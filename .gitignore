@@ -1,0 +1,13 @@
+.vs/
+.idea/
+.codex/
+build/
+cmake-build-*/
+out/
+x64/
+x86/
+Debug/
+Release/
+*.user
+*.suo
+*.VC.db
