@@ -7,4 +7,4 @@
 /vcpkg_installed/
 *.user
 *.VC.db
-*.opendb
+*.opendb  
