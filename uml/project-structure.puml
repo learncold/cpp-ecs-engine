@@ -1,0 +1,76 @@
+@startuml project-structure
+title SafeCrowd Simple 3-Layer Architecture
+
+left to right direction
+skinparam componentStyle rectangle
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam linetype ortho
+
+package "application" {
+  [safecrowd_app\n(Qt App)] as App
+}
+
+package "domain" {
+  [ScenarioDefinition\n(layout / population /\nenvironment / control)] as ScenarioDefinition
+  [ExecutionConfig\n(time limit / sample /\nseed / repeats)] as ExecutionConfig
+  [ScenarioCalibrationService\n(UI input -> internal params)] as Calibration
+  [SimulationSession\n(single run orchestration)] as SimulationSession
+  [ScenarioBatchRunner\n(baseline / alternatives /\nrepeated runs)] as BatchRunner
+  [ResultAggregator\n(metrics / heatmap / delta)] as ResultAggregator
+}
+
+package "engine" {
+  package "api" {
+    [EngineRuntime\n(entry / control)] as EngineRuntime
+    [EngineWorld\n(query / resources /\ncommands facade)] as EngineWorld
+    [EngineSystem\n(system contract)] as EngineSystem
+  }
+
+  [Runtime Core\n(FrameClock / SystemScheduler /\nCommandBuffer / ResourceStore /\nDeterministicRng)] as RuntimeCore
+  [ECS Core\n(EntityRegistry / ComponentRegistry /\nPackedComponentStorage)] as EcsCore
+}
+
+App --> ScenarioDefinition : edit / persist
+App --> BatchRunner : run / compare
+ExecutionConfig --> BatchRunner : experiment contract
+ScenarioDefinition --> BatchRunner : baseline / alternatives
+BatchRunner --> Calibration : preset resolution
+Calibration --> SimulationSession : internal params
+BatchRunner --> SimulationSession : spawn runs
+BatchRunner --> ResultAggregator : summarize results
+SimulationSession --> EngineRuntime : initialize / play / stop
+SimulationSession --> EngineWorld : query / resources / commands
+App --> EngineRuntime : viewport only\n(optional)
+
+EngineRuntime --> RuntimeCore
+EngineRuntime --> EngineWorld
+RuntimeCore --> EngineWorld : uses facade
+EngineWorld --> EcsCore : delegates
+
+note right of EngineWorld
+  Shared engine API surface.
+  Domain sessions and runtime both
+  interact with world state here
+  through query / resources / commands.
+  Commands are queued first and committed
+  later by the runtime at safe phase boundaries.
+end note
+
+note right of EcsCore
+  Reusable engine only
+  No SafeCrowd logic
+  No Qt dependency
+end note
+
+note right of ResultAggregator
+  Scenario batches compare baseline vs alternatives,
+  preserve seed / repeat settings,
+  and emit metrics plus delta views.
+end note
+
+note right of App
+  Qt UI and app entry point
+end note
+
+@enduml

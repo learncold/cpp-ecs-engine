@@ -1,0 +1,194 @@
+@startuml safecrowd-engine-runtime-core
+title SafeCrowd Engine Runtime Core
+
+top to bottom direction
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam linetype ortho
+
+package "engine::api" {
+  class EngineRuntime {
+    +initialize()
+    +play()
+    +pause()
+    +stop()
+    +stepFrame()
+    +world()
+    +stats()
+  }
+
+  class EngineWorld {
+    +query(): WorldQuery
+    +resources(): WorldResources
+    +commands(): WorldCommands
+  }
+
+  class WorldQuery {
+    +view<T...>()
+    +contains<T>(entity: Entity): bool
+    +get<T>(entity: Entity): T&
+  }
+
+  class WorldResources {
+    +set<T>()
+    +get<T>(): T&
+    +contains<T>(): bool
+  }
+
+  class WorldCommands {
+    +createEntity(): Entity
+    +destroyEntity(entity: Entity)
+    +add<T>(entity: Entity, component: T)
+    +remove<T>(entity: Entity)
+  }
+
+  interface EngineSystem {
+    +configure(world: EngineWorld)
+    +update(world: EngineWorld, step: EngineStepContext)
+  }
+
+  class SystemDescriptor {
+    +phase
+    +order
+    +triggerPolicy
+    +intervalTicks
+    +before
+    +after
+    +enabled
+  }
+
+  class EngineConfig {
+    +fixedDeltaTime
+    +maxCatchUpSteps
+    +baseSeed
+  }
+  class EngineStats
+  class EngineStepContext {
+    +frameIndex
+    +fixedStepIndex
+    +alpha
+    +runIndex
+    +derivedSeed
+  }
+
+  class RunContext {
+    +runIndex
+    +baseSeed
+    +derivedSeed
+  }
+
+  enum UpdatePhase {
+    Startup
+    PreSimulation
+    FixedSimulation
+    PostSimulation
+    RenderSync
+  }
+
+  enum TriggerPolicy {
+    EveryFrame
+    FixedStep
+    Interval
+  }
+
+  interface IRenderBridge {
+    +sync()
+  }
+}
+
+package "engine::runtime" {
+  class FrameClock {
+    +beginFrame()
+    +shouldRunFixedStep()
+    +consumeFixedStep()
+    +alpha()
+  }
+
+  class SystemScheduler {
+    +registerSystem()
+    +executePhase()
+  }
+
+  class ResourceStore {
+    +set()
+    +get()
+    +contains()
+  }
+
+  class CommandBuffer {
+    +createEntity()
+    +destroyEntity()
+    +addComponent()
+    +removeComponent()
+    +flush()
+  }
+
+  class DeterministicRng {
+    +reseed(seed: uint64)
+    +streamFor(systemKey, runIndex)
+  }
+
+}
+
+package "engine::ecs" {
+  class EcsCore
+}
+
+EngineRuntime *-- EngineWorld
+EngineRuntime *-- FrameClock
+EngineRuntime *-- SystemScheduler
+EngineRuntime *-- CommandBuffer
+EngineRuntime *-- DeterministicRng
+EngineRuntime o-- IRenderBridge
+EngineRuntime --> EngineConfig
+EngineRuntime --> EngineStats
+EngineRuntime --> RunContext
+
+EngineWorld *-- WorldQuery
+EngineWorld *-- WorldResources
+EngineWorld *-- WorldCommands
+EngineWorld --> EcsCore : delegates
+
+WorldQuery --> EcsCore : reads facade
+WorldResources --> ResourceStore : delegates
+WorldCommands --> CommandBuffer : enqueues deferred mutations
+
+SystemScheduler --> EngineSystem
+SystemScheduler --> SystemDescriptor
+SystemScheduler --> EngineWorld : uses facade
+SystemScheduler --> CommandBuffer : flushes at phase boundaries
+
+DeterministicRng --> RunContext : derives repeatable streams
+CommandBuffer --> EcsCore : applies deferred mutations
+
+note bottom of SystemScheduler
+  Ordered phases, fixed-step execution, interval ticks,
+  and before/after constraints live here.
+  Runtime reaches world state through EngineWorld,
+  not through raw ECS storage.
+end note
+
+note bottom of ResourceStore
+  Domain fields such as density, visibility, flow,
+  and dynamic cost live here as typed resources.
+end note
+
+note bottom of WorldCommands
+  Mutation requests are recorded first.
+  Systems do not mutate ECS storage immediately
+  while iterating queries.
+end note
+
+note right of DeterministicRng
+  Repeatable seed streams are derived per run
+  so scenario batches can be reproduced.
+end note
+
+note right of EcsCore
+  EntityRegistry
+  ComponentRegistry
+  PackedComponentStorage
+end note
+
+@enduml
