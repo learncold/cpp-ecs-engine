@@ -45,16 +45,16 @@
 
 ## 현재 구조
 - `Sprint 1`
-  - Epic: `#1 EPIC- Engine Foundation`
-  - Epic: `#2 EPIC- Sprint 1 Demo Vertical Slice`
-  - Task: 각 epic 아래 `Task- ...` sub-issue로 관리
+  - Epic: `#1 EPIC-1 Engine Foundation`
+  - Epic: `#2 EPIC-2 Sprint 1 Demo Vertical Slice`
+  - Task: `#6 ~ #20` (`Task- ...` 형식)
 - `Sprint 2`
-  - Epic: `#3 EPIC- Product Completion for Sprint 2`
-  - Epic: `#4 EPIC- Compare and Presentation Readiness`
-  - Task: 각 epic 아래 `Task- ...` sub-issue로 관리
+  - Epic: `#3 EPIC-3 Product Completion for Sprint 2`
+  - Epic: `#4 EPIC-4 Compare and Presentation Readiness`
+  - Task: `#21 ~ #30` (`Task- ...` 형식)
 - `Sprint 3`
-  - Epic: `#5 EPIC- Finish and Optional Extensions`
-  - Task: 각 epic 아래 `Task- ...` sub-issue로 관리
+  - Epic: `#5 EPIC-5 Finish and Optional Extensions`
+  - Task: `#31 ~ #35` (`Task- ...` 형식)
 
 ## 메모
 - `Docs`, `Chore`, `Analysis`는 `Lightweight Task` form으로 가볍게 등록한다.
