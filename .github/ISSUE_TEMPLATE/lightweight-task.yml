@@ -1,13 +1,13 @@
 name: Lightweight Task
 description: Create a small Docs, Chore, or Analysis task without implementation-heavy required fields.
-title: "T- "
+title: "Task- "
 body:
   - type: markdown
     attributes:
       value: |
         Use this form for a small documentation, maintenance, or analysis task.
 
-        GitHub assigns the numeric issue number automatically. Enter only the short title after `T- `.
+        GitHub assigns the numeric issue number automatically. Enter only the short title after `Task- `.
         Keep the issue focused enough that it can usually map to one PR.
   - type: textarea
     id: summary
