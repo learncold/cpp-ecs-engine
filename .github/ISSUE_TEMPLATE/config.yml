@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: GitHub Project Board
+    url: https://github.com/users/learncold/projects/1
+    about: Check sprint placement, parent issue structure, and current work status before creating a new issue.
+  - name: Contribution Rules
+    url: https://github.com/learncold/cpp-ecs-engine/blob/main/CONTRIBUTING.md
+    about: Review the repository workflow, title conventions, and architecture guardrails.
