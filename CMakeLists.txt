@@ -5,6 +5,8 @@ project(SafeCrowd
     LANGUAGES CXX
 )
 
+include(CTest)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -63,6 +65,31 @@ target_link_libraries(safecrowd_domain
 )
 
 configure_project_target(safecrowd_domain)
+
+if (BUILD_TESTING)
+    add_executable(safecrowd_tests
+        tests/TestMain.cpp
+        tests/TestSupport.h
+        tests/FrameClockTests.cpp
+        tests/EngineRuntimeTests.cpp
+        tests/SafeCrowdDomainTests.cpp
+    )
+
+    target_include_directories(safecrowd_tests
+        PRIVATE
+            ${SAFECROWD_SRC_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests
+    )
+
+    target_link_libraries(safecrowd_tests
+        PRIVATE
+            safecrowd_domain
+    )
+
+    configure_project_target(safecrowd_tests)
+
+    add_test(NAME safecrowd_tests COMMAND safecrowd_tests)
+endif()
 
 add_executable(safecrowd_app
     src/application/main.cpp

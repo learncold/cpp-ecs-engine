@@ -1,14 +1,29 @@
 # AGENTS.md
 
 ## Project Overview
-- SafeCrowd is a ECS game engine based crowd simulation project.
-- Use Qt for UI.
+- SafeCrowd is an ECS-based crowd simulation and decision-support project with a Qt desktop application.
 - Keep the architecture layered: `application -> domain -> engine`.
+- Product/architecture documents currently lead the implementation, so verify tracked source files before assuming a module already exists in `src/`.
+
+## Current Repo State
+- Declared CMake targets:
+  - `ecs_engine`
+  - `safecrowd_domain`
+  - `safecrowd_app`
+- The repository currently includes build configuration, docs, UML diagrams, GitHub workflow/templates, and vendored third-party code under `external/`.
+- Source roots are still expected under:
+  - `src/application`
+  - `src/domain`
+  - `src/engine`
+- When touching build files, confirm that referenced source files are actually tracked in Git.
 
 ## Build
 - Configure: `cmake --preset windows-debug`
 - Build: `cmake --build --preset build-debug`
+- Test: `ctest --preset test-debug`
 - App target: `safecrowd_app`
+- UI dependency: Qt6 via `vcpkg.json` (`qtbase`)
+- If configure/build fails, check preset/Visual Studio selection and `vcpkg`/Qt availability before assuming the code change caused it.
 
 ## Source Layout
 - All C++ source files live under `src/`.
@@ -17,28 +32,62 @@
   - `#include "application/..."`
   - `#include "domain/..."`
   - `#include "engine/..."`
+- Supporting repository areas:
+  - `docs/` for requirements, architecture, and project-management notes
+  - `uml/` for PlantUML diagrams and explanations
+  - `.github/` for repository workflow/policy files
+  - `external/` for vendored dependencies that must remain in-tree
 
 ## Architecture Rules
 - `engine` must not depend on `domain` or `application`.
 - `domain` must not depend on Qt UI code.
 - `application` is responsible for wiring UI to domain logic.
+- If a change affects multiple layers, review dependency direction first and keep responsibilities explicit.
 
 ## Dependency Policy
 - Prefer dependencies declared in `vcpkg.json`.
 - Use `external/` only for vendored libraries that must live in-tree.
+- `external/glad/` is currently tracked as vendored third-party code.
 - Do not leave unused third-party code in `external/`.
+
+## GitHub Workflow
+- Use GitHub issue forms for new work items; blank issues are disabled.
+- Issue types currently supported:
+  - `Epic` for larger parent work
+  - `Task` for single implementation/analysis/docs work
+- GitHub Project guidance is documented in `docs/GitHub Project.md`.
+- PR titles must follow `[Area] short summary`.
+- Allowed PR areas:
+  - `Engine`
+  - `Domain`
+  - `Application`
+  - `Docs`
+  - `Build`
+  - `Analysis`
+  - `Chore`
+- PR bodies should follow `.github/PULL_REQUEST_TEMPLATE.md`.
+- `main` is protected:
+  - merge through PR only
+  - squash merge is the intended merge mode
+  - required PR check: `Validate PR`
+  - build/test checks should stay aligned with `.github/workflows/ci.yml`
 
 ## Editing Guidelines
 - Keep changes minimal and localized.
 - Preserve existing naming/style unless there is a clear reason to refactor.
-- Update docs when structure or build rules change.
+- Update docs when structure, build rules, or repository workflow changes.
+- When changing contribution workflow files, keep `CONTRIBUTING.md` and `.github/` files aligned.
 
 ## Docs
 - Architecture notes: `docs/프로젝트 구조.md`
+- Project workflow notes: `docs/GitHub Project.md`
 - Requirements and overview docs are under `docs/`.
 
 ## Review Priorities
 - Broken build or preset mismatch
+- Unit test regression or missing CTest wiring
+- Missing tracked source files referenced by `CMakeLists.txt`
 - Layer dependency violations
 - Qt code leaking into `domain`
 - Unused or confusing dependency setup
+- Drift between `CONTRIBUTING.md` and `.github/` workflow/template files
