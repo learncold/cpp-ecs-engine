@@ -27,6 +27,7 @@
 
 - [ ] `cmake --preset windows-debug`
 - [ ] `cmake --build --preset build-debug`
+- [ ] `ctest --preset test-debug`
 - [ ] Not run (reason below)
 
 ## Risks / Follow-up

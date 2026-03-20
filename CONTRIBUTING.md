@@ -52,7 +52,7 @@ PR 제목은 아래 형식을 따릅니다.
 - 연결된 issue
 - 변경이 속한 영역
 - 아키텍처 규칙 점검 결과
-- 빌드/검증 결과 또는 미실행 사유
+- 빌드/테스트 검증 결과 또는 미실행 사유
 - 남은 리스크나 후속 작업
 
 ## 아키텍처 체크
@@ -71,6 +71,7 @@ PR 작성 시 아래 항목을 항상 점검합니다.
 ```powershell
 cmake --preset windows-debug
 cmake --build --preset build-debug
+ctest --preset test-debug
 ```
 
 실행하지 못했다면 PR 본문에 이유를 남깁니다.
