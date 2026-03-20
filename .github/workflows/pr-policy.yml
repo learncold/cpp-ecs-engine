@@ -56,13 +56,44 @@ jobs:
             const relatedIssueSection = section("## Related Issue");
             const areaSection = section("## Area");
             const verificationSection = section("## Verification");
+            const selectedAreas = [...areaSection.matchAll(/- \[[xX]\] (.+)/g)].map((match) => match[1].trim());
+            const noIssuePattern = /\b(?:none|n\/a|no separate issue)\b/i;
+
+            const changedFiles = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              per_page: 100,
+            });
+
+            const docsPolicyOnlyPatterns = [
+              /^docs\//,
+              /^uml\//,
+              /^\.github\/ISSUE_TEMPLATE\//,
+              /^\.github\/PULL_REQUEST_TEMPLATE\.md$/,
+              /^\.github\/workflows\/pr-policy\.yml$/,
+              /^CONTRIBUTING\.md$/,
+              /^README\.md$/,
+            ];
+
+            const isDocsPolicyOnlyPr =
+              changedFiles.length > 0 &&
+              changedFiles.every((file) =>
+                docsPolicyOnlyPatterns.some((pattern) => pattern.test(file.filename))
+              );
+            const isDocsAreaOnly = selectedAreas.length === 1 && selectedAreas[0] === "Docs";
 
             const issuePattern = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?)\s+#\d+\b/i;
-            if (!issuePattern.test(relatedIssueSection)) {
-              errors.push("`## Related Issue` must include an issue reference such as `Closes #12`.");
+            const hasIssueReference = issuePattern.test(relatedIssueSection);
+            const usesDocsOnlyException = noIssuePattern.test(relatedIssueSection);
+
+            if (!hasIssueReference) {
+              if (!(usesDocsOnlyException && isDocsAreaOnly && isDocsPolicyOnlyPr)) {
+                errors.push("`## Related Issue` must include an issue reference such as `Closes #12`, unless this is a Docs-only docs/policy PR and the section says `None (docs/policy-only PR)`.");
+              }
             }
 
-            if (!/- \[[xX]\] /.test(areaSection)) {
+            if (selectedAreas.length === 0) {
               errors.push("Select at least one checkbox in `## Area`.");
             }
 
