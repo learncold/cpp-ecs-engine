@@ -1,12 +1,13 @@
-name: Task
-description: Create a single implementation, analysis, docs, or maintenance task.
+name: Implementation Task
+description: Create a scoped code or build task for Engine, Domain, Application, or Build work.
 title: "T- "
 body:
   - type: markdown
     attributes:
       value: |
-        Use this form for a single unit of work.
+        Use this form for a single implementation or build task.
 
+        GitHub assigns the numeric issue number automatically. Enter only the short title after `T- `.
         Prefer one task per PR, and keep the task scoped tightly enough that it can be reviewed and merged independently.
   - type: textarea
     id: summary
@@ -31,10 +32,7 @@ body:
         - Engine
         - Domain
         - Application
-        - Docs
         - Build
-        - Analysis
-        - Chore
     validations:
       required: true
   - type: dropdown

@@ -7,6 +7,8 @@ body:
       value: |
         Use this form for sprint-sized work that will be broken into multiple tasks.
 
+        GitHub assigns the numeric issue number automatically. Enter only the short title after `EPIC- `.
+
         Keep the layered architecture in mind:
         - `application -> domain -> engine`
         - `domain` must not depend on Qt UI code

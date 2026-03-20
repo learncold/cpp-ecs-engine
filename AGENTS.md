@@ -55,7 +55,8 @@
 - Use GitHub issue forms for new work items; blank issues are disabled.
 - Issue types currently supported:
   - `Epic` for larger parent work
-  - `Task` for single implementation/analysis/docs work
+  - `Implementation Task` for `Engine` / `Domain` / `Application` / `Build` work
+  - `Lightweight Task` for `Docs` / `Chore` / `Analysis` work
 - GitHub Project guidance is documented in `docs/GitHub Project.md`.
 - PR titles must follow `[Area] short summary`.
 - Allowed PR areas:

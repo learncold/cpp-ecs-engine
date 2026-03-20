@@ -56,6 +56,7 @@
   - Task: `#31 ~ #35`
 
 ## 메모
-- issue 본문은 `Summary`만 남기고 최소화했다.
+- `Docs`, `Chore`, `Analysis`는 `Lightweight Task` form으로 가볍게 등록한다.
+- `Engine`, `Domain`, `Application`, `Build`는 `Implementation Task` form으로 범위와 검증 계획까지 남긴다.
 - 세부 작업명, 부모-자식 관계, dependency는 GitHub Project와 issue 자체를 기준으로 관리한다.
 - 2026-03-20 기준 현재 `In Progress` 상태인 작업은 `#6 T-001`이다.
