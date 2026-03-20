@@ -1,0 +1,77 @@
+name: PR Policy
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - synchronize
+      - reopened
+      - ready_for_review
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  validate-pr:
+    name: Validate PR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check title and body
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const title = pr.title || "";
+            const body = pr.body || "";
+            const errors = [];
+
+            const titlePattern = /^\[(Engine|Domain|Application|Docs|Build|Analysis|Chore)\]\s.+$/;
+            if (!titlePattern.test(title)) {
+              errors.push("PR title must match `[Area] short summary`.");
+            }
+
+            const requiredHeadings = [
+              "## Summary",
+              "## Related Issue",
+              "## Area",
+              "## Architecture Check",
+              "## Verification",
+            ];
+
+            for (const heading of requiredHeadings) {
+              if (!body.includes(heading)) {
+                errors.push(`Missing section: ${heading}`);
+              }
+            }
+
+            const section = (heading) => {
+              const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+              const pattern = new RegExp(`${escaped}\\s*([\\s\\S]*?)(?=\\n## |$)`, "i");
+              const match = body.match(pattern);
+              return match ? match[1] : "";
+            };
+
+            const relatedIssueSection = section("## Related Issue");
+            const areaSection = section("## Area");
+            const verificationSection = section("## Verification");
+
+            const issuePattern = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?)\s+#\d+\b/i;
+            if (!issuePattern.test(relatedIssueSection)) {
+              errors.push("`## Related Issue` must include an issue reference such as `Closes #12`.");
+            }
+
+            if (!/- \[[xX]\] /.test(areaSection)) {
+              errors.push("Select at least one checkbox in `## Area`.");
+            }
+
+            if (!/- \[[xX]\] /.test(verificationSection)) {
+              errors.push("Select at least one checkbox in `## Verification`.");
+            }
+
+            if (errors.length > 0) {
+              core.setFailed(errors.join("\n"));
+            } else {
+              core.info("PR policy checks passed.");
+            }
