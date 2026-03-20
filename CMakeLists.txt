@@ -11,12 +11,16 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(CMAKE_AUTOMOC ON)
-set(CMAKE_AUTOUIC ON)
-set(CMAKE_AUTORCC ON)
+option(SAFECROWD_BUILD_APP "Build the Qt desktop application" ON)
 
-find_package(Qt6 CONFIG REQUIRED COMPONENTS Core Gui Widgets)
-qt_standard_project_setup()
+if (SAFECROWD_BUILD_APP)
+    set(CMAKE_AUTOMOC ON)
+    set(CMAKE_AUTOUIC ON)
+    set(CMAKE_AUTORCC ON)
+
+    find_package(Qt6 CONFIG REQUIRED COMPONENTS Core Gui Widgets)
+    qt_standard_project_setup()
+endif()
 
 set(SAFECROWD_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
@@ -91,23 +95,25 @@ if (BUILD_TESTING)
     add_test(NAME safecrowd_tests COMMAND safecrowd_tests)
 endif()
 
-add_executable(safecrowd_app
-    src/application/main.cpp
-    src/application/MainWindow.cpp
-    src/application/MainWindow.h
-)
+if (SAFECROWD_BUILD_APP)
+    add_executable(safecrowd_app
+        src/application/main.cpp
+        src/application/MainWindow.cpp
+        src/application/MainWindow.h
+    )
 
-target_include_directories(safecrowd_app
-    PRIVATE
-        ${SAFECROWD_SRC_DIR}
-)
+    target_include_directories(safecrowd_app
+        PRIVATE
+            ${SAFECROWD_SRC_DIR}
+    )
 
-target_link_libraries(safecrowd_app
-    PRIVATE
-        safecrowd_domain
-        Qt6::Core
-        Qt6::Gui
-        Qt6::Widgets
-)
+    target_link_libraries(safecrowd_app
+        PRIVATE
+            safecrowd_domain
+            Qt6::Core
+            Qt6::Gui
+            Qt6::Widgets
+    )
 
-configure_project_target(safecrowd_app)
+    configure_project_target(safecrowd_app)
+endif()

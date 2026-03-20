@@ -24,6 +24,7 @@
 - App target: `safecrowd_app`
 - UI dependency: Qt6 via `vcpkg.json` (`qtbase`)
 - If configure/build fails, check preset/Visual Studio selection and `vcpkg`/Qt availability before assuming the code change caused it.
+- PR CI currently validates the engine/domain/test path with `-DSAFECROWD_BUILD_APP=OFF` for fast feedback; keep the full Qt app build healthy locally.
 
 ## Source Layout
 - All C++ source files live under `src/`.
