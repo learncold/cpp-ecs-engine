@@ -8,7 +8,7 @@
   - Epic과 Task를 모두 issue로 관리한다.
   - Epic-Task 관계는 GitHub native `Parent issue` / `sub-issue`를 사용한다.
   - 선행 작업 관계는 GitHub native issue dependency `blocked by`를 사용한다.
-  - Task 제목은 `Task- short title` 형식을 사용하고, 순서는 제목 번호가 아니라 GitHub issue 번호, Sprint, Parent issue, dependency로 관리한다.
+  - Task 제목은 `Task-short title` 형식을 사용하고, 순서는 제목 번호가 아니라 GitHub issue 번호, Sprint, Parent issue, dependency로 관리한다.
 
 ## 현재 필드
 - `Title`
@@ -47,14 +47,14 @@
 - `Sprint 1`
   - Epic: `#1 EPIC-1 Engine Foundation`
   - Epic: `#2 EPIC-2 Sprint 1 Demo Vertical Slice`
-  - Task: `#6 ~ #20` (`Task- ...` 형식)
+  - Task: `#6 ~ #20` (`Task-...` 형식)
 - `Sprint 2`
   - Epic: `#3 EPIC-3 Product Completion for Sprint 2`
   - Epic: `#4 EPIC-4 Compare and Presentation Readiness`
-  - Task: `#21 ~ #30` (`Task- ...` 형식)
+  - Task: `#21 ~ #30` (`Task-...` 형식)
 - `Sprint 3`
   - Epic: `#5 EPIC-5 Finish and Optional Extensions`
-  - Task: `#31 ~ #35` (`Task- ...` 형식)
+  - Task: `#31 ~ #35` (`Task-...` 형식)
 
 ## 메모
 - `Docs`, `Chore`, `Analysis`는 `Lightweight Task` form으로 가볍게 등록한다.
