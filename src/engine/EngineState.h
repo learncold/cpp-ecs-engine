@@ -1,11 +1,12 @@
 #pragma once
 
-namespace ecs_engine
-{
-enum class EngineState
-{
-    Idle,
+namespace safecrowd::engine {
+
+enum class EngineState {
+    Stopped,
+    Ready,
     Running,
-    Paused
+    Paused,
 };
-} // namespace ecs_engine
+
+}  // namespace safecrowd::engine

@@ -1,20 +1,13 @@
 #pragma once
 
-#include <cstddef>
+#include <cstdint>
 
-namespace ecs_engine
-{
-struct EngineConfig
-{
-    double fixedTimeStepSeconds{1.0 / 60.0};
-    double maxFrameDeltaSeconds{0.25};
-    std::size_t maxCatchUpSteps{8};
+namespace safecrowd::engine {
 
-    [[nodiscard]] bool isValid() const noexcept
-    {
-        return fixedTimeStepSeconds > 0.0
-            && maxFrameDeltaSeconds >= fixedTimeStepSeconds
-            && maxCatchUpSteps > 0;
-    }
+struct EngineConfig {
+    double fixedDeltaTime{1.0 / 60.0};
+    std::uint32_t maxCatchUpSteps{4};
+    std::uint64_t baseSeed{1};
 };
-} // namespace ecs_engine
+
+}  // namespace safecrowd::engine

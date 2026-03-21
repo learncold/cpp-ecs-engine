@@ -1,66 +1,65 @@
 #include "engine/FrameClock.h"
 
 #include <algorithm>
+#include <cmath>
 
-namespace ecs_engine
-{
-namespace
-{
-EngineConfig sanitizeConfig(EngineConfig config) noexcept
-{
-    const EngineConfig defaults{};
+namespace safecrowd::engine {
+namespace {
 
-    if (config.fixedTimeStepSeconds <= 0.0) {
-        config.fixedTimeStepSeconds = defaults.fixedTimeStepSeconds;
-    }
-
-    if (config.maxFrameDeltaSeconds < config.fixedTimeStepSeconds) {
-        config.maxFrameDeltaSeconds = std::max(defaults.maxFrameDeltaSeconds, config.fixedTimeStepSeconds);
+EngineConfig normalizeConfig(EngineConfig config) {
+    if (config.fixedDeltaTime <= 0.0) {
+        config.fixedDeltaTime = 1.0 / 60.0;
     }
 
     if (config.maxCatchUpSteps == 0) {
-        config.maxCatchUpSteps = defaults.maxCatchUpSteps;
+        config.maxCatchUpSteps = 1;
     }
 
     return config;
 }
-} // namespace
 
-FrameClock::FrameClock(EngineConfig config) noexcept
-    : config_(sanitizeConfig(config))
-{
+}  // namespace
+
+FrameClock::FrameClock(const EngineConfig& config)
+    : config_(normalizeConfig(config)) {
 }
 
-const EngineConfig& FrameClock::config() const noexcept
-{
-    return config_;
+void FrameClock::reset() {
+    accumulatedSeconds_ = 0.0;
+    pendingFixedSteps_ = 0;
 }
 
-double FrameClock::lagSeconds() const noexcept
-{
-    return lagSeconds_;
+void FrameClock::beginFrame(double deltaSeconds) {
+    const double safeDeltaSeconds = std::max(0.0, deltaSeconds);
+    const double maxAccumulatedSeconds =
+        config_.fixedDeltaTime * static_cast<double>(config_.maxCatchUpSteps);
+
+    accumulatedSeconds_ = std::min(accumulatedSeconds_ + safeDeltaSeconds, maxAccumulatedSeconds);
+
+    const double rawFixedSteps = std::floor(accumulatedSeconds_ / config_.fixedDeltaTime);
+    pendingFixedSteps_ = static_cast<std::uint32_t>(rawFixedSteps);
 }
 
-void FrameClock::reset() noexcept
-{
-    lagSeconds_ = 0.0;
+bool FrameClock::shouldRunFixedStep() const {
+    return pendingFixedSteps_ > 0;
 }
 
-FramePlan FrameClock::advance(double frameDeltaSeconds) noexcept
-{
-    const double clampedFrameDelta = std::clamp(frameDeltaSeconds, 0.0, config_.maxFrameDeltaSeconds);
-    const double maxLagWindow = config_.fixedTimeStepSeconds * static_cast<double>(config_.maxCatchUpSteps);
+void FrameClock::consumeFixedStep() {
+    if (!shouldRunFixedStep()) {
+        return;
+    }
 
-    lagSeconds_ = std::min(lagSeconds_ + clampedFrameDelta, maxLagWindow);
-
-    const std::size_t stepsToRun = static_cast<std::size_t>(lagSeconds_ / config_.fixedTimeStepSeconds);
-    lagSeconds_ -= static_cast<double>(stepsToRun) * config_.fixedTimeStepSeconds;
-
-    return {
-        stepsToRun,
-        clampedFrameDelta,
-        config_.fixedTimeStepSeconds,
-        lagSeconds_
-    };
+    --pendingFixedSteps_;
+    accumulatedSeconds_ = std::max(0.0, accumulatedSeconds_ - config_.fixedDeltaTime);
 }
-} // namespace ecs_engine
+
+double FrameClock::alpha() const {
+    const double alphaValue = accumulatedSeconds_ / config_.fixedDeltaTime;
+    return std::clamp(alphaValue, 0.0, 1.0);
+}
+
+std::uint32_t FrameClock::pendingFixedSteps() const noexcept {
+    return pendingFixedSteps_;
+}
+
+}  // namespace safecrowd::engine

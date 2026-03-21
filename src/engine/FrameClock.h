@@ -1,32 +1,26 @@
 #pragma once
 
-#include <cstddef>
+#include <cstdint>
 
 #include "engine/EngineConfig.h"
 
-namespace ecs_engine
-{
-struct FramePlan
-{
-    std::size_t stepsToRun{0};
-    double frameDeltaSeconds{0.0};
-    double fixedTimeStepSeconds{0.0};
-    double remainingLagSeconds{0.0};
-};
+namespace safecrowd::engine {
 
-class FrameClock
-{
+class FrameClock {
 public:
-    explicit FrameClock(EngineConfig config = {}) noexcept;
+    explicit FrameClock(const EngineConfig& config = {});
 
-    [[nodiscard]] const EngineConfig& config() const noexcept;
-    [[nodiscard]] double lagSeconds() const noexcept;
-
-    void reset() noexcept;
-    [[nodiscard]] FramePlan advance(double frameDeltaSeconds) noexcept;
+    void reset();
+    void beginFrame(double deltaSeconds);
+    bool shouldRunFixedStep() const;
+    void consumeFixedStep();
+    double alpha() const;
+    std::uint32_t pendingFixedSteps() const noexcept;
 
 private:
     EngineConfig config_;
-    double lagSeconds_{0.0};
+    double accumulatedSeconds_{0.0};
+    std::uint32_t pendingFixedSteps_{0};
 };
-} // namespace ecs_engine
+
+}  // namespace safecrowd::engine

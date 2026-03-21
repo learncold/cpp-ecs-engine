@@ -1,0 +1,108 @@
+name: Implementation Task
+description: Create a scoped code or build task for Engine, Domain, Application, or Build work.
+title: "Task-"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for a single implementation or build task.
+
+        GitHub assigns the numeric issue number automatically. Enter only the short title after `Task-`.
+        Prefer one task per PR, and keep the task scoped tightly enough that it can be reviewed and merged independently.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Describe the task in one short paragraph.
+      placeholder: Implement a generation-safe entity handle and the corresponding entity registry API.
+    validations:
+      required: true
+  - type: input
+    id: parent-issue
+    attributes:
+      label: Parent Issue
+      description: Link the parent epic when this task belongs under one.
+      placeholder: "#1"
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Select the main area this task belongs to.
+      options:
+        - Engine
+        - Domain
+        - Application
+        - Build
+    validations:
+      required: true
+  - type: dropdown
+    id: sprint
+    attributes:
+      label: Target Sprint
+      description: Choose the sprint that should own this task.
+      options:
+        - Sprint 1
+        - Sprint 2
+        - Sprint 3
+        - Later
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: List the concrete changes this task should include.
+      placeholder: |
+        - Add `Entity` handle type
+        - Add generation tracking to the registry
+        - Add minimal tests or smoke coverage
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: Describe how we know the task is done.
+      placeholder: |
+        - Stale entity handles are rejected
+        - API is reachable from the engine layer
+        - Behavior is covered by a smoke test or documented check
+    validations:
+      required: true
+  - type: textarea
+    id: architecture
+    attributes:
+      label: Architecture / Dependency Check
+      description: Record any layer constraints or include-path expectations.
+      placeholder: |
+        - Keep the implementation inside `src/engine`
+        - Do not add Qt usage
+        - Use `#include "engine/..."`
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification Plan
+      description: Explain how this task should be validated.
+      placeholder: |
+        - `cmake --preset windows-debug`
+        - `cmake --build --preset build-debug`
+        - Add or run the smallest useful smoke test
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies / Blockers
+      description: Note anything this task depends on or anything currently blocking it.
+      placeholder: Waiting on tracked source files or local vcpkg/Visual Studio setup to stabilize.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Repository Checks
+      options:
+        - label: I checked for an existing related issue or epic before creating this task.
+          required: true
+        - label: I will keep the issue title aligned with the repository naming convention.
+          required: true

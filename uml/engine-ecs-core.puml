@@ -1,0 +1,128 @@
+@startuml safecrowd-engine-ecs-core
+title SafeCrowd Engine ECS Core
+
+top to bottom direction
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam linetype ortho
+
+package "engine::api" {
+  class EngineWorld {
+    +query(): WorldQuery
+    +resources(): WorldResources
+    +commands(): WorldCommands
+  }
+
+  class WorldQuery {
+    +view<T...>()
+    +contains<T>(entity: Entity): bool
+    +get<T>(entity: Entity): T&
+  }
+
+  class WorldCommands {
+    +createEntity(): Entity
+    +destroyEntity(entity: Entity)
+    +add<T>(entity: Entity, component: T)
+    +remove<T>(entity: Entity)
+  }
+
+  class WorldResources {
+    +set<T>()
+    +get<T>(): T&
+    +contains<T>(): bool
+  }
+}
+
+package "engine::ecs" {
+  class EcsCore
+
+  class EntityRegistry {
+    +allocate(): Entity
+    +release(entity: Entity)
+    +isAlive(entity: Entity): bool
+    +setSignature(entity: Entity, signature: Signature)
+    +signatureOf(entity: Entity): Signature
+  }
+
+  class ComponentRegistry {
+    +registerType<T>()
+    +componentType<T>(): ComponentType
+    +storage<T>(): PackedComponentStorage
+    +entityDestroyed(entity: Entity)
+  }
+
+  interface IComponentStorage {
+    +entityDestroyed(entity: Entity)
+  }
+
+  class "PackedComponentStorage<T>" as PackedComponentStorage {
+    +insert(entity: Entity, component: T)
+    +remove(entity: Entity)
+    +get(entity: Entity): T&
+  }
+
+  class Entity {
+    +index
+    +generation
+  }
+  class ComponentType
+  class Signature
+}
+
+EngineWorld *-- WorldQuery
+EngineWorld *-- WorldResources
+EngineWorld *-- WorldCommands
+EngineWorld --> EcsCore : delegates
+
+WorldQuery --> EcsCore : reads
+WorldCommands ..> EcsCore : deferred mutation path
+
+EcsCore *-- EntityRegistry
+EcsCore *-- ComponentRegistry
+
+ComponentRegistry o-- IComponentStorage
+PackedComponentStorage ..|> IComponentStorage
+
+EntityRegistry ..> Entity
+EntityRegistry ..> Signature
+ComponentRegistry ..> ComponentType
+ComponentRegistry ..> Entity
+PackedComponentStorage ..> Entity
+
+note bottom of EngineWorld
+  Shared world facade.
+  Runtime and upper layers meet the ECS here,
+  but do not talk to raw ECS stores directly.
+end note
+
+note bottom of WorldCommands
+  Mutation requests are expressed through a narrow command surface.
+  They are never applied immediately here.
+  Runtime applies them later through
+  a command buffer at safe sync points.
+end note
+
+note bottom of WorldResources
+  Resource access is part of the same facade surface,
+  but its storage lives in the runtime layer rather than ECS storage.
+end note
+
+note bottom of WorldQuery
+  The first implementation may iterate live entities
+  and filter by signature without extra caches.
+  Higher-level query caching can be added later
+  without changing the facade.
+end note
+
+note right of Entity
+  Generation is part of the handle
+  so stale entity references can be rejected.
+end note
+
+note bottom of PackedComponentStorage
+  Packed array design follows the ECS reference:
+  remove-by-swap to keep iteration dense.
+end note
+
+@enduml

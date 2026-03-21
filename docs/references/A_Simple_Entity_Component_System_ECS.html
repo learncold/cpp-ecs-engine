@@ -1,0 +1,1585 @@
+<!DOCTYPE html>
+
+<!-- saved from url=(0055)https://austinmorlan.com/posts/entity_component_system/ -->
+<html lang="en-us"><head><meta content="text/html; charset=utf-8" http-equiv="Content-Type"/><meta content="Austin Morlan" name="author"/><meta content="https://austinmorlan.com/posts/entity_component_system/" property="og:url"/><meta content="Austin Morlan" property="og:site_name"/><meta content="A Simple Entity Component System (ECS) [C++]" property="og:title"/><meta content="Ever since first hearing about Entity Component Systems and their implications in game development, I’ve wanted to build one for my own usage and knowledge. There are a few examples that people have built and posted online (1, 2), and there are a few full-fledged ones that can be used to build real games (3 , 4).
+I liked different aspects of each of them that I studied, but I wanted to build my own and put my own spin on the problem, incorporating different elements from different examples." property="og:description"/><meta content="en_us" property="og:locale"/><meta content="article" property="og:type"/><meta content="posts" property="article:section"/><meta content="2019-06-25T00:00:00+00:00" property="article:published_time"/><meta content="2022-12-20T18:57:17-08:00" property="article:modified_time"/><meta content="https://austinmorlan.com/posts/entity_component_system/media/component_array_e3_add_d.png" property="og:image"/><title>A Simple Entity Component System (ECS) [C++] - Austin Morlan</title><link href="https://austinmorlan.com/images/favicon-32x32.png" rel="icon" sizes="32x32" type="image/png"/><link href="https://austinmorlan.com/images/favicon-16x16.png" rel="icon" sizes="16x16" type="image/png"/><meta content="Hugo 0.126.2" name="generator"/><meta content="light" name="color-scheme"/><style>
+:root {
+  color-scheme: light;
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --surface-2: #f6f8fa;
+  --surface-3: #f3f4f6;
+  --text: #1f2937;
+  --muted: #6b7280;
+  --border: #d1d5db;
+  --border-soft: #e5e7eb;
+  --link: #2563eb;
+  --link-hover: #1d4ed8;
+  --note-bg: #eff6ff;
+  --note-border: #93c5fd;
+  --code-bg: #f6f8fa;
+  --line-no-bg: #f9fafb;
+  --comment: #6b7280;
+  --keyword: #7c3aed;
+  --type: #0f766e;
+  --string: #b45309;
+  --number: #c2410c;
+  --func: #1d4ed8;
+  --name: #111827;
+  --operator: #374151;
+}
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+body {
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  line-height: 1.7;
+}
+main.wrapper {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+}
+header {
+  margin-bottom: 28px;
+}
+.content {
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: 18px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+  padding: 32px;
+}
+h1, h2, h3, h4 {
+  color: #111827;
+  line-height: 1.25;
+}
+h1.title {
+  font-size: clamp(2rem, 3vw, 2.7rem);
+  margin: 0.2em 0 0.5em;
+}
+h2 {
+  margin-top: 2.4rem;
+  padding-top: 0.4rem;
+  font-size: 1.6rem;
+}
+p, li {
+  font-size: 1rem;
+}
+a {
+  color: var(--link);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--link-hover);
+  text-decoration: underline;
+}
+hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 1rem 0 1.5rem;
+}
+header hr {
+  border-top-color: var(--border);
+}
+img {
+  max-width: 100%;
+  height: auto;
+}
+pre, code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+code {
+  font-size: 0.94em;
+}
+pre {
+  margin: 0;
+}
+.note {
+  background: var(--note-bg);
+  border: 1px solid #bfdbfe;
+  border-left: 4px solid var(--note-border);
+  padding: 16px 18px;
+  border-radius: 12px;
+  margin: 1.2rem 0;
+}
+.toc {
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  padding: 14px 18px;
+  margin: 1.4rem 0 2rem;
+}
+.toc ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+.highlight {
+  margin: 1.1rem 0 1.5rem;
+  background: var(--code-bg);
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  overflow-x: auto;
+}
+.chroma {
+  background: transparent !important;
+}
+.highlight table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.highlight td {
+  vertical-align: top;
+}
+.highlight td.lntd:first-child {
+  width: 1%;
+  white-space: nowrap;
+  background: var(--line-no-bg);
+  border-right: 1px solid var(--border-soft);
+}
+.highlight td.lntd pre {
+  padding: 14px 10px;
+}
+.highlight td.lntd:last-child pre {
+  padding: 14px 16px;
+}
+.lnt {
+  color: #9ca3af;
+  user-select: none;
+}
+.line, .cl {
+  display: block;
+}
+.c1 { color: var(--comment); font-style: italic; }
+.k { color: var(--keyword); font-weight: 600; }
+.kt { color: var(--type); }
+.s { color: var(--string); }
+.mi, .mf { color: var(--number); }
+.nf { color: var(--func); }
+.nc { color: #0f766e; font-weight: 600; }
+.nb, .nl { color: #2563eb; }
+.n { color: var(--name); }
+.o, .p { color: var(--operator); }
+ul, ol {
+  padding-left: 1.35rem;
+}
+blockquote {
+  margin: 1.2rem 0;
+  padding: 0.2rem 1rem;
+  border-left: 4px solid var(--border);
+  color: #374151;
+  background: #f9fafb;
+  border-radius: 0 10px 10px 0;
+}
+@media (max-width: 720px) {
+  main.wrapper {
+    padding: 18px 12px 36px;
+  }
+  .content {
+    padding: 20px 16px;
+    border-radius: 14px;
+  }
+  h1.title {
+    font-size: 1.8rem;
+  }
+}
+</style></head><body><main class="wrapper"><header><div style="font-size:1.5rem;margin-top:1rem;margin-bottom:2rem;display:inline-block;vertical-align:middle"><a href="https://austinmorlan.com/" rel="noopener noreferrer" style="text-decoration:none" target="_blank"><b>AUSTIN MORLAN</b></a><br/><hr style="border:1px solid #d1d5db"/><div style="text-align:justify;display:inline-block;width:100%"><a href="https://austinmorlan.com/about" rel="noopener noreferrer" style="text-decoration:none" target="_blank">ABOUT</a>
+<a href="mailto:mail@austinmorlan.com" style="text-decoration:none">CONTACT</a>
+<a href="https://austinmorlan.com/index.xml" rel="noopener noreferrer" style="text-decoration:none" target="_blank">RSS</a></div></div></header><div class="content">Jun 25, 2019<br/><br/><h1 class="title">A Simple Entity Component System (ECS) [C++]</h1><hr/><br/><p>Ever since first hearing about Entity Component Systems and their implications in game development,
+I’ve wanted to build one for my own usage and knowledge. There are a few examples that people have built and posted online
+(<a href="https://savas.ca/nomad" rel="noopener noreferrer" target="_blank">1</a>, <a href="https://tsprojectsblog.wordpress.com/portfolio/entity-component-system/" rel="noopener noreferrer" target="_blank">2</a>),
+and there are a few full-fledged ones that can be used to build real games (<a href="https://github.com/skypjack/entt" rel="noopener noreferrer" target="_blank">3</a>
+, <a href="https://github.com/alecthomas/entityx" rel="noopener noreferrer" target="_blank">4</a>).</p><p>I liked different aspects of each of them that I studied, but I wanted to build my own and put
+my own spin on the problem, incorporating different elements from different examples. This is the result.</p><p>It is, admittedly and by design, simple. It’s intended as a jumping off point for the curious.</p><div class="note">UPDATE [2021-07-12]<br/>-------------------<br/><br/>In the two years since I wrote this, I've received many comments/emails about it, and it gets a lot of daily hits.
+I fear that people read it and take it as gospel when I never intended to be seen as an authority on the subject;
+I just wanted to write about something that I found interesting.<br/><br/>Since then my feelings on a few things have changed so I'd like to talk about them here briefly.<br/><br/><b>1) I don't like "Modern" C++ or really C++ in general.</b><br/><br/>I use some C++ features here that I would never use today as I've gone back to trying to write simple code. I will
+either use C++ with a limited feature set (operator overloading, function overloading, that's about it), or I will
+just use straight up C. I like the simplicity of C and I find that when I use C++ I spend far too much brainpower
+on thinking about the language and not enough time thinking of the actual problem I'm trying to solve.<br/><br/><b>2) I'm not an expert on ECSes.</b><br/><br/>I wrote this because I heard about the idea of an ECS and thought they were cool but often explained poorly or
+overly complicated, so I wanted to explain my understanding in a way that made sense to me. I've not done anything else
+with ECSes since.<br/><br/>I hope you still find this useful but take it for what it is.</div><div class="toc"><nav id="TableOfContents"><ul><li><a href="https://austinmorlan.com/posts/entity_component_system/#what-is-an-ecs" rel="noopener noreferrer" target="_blank">What is an ECS?</a></li><li><a href="https://austinmorlan.com/posts/entity_component_system/#the-entity" rel="noopener noreferrer" target="_blank">The Entity</a></li><li><a href="https://austinmorlan.com/posts/entity_component_system/#the-component" rel="noopener noreferrer" target="_blank">The Component</a></li><li><a href="https://austinmorlan.com/posts/entity_component_system/#the-signature" rel="noopener noreferrer" target="_blank">The Signature</a></li><li><a href="https://austinmorlan.com/posts/entity_component_system/#the-entity-manager" rel="noopener noreferrer" target="_blank">The Entity Manager</a></li><li><a href="https://austinmorlan.com/posts/entity_component_system/#the-component-array" rel="noopener noreferrer" target="_blank">The Component Array</a></li><li><a href="https://austinmorlan.com/posts/entity_component_system/#the-component-manager" rel="noopener noreferrer" target="_blank">The Component Manager</a></li><li><a href="https://austinmorlan.com/posts/entity_component_system/#the-system" rel="noopener noreferrer" target="_blank">The System</a></li><li><a href="https://austinmorlan.com/posts/entity_component_system/#the-system-manager" rel="noopener noreferrer" target="_blank">The System Manager</a></li><li><a href="https://austinmorlan.com/posts/entity_component_system/#the-coordinator" rel="noopener noreferrer" target="_blank">The Coordinator</a></li><li><a href="https://austinmorlan.com/posts/entity_component_system/#demo" rel="noopener noreferrer" target="_blank">Demo</a></li><li><a href="https://austinmorlan.com/posts/entity_component_system/#conclusion" rel="noopener noreferrer" target="_blank">Conclusion</a></li><li><a href="https://austinmorlan.com/posts/entity_component_system/#source-code" rel="noopener noreferrer" target="_blank">Source Code</a></li><li><a href="https://austinmorlan.com/posts/entity_component_system/#further-reading" rel="noopener noreferrer" target="_blank">Further Reading</a></li></ul></nav></div><h2 id="what-is-an-ecs">What is an ECS?</h2><hr/><p>Traditionally in game development, you would follow an inheritance approach to problems. A <strong>Goblin</strong> inherits
+from a <strong>Monster</strong> which inherits from an <strong>Actor</strong>. A <strong>Shopkeeper</strong> inherits from a <strong>Human</strong> which also
+inherits from an <strong>Actor</strong>. The <strong>Actor</strong> class contains a function called <strong>Render()</strong> which knows
+how to render an <strong>Actor</strong>, so for every <strong>Goblin</strong> you can call <strong>Goblin.Render()</strong> and for every <strong>Shopkeeper</strong>
+you can call <strong>Shoperkeeper.Render()</strong>.</p><p>There are two main problems with this approach. The first is the problem of flexibility. If you decide that
+you want to visit a town of friendly goblins in the game, and you have <strong>Goblin Shopkeepers</strong>, your inheritance
+tree gets messed up. You have all of the shopkeeping functionality in the <strong>Shopkeeper</strong> class (selling,
+bartering, whatever), but your <strong>Goblin Shopkeeper</strong> can’t inherit from <strong>Shopkeeper</strong> because that would
+make the <strong>Goblin Shopkeeper</strong> a <strong>Human</strong>. Without a doubt, inheritance has its place in software development,
+but in gameplay programming it can cause problems.</p><p>The second problem is a misuse of the cache. In games, you commonly iterate over a set of objects multiple times
+per second, running methods on them every frame. For example, your physics system might iterate over all objects
+that are subject to physics and call <strong>Object.Integrate(dt)</strong>, updating their position, velocity, and acceleration.
+So traditionally you’d have your big object that contains all of its state, including those needed for physics,
+and you’d call the integrate function on every object that needs to be updated. In each object’s <strong>Integrate()</strong> method,
+you access the object’s position, velocity, and acceleration member variables. When you access position, it’s pulled
+into a cache line along with nearby member variables. Some of those nearby member variables will be useful (velocity
+and the acceleration), while others will not be. This is a huge waste of the cache and in an age where the
+performance bottleneck is the time it takes for data to get from main memory to the CPU’s memory, it’s a big deal.</p><p>The tides have been shifting into component-based design to solve the first problem. Looking at Unity, for
+example, all of the game objects are component-based. You start with a blank object that has only the default
+required Transform component, and you add more components to give the object functionality. But that hasn’t
+solved the second problem.</p><p>The second problem is solved by keeping all of the data that will be iterated upon regularly packed tightly
+into memory so that an entire cache line’s worth of data can be loaded at once, and when the next item is iterated upon,
+its data is already in the cache. This is solved by defining components as Plain Old Data (POD), essentially a simple
+struct with only the relevant data included. To continue the physics example, you might have <strong>Transform</strong> with position,
+<strong>Rigidody</strong> with velocity and acceleration, and <strong>Gravity</strong> with the gravitational constant <em>g</em>.</p><p>The physics system would then iterate over all “objects” that “contain” these three components, pulling
+in only the data it cares about into the cache.</p><div class="note">Unity is moving in this direction with the introduction of its own ECS implementation, as well as its
+Jobs system and the Burst compiler. In fact, watching a talk by Mike Acton (Principal Programmer at
+Unity leading ECS development) is what got me interested in this stuff in the first place.</div><p>In reality, the traditional concept of the “object” is gone. Instead we have an <strong>Entity</strong> which is simply
+an ID. It doesn’t “contain” anything. Instead the ID is used as an index into an array of components. An array
+is contiguous in memory which lends itself well to being the data structure of choice. So the physics system
+might have a list of all entities that have a <strong>Transform</strong>, <strong>RigidBody</strong>, and <strong>Gravity</strong> component, and
+use the entity’s ID as an index into the <strong>Transform</strong> array, into the <strong>RigidBody</strong> array, and into the
+<strong>Gravity</strong> array.</p><p>So conceptually it’s all pretty simple. An <strong>Entity</strong> is an ID. A <strong>Component</strong> is a struct of data. A
+<strong>System</strong> is the logic that operates on the components. The meat of this post will be on how to implement those
+three elements in a way that is simple, easy to understand, and easy to use.</p><p>I set out to design mine with the following goals:</p><ul><li>Relatively simple and understandable</li><li>Modern C++</li><li>Minimal amount of if conditions (to avoid branch mispredictions)</li><li>Minimal virtual inheritance (to avoid virtual function lookup and branch mispredictions)</li></ul><h2 id="the-entity">The Entity</h2><hr/><p>As promised, an <strong>Entity</strong> is very simple:</p><div class="highlight"><div class="chroma"><table class="lntable"><tbody><tr><td class="lntd"><pre class="chroma" tabindex="0"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td><td class="lntd"><pre class="chroma" tabindex="0"><code class="language-cpp" data-lang="cpp"><span class="line"><span class="cl"><span class="c1">// A simple type alias
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="k">using</span> <span class="n">Entity</span> <span class="o">=</span> <span class="n">std</span><span class="o">::</span><span class="kt">uint32_t</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Used to define the size of arrays later on
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="k">const</span> <span class="n">Entity</span> <span class="n">MAX_ENTITIES</span> <span class="o">=</span> <span class="mi">5000</span><span class="p">;</span></span></span></code></pre></td></tr></tbody></table></div></div><div class="note">You could of course choose for an <b>Entity</b> to be of any size, and same with <b>MAX_ENTITIES</b>.</div><h2 id="the-component">The Component</h2><hr/><p>A component is almost as simple as an entity. It’s just a struct with a small chunk of functionally related
+data. As an example, <strong>Transform</strong> might look like this:</p><div class="highlight"><div class="chroma"><table class="lntable"><tbody><tr><td class="lntd"><pre class="chroma" tabindex="0"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td><td class="lntd"><pre class="chroma" tabindex="0"><code class="language-cpp" data-lang="cpp"><span class="line"><span class="cl"><span class="k">struct</span> <span class="nc">Transform</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="n">Vec3</span> <span class="n">position</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">	<span class="n">Quat</span> <span class="n">rotation</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">	<span class="n">Vec3</span> <span class="n">scale</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span></span></span></code></pre></td></tr></tbody></table></div></div><p>Each component type (<strong>Transform</strong>, <strong>RigidBody</strong>, etc) also has a unique ID given to it (for reasons
+explained later).</p><div class="highlight"><div class="chroma"><table class="lntable"><tbody><tr><td class="lntd"><pre class="chroma" tabindex="0"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td><td class="lntd"><pre class="chroma" tabindex="0"><code class="language-cpp" data-lang="cpp"><span class="line"><span class="cl"><span class="c1">// A simple type alias
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="k">using</span> <span class="n">ComponentType</span> <span class="o">=</span> <span class="n">std</span><span class="o">::</span><span class="kt">uint8_t</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Used to define the size of arrays later on
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="k">const</span> <span class="n">ComponentType</span> <span class="n">MAX_COMPONENTS</span> <span class="o">=</span> <span class="mi">32</span><span class="p">;</span></span></span></code></pre></td></tr></tbody></table></div></div><div class="note">Again, you could choose any size for <b>ComponentType</b> and <b>MAX_COMPONENTS</b>.</div><h2 id="the-signature">The Signature</h2><hr/><p>Since an entity is simply an ID, we need a way to track which components an entity “has”, and we
+also need a way to track which components a system cares about.</p><p>I chose the very simple approach of using a <strong>std::bitset</strong> (modern C++ equivalent of a bitfield), called
+a <strong>Signature</strong>. Each component type has a unique ID (starting from 0), which is used to represent a bit
+in the signature.</p><p>As an example, if <strong>Transform</strong> has type 0, <strong>RigidBody</strong> has type 1, and <strong>Gravity</strong> has type 2, an entity
+that “has” those three components would have a signature of 0b111 (bits 0, 1, and 2 are set).</p><p>A system would also register its interest in certain components as another signature. Then it’s a simple
+bitwise comparison to ensure that an entity’s signature contains the system’s signature (an entity might have
+<em>more</em> components than a system requires, which is fine, as long as it has <em>all</em> of the components a system
+requires).</p><div class="highlight"><div class="chroma"><table class="lntable"><tbody><tr><td class="lntd"><pre class="chroma" tabindex="0"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td><td class="lntd"><pre class="chroma" tabindex="0"><code class="language-cpp" data-lang="cpp"><span class="line"><span class="cl"><span class="c1">// A simple type alias
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="k">using</span> <span class="n">Signature</span> <span class="o">=</span> <span class="n">std</span><span class="o">::</span><span class="n">bitset</span><span class="o">&lt;</span><span class="n">MAX_COMPONENTS</span><span class="o">&gt;</span><span class="p">;</span></span></span></code></pre></td></tr></tbody></table></div></div><h2 id="the-entity-manager">The Entity Manager</h2><hr/><p>The <strong>Entity Manager</strong> is in charge of distributing entity IDs and keeping record of which IDs are in
+use and which are not.</p><p>I chose to use a simple <strong>std::queue</strong>, where on startup the queue is initialized to contain every valid entity ID up
+to <strong>MAX_ENTITIES</strong>. When an entity is created it takes an ID from the front of the queue, and when an
+entity is destroyed it puts the destroyed ID at the back of the queue.</p><div class="highlight"><div class="chroma"><table class="lntable"><tbody><tr><td class="lntd"><pre class="chroma" tabindex="0"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span></code></pre></td><td class="lntd"><pre class="chroma" tabindex="0"><code class="language-cpp" data-lang="cpp"><span class="line"><span class="cl"><span class="k">class</span> <span class="nc">EntityManager</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl"><span class="k">public</span><span class="o">:</span>
+</span></span><span class="line"><span class="cl">	<span class="n">EntityManager</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="c1">// Initialize the queue with all possible entity IDs
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="k">for</span> <span class="p">(</span><span class="n">Entity</span> <span class="n">entity</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">entity</span> <span class="o">&lt;</span> <span class="n">MAX_ENTITIES</span><span class="p">;</span> <span class="o">++</span><span class="n">entity</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="n">mAvailableEntities</span><span class="p">.</span><span class="n">push</span><span class="p">(</span><span class="n">entity</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="n">Entity</span> <span class="nf">CreateEntity</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="n">assert</span><span class="p">(</span><span class="n">mLivingEntityCount</span> <span class="o">&lt;</span> <span class="n">MAX_ENTITIES</span> <span class="o">&amp;&amp;</span> <span class="s">"Too many entities in existence."</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="c1">// Take an ID from the front of the queue
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="n">Entity</span> <span class="n">id</span> <span class="o">=</span> <span class="n">mAvailableEntities</span><span class="p">.</span><span class="n">front</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">		<span class="n">mAvailableEntities</span><span class="p">.</span><span class="n">pop</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">		<span class="o">++</span><span class="n">mLivingEntityCount</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="n">id</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="kt">void</span> <span class="nf">DestroyEntity</span><span class="p">(</span><span class="n">Entity</span> <span class="n">entity</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="n">assert</span><span class="p">(</span><span class="n">entity</span> <span class="o">&lt;</span> <span class="n">MAX_ENTITIES</span> <span class="o">&amp;&amp;</span> <span class="s">"Entity out of range."</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="c1">// Invalidate the destroyed entity's signature
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="n">mSignatures</span><span class="p">[</span><span class="n">entity</span><span class="p">].</span><span class="n">reset</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="c1">// Put the destroyed ID at the back of the queue
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="n">mAvailableEntities</span><span class="p">.</span><span class="n">push</span><span class="p">(</span><span class="n">entity</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">		<span class="o">--</span><span class="n">mLivingEntityCount</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="kt">void</span> <span class="nf">SetSignature</span><span class="p">(</span><span class="n">Entity</span> <span class="n">entity</span><span class="p">,</span> <span class="n">Signature</span> <span class="n">signature</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="n">assert</span><span class="p">(</span><span class="n">entity</span> <span class="o">&lt;</span> <span class="n">MAX_ENTITIES</span> <span class="o">&amp;&amp;</span> <span class="s">"Entity out of range."</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="c1">// Put this entity's signature into the array
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="n">mSignatures</span><span class="p">[</span><span class="n">entity</span><span class="p">]</span> <span class="o">=</span> <span class="n">signature</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="n">Signature</span> <span class="nf">GetSignature</span><span class="p">(</span><span class="n">Entity</span> <span class="n">entity</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="n">assert</span><span class="p">(</span><span class="n">entity</span> <span class="o">&lt;</span> <span class="n">MAX_ENTITIES</span> <span class="o">&amp;&amp;</span> <span class="s">"Entity out of range."</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="c1">// Get this entity's signature from the array
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="k">return</span> <span class="n">mSignatures</span><span class="p">[</span><span class="n">entity</span><span class="p">];</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="k">private</span><span class="o">:</span>
+</span></span><span class="line"><span class="cl">	<span class="c1">// Queue of unused entity IDs
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="n">std</span><span class="o">::</span><span class="n">queue</span><span class="o">&lt;</span><span class="n">Entity</span><span class="o">&gt;</span> <span class="n">mAvailableEntities</span><span class="p">{};</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="c1">// Array of signatures where the index corresponds to the entity ID
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="n">std</span><span class="o">::</span><span class="n">array</span><span class="o">&lt;</span><span class="n">Signature</span><span class="p">,</span> <span class="n">MAX_ENTITIES</span><span class="o">&gt;</span> <span class="n">mSignatures</span><span class="p">{};</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="c1">// Total living entities - used to keep limits on how many exist
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="kt">uint32_t</span> <span class="n">mLivingEntityCount</span><span class="p">{};</span>
+</span></span><span class="line"><span class="cl"><span class="p">};</span></span></span></code></pre></td></tr></tbody></table></div></div><h2 id="the-component-array">The Component Array</h2><hr/><p>We need to create a data structure that is essentially a simple array, but is
+always a <em>packed</em> array, meaning it has no holes. If an entity is just an index
+into an array of components, then it’s simple to grab the relevant component
+for an entity, but what happens when an entity is destroyed? That index into
+the array is no longer valid.</p><p>Remember that the entire point of the ECS is to keep the data packed in memory,
+meaning that you should be able to iterate over all of the indices in the array
+without needing any sort of “if(valid)” checks. When an entity is destroyed,
+the component data it “had” still exists in the arrays. If a system were to
+then try to iterate over the array, it would encounter stale data with no
+entity attached. For this reason we need to keep the array packed with valid
+data at all times.</p><p>I chose to solve this problem by keeping a mapping from entity IDs to array
+indices. When accessing the array, you use the entity ID to look up the actual
+array index. Then, when an entity is destroyed, you take the last valid element
+in the array and move it into the deleted entity’s spot and update the map so
+that the entity ID now points to the correct position. There is also a map from
+the array index to an entity ID so that, when moving the last array element,
+you know which entity was using that index and can update its map.</p><p>Before showing the code, let me demonstrate the process visually because try as
+I might to make the code understandable, it’s still clearer in picture form.</p><p>Let’s assume that <strong>MAX_ENTITIES</strong> is set to 5. The array starts out empty,
+there is nothing in the maps, and the size is 0.</p><div class="highlight"><div class="chroma"><table class="lntable"><tbody><tr><td class="lntd"><pre class="chroma" tabindex="0"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td><td class="lntd"><pre class="chroma" tabindex="0"><code class="language-text" data-lang="text"><span class="line"><span class="cl">Start
+</span></span><span class="line"><span class="cl">------
+</span></span><span class="line"><span class="cl">Array: []
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Entity-&gt;Index: []
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Index-&gt;Entity: []
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Size: 0</span></span></code></pre></td></tr></tbody></table></div></div><p>We then add a component with value A to Entity 0.</p><p>Entity 0 maps to Index 0, and Index 0 maps to Entity 0.</p><div class="highlight"><div class="chroma"><table class="lntable"><tbody><tr><td class="lntd"><pre class="chroma" tabindex="0"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td><td class="lntd"><pre class="chroma" tabindex="0"><code class="language-text" data-lang="text"><span class="line"><span class="cl">Add A to Entity 0
+</span></span><span class="line"><span class="cl">------
+</span></span><span class="line"><span class="cl">Array: [A]
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Entity-&gt;Index:
+</span></span><span class="line"><span class="cl">[0:0] Entity 0's data (A) is at Index 0
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Index-&gt;Entity:
+</span></span><span class="line"><span class="cl">[0:0] Index 0 holds Entity 0's data (A)
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Size: 1</span></span></code></pre></td></tr></tbody></table></div></div><p>We then add a component with value B to Entity 1.</p><p>Entity 1 maps to Index 1, and Index 1 maps to Entity 1.</p><div class="highlight"><div class="chroma"><table class="lntable"><tbody><tr><td class="lntd"><pre class="chroma" tabindex="0"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td><td class="lntd"><pre class="chroma" tabindex="0"><code class="language-text" data-lang="text"><span class="line"><span class="cl">Add B to Entity 1
+</span></span><span class="line"><span class="cl">------
+</span></span><span class="line"><span class="cl">Array: [A, B]
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Entity-&gt;Index:
+</span></span><span class="line"><span class="cl">[0:0] Entity 0's data (A) is at Index 0
+</span></span><span class="line"><span class="cl">[1:1] Entity 1's data (B) is at Index 1
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Index-&gt;Entity:
+</span></span><span class="line"><span class="cl">[0:0] Index 0 holds Entity 0's data (A)
+</span></span><span class="line"><span class="cl">[1:1] Index 1 holds Entity 1's data (B)
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Size: 2</span></span></code></pre></td></tr></tbody></table></div></div><p>We then add a component with value C to Entity 2.</p><p>Entity 2 maps to Index 2, and Index 2 maps to Entity 2.</p><div class="highlight"><div class="chroma"><table class="lntable"><tbody><tr><td class="lntd"><pre class="chroma" tabindex="0"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td><td class="lntd"><pre class="chroma" tabindex="0"><code class="language-text" data-lang="text"><span class="line"><span class="cl">Add C to Entity 2
+</span></span><span class="line"><span class="cl">------
+</span></span><span class="line"><span class="cl">Array: [A, B, C]
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Entity-&gt;Index:
+</span></span><span class="line"><span class="cl">[0:0] Entity 0's data (A) is at Index 0
+</span></span><span class="line"><span class="cl">[1:1] Entity 1's data (B) is at Index 1
+</span></span><span class="line"><span class="cl">[2:2] Entity 2's data (C) is at Index 2
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Index-&gt;Entity:
+</span></span><span class="line"><span class="cl">[0:0] Index 0 holds Entity 0's data (A)
+</span></span><span class="line"><span class="cl">[1:1] Index 1 holds Entity 1's data (B)
+</span></span><span class="line"><span class="cl">[2:2] Index 2 holds Entity 2's data (C)
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Size: 3</span></span></code></pre></td></tr></tbody></table></div></div><p>We then add a component with value D to Entity 3.</p><p>Entity 3 maps to Index 3, and Index 3 maps to Entity 3.</p><div class="highlight"><div class="chroma"><table class="lntable"><tbody><tr><td class="lntd"><pre class="chroma" tabindex="0"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td><td class="lntd"><pre class="chroma" tabindex="0"><code class="language-text" data-lang="text"><span class="line"><span class="cl">Add D to Entity 3
+</span></span><span class="line"><span class="cl">------
+</span></span><span class="line"><span class="cl">Array: [A, B, C, D]
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Entity-&gt;Index:
+</span></span><span class="line"><span class="cl">[0:0] Entity 0's data (A) is at Index 0
+</span></span><span class="line"><span class="cl">[1:1] Entity 1's data (B) is at Index 1
+</span></span><span class="line"><span class="cl">[2:2] Entity 2's data (C) is at Index 2
+</span></span><span class="line"><span class="cl">[3:3] Entity 3's data (D) is at Index 3
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Index-&gt;Entity:
+</span></span><span class="line"><span class="cl">[0:0] Index 0 holds Entity 0's data (A)
+</span></span><span class="line"><span class="cl">[1:1] Index 1 holds Entity 1's data (B)
+</span></span><span class="line"><span class="cl">[2:2] Index 2 holds Entity 2's data (C)
+</span></span><span class="line"><span class="cl">[3:3] Index 3 holds Entity 3's data (D)
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Size: 4</span></span></code></pre></td></tr></tbody></table></div></div><p>So far so good. Everything is packed into memory. But then we delete the value B from Entity 1. To keep
+it packed, we move the last element D into the spot occupied by B, and update the maps.</p><p>Entity 3 maps to Index 1, and Index 1 maps to Entity 3.</p><div class="highlight"><div class="chroma"><table class="lntable"><tbody><tr><td class="lntd"><pre class="chroma" tabindex="0"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td><td class="lntd"><pre class="chroma" tabindex="0"><code class="language-text" data-lang="text"><span class="line"><span class="cl">Delete B (which was at Index 1 and was the data of Entity 1)
+</span></span><span class="line"><span class="cl">------
+</span></span><span class="line"><span class="cl">Array: [A, D, C]
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Entity-&gt;Index:
+</span></span><span class="line"><span class="cl">[0:0] Entity 0's data (A) is at Index 0
+</span></span><span class="line"><span class="cl">[3:1] Entity 3's data (D) is at Index 1
+</span></span><span class="line"><span class="cl">[2:2] Entity 2's data (C) is at Index 2
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Index-&gt;Entity:
+</span></span><span class="line"><span class="cl">[0:0] Index 0 holds Entity 0's data (A)
+</span></span><span class="line"><span class="cl">[1:3] Index 1 holds Entity 3's data (D)
+</span></span><span class="line"><span class="cl">[2:2] Index 2 holds Entity 2's data (C)
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Size: 3</span></span></code></pre></td></tr></tbody></table></div></div><p>We then delete the value D from Entity 3, moving the last element C into the spot occupied by D.</p><p>Entity 2 maps to Index 1, and Index 1 maps to Entity 2.</p><div class="highlight"><div class="chroma"><table class="lntable"><tbody><tr><td class="lntd"><pre class="chroma" tabindex="0"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td><td class="lntd"><pre class="chroma" tabindex="0"><code class="language-text" data-lang="text"><span class="line"><span class="cl">Delete D (which was at Index 1 and was the data of Entity 3)
+</span></span><span class="line"><span class="cl">------
+</span></span><span class="line"><span class="cl">Array: [A, C]
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Entity-&gt;Index:
+</span></span><span class="line"><span class="cl">[0:0] Entity 0's data (A) is at Index 0
+</span></span><span class="line"><span class="cl">[2:1] Entity 2's data (C) is at Index 1
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Index-&gt;Entity:
+</span></span><span class="line"><span class="cl">[0:0] Index 0 holds Entity 0's data (A)
+</span></span><span class="line"><span class="cl">[1:2] Index 1 holds Entity 2's data (C)
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Size: 2</span></span></code></pre></td></tr></tbody></table></div></div><p>Finally we add value E to Entity 4.</p><p>Entity 4 maps to Index 2, and Index 2 maps to Entity 4.</p><div class="highlight"><div class="chroma"><table class="lntable"><tbody><tr><td class="lntd"><pre class="chroma" tabindex="0"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td><td class="lntd"><pre class="chroma" tabindex="0"><code class="language-text" data-lang="text"><span class="line"><span class="cl">Add E to Entity 4
+</span></span><span class="line"><span class="cl">------
+</span></span><span class="line"><span class="cl">Array: [A, C, E]
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Entity-&gt;Index:
+</span></span><span class="line"><span class="cl">[0:0] Entity 0's data (A) is at Index 0
+</span></span><span class="line"><span class="cl">[2:1] Entity 2's data (C) is at Index 1
+</span></span><span class="line"><span class="cl">[4:2] Entity 4's data (E) is at index 2
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Index-&gt;Entity:
+</span></span><span class="line"><span class="cl">[0:0] Index 0 holds Entity 0's data (A)
+</span></span><span class="line"><span class="cl">[1:2] Index 1 holds Entity 2's data (C)
+</span></span><span class="line"><span class="cl">[2:4] Index 2 holds Entity 4's data (E)
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Size: 3</span></span></code></pre></td></tr></tbody></table></div></div><p>Voila, components removed and added while maintaining density.</p><div class="highlight"><div class="chroma"><table class="lntable"><tbody><tr><td class="lntd"><pre class="chroma" tabindex="0"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span><span class="lnt">71
+</span><span class="lnt">72
+</span><span class="lnt">73
+</span><span class="lnt">74
+</span><span class="lnt">75
+</span><span class="lnt">76
+</span><span class="lnt">77
+</span><span class="lnt">78
+</span><span class="lnt">79
+</span><span class="lnt">80
+</span><span class="lnt">81
+</span></code></pre></td><td class="lntd"><pre class="chroma" tabindex="0"><code class="language-cpp" data-lang="cpp"><span class="line"><span class="cl"><span class="c1">// The one instance of virtual inheritance in the entire implementation.
+</span></span></span><span class="line"><span class="cl"><span class="c1">// An interface is needed so that the ComponentManager (seen later)
+</span></span></span><span class="line"><span class="cl"><span class="c1">// can tell a generic ComponentArray that an entity has been destroyed
+</span></span></span><span class="line"><span class="cl"><span class="c1">// and that it needs to update its array mappings.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="k">class</span> <span class="nc">IComponentArray</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl"><span class="k">public</span><span class="o">:</span>
+</span></span><span class="line"><span class="cl">	<span class="k">virtual</span> <span class="o">~</span><span class="n">IComponentArray</span><span class="p">()</span> <span class="o">=</span> <span class="k">default</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">	<span class="k">virtual</span> <span class="kt">void</span> <span class="nf">EntityDestroyed</span><span class="p">(</span><span class="n">Entity</span> <span class="n">entity</span><span class="p">)</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">};</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span> <span class="n">T</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl"><span class="k">class</span> <span class="nc">ComponentArray</span> <span class="o">:</span> <span class="k">public</span> <span class="n">IComponentArray</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl"><span class="k">public</span><span class="o">:</span>
+</span></span><span class="line"><span class="cl">	<span class="kt">void</span> <span class="n">InsertData</span><span class="p">(</span><span class="n">Entity</span> <span class="n">entity</span><span class="p">,</span> <span class="n">T</span> <span class="n">component</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="n">assert</span><span class="p">(</span><span class="n">mEntityToIndexMap</span><span class="p">.</span><span class="n">find</span><span class="p">(</span><span class="n">entity</span><span class="p">)</span> <span class="o">==</span> <span class="n">mEntityToIndexMap</span><span class="p">.</span><span class="n">end</span><span class="p">()</span> <span class="o">&amp;&amp;</span> <span class="s">"Component added to same entity more than once."</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="c1">// Put new entry at end and update the maps
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="n">size_t</span> <span class="n">newIndex</span> <span class="o">=</span> <span class="n">mSize</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">		<span class="n">mEntityToIndexMap</span><span class="p">[</span><span class="n">entity</span><span class="p">]</span> <span class="o">=</span> <span class="n">newIndex</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">		<span class="n">mIndexToEntityMap</span><span class="p">[</span><span class="n">newIndex</span><span class="p">]</span> <span class="o">=</span> <span class="n">entity</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">		<span class="n">mComponentArray</span><span class="p">[</span><span class="n">newIndex</span><span class="p">]</span> <span class="o">=</span> <span class="n">component</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">		<span class="o">++</span><span class="n">mSize</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="kt">void</span> <span class="nf">RemoveData</span><span class="p">(</span><span class="n">Entity</span> <span class="n">entity</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="n">assert</span><span class="p">(</span><span class="n">mEntityToIndexMap</span><span class="p">.</span><span class="n">find</span><span class="p">(</span><span class="n">entity</span><span class="p">)</span> <span class="o">!=</span> <span class="n">mEntityToIndexMap</span><span class="p">.</span><span class="n">end</span><span class="p">()</span> <span class="o">&amp;&amp;</span> <span class="s">"Removing non-existent component."</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="c1">// Copy element at end into deleted element's place to maintain density
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="n">size_t</span> <span class="n">indexOfRemovedEntity</span> <span class="o">=</span> <span class="n">mEntityToIndexMap</span><span class="p">[</span><span class="n">entity</span><span class="p">];</span>
+</span></span><span class="line"><span class="cl">		<span class="n">size_t</span> <span class="n">indexOfLastElement</span> <span class="o">=</span> <span class="n">mSize</span> <span class="o">-</span> <span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">		<span class="n">mComponentArray</span><span class="p">[</span><span class="n">indexOfRemovedEntity</span><span class="p">]</span> <span class="o">=</span> <span class="n">mComponentArray</span><span class="p">[</span><span class="n">indexOfLastElement</span><span class="p">];</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="c1">// Update map to point to moved spot
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="n">Entity</span> <span class="n">entityOfLastElement</span> <span class="o">=</span> <span class="n">mIndexToEntityMap</span><span class="p">[</span><span class="n">indexOfLastElement</span><span class="p">];</span>
+</span></span><span class="line"><span class="cl">		<span class="n">mEntityToIndexMap</span><span class="p">[</span><span class="n">entityOfLastElement</span><span class="p">]</span> <span class="o">=</span> <span class="n">indexOfRemovedEntity</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">		<span class="n">mIndexToEntityMap</span><span class="p">[</span><span class="n">indexOfRemovedEntity</span><span class="p">]</span> <span class="o">=</span> <span class="n">entityOfLastElement</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="n">mEntityToIndexMap</span><span class="p">.</span><span class="n">erase</span><span class="p">(</span><span class="n">entity</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">		<span class="n">mIndexToEntityMap</span><span class="p">.</span><span class="n">erase</span><span class="p">(</span><span class="n">indexOfLastElement</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="o">--</span><span class="n">mSize</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="n">T</span><span class="o">&amp;</span> <span class="n">GetData</span><span class="p">(</span><span class="n">Entity</span> <span class="n">entity</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="n">assert</span><span class="p">(</span><span class="n">mEntityToIndexMap</span><span class="p">.</span><span class="n">find</span><span class="p">(</span><span class="n">entity</span><span class="p">)</span> <span class="o">!=</span> <span class="n">mEntityToIndexMap</span><span class="p">.</span><span class="n">end</span><span class="p">()</span> <span class="o">&amp;&amp;</span> <span class="s">"Retrieving non-existent component."</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="c1">// Return a reference to the entity's component
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="k">return</span> <span class="n">mComponentArray</span><span class="p">[</span><span class="n">mEntityToIndexMap</span><span class="p">[</span><span class="n">entity</span><span class="p">]];</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="kt">void</span> <span class="nf">EntityDestroyed</span><span class="p">(</span><span class="n">Entity</span> <span class="n">entity</span><span class="p">)</span> <span class="k">override</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">if</span> <span class="p">(</span><span class="n">mEntityToIndexMap</span><span class="p">.</span><span class="n">find</span><span class="p">(</span><span class="n">entity</span><span class="p">)</span> <span class="o">!=</span> <span class="n">mEntityToIndexMap</span><span class="p">.</span><span class="n">end</span><span class="p">())</span>
+</span></span><span class="line"><span class="cl">		<span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="c1">// Remove the entity's component if it existed
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>			<span class="n">RemoveData</span><span class="p">(</span><span class="n">entity</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="k">private</span><span class="o">:</span>
+</span></span><span class="line"><span class="cl">	<span class="c1">// The packed array of components (of generic type T),
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="c1">// set to a specified maximum amount, matching the maximum number
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="c1">// of entities allowed to exist simultaneously, so that each entity
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="c1">// has a unique spot.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="n">std</span><span class="o">::</span><span class="n">array</span><span class="o">&lt;</span><span class="n">T</span><span class="p">,</span> <span class="n">MAX_ENTITIES</span><span class="o">&gt;</span> <span class="n">mComponentArray</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="c1">// Map from an entity ID to an array index.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="n">std</span><span class="o">::</span><span class="n">unordered_map</span><span class="o">&lt;</span><span class="n">Entity</span><span class="p">,</span> <span class="n">size_t</span><span class="o">&gt;</span> <span class="n">mEntityToIndexMap</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="c1">// Map from an array index to an entity ID.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="n">std</span><span class="o">::</span><span class="n">unordered_map</span><span class="o">&lt;</span><span class="n">size_t</span><span class="p">,</span> <span class="n">Entity</span><span class="o">&gt;</span> <span class="n">mIndexToEntityMap</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="c1">// Total size of valid entries in the array.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="n">size_t</span> <span class="n">mSize</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">};</span></span></span></code></pre></td></tr></tbody></table></div></div><div class="note">The <b>unordered_map</b> does have a performance penalty because when you want to get the ID of a component to grab it from
+the contiguous array, you have to request it from the unordered_map which is not contiguous. An alternative would be
+to use arrays instead.<br/><br/>But the <b>unordered_map</b>s have the nice property of supporting <b>find()</b>, <b>insert()</b>, and <b>delete()</b>,
+which allow for asserting validity without "if(valid)" checks and it's a bit clearer then setting array elements to some
+"INVALID" value.</div><div class="note">The virtual inheritance of <b>IComponentArray</b> is unfortunate but, as far as I can tell, unavoidable.
+As seen later, we'll have a list of every <b>ComponentArray</b> (one per component type), and we need to
+notify all of them when an entity is destroyed so that it can remove the entity's data if it exists.
+The only way to keep a list of multiple templated types is to keep a list of their common interface
+so that we can call <b>EntityDestroyed()</b> on all of them.<br/><br/>Another method is to use events, so that every <b>ComponentArray</b> can subscribe to an Entity Destroyed
+event and then respond accordingly. This was my original approach but I decided to keep <b>ComponentArray</b>s
+relatively stupid.<br/><br/>Yet another method would be to use some fancy template magic and reflection, but I wanted to
+keep it as simple as possibe for my own sanity. The cost of calling the virtual function <b>EntityDestroyed()</b>
+should be minimal because it isn't something that happens every single frame.</div><h2 id="the-component-manager">The Component Manager</h2><hr/><p>Now we can implement the <strong>Component Manager</strong>, which is in charge of talking to all of the different
+<strong>ComponentArrays</strong> when a component needs to be added or removed.</p><p>As mentioned earlier, we need to have a unique ID for every type of component so that it can have a bit
+in a signature. To accomplish that without pain, I have the Component Manager have a <strong>ComponentType</strong> variable
+that increments by one with every component type that is registered. I’ve seen implementations that don’t
+require any sort of <strong>RegisterComponent</strong> functionality, but I’ve found it to be the simplest method. The
+downside is that any time you add a new type of component to your game and want to use it, you will first need
+to call <strong>RegisterComponent</strong>.</p><p>C++ offers a convenient function that will return a pointer to a const char array representation of a type T.
+That pointer (which is just an integer) can be used as a unique key into a map of <strong>ComponentTypes</strong>.</p><p>That same key is also used as a unique key into a map of <strong>IComponentArray</strong> pointers, so there is one
+<strong>ComponentArray</strong> instantiation per <strong>ComponentType</strong>.</p><div class="highlight"><div class="chroma"><table class="lntable"><tbody><tr><td class="lntd"><pre class="chroma" tabindex="0"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span><span class="lnt">71
+</span><span class="lnt">72
+</span><span class="lnt">73
+</span><span class="lnt">74
+</span><span class="lnt">75
+</span><span class="lnt">76
+</span><span class="lnt">77
+</span><span class="lnt">78
+</span><span class="lnt">79
+</span><span class="lnt">80
+</span><span class="lnt">81
+</span><span class="lnt">82
+</span><span class="lnt">83
+</span><span class="lnt">84
+</span><span class="lnt">85
+</span></code></pre></td><td class="lntd"><pre class="chroma" tabindex="0"><code class="language-cpp" data-lang="cpp"><span class="line"><span class="cl"><span class="k">class</span> <span class="nc">ComponentManager</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl"><span class="k">public</span><span class="o">:</span>
+</span></span><span class="line"><span class="cl">	<span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span> <span class="n">T</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl">	<span class="kt">void</span> <span class="n">RegisterComponent</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">const</span> <span class="kt">char</span><span class="o">*</span> <span class="n">typeName</span> <span class="o">=</span> <span class="k">typeid</span><span class="p">(</span><span class="n">T</span><span class="p">).</span><span class="n">name</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="n">assert</span><span class="p">(</span><span class="n">mComponentTypes</span><span class="p">.</span><span class="n">find</span><span class="p">(</span><span class="n">typeName</span><span class="p">)</span> <span class="o">==</span> <span class="n">mComponentTypes</span><span class="p">.</span><span class="n">end</span><span class="p">()</span> <span class="o">&amp;&amp;</span> <span class="s">"Registering component type more than once."</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="c1">// Add this component type to the component type map
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="n">mComponentTypes</span><span class="p">.</span><span class="n">insert</span><span class="p">({</span><span class="n">typeName</span><span class="p">,</span> <span class="n">mNextComponentType</span><span class="p">});</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="c1">// Create a ComponentArray pointer and add it to the component arrays map
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="n">mComponentArrays</span><span class="p">.</span><span class="n">insert</span><span class="p">({</span><span class="n">typeName</span><span class="p">,</span> <span class="n">std</span><span class="o">::</span><span class="n">make_shared</span><span class="o">&lt;</span><span class="n">ComponentArray</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;&gt;</span><span class="p">()});</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="c1">// Increment the value so that the next component registered will be different
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="o">++</span><span class="n">mNextComponentType</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span> <span class="n">T</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl">	<span class="n">ComponentType</span> <span class="n">GetComponentType</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">const</span> <span class="kt">char</span><span class="o">*</span> <span class="n">typeName</span> <span class="o">=</span> <span class="k">typeid</span><span class="p">(</span><span class="n">T</span><span class="p">).</span><span class="n">name</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="n">assert</span><span class="p">(</span><span class="n">mComponentTypes</span><span class="p">.</span><span class="n">find</span><span class="p">(</span><span class="n">typeName</span><span class="p">)</span> <span class="o">!=</span> <span class="n">mComponentTypes</span><span class="p">.</span><span class="n">end</span><span class="p">()</span> <span class="o">&amp;&amp;</span> <span class="s">"Component not registered before use."</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="c1">// Return this component's type - used for creating signatures
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="k">return</span> <span class="n">mComponentTypes</span><span class="p">[</span><span class="n">typeName</span><span class="p">];</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span> <span class="n">T</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl">	<span class="kt">void</span> <span class="n">AddComponent</span><span class="p">(</span><span class="n">Entity</span> <span class="n">entity</span><span class="p">,</span> <span class="n">T</span> <span class="n">component</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="c1">// Add a component to the array for an entity
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="n">GetComponentArray</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="p">()</span><span class="o">-&gt;</span><span class="n">InsertData</span><span class="p">(</span><span class="n">entity</span><span class="p">,</span> <span class="n">component</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span> <span class="n">T</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl">	<span class="kt">void</span> <span class="n">RemoveComponent</span><span class="p">(</span><span class="n">Entity</span> <span class="n">entity</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="c1">// Remove a component from the array for an entity
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="n">GetComponentArray</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="p">()</span><span class="o">-&gt;</span><span class="n">RemoveData</span><span class="p">(</span><span class="n">entity</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span> <span class="n">T</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl">	<span class="n">T</span><span class="o">&amp;</span> <span class="n">GetComponent</span><span class="p">(</span><span class="n">Entity</span> <span class="n">entity</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="c1">// Get a reference to a component from the array for an entity
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="k">return</span> <span class="n">GetComponentArray</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="p">()</span><span class="o">-&gt;</span><span class="n">GetData</span><span class="p">(</span><span class="n">entity</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="kt">void</span> <span class="nf">EntityDestroyed</span><span class="p">(</span><span class="n">Entity</span> <span class="n">entity</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="c1">// Notify each component array that an entity has been destroyed
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="c1">// If it has a component for that entity, it will remove it
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="k">for</span> <span class="p">(</span><span class="k">auto</span> <span class="k">const</span><span class="o">&amp;</span> <span class="nl">pair</span> <span class="p">:</span> <span class="n">mComponentArrays</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="k">auto</span> <span class="k">const</span><span class="o">&amp;</span> <span class="n">component</span> <span class="o">=</span> <span class="n">pair</span><span class="p">.</span><span class="n">second</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">			<span class="n">component</span><span class="o">-&gt;</span><span class="n">EntityDestroyed</span><span class="p">(</span><span class="n">entity</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="k">private</span><span class="o">:</span>
+</span></span><span class="line"><span class="cl">	<span class="c1">// Map from type string pointer to a component type
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="n">std</span><span class="o">::</span><span class="n">unordered_map</span><span class="o">&lt;</span><span class="k">const</span> <span class="kt">char</span><span class="o">*</span><span class="p">,</span> <span class="n">ComponentType</span><span class="o">&gt;</span> <span class="n">mComponentTypes</span><span class="p">{};</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="c1">// Map from type string pointer to a component array
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="n">std</span><span class="o">::</span><span class="n">unordered_map</span><span class="o">&lt;</span><span class="k">const</span> <span class="kt">char</span><span class="o">*</span><span class="p">,</span> <span class="n">std</span><span class="o">::</span><span class="n">shared_ptr</span><span class="o">&lt;</span><span class="n">IComponentArray</span><span class="o">&gt;&gt;</span> <span class="n">mComponentArrays</span><span class="p">{};</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="c1">// The component type to be assigned to the next registered component - starting at 0
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="n">ComponentType</span> <span class="n">mNextComponentType</span><span class="p">{};</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="c1">// Convenience function to get the statically casted pointer to the ComponentArray of type T.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span> <span class="n">T</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl">	<span class="n">std</span><span class="o">::</span><span class="n">shared_ptr</span><span class="o">&lt;</span><span class="n">ComponentArray</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;&gt;</span> <span class="n">GetComponentArray</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">const</span> <span class="kt">char</span><span class="o">*</span> <span class="n">typeName</span> <span class="o">=</span> <span class="k">typeid</span><span class="p">(</span><span class="n">T</span><span class="p">).</span><span class="n">name</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="n">assert</span><span class="p">(</span><span class="n">mComponentTypes</span><span class="p">.</span><span class="n">find</span><span class="p">(</span><span class="n">typeName</span><span class="p">)</span> <span class="o">!=</span> <span class="n">mComponentTypes</span><span class="p">.</span><span class="n">end</span><span class="p">()</span> <span class="o">&amp;&amp;</span> <span class="s">"Component not registered before use."</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="n">std</span><span class="o">::</span><span class="n">static_pointer_cast</span><span class="o">&lt;</span><span class="n">ComponentArray</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;&gt;</span><span class="p">(</span><span class="n">mComponentArrays</span><span class="p">[</span><span class="n">typeName</span><span class="p">]);</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">};</span></span></span></code></pre></td></tr></tbody></table></div></div><h2 id="the-system">The System</h2><hr/><p>A system is any functionality that iterates upon a list of entities with a certain signature of components.</p><p>Every system needs a list of entities, and we want some logic outside of the system (in the form of a
+manager to maintain that list), so I use a <strong>System</strong> base class that has only a <strong>std::set</strong> of entities.</p><p>I chose a <strong>std::set</strong> rather than a <strong>std::list</strong> for a few reasons.</p><p>First, each entity is unique, and a set is defined as having every element be unique, so it maps well logically.</p><p>Second, each entity is an integer which makes for easy compares when inserting/removing from the set. Removing
+a specific entity from a list is O(n) because you have to start at the beginning and possibly go to the end,
+while removing from a set is O(log n) because it’s a binary tree. However, inserting into a list
+is only O(1) while inserting into a set is O(log n) as well.</p><p>Third, it makes the code easier to understand and read. With a list, you have to use <strong>std::find</strong> to check
+if an entity is in the list, but with <strong>std::set</strong> you can just call <strong>insert()</strong> and <strong>erase()</strong> directly
+without any checks. If trying to insert when it’s already in, it does nothing. If trying to erase when it
+doesn’t exist, it does nothing.</p><p>Fourth, I tested using a list and using a set, and a set was faster.</p><div class="highlight"><div class="chroma"><table class="lntable"><tbody><tr><td class="lntd"><pre class="chroma" tabindex="0"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td><td class="lntd"><pre class="chroma" tabindex="0"><code class="language-cpp" data-lang="cpp"><span class="line"><span class="cl"><span class="k">class</span> <span class="nc">System</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl"><span class="k">public</span><span class="o">:</span>
+</span></span><span class="line"><span class="cl">	<span class="n">std</span><span class="o">::</span><span class="n">set</span><span class="o">&lt;</span><span class="n">Entity</span><span class="o">&gt;</span> <span class="n">mEntities</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">};</span></span></span></code></pre></td></tr></tbody></table></div></div><p>Each system can then inherit from this class which allows the System Manager (see next section) to keep
+a list of pointers to systems. Inheritance, but not virtual.</p><p>A system could then do something like this:</p><div class="highlight"><div class="chroma"><table class="lntable"><tbody><tr><td class="lntd"><pre class="chroma" tabindex="0"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td><td class="lntd"><pre class="chroma" tabindex="0"><code class="language-cpp" data-lang="cpp"><span class="line"><span class="cl"><span class="k">for</span> <span class="p">(</span><span class="k">auto</span> <span class="k">const</span><span class="o">&amp;</span> <span class="nl">entity</span> <span class="p">:</span> <span class="n">mEntities</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="k">auto</span><span class="o">&amp;</span> <span class="n">rigidBody</span> <span class="o">=</span> <span class="n">GetComponent</span><span class="o">&lt;</span><span class="n">RigidBody</span><span class="o">&gt;</span><span class="p">(</span><span class="n">entity</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">	<span class="k">auto</span><span class="o">&amp;</span> <span class="n">transform</span> <span class="o">=</span> <span class="n">GetComponent</span><span class="o">&lt;</span><span class="n">Transform</span><span class="o">&gt;</span><span class="p">(</span><span class="n">entity</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">	<span class="k">auto</span> <span class="k">const</span><span class="o">&amp;</span> <span class="n">gravity</span> <span class="o">=</span> <span class="n">GetComponent</span><span class="o">&lt;</span><span class="n">Gravity</span><span class="o">&gt;</span><span class="p">(</span><span class="n">entity</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="n">transform</span><span class="p">.</span><span class="n">position</span> <span class="o">+=</span> <span class="n">rigidBody</span><span class="p">.</span><span class="n">velocity</span> <span class="o">*</span> <span class="n">dt</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="n">rigidBody</span><span class="p">.</span><span class="n">velocity</span> <span class="o">+=</span> <span class="n">gravity</span><span class="p">.</span><span class="n">force</span> <span class="o">*</span> <span class="n">dt</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span></span></span></code></pre></td></tr></tbody></table></div></div><p>A <strong>RigidBody</strong>, a <strong>Transform</strong>, and a <strong>Gravity</strong> will be pulled into the cache for this entity as well as
+for all of the entities near it in the component array, which are likely to be needed with the next entity
+in the list of entities.</p><h2 id="the-system-manager">The System Manager</h2><hr/><p>The <strong>System Manager</strong> is in charge of maintaining a record of registered systems and their signatures. When
+a system is registered, it’s added to a map with the same <strong>typeid(T).name()</strong> trick used for the components.
+That same key is used for a map of system pointers as well.</p><p>As with components, this approach requires a call to <strong>RegisterSystem()</strong> for every additional system type
+added to the game.</p><p>Each system needs to have a signature set for it so that the manager can add appropriate entities to each
+systems’s list of entities. When an entity’s signature has changed (due to components being added or removed),
+then the system’s list of entities that it’s tracking needs to be updated.</p><p>If an entity that the system is tracking is destroyed, then it also needs to update its list.</p><div class="highlight"><div class="chroma"><table class="lntable"><tbody><tr><td class="lntd"><pre class="chroma" tabindex="0"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span></code></pre></td><td class="lntd"><pre class="chroma" tabindex="0"><code class="language-cpp" data-lang="cpp"><span class="line"><span class="cl"><span class="k">class</span> <span class="nc">SystemManager</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl"><span class="k">public</span><span class="o">:</span>
+</span></span><span class="line"><span class="cl">	<span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span> <span class="n">T</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl">	<span class="n">std</span><span class="o">::</span><span class="n">shared_ptr</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span> <span class="n">RegisterSystem</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">const</span> <span class="kt">char</span><span class="o">*</span> <span class="n">typeName</span> <span class="o">=</span> <span class="k">typeid</span><span class="p">(</span><span class="n">T</span><span class="p">).</span><span class="n">name</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="n">assert</span><span class="p">(</span><span class="n">mSystems</span><span class="p">.</span><span class="n">find</span><span class="p">(</span><span class="n">typeName</span><span class="p">)</span> <span class="o">==</span> <span class="n">mSystems</span><span class="p">.</span><span class="n">end</span><span class="p">()</span> <span class="o">&amp;&amp;</span> <span class="s">"Registering system more than once."</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="c1">// Create a pointer to the system and return it so it can be used externally
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="k">auto</span> <span class="n">system</span> <span class="o">=</span> <span class="n">std</span><span class="o">::</span><span class="n">make_shared</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">		<span class="n">mSystems</span><span class="p">.</span><span class="n">insert</span><span class="p">({</span><span class="n">typeName</span><span class="p">,</span> <span class="n">system</span><span class="p">});</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="n">system</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span> <span class="n">T</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl">	<span class="kt">void</span> <span class="n">SetSignature</span><span class="p">(</span><span class="n">Signature</span> <span class="n">signature</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">const</span> <span class="kt">char</span><span class="o">*</span> <span class="n">typeName</span> <span class="o">=</span> <span class="k">typeid</span><span class="p">(</span><span class="n">T</span><span class="p">).</span><span class="n">name</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="n">assert</span><span class="p">(</span><span class="n">mSystems</span><span class="p">.</span><span class="n">find</span><span class="p">(</span><span class="n">typeName</span><span class="p">)</span> <span class="o">!=</span> <span class="n">mSystems</span><span class="p">.</span><span class="n">end</span><span class="p">()</span> <span class="o">&amp;&amp;</span> <span class="s">"System used before registered."</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="c1">// Set the signature for this system
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="n">mSignatures</span><span class="p">.</span><span class="n">insert</span><span class="p">({</span><span class="n">typeName</span><span class="p">,</span> <span class="n">signature</span><span class="p">});</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="kt">void</span> <span class="nf">EntityDestroyed</span><span class="p">(</span><span class="n">Entity</span> <span class="n">entity</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="c1">// Erase a destroyed entity from all system lists
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="c1">// mEntities is a set so no check needed
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="k">for</span> <span class="p">(</span><span class="k">auto</span> <span class="k">const</span><span class="o">&amp;</span> <span class="nl">pair</span> <span class="p">:</span> <span class="n">mSystems</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="k">auto</span> <span class="k">const</span><span class="o">&amp;</span> <span class="n">system</span> <span class="o">=</span> <span class="n">pair</span><span class="p">.</span><span class="n">second</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">			<span class="n">system</span><span class="o">-&gt;</span><span class="n">mEntities</span><span class="p">.</span><span class="n">erase</span><span class="p">(</span><span class="n">entity</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="kt">void</span> <span class="nf">EntitySignatureChanged</span><span class="p">(</span><span class="n">Entity</span> <span class="n">entity</span><span class="p">,</span> <span class="n">Signature</span> <span class="n">entitySignature</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="c1">// Notify each system that an entity's signature changed
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="k">for</span> <span class="p">(</span><span class="k">auto</span> <span class="k">const</span><span class="o">&amp;</span> <span class="nl">pair</span> <span class="p">:</span> <span class="n">mSystems</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="k">auto</span> <span class="k">const</span><span class="o">&amp;</span> <span class="n">type</span> <span class="o">=</span> <span class="n">pair</span><span class="p">.</span><span class="n">first</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">			<span class="k">auto</span> <span class="k">const</span><span class="o">&amp;</span> <span class="n">system</span> <span class="o">=</span> <span class="n">pair</span><span class="p">.</span><span class="n">second</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">			<span class="k">auto</span> <span class="k">const</span><span class="o">&amp;</span> <span class="n">systemSignature</span> <span class="o">=</span> <span class="n">mSignatures</span><span class="p">[</span><span class="n">type</span><span class="p">];</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">			<span class="c1">// Entity signature matches system signature - insert into set
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>			<span class="k">if</span> <span class="p">((</span><span class="n">entitySignature</span> <span class="o">&amp;</span> <span class="n">systemSignature</span><span class="p">)</span> <span class="o">==</span> <span class="n">systemSignature</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">			<span class="p">{</span>
+</span></span><span class="line"><span class="cl">				<span class="n">system</span><span class="o">-&gt;</span><span class="n">mEntities</span><span class="p">.</span><span class="n">insert</span><span class="p">(</span><span class="n">entity</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">			<span class="p">}</span>
+</span></span><span class="line"><span class="cl">			<span class="c1">// Entity signature does not match system signature - erase from set
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>			<span class="k">else</span>
+</span></span><span class="line"><span class="cl">			<span class="p">{</span>
+</span></span><span class="line"><span class="cl">				<span class="n">system</span><span class="o">-&gt;</span><span class="n">mEntities</span><span class="p">.</span><span class="n">erase</span><span class="p">(</span><span class="n">entity</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">			<span class="p">}</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="k">private</span><span class="o">:</span>
+</span></span><span class="line"><span class="cl">	<span class="c1">// Map from system type string pointer to a signature
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="n">std</span><span class="o">::</span><span class="n">unordered_map</span><span class="o">&lt;</span><span class="k">const</span> <span class="kt">char</span><span class="o">*</span><span class="p">,</span> <span class="n">Signature</span><span class="o">&gt;</span> <span class="n">mSignatures</span><span class="p">{};</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="c1">// Map from system type string pointer to a system pointer
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="n">std</span><span class="o">::</span><span class="n">unordered_map</span><span class="o">&lt;</span><span class="k">const</span> <span class="kt">char</span><span class="o">*</span><span class="p">,</span> <span class="n">std</span><span class="o">::</span><span class="n">shared_ptr</span><span class="o">&lt;</span><span class="n">System</span><span class="o">&gt;&gt;</span> <span class="n">mSystems</span><span class="p">{};</span>
+</span></span><span class="line"><span class="cl"><span class="p">};</span></span></span></code></pre></td></tr></tbody></table></div></div><h2 id="the-coordinator">The Coordinator</h2><hr/><p>We now have quite a lot of functionality built up. We have entities which are managed by an <strong>Entity Manager</strong>.
+We have components which are managed by a <strong>Component Manager</strong>. And we have systems which are managed by a
+<strong>System Manager</strong>. These three managers also need to talk to each other.</p><p>There are a few ways of accomplishing that, such as having them all be globals, or using an event system, but
+I opted to instead bundle them into a single class called <strong>Coordinator</strong> (alternative name suggestions welcome)
+that acts as a mediator. This allows us to have a single instance of the coordinator (as a global or whatever
+you want), and we can use it to interface with all of the managers. It also makes usage easier because you can
+replace this:</p><div class="highlight"><div class="chroma"><table class="lntable"><tbody><tr><td class="lntd"><pre class="chroma" tabindex="0"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td><td class="lntd"><pre class="chroma" tabindex="0"><code class="language-cpp" data-lang="cpp"><span class="line"><span class="cl"><span class="n">Entity</span> <span class="n">player</span> <span class="o">=</span> <span class="n">entityManager</span><span class="p">.</span><span class="n">CreateEntity</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl"><span class="n">componentManager</span><span class="p">.</span><span class="n">AddComponent</span><span class="o">&lt;</span><span class="n">Transform</span><span class="o">&gt;</span><span class="p">(</span><span class="n">player</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="n">RenderSystem</span> <span class="n">renderSystem</span> <span class="o">=</span> <span class="n">systemManager</span><span class="p">.</span><span class="n">RegisterSystem</span><span class="o">&lt;</span><span class="n">RenderSystem</span><span class="o">&gt;</span><span class="p">();</span></span></span></code></pre></td></tr></tbody></table></div></div><p>With this:</p><div class="highlight"><div class="chroma"><table class="lntable"><tbody><tr><td class="lntd"><pre class="chroma" tabindex="0"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td><td class="lntd"><pre class="chroma" tabindex="0"><code class="language-cpp" data-lang="cpp"><span class="line"><span class="cl"><span class="n">Entity</span> <span class="n">player</span> <span class="o">=</span> <span class="n">coordinator</span><span class="p">.</span><span class="n">CreateEntity</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl"><span class="n">coordinator</span><span class="p">.</span><span class="n">AddComponent</span><span class="o">&lt;</span><span class="n">Transform</span><span class="o">&gt;</span><span class="p">(</span><span class="n">player</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="n">RenderSystem</span> <span class="n">renderSystem</span> <span class="o">=</span> <span class="n">coordinator</span><span class="p">.</span><span class="n">RegisterSystem</span><span class="o">&lt;</span><span class="n">RenderSystem</span><span class="o">&gt;</span><span class="p">();</span></span></span></code></pre></td></tr></tbody></table></div></div><p>The coordinator has pointers to each manager and does some meta-managing between them.</p><div class="highlight"><div class="chroma"><table class="lntable"><tbody><tr><td class="lntd"><pre class="chroma" tabindex="0"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span><span class="lnt">71
+</span><span class="lnt">72
+</span><span class="lnt">73
+</span><span class="lnt">74
+</span><span class="lnt">75
+</span><span class="lnt">76
+</span><span class="lnt">77
+</span><span class="lnt">78
+</span><span class="lnt">79
+</span><span class="lnt">80
+</span><span class="lnt">81
+</span><span class="lnt">82
+</span><span class="lnt">83
+</span><span class="lnt">84
+</span><span class="lnt">85
+</span><span class="lnt">86
+</span><span class="lnt">87
+</span><span class="lnt">88
+</span><span class="lnt">89
+</span><span class="lnt">90
+</span></code></pre></td><td class="lntd"><pre class="chroma" tabindex="0"><code class="language-cpp" data-lang="cpp"><span class="line"><span class="cl"><span class="k">class</span> <span class="nc">Coordinator</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl"><span class="k">public</span><span class="o">:</span>
+</span></span><span class="line"><span class="cl">	<span class="kt">void</span> <span class="n">Init</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="c1">// Create pointers to each manager
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="n">mComponentManager</span> <span class="o">=</span> <span class="n">std</span><span class="o">::</span><span class="n">make_unique</span><span class="o">&lt;</span><span class="n">ComponentManager</span><span class="o">&gt;</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">		<span class="n">mEntityManager</span> <span class="o">=</span> <span class="n">std</span><span class="o">::</span><span class="n">make_unique</span><span class="o">&lt;</span><span class="n">EntityManager</span><span class="o">&gt;</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">		<span class="n">mSystemManager</span> <span class="o">=</span> <span class="n">std</span><span class="o">::</span><span class="n">make_unique</span><span class="o">&lt;</span><span class="n">SystemManager</span><span class="o">&gt;</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="c1">// Entity methods
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="n">Entity</span> <span class="nf">CreateEntity</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="n">mEntityManager</span><span class="o">-&gt;</span><span class="n">CreateEntity</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="kt">void</span> <span class="nf">DestroyEntity</span><span class="p">(</span><span class="n">Entity</span> <span class="n">entity</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="n">mEntityManager</span><span class="o">-&gt;</span><span class="n">DestroyEntity</span><span class="p">(</span><span class="n">entity</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="n">mComponentManager</span><span class="o">-&gt;</span><span class="n">EntityDestroyed</span><span class="p">(</span><span class="n">entity</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="n">mSystemManager</span><span class="o">-&gt;</span><span class="n">EntityDestroyed</span><span class="p">(</span><span class="n">entity</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="c1">// Component methods
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span> <span class="n">T</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl">	<span class="kt">void</span> <span class="n">RegisterComponent</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="n">mComponentManager</span><span class="o">-&gt;</span><span class="n">RegisterComponent</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span> <span class="n">T</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl">	<span class="kt">void</span> <span class="n">AddComponent</span><span class="p">(</span><span class="n">Entity</span> <span class="n">entity</span><span class="p">,</span> <span class="n">T</span> <span class="n">component</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="n">mComponentManager</span><span class="o">-&gt;</span><span class="n">AddComponent</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="p">(</span><span class="n">entity</span><span class="p">,</span> <span class="n">component</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="k">auto</span> <span class="n">signature</span> <span class="o">=</span> <span class="n">mEntityManager</span><span class="o">-&gt;</span><span class="n">GetSignature</span><span class="p">(</span><span class="n">entity</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">		<span class="n">signature</span><span class="p">.</span><span class="n">set</span><span class="p">(</span><span class="n">mComponentManager</span><span class="o">-&gt;</span><span class="n">GetComponentType</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="p">(),</span> <span class="nb">true</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">		<span class="n">mEntityManager</span><span class="o">-&gt;</span><span class="n">SetSignature</span><span class="p">(</span><span class="n">entity</span><span class="p">,</span> <span class="n">signature</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="n">mSystemManager</span><span class="o">-&gt;</span><span class="n">EntitySignatureChanged</span><span class="p">(</span><span class="n">entity</span><span class="p">,</span> <span class="n">signature</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span> <span class="n">T</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl">	<span class="kt">void</span> <span class="n">RemoveComponent</span><span class="p">(</span><span class="n">Entity</span> <span class="n">entity</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="n">mComponentManager</span><span class="o">-&gt;</span><span class="n">RemoveComponent</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="p">(</span><span class="n">entity</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="k">auto</span> <span class="n">signature</span> <span class="o">=</span> <span class="n">mEntityManager</span><span class="o">-&gt;</span><span class="n">GetSignature</span><span class="p">(</span><span class="n">entity</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">		<span class="n">signature</span><span class="p">.</span><span class="n">set</span><span class="p">(</span><span class="n">mComponentManager</span><span class="o">-&gt;</span><span class="n">GetComponentType</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="p">(),</span> <span class="nb">false</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">		<span class="n">mEntityManager</span><span class="o">-&gt;</span><span class="n">SetSignature</span><span class="p">(</span><span class="n">entity</span><span class="p">,</span> <span class="n">signature</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="n">mSystemManager</span><span class="o">-&gt;</span><span class="n">EntitySignatureChanged</span><span class="p">(</span><span class="n">entity</span><span class="p">,</span> <span class="n">signature</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span> <span class="n">T</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl">	<span class="n">T</span><span class="o">&amp;</span> <span class="n">GetComponent</span><span class="p">(</span><span class="n">Entity</span> <span class="n">entity</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="n">mComponentManager</span><span class="o">-&gt;</span><span class="n">GetComponent</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="p">(</span><span class="n">entity</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span> <span class="n">T</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl">	<span class="n">ComponentType</span> <span class="n">GetComponentType</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="n">mComponentManager</span><span class="o">-&gt;</span><span class="n">GetComponentType</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="c1">// System methods
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span> <span class="n">T</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl">	<span class="n">std</span><span class="o">::</span><span class="n">shared_ptr</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span> <span class="n">RegisterSystem</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="n">mSystemManager</span><span class="o">-&gt;</span><span class="n">RegisterSystem</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">template</span><span class="o">&lt;</span><span class="k">typename</span> <span class="n">T</span><span class="o">&gt;</span>
+</span></span><span class="line"><span class="cl">	<span class="kt">void</span> <span class="n">SetSystemSignature</span><span class="p">(</span><span class="n">Signature</span> <span class="n">signature</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="n">mSystemManager</span><span class="o">-&gt;</span><span class="n">SetSignature</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="p">(</span><span class="n">signature</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="k">private</span><span class="o">:</span>
+</span></span><span class="line"><span class="cl">	<span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">ComponentManager</span><span class="o">&gt;</span> <span class="n">mComponentManager</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">	<span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">EntityManager</span><span class="o">&gt;</span> <span class="n">mEntityManager</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">	<span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">SystemManager</span><span class="o">&gt;</span> <span class="n">mSystemManager</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">};</span></span></span></code></pre></td></tr></tbody></table></div></div><div class="note">I've seen implementations that create an entity class that acts as a wrapper to an ID with methods
+that call into the <b>EntityManager</b> and <b>ComponentManager</b> directly (e.g., <b>entity.RemoveComponent<t>()</t></b>),
+which makes for more intuitive usage, but I found it to cause the code to be more complicated and hard to understand.
+I tried to do it that way multiple times but each time came upon recursive header issues. In the end I opted for the
+cleaner but less intuitive <b>Coordinator</b>.</div><h2 id="demo">Demo</h2><hr/><p>Now let’s see how all of this might be used in a demo that instantiates 10,000 cubes and then has them fall
+under the influence of gravity. We’ll ignore the rendering and the math classes because that isn’t what this post is
+about, but keep in mind there is also a rendering system and a Vec3 class.</p><p>We have the following components:</p><div class="highlight"><div class="chroma"><table class="lntable"><tbody><tr><td class="lntd"><pre class="chroma" tabindex="0"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td><td class="lntd"><pre class="chroma" tabindex="0"><code class="language-cpp" data-lang="cpp"><span class="line"><span class="cl"><span class="k">struct</span> <span class="nc">Gravity</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="n">Vec3</span> <span class="n">force</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">};</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="k">struct</span> <span class="nc">RigidBody</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="n">Vec3</span> <span class="n">velocity</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">	<span class="n">Vec3</span> <span class="n">acceleration</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">};</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="k">struct</span> <span class="nc">Transform</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="n">Vec3</span> <span class="n">position</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">	<span class="n">Vec3</span> <span class="n">rotation</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">	<span class="n">Vec3</span> <span class="n">scale</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">};</span></span></span></code></pre></td></tr></tbody></table></div></div><p>A system for rudimentary physics integration:</p><div class="highlight"><div class="chroma"><table class="lntable"><tbody><tr><td class="lntd"><pre class="chroma" tabindex="0"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td><td class="lntd"><pre class="chroma" tabindex="0"><code class="language-cpp" data-lang="cpp"><span class="line"><span class="cl"><span class="k">extern</span> <span class="n">Coordinator</span> <span class="n">gCoordinator</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kt">void</span> <span class="n">PhysicsSystem</span><span class="o">::</span><span class="n">Update</span><span class="p">(</span><span class="kt">float</span> <span class="n">dt</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="k">for</span> <span class="p">(</span><span class="k">auto</span> <span class="k">const</span><span class="o">&amp;</span> <span class="nl">entity</span> <span class="p">:</span> <span class="n">mEntities</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">auto</span><span class="o">&amp;</span> <span class="n">rigidBody</span> <span class="o">=</span> <span class="n">gCoordinator</span><span class="p">.</span><span class="n">GetComponent</span><span class="o">&lt;</span><span class="n">RigidBody</span><span class="o">&gt;</span><span class="p">(</span><span class="n">entity</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">		<span class="k">auto</span><span class="o">&amp;</span> <span class="n">transform</span> <span class="o">=</span> <span class="n">gCoordinator</span><span class="p">.</span><span class="n">GetComponent</span><span class="o">&lt;</span><span class="n">Transform</span><span class="o">&gt;</span><span class="p">(</span><span class="n">entity</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">		<span class="k">auto</span> <span class="k">const</span><span class="o">&amp;</span> <span class="n">gravity</span> <span class="o">=</span> <span class="n">gCoordinator</span><span class="p">.</span><span class="n">GetComponent</span><span class="o">&lt;</span><span class="n">Gravity</span><span class="o">&gt;</span><span class="p">(</span><span class="n">entity</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="n">transform</span><span class="p">.</span><span class="n">position</span> <span class="o">+=</span> <span class="n">rigidBody</span><span class="p">.</span><span class="n">velocity</span> <span class="o">*</span> <span class="n">dt</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="n">rigidBody</span><span class="p">.</span><span class="n">velocity</span> <span class="o">+=</span> <span class="n">gravity</span><span class="p">.</span><span class="n">force</span> <span class="o">*</span> <span class="n">dt</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span></span></span></code></pre></td></tr></tbody></table></div></div><p>Then the main loop:</p><div class="highlight"><div class="chroma"><table class="lntable"><tbody><tr><td class="lntd"><pre class="chroma" tabindex="0"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span></code></pre></td><td class="lntd"><pre class="chroma" tabindex="0"><code class="language-cpp" data-lang="cpp"><span class="line"><span class="cl"><span class="n">Coordinator</span> <span class="n">gCoordinator</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kt">int</span> <span class="nf">main</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="n">gCoordinator</span><span class="p">.</span><span class="n">Init</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="n">gCoordinator</span><span class="p">.</span><span class="n">RegisterComponent</span><span class="o">&lt;</span><span class="n">Gravity</span><span class="o">&gt;</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">	<span class="n">gCoordinator</span><span class="p">.</span><span class="n">RegisterComponent</span><span class="o">&lt;</span><span class="n">RigidBody</span><span class="o">&gt;</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">	<span class="n">gCoordinator</span><span class="p">.</span><span class="n">RegisterComponent</span><span class="o">&lt;</span><span class="n">Transform</span><span class="o">&gt;</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">auto</span> <span class="n">physicsSystem</span> <span class="o">=</span> <span class="n">gCoordinator</span><span class="p">.</span><span class="n">RegisterSystem</span><span class="o">&lt;</span><span class="n">PhysicsSystem</span><span class="o">&gt;</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="n">Signature</span> <span class="n">signature</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">	<span class="n">signature</span><span class="p">.</span><span class="n">set</span><span class="p">(</span><span class="n">gCoordinator</span><span class="p">.</span><span class="n">GetComponentType</span><span class="o">&lt;</span><span class="n">Gravity</span><span class="o">&gt;</span><span class="p">());</span>
+</span></span><span class="line"><span class="cl">	<span class="n">signature</span><span class="p">.</span><span class="n">set</span><span class="p">(</span><span class="n">gCoordinator</span><span class="p">.</span><span class="n">GetComponentType</span><span class="o">&lt;</span><span class="n">RigidBody</span><span class="o">&gt;</span><span class="p">());</span>
+</span></span><span class="line"><span class="cl">	<span class="n">signature</span><span class="p">.</span><span class="n">set</span><span class="p">(</span><span class="n">gCoordinator</span><span class="p">.</span><span class="n">GetComponentType</span><span class="o">&lt;</span><span class="n">Transform</span><span class="o">&gt;</span><span class="p">());</span>
+</span></span><span class="line"><span class="cl">	<span class="n">gCoordinator</span><span class="p">.</span><span class="n">SetSystemSignature</span><span class="o">&lt;</span><span class="n">PhysicsSystem</span><span class="o">&gt;</span><span class="p">(</span><span class="n">signature</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="n">Entity</span><span class="o">&gt;</span> <span class="n">entities</span><span class="p">(</span><span class="n">MAX_ENTITIES</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="n">std</span><span class="o">::</span><span class="n">default_random_engine</span> <span class="n">generator</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">	<span class="n">std</span><span class="o">::</span><span class="n">uniform_real_distribution</span><span class="o">&lt;</span><span class="kt">float</span><span class="o">&gt;</span> <span class="n">randPosition</span><span class="p">(</span><span class="o">-</span><span class="mf">100.0f</span><span class="p">,</span> <span class="mf">100.0f</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">	<span class="n">std</span><span class="o">::</span><span class="n">uniform_real_distribution</span><span class="o">&lt;</span><span class="kt">float</span><span class="o">&gt;</span> <span class="n">randRotation</span><span class="p">(</span><span class="mf">0.0f</span><span class="p">,</span> <span class="mf">3.0f</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">	<span class="n">std</span><span class="o">::</span><span class="n">uniform_real_distribution</span><span class="o">&lt;</span><span class="kt">float</span><span class="o">&gt;</span> <span class="n">randScale</span><span class="p">(</span><span class="mf">3.0f</span><span class="p">,</span> <span class="mf">5.0f</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">	<span class="n">std</span><span class="o">::</span><span class="n">uniform_real_distribution</span><span class="o">&lt;</span><span class="kt">float</span><span class="o">&gt;</span> <span class="n">randGravity</span><span class="p">(</span><span class="o">-</span><span class="mf">10.0f</span><span class="p">,</span> <span class="o">-</span><span class="mf">1.0f</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="kt">float</span> <span class="n">scale</span> <span class="o">=</span> <span class="n">randScale</span><span class="p">(</span><span class="n">generator</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">for</span> <span class="p">(</span><span class="k">auto</span><span class="o">&amp;</span> <span class="nl">entity</span> <span class="p">:</span> <span class="n">entities</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="n">entity</span> <span class="o">=</span> <span class="n">gCoordinator</span><span class="p">.</span><span class="n">CreateEntity</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="n">gCoordinator</span><span class="p">.</span><span class="n">AddComponent</span><span class="p">(</span>
+</span></span><span class="line"><span class="cl">			<span class="n">entity</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">			<span class="n">Gravity</span><span class="p">{</span><span class="n">Vec3</span><span class="p">(</span><span class="mf">0.0f</span><span class="p">,</span> <span class="n">randGravity</span><span class="p">(</span><span class="n">generator</span><span class="p">),</span> <span class="mf">0.0f</span><span class="p">)});</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="n">gCoordinator</span><span class="p">.</span><span class="n">AddComponent</span><span class="p">(</span>
+</span></span><span class="line"><span class="cl">			<span class="n">entity</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">			<span class="n">RigidBody</span><span class="p">{</span>
+</span></span><span class="line"><span class="cl">				<span class="p">.</span><span class="n">velocity</span> <span class="o">=</span> <span class="n">Vec3</span><span class="p">(</span><span class="mf">0.0f</span><span class="p">,</span> <span class="mf">0.0f</span><span class="p">,</span> <span class="mf">0.0f</span><span class="p">),</span>
+</span></span><span class="line"><span class="cl">				<span class="p">.</span><span class="n">acceleration</span> <span class="o">=</span> <span class="n">Vec3</span><span class="p">(</span><span class="mf">0.0f</span><span class="p">,</span> <span class="mf">0.0f</span><span class="p">,</span> <span class="mf">0.0f</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">			<span class="p">});</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="n">gCoordinator</span><span class="p">.</span><span class="n">AddComponent</span><span class="p">(</span>
+</span></span><span class="line"><span class="cl">			<span class="n">entity</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">			<span class="n">Transform</span><span class="p">{</span>
+</span></span><span class="line"><span class="cl">				<span class="p">.</span><span class="n">position</span> <span class="o">=</span> <span class="n">Vec3</span><span class="p">(</span><span class="n">randPosition</span><span class="p">(</span><span class="n">generator</span><span class="p">),</span> <span class="n">randPosition</span><span class="p">(</span><span class="n">generator</span><span class="p">),</span> <span class="n">randPosition</span><span class="p">(</span><span class="n">generator</span><span class="p">)),</span>
+</span></span><span class="line"><span class="cl">				<span class="p">.</span><span class="n">rotation</span> <span class="o">=</span> <span class="n">Vec3</span><span class="p">(</span><span class="n">randRotation</span><span class="p">(</span><span class="n">generator</span><span class="p">),</span> <span class="n">randRotation</span><span class="p">(</span><span class="n">generator</span><span class="p">),</span> <span class="n">randRotation</span><span class="p">(</span><span class="n">generator</span><span class="p">)),</span>
+</span></span><span class="line"><span class="cl">				<span class="p">.</span><span class="n">scale</span> <span class="o">=</span> <span class="n">Vec3</span><span class="p">(</span><span class="n">scale</span><span class="p">,</span> <span class="n">scale</span><span class="p">,</span> <span class="n">scale</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">			<span class="p">});</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="kt">float</span> <span class="n">dt</span> <span class="o">=</span> <span class="mf">0.0f</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">while</span> <span class="p">(</span><span class="o">!</span><span class="n">quit</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">auto</span> <span class="n">startTime</span> <span class="o">=</span> <span class="n">std</span><span class="o">::</span><span class="n">chrono</span><span class="o">::</span><span class="n">high_resolution_clock</span><span class="o">::</span><span class="n">now</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="n">physicsSystem</span><span class="o">-&gt;</span><span class="n">Update</span><span class="p">(</span><span class="n">dt</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="k">auto</span> <span class="n">stopTime</span> <span class="o">=</span> <span class="n">std</span><span class="o">::</span><span class="n">chrono</span><span class="o">::</span><span class="n">high_resolution_clock</span><span class="o">::</span><span class="n">now</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="n">dt</span> <span class="o">=</span> <span class="n">std</span><span class="o">::</span><span class="n">chrono</span><span class="o">::</span><span class="n">duration</span><span class="o">&lt;</span><span class="kt">float</span><span class="p">,</span> <span class="n">std</span><span class="o">::</span><span class="n">chrono</span><span class="o">::</span><span class="n">seconds</span><span class="o">::</span><span class="n">period</span><span class="o">&gt;</span><span class="p">(</span><span class="n">stopTime</span> <span class="o">-</span> <span class="n">startTime</span><span class="p">).</span><span class="n">count</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span></span></span></code></pre></td></tr></tbody></table></div></div><p>Here is the result:</p><video controls="" preload="metadata">
+<source src="/posts/entity_component_system/media/cubes_gravity.mp4" type="video/mp4"/></video><p>Here is the output from Valgrind’s cachegrind tool if you’re curious:</p><div class="highlight"><div class="chroma"><table class="lntable"><tbody><tr><td class="lntd"><pre class="chroma" tabindex="0"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td><td class="lntd"><pre class="chroma" tabindex="0"><code class="language-text" data-lang="text"><span class="line"><span class="cl">==15445== I   refs:      3,632,270,619
+</span></span><span class="line"><span class="cl">==15445== I1  misses:       87,147,982
+</span></span><span class="line"><span class="cl">==15445== LLi misses:           26,599
+</span></span><span class="line"><span class="cl">==15445== I1  miss rate:          2.40%
+</span></span><span class="line"><span class="cl">==15445== LLi miss rate:          0.00%
+</span></span><span class="line"><span class="cl">==15445==
+</span></span><span class="line"><span class="cl">==15445== D   refs:      1,583,125,924  (1,045,689,190 rd   + 537,436,734 wr)
+</span></span><span class="line"><span class="cl">==15445== D1  misses:       11,968,989  (    7,776,523 rd   +   4,192,466 wr)
+</span></span><span class="line"><span class="cl">==15445== LLd misses:          505,598  (      270,649 rd   +     234,949 wr)
+</span></span><span class="line"><span class="cl">==15445== D1  miss rate:           0.8% (          0.7%     +         0.8%  )
+</span></span><span class="line"><span class="cl">==15445== LLd miss rate:           0.0% (          0.0%     +         0.0%  )
+</span></span><span class="line"><span class="cl">==15445==
+</span></span><span class="line"><span class="cl">==15445== LL refs:          99,116,971  (   94,924,505 rd   +   4,192,466 wr)
+</span></span><span class="line"><span class="cl">==15445== LL misses:           532,197  (      297,248 rd   +     234,949 wr)
+</span></span><span class="line"><span class="cl">==15445== LL miss rate:            0.0% (          0.0%     +         0.0%  )</span></span></code></pre></td></tr></tbody></table></div></div><p>This is a very simple example of course, but it’s still fun.</p><p>Circling back to the beginning about components also making complex behavior easier, we could easily flip our demo
+by not adding a <strong>RigidBody</strong> or a <strong>Gravity</strong> to the cubes, and instead adding them to the camera.</p><video controls="" preload="metadata">
+<source src="/posts/entity_component_system/media/camera_gravity.mp4" type="video/mp4"/></video><p>That is the camera falling down while the cubes remain still.</p><h2 id="conclusion">Conclusion</h2><hr/><p>If you were skeptical about the idea of an ECS, I hope I’ve convinced you it has its merits. And if you were
+confused about how to implement one (like I was for a long time), I hope I’ve helped you find a way.</p><h2 id="source-code">Source Code</h2><hr/><p>You can find all of the source code <a href="https://code.austinmorlan.com/austin/2019-ecs" rel="noopener noreferrer" target="_blank">here</a>.</p><div class="note">All of the ECS-related source code exists only in headers for two reasons. First, there are a lot of templates which
+must be in headers anyway. Second, it may possibly increase the odds that the compiler will inline.</div><h2 id="further-reading">Further Reading</h2><hr/><ul><li><a href="https://savas.ca/nomad" rel="noopener noreferrer" target="_blank">1</a></li><li><a href="https://tsprojectsblog.wordpress.com/portfolio/entity-component-system/" rel="noopener noreferrer" target="_blank">2</a></li><li><a href="https://github.com/skypjack/entt" rel="noopener noreferrer" target="_blank">3</a></li><li><a href="https://github.com/alecthomas/entityx" rel="noopener noreferrer" target="_blank">4</a></li></ul><br/><br/>Last Edited: Dec 20, 2022<br/><br/><br/><br/></div></main></body></html>

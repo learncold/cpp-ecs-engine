@@ -2,13 +2,14 @@
 
 #include <cstdint>
 
-namespace ecs_engine
-{
-struct EngineStepContext
-{
+namespace safecrowd::engine {
+
+struct EngineStepContext {
     std::uint64_t frameIndex{0};
-    std::uint64_t stepIndex{0};
-    double deltaSeconds{0.0};
-    double simulationTimeSeconds{0.0};
+    std::uint64_t fixedStepIndex{0};
+    double alpha{0.0};
+    std::uint64_t runIndex{0};
+    std::uint64_t derivedSeed{0};
 };
-} // namespace ecs_engine
+
+}  // namespace safecrowd::engine

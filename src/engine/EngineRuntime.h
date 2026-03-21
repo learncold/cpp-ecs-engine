@@ -1,44 +1,37 @@
 #pragma once
 
-#include <cstddef>
-#include <string_view>
-#include <vector>
+#include <cstdint>
 
 #include "engine/EngineConfig.h"
-#include "engine/EngineState.h"
 #include "engine/EngineStats.h"
 #include "engine/EngineSystem.h"
 #include "engine/FrameClock.h"
 
-namespace ecs_engine
-{
-class EngineRuntime
-{
+namespace safecrowd::engine {
+
+class EngineRuntime {
 public:
-    explicit EngineRuntime(EngineConfig config = {}) noexcept;
+    explicit EngineRuntime(EngineConfig config = {});
 
-    [[nodiscard]] std::string_view name() const noexcept;
-    [[nodiscard]] std::string_view summary() const noexcept;
+    void initialize();
+    void play();
+    void pause();
+    void stop();
+    void stepFrame(double deltaSeconds);
 
-    [[nodiscard]] EngineState state() const noexcept;
-    [[nodiscard]] const EngineConfig& config() const noexcept;
-    [[nodiscard]] const EngineStats& stats() const noexcept;
-
-    void addSystem(EngineSystem& system);
-    void start() noexcept;
-    void pause() noexcept;
-    void resume() noexcept;
-    void stop() noexcept;
-    void reset() noexcept;
-    void tick(double frameDeltaSeconds);
+    EngineWorld& world() noexcept;
+    const EngineWorld& world() const noexcept;
+    const EngineConfig& config() const noexcept;
+    const EngineStats& stats() const noexcept;
+    EngineState state() const noexcept;
+    std::uint64_t runIndex() const noexcept;
 
 private:
-    void runFixedUpdate(std::size_t stepsToRun, double stepDeltaSeconds);
-    void resetStats() noexcept;
-
-    EngineState state_{EngineState::Idle};
+    EngineConfig config_;
+    EngineStats stats_;
+    EngineWorld world_;
     FrameClock frameClock_;
-    EngineStats stats_{};
-    std::vector<EngineSystem*> systems_;
+    std::uint64_t runIndex_{0};
 };
-} // namespace ecs_engine
+
+}  // namespace safecrowd::engine

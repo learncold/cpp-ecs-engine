@@ -1,13 +1,43 @@
 #include "domain/SafeCrowdDomain.h"
 
-namespace safecrowd
-{
-Overview SafeCrowdDomain::buildOverview() const
-{
+namespace safecrowd::domain {
+
+SafeCrowdDomain::SafeCrowdDomain(engine::EngineRuntime& runtime)
+    : runtime_(runtime) {
+}
+
+void SafeCrowdDomain::start() {
+    runtime_.play();
+}
+
+void SafeCrowdDomain::pause() {
+    runtime_.pause();
+}
+
+void SafeCrowdDomain::stop() {
+    runtime_.stop();
+}
+
+void SafeCrowdDomain::update(double deltaSeconds) {
+    runtime_.stepFrame(deltaSeconds);
+}
+
+SimulationSummary SafeCrowdDomain::summary() const {
+    const auto& stats = runtime_.stats();
     return {
-        "SafeCrowd",
-        std::string(engine_.name()) + ": " + std::string(engine_.summary()),
-        "Domain layer owns scenario rules, simulation behavior, and risk evaluation."
+        .state = stats.state,
+        .frameIndex = stats.frameIndex,
+        .fixedStepIndex = stats.fixedStepIndex,
+        .alpha = stats.alpha,
     };
 }
-} // namespace safecrowd
+
+engine::EngineRuntime& SafeCrowdDomain::runtime() noexcept {
+    return runtime_;
+}
+
+const engine::EngineRuntime& SafeCrowdDomain::runtime() const noexcept {
+    return runtime_;
+}
+
+}  // namespace safecrowd::domain

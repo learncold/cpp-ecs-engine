@@ -1,24 +1,34 @@
 #pragma once
 
-#include <string>
+#include <cstdint>
 
 #include "engine/EngineRuntime.h"
+#include "engine/EngineState.h"
 
-namespace safecrowd
-{
-struct Overview
-{
-    std::string title;
-    std::string engineSummary;
-    std::string domainSummary;
+namespace safecrowd::domain {
+
+struct SimulationSummary {
+    engine::EngineState state{engine::EngineState::Stopped};
+    std::uint64_t frameIndex{0};
+    std::uint64_t fixedStepIndex{0};
+    double alpha{0.0};
 };
 
-class SafeCrowdDomain
-{
+class SafeCrowdDomain {
 public:
-    [[nodiscard]] Overview buildOverview() const;
+    explicit SafeCrowdDomain(engine::EngineRuntime& runtime);
+
+    void start();
+    void pause();
+    void stop();
+    void update(double deltaSeconds);
+
+    SimulationSummary summary() const;
+    engine::EngineRuntime& runtime() noexcept;
+    const engine::EngineRuntime& runtime() const noexcept;
 
 private:
-    ecs_engine::EngineRuntime engine_;
+    engine::EngineRuntime& runtime_;
 };
-} // namespace safecrowd
+
+}  // namespace safecrowd::domain

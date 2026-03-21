@@ -1,0 +1,59 @@
+@startuml safecrowd-engine-overview
+title SafeCrowd Engine Layer Overview
+
+left to right direction
+skinparam componentStyle rectangle
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam linetype ortho
+
+package "application" {
+  [safecrowd_app\n(Qt App)] as App
+}
+
+package "domain" {
+  [safecrowd_domain\n(Scenario / Simulation / Risk)] as Domain
+}
+
+package "engine" {
+  package "api" {
+    [Engine API Surface\nEngineRuntime / EngineWorld /\nWorldQuery / WorldResources /\nWorldCommands / EngineSystem] as Api
+  }
+
+  [Runtime Core\n(FrameClock / SystemScheduler /\nCommandBuffer / ResourceStore /\nDeterministicRng)] as Runtime
+  [ECS Core\n(EcsCore / EntityRegistry /\nComponentRegistry / PackedComponentStorage)] as Ecs
+}
+
+App --> Domain
+Domain --> Api : configure / run / query / queue mutations
+App ..> Api : optional viewport bridge
+
+Api --> Runtime : owns execution flow
+Api --> Ecs : owns world data facade
+Runtime --> Ecs : through EngineWorld facade
+
+note bottom of Api
+  Shared engine API surface.
+  Domain systems and runtime both
+  meet at EngineWorld here through
+  query / resources / commands facets.
+  Mutation requests are deferred first
+  and committed by the runtime later.
+end note
+
+note bottom of Runtime
+  Time, phase order, deferred mutation,
+  deterministic random streams,
+  and execution orchestration.
+  Initial engine scope prioritizes
+  fixed-step scheduling over advanced
+  event or snapshot extensions.
+end note
+
+note bottom of Ecs
+  Dense storage, generation-safe entities,
+  and signature matching.
+  Domain-specific behavior does not live here.
+end note
+
+@enduml

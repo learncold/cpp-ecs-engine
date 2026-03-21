@@ -1,17 +1,21 @@
 #pragma once
 
-#include <string_view>
-
 #include "engine/EngineStepContext.h"
 
-namespace ecs_engine
-{
-class EngineSystem
-{
+namespace safecrowd::engine {
+
+class EngineWorld {
+};
+
+class EngineSystem {
 public:
     virtual ~EngineSystem() = default;
 
-    [[nodiscard]] virtual std::string_view name() const noexcept = 0;
-    virtual void update(const EngineStepContext& context) = 0;
+    virtual void configure(EngineWorld& world) {
+        (void)world;
+    }
+
+    virtual void update(EngineWorld& world, const EngineStepContext& step) = 0;
 };
-} // namespace ecs_engine
+
+}  // namespace safecrowd::engine

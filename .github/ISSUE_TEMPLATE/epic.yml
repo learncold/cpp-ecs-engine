@@ -1,0 +1,124 @@
+name: Epic
+description: Create a larger work item that groups multiple tasks.
+title: "EPIC- "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for sprint-sized work that will be broken into multiple tasks.
+
+        GitHub assigns the numeric issue number automatically. Enter only the short title after `EPIC- `.
+
+        Keep the layered architecture in mind:
+        - `application -> domain -> engine`
+        - `domain` must not depend on Qt UI code
+        - `engine` must not depend on `domain` or `application`
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Describe the epic in one short paragraph.
+      placeholder: Complete the engine foundation needed for the first playable SafeCrowd demo.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Select the main area this epic belongs to.
+      options:
+        - Engine
+        - Domain
+        - Application
+        - Docs
+        - Build
+        - Analysis
+        - Chore
+    validations:
+      required: true
+  - type: dropdown
+    id: sprint
+    attributes:
+      label: Target Sprint
+      description: Choose the sprint that should own this epic.
+      options:
+        - Sprint 1
+        - Sprint 2
+        - Sprint 3
+        - Later
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal / Outcome
+      description: Explain what should be true when this epic is complete.
+      placeholder: The engine can run a deterministic fixed-timestep update loop and expose the minimal runtime APIs needed by the domain layer.
+    validations:
+      required: true
+  - type: textarea
+    id: in-scope
+    attributes:
+      label: In Scope
+      description: List the work that belongs inside this epic.
+      placeholder: |
+        - Implement the runtime entry point
+        - Add scheduler primitives
+        - Add basic smoke tests
+    validations:
+      required: true
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out of Scope
+      description: Capture work that should stay outside this epic.
+      placeholder: |
+        - Advanced replay tooling
+        - 3D rendering features
+  - type: textarea
+    id: child-tasks
+    attributes:
+      label: Child Tasks
+      description: List planned child tasks or linked issues.
+      placeholder: |
+        - #12 Implement EngineRuntime minimal orchestration API
+        - #13 Add engine smoke test for deferred mutation flow
+    validations:
+      required: true
+  - type: textarea
+    id: architecture
+    attributes:
+      label: Architecture / Dependency Notes
+      description: Record the layer boundaries or dependency constraints this epic must respect.
+      placeholder: |
+        - Keep all runtime internals inside `src/engine`
+        - Do not pull Qt types into `src/domain`
+        - Preserve `src/` as the include root
+    validations:
+      required: true
+  - type: textarea
+    id: done-criteria
+    attributes:
+      label: Done Criteria
+      description: Define what counts as complete for this epic.
+      placeholder: |
+        - All child tasks are closed
+        - Demo-critical runtime path is implemented
+        - No layer rule is violated
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks / Dependencies
+      description: Note blockers, dependencies, or uncertainties.
+      placeholder: Depends on stable vcpkg/Qt setup and the first tracked source files landing in `src/`.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Repository Checks
+      options:
+        - label: I checked the current GitHub Project board before creating this epic.
+          required: true
+        - label: I will keep the issue title aligned with the repository naming convention.
+          required: true

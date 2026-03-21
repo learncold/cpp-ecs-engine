@@ -1,0 +1,85 @@
+name: Lightweight Task
+description: Create a small Docs, Chore, or Analysis task without implementation-heavy required fields.
+title: "Task-"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for a small documentation, maintenance, or analysis task.
+
+        GitHub assigns the numeric issue number automatically. Enter only the short title after `Task-`.
+        Keep the issue focused enough that it can usually map to one PR.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Describe the task in one short paragraph.
+      placeholder: Add a short guide for how the team should use the GitHub Project board.
+    validations:
+      required: true
+  - type: input
+    id: parent-issue
+    attributes:
+      label: Parent Issue
+      description: Link the parent epic when this task belongs under one.
+      placeholder: "#1"
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Select the main area this task belongs to.
+      options:
+        - Docs
+        - Chore
+        - Analysis
+    validations:
+      required: true
+  - type: dropdown
+    id: sprint
+    attributes:
+      label: Target Sprint
+      description: Choose the sprint that should own this task.
+      options:
+        - Sprint 1
+        - Sprint 2
+        - Sprint 3
+        - Later
+    validations:
+      required: true
+  - type: textarea
+    id: deliverable
+    attributes:
+      label: Deliverable
+      description: State what concrete output or change should exist when the task is done.
+      placeholder: |
+        - Add `docs/GitHub Project.md`
+        - Capture the expected team workflow
+    validations:
+      required: true
+  - type: textarea
+    id: done-when
+    attributes:
+      label: Done When
+      description: List the simplest completion criteria for this task.
+      placeholder: |
+        - The document or maintenance change is merged
+        - The intended audience can use the result without extra clarification
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification / Notes
+      description: Record how the task should be checked, or explain why no build/test validation is needed.
+      placeholder: |
+        - Review the markdown in GitHub
+        - Docs-only change; no build/test run required
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Repository Checks
+      options:
+        - label: I checked for an existing related issue or epic before creating this task.
+          required: true
+        - label: I will keep the issue title aligned with the repository naming convention.
+          required: true

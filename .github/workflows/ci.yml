@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build/ci -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -DSAFECROWD_BUILD_APP=OFF
+
+      - name: Build
+        run: cmake --build build/ci --parallel
+
+      - name: Test
+        run: ctest --test-dir build/ci --output-on-failure
