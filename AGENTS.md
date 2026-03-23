@@ -15,7 +15,6 @@
   - `src/application`
   - `src/domain`
   - `src/engine`
-- Each layer may further split into `include/` and `src/` under its own root.
 - When touching build files, confirm that referenced source files are actually tracked in Git.
 
 ## Build
@@ -29,7 +28,8 @@
 
 ## Source Layout
 - All C++ source files live under `src/`.
-- Split each layer so headers live under `src/<layer>/include/<layer>/` and source files live under `src/<layer>/src/`.
+- Keep each layer's headers and source files directly under `src/<layer>/` unless a clear need for subfolders appears.
+- Use `src/` as the include root.
 - Preferred includes:
   - `#include "application/..."`
   - `#include "domain/..."`
