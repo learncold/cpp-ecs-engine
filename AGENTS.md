@@ -69,11 +69,11 @@
   - `Analysis`
   - `Chore`
 - PR bodies should follow `.github/PULL_REQUEST_TEMPLATE.md`.
-- `main` is protected:
-  - merge through PR only
-  - squash merge is the intended merge mode
-  - required PR check: `Validate PR`
-  - build/test checks should stay aligned with `.github/workflows/ci.yml`
+- `main` handling:
+  - code/build changes follow the normal `branch -> PR -> merge` flow
+  - docs/policy-only changes limited to `docs/`, `uml/`, `CONTRIBUTING.md`, PR/issue templates, or PR policy workflow files may be pushed directly to `main` by maintainers
+  - squash merge remains the intended merge mode for PR-based changes
+  - PR checks should stay aligned with `.github/workflows/ci.yml`
 
 ## Editing Guidelines
 - Keep changes minimal and localized.
