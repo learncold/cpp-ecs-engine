@@ -15,6 +15,7 @@
   - `src/application`
   - `src/domain`
   - `src/engine`
+- Each layer may further split into `include/` and `src/` under its own root.
 - When touching build files, confirm that referenced source files are actually tracked in Git.
 
 ## Build
@@ -28,7 +29,7 @@
 
 ## Source Layout
 - All C++ source files live under `src/`.
-- Use `src/` as the include root.
+- Split each layer so headers live under `src/<layer>/include/<layer>/` and source files live under `src/<layer>/src/`.
 - Preferred includes:
   - `#include "application/..."`
   - `#include "domain/..."`
@@ -81,6 +82,7 @@
 - When changing contribution workflow files, keep `CONTRIBUTING.md` and `.github/` files aligned.
 
 ## Docs
+- After any changes to the project, ensure the documents remain consistent.
 - Architecture notes: `docs/프로젝트 구조.md`
 - Project workflow notes: `docs/GitHub Project.md`
 - Requirements and overview docs are under `docs/`.
