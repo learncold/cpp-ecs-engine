@@ -33,8 +33,6 @@ function(configure_project_target target_name)
 endfunction()
 
 add_library(ecs_engine STATIC
-    src/engine/include/engine/Entity.h
-    src/engine/include/engine/EntityRegistry.h
     src/engine/include/engine/EngineConfig.h
     src/engine/include/engine/EngineRuntime.h
     src/engine/include/engine/EngineState.h
@@ -42,7 +40,6 @@ add_library(ecs_engine STATIC
     src/engine/include/engine/EngineStepContext.h
     src/engine/include/engine/EngineSystem.h
     src/engine/include/engine/FrameClock.h
-    src/engine/src/EntityRegistry.cpp
     src/engine/src/EngineRuntime.cpp
     src/engine/src/FrameClock.cpp
 )
@@ -75,7 +72,6 @@ if (BUILD_TESTING)
     add_executable(safecrowd_tests
         tests/TestMain.cpp
         tests/TestSupport.h
-        tests/EntityRegistryTests.cpp
         tests/FrameClockTests.cpp
         tests/EngineRuntimeTests.cpp
         tests/SafeCrowdDomainTests.cpp
