@@ -32,33 +32,35 @@ function(configure_project_target target_name)
     set_property(TARGET ${target_name} PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 endfunction()
 
+set(SAFECROWD_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
+
 add_library(ecs_engine STATIC
-    src/engine/include/engine/EngineConfig.h
-    src/engine/include/engine/EngineRuntime.h
-    src/engine/include/engine/EngineState.h
-    src/engine/include/engine/EngineStats.h
-    src/engine/include/engine/EngineStepContext.h
-    src/engine/include/engine/EngineSystem.h
-    src/engine/include/engine/FrameClock.h
-    src/engine/src/EngineRuntime.cpp
-    src/engine/src/FrameClock.cpp
+    src/engine/EngineConfig.h
+    src/engine/EngineRuntime.h
+    src/engine/EngineState.h
+    src/engine/EngineStats.h
+    src/engine/EngineStepContext.h
+    src/engine/EngineSystem.h
+    src/engine/FrameClock.h
+    src/engine/EngineRuntime.cpp
+    src/engine/FrameClock.cpp
 )
 
 target_include_directories(ecs_engine
     PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/engine/include
+        ${SAFECROWD_SRC_DIR}
 )
 
 configure_project_target(ecs_engine)
 
 add_library(safecrowd_domain STATIC
-    src/domain/include/domain/SafeCrowdDomain.h
-    src/domain/src/SafeCrowdDomain.cpp
+    src/domain/SafeCrowdDomain.h
+    src/domain/SafeCrowdDomain.cpp
 )
 
 target_include_directories(safecrowd_domain
     PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/domain/include
+        ${SAFECROWD_SRC_DIR}
 )
 
 target_link_libraries(safecrowd_domain
@@ -94,14 +96,14 @@ endif()
 
 if (SAFECROWD_BUILD_APP)
     add_executable(safecrowd_app
-        src/application/include/application/MainWindow.h
-        src/application/src/main.cpp
-        src/application/src/MainWindow.cpp
+        src/application/MainWindow.h
+        src/application/main.cpp
+        src/application/MainWindow.cpp
     )
 
     target_include_directories(safecrowd_app
         PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/src/application/include
+            ${SAFECROWD_SRC_DIR}
     )
 
     set_target_properties(safecrowd_app PROPERTIES
