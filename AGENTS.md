@@ -28,6 +28,7 @@
 
 ## Source Layout
 - All C++ source files live under `src/`.
+- Keep each layer's headers and source files directly under `src/<layer>/` unless a clear need for subfolders appears.
 - Use `src/` as the include root.
 - Preferred includes:
   - `#include "application/..."`
@@ -68,11 +69,11 @@
   - `Analysis`
   - `Chore`
 - PR bodies should follow `.github/PULL_REQUEST_TEMPLATE.md`.
-- `main` is protected:
-  - merge through PR only
-  - squash merge is the intended merge mode
-  - required PR check: `Validate PR`
-  - build/test checks should stay aligned with `.github/workflows/ci.yml`
+- `main` handling:
+  - code/build changes follow the normal `branch -> PR -> merge` flow
+  - docs/policy-only changes limited to `docs/`, `uml/`, `CONTRIBUTING.md`, PR/issue templates, or PR policy workflow files may be pushed directly to `main` by maintainers
+  - squash merge remains the intended merge mode for PR-based changes
+  - PR checks should stay aligned with `.github/workflows/ci.yml`
 
 ## Editing Guidelines
 - Keep changes minimal and localized.
@@ -81,6 +82,7 @@
 - When changing contribution workflow files, keep `CONTRIBUTING.md` and `.github/` files aligned.
 
 ## Docs
+- After any changes to the project, ensure the documents remain consistent.
 - Architecture notes: `docs/프로젝트 구조.md`
 - Project workflow notes: `docs/GitHub Project.md`
 - Requirements and overview docs are under `docs/`.

@@ -22,8 +22,6 @@ if (SAFECROWD_BUILD_APP)
     qt_standard_project_setup()
 endif()
 
-set(SAFECROWD_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
-
 function(configure_project_target target_name)
     if (MSVC)
         target_compile_options(${target_name} PRIVATE /W4 /permissive-)
@@ -34,16 +32,21 @@ function(configure_project_target target_name)
     set_property(TARGET ${target_name} PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 endfunction()
 
+set(SAFECROWD_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
+
 add_library(ecs_engine STATIC
+    src/engine/Entity.h
+    src/engine/EntityRegistry.h
     src/engine/EngineConfig.h
-    src/engine/EngineRuntime.cpp
     src/engine/EngineRuntime.h
     src/engine/EngineState.h
     src/engine/EngineStats.h
     src/engine/EngineStepContext.h
     src/engine/EngineSystem.h
-    src/engine/FrameClock.cpp
     src/engine/FrameClock.h
+    src/engine/EntityRegistry.cpp
+    src/engine/EngineRuntime.cpp
+    src/engine/FrameClock.cpp
 )
 
 target_include_directories(ecs_engine
@@ -54,8 +57,8 @@ target_include_directories(ecs_engine
 configure_project_target(ecs_engine)
 
 add_library(safecrowd_domain STATIC
-    src/domain/SafeCrowdDomain.cpp
     src/domain/SafeCrowdDomain.h
+    src/domain/SafeCrowdDomain.cpp
 )
 
 target_include_directories(safecrowd_domain
@@ -74,6 +77,7 @@ if (BUILD_TESTING)
     add_executable(safecrowd_tests
         tests/TestMain.cpp
         tests/TestSupport.h
+        tests/EngineRegistryTests.cpp
         tests/FrameClockTests.cpp
         tests/EngineRuntimeTests.cpp
         tests/SafeCrowdDomainTests.cpp
@@ -81,7 +85,6 @@ if (BUILD_TESTING)
 
     target_include_directories(safecrowd_tests
         PRIVATE
-            ${SAFECROWD_SRC_DIR}
             ${CMAKE_CURRENT_SOURCE_DIR}/tests
     )
 
@@ -97,14 +100,20 @@ endif()
 
 if (SAFECROWD_BUILD_APP)
     add_executable(safecrowd_app
+        src/application/MainWindow.h
         src/application/main.cpp
         src/application/MainWindow.cpp
-        src/application/MainWindow.h
     )
 
     target_include_directories(safecrowd_app
         PRIVATE
             ${SAFECROWD_SRC_DIR}
+    )
+
+    set_target_properties(safecrowd_app PROPERTIES
+        AUTOMOC OFF
+        AUTOUIC OFF
+        AUTORCC OFF
     )
 
     target_link_libraries(safecrowd_app
