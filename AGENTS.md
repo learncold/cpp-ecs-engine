@@ -21,6 +21,11 @@
 - Configure: `cmake --preset windows-debug`
 - Build: `cmake --build --preset build-debug`
 - Test: `ctest --preset test-debug`
+- Configure without app: `cmake --preset windows-debug-no-app`
+- Build engine only: `cmake --build --preset build-engine-debug`
+- Build engine + domain: `cmake --build --preset build-engine-domain-debug`
+- Build engine + domain + tests without app: `cmake --build --preset build-no-app-debug`
+- Test without app: `ctest --preset test-no-app-debug`
 - App target: `safecrowd_app`
 - UI dependency: Qt6 via `vcpkg.json` (`qtbase`)
 - If configure/build fails, check preset/Visual Studio selection and `vcpkg`/Qt availability before assuming the code change caused it.

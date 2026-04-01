@@ -79,6 +79,16 @@ cmake --build --preset build-debug
 ctest --preset test-debug
 ```
 
+Application layer를 제외한 빠른 검증이 필요하면 아래 프리셋을 사용합니다.
+
+```powershell
+cmake --preset windows-debug-no-app
+cmake --build --preset build-engine-debug
+cmake --build --preset build-engine-domain-debug
+cmake --build --preset build-no-app-debug
+ctest --preset test-no-app-debug
+```
+
 실행하지 못했다면 PR 본문에 이유를 남깁니다.
 
 ## 머지 규칙
