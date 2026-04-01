@@ -37,6 +37,7 @@ set(SAFECROWD_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
 add_library(ecs_engine STATIC
     src/engine/Entity.h
     src/engine/EntityRegistry.h
+    src/engine/IComponentStorage.h
     src/engine/EngineConfig.h
     src/engine/EngineRuntime.h
     src/engine/EngineState.h
@@ -44,6 +45,7 @@ add_library(ecs_engine STATIC
     src/engine/EngineStepContext.h
     src/engine/EngineSystem.h
     src/engine/FrameClock.h
+    src/engine/PackedComponentStorage.h
     src/engine/EntityRegistry.cpp
     src/engine/EngineRuntime.cpp
     src/engine/FrameClock.cpp
@@ -80,6 +82,7 @@ if (BUILD_TESTING)
         tests/EngineRegistryTests.cpp
         tests/FrameClockTests.cpp
         tests/EngineRuntimeTests.cpp
+        tests/PackedComponentStorageTests.cpp
         tests/SafeCrowdDomainTests.cpp
     )
 
