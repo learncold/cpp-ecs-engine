@@ -5,6 +5,8 @@
 /.codex/
 /CMakeUserPresets.json
 /vcpkg_installed/
+/.deps/
+/.vendor/
 *.user
 *.VC.db
 *.opendb  

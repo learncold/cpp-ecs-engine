@@ -90,6 +90,23 @@ cmake --build --preset build-no-app-debug
 ctest --preset test-no-app-debug
 ```
 
+- `windows-debug` / `windows-release` 첫 configure는 `vcpkg`가 `qtbase`를 설치하는 동안 몇 분 이상 걸릴 수 있습니다.
+- 현재 manifest는 `qtbase` 기본 feature를 끄고 `widgets`만 요청하므로, 불필요한 SQL/PostgreSQL 플러그인까지 끌어오지 않도록 유지합니다.
+
+로컬 import stack 검증이 필요하면 기본 경로를 유지한 채 아래 옵션을 추가합니다.
+
+```powershell
+cmake --preset windows-debug-no-app `
+  -DSAFECROWD_ENABLE_IMPORT_STACK=ON `
+  -DSAFECROWD_IMPORT_STACK_ROOT=C:/sdk/import-stack `
+  -DSAFECROWD_IFCOPENSHELL_ROOT=C:/sdk/IfcOpenShell
+cmake --build --preset build-engine-domain-debug
+```
+
+- `SAFECROWD_ENABLE_IMPORT_STACK`는 기본값이 `OFF`이며, CI와 Sprint 1 기본 경로는 그대로 유지합니다.
+- `SAFECROWD_IMPORT_STACK_ROOT`는 공통 prefix 용도이고, `SAFECROWD_LIBDXFRW_ROOT`, `SAFECROWD_IFCOPENSHELL_ROOT`, `SAFECROWD_CLIPPER2_ROOT`, `SAFECROWD_BOOST_ROOT`, `SAFECROWD_RECAST_ROOT`로 개별 경로를 덮어쓸 수 있습니다.
+- 현재 smoke check는 `libdxfrw`, `IfcOpenShell` parser 헤더, `Clipper2`, `Boost.Geometry`, `Recast`, `Detour`의 include/lib 경로를 configure 단계에서 확인합니다.
+
 실행하지 못했다면 PR 본문에 이유를 남깁니다.
 
 ## 머지 규칙

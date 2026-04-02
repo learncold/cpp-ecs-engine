@@ -6,6 +6,7 @@ project(SafeCrowd
 )
 
 include(CTest)
+include(cmake/SafeCrowdImportStack.cmake)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -72,6 +73,8 @@ target_link_libraries(safecrowd_domain
     PUBLIC
         ecs_engine
 )
+
+safecrowd_configure_domain_import_stack(safecrowd_domain)
 
 configure_project_target(safecrowd_domain)
 
