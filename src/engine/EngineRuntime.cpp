@@ -48,6 +48,7 @@ void EngineRuntime::pause() {
 }
 
 void EngineRuntime::stop() {
+    world_.shutdown();
     frameClock_.reset();
     stats_ = {};
     stats_.state = EngineState::Stopped;

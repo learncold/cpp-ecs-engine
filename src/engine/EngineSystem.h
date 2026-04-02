@@ -1,10 +1,26 @@
 #pragma once
 
+#include "engine/EcsCore.h"
 #include "engine/EngineStepContext.h"
 
 namespace safecrowd::engine {
 
 class EngineWorld {
+public:
+    [[nodiscard]] EcsCore& ecsCore() noexcept {
+        return ecsCore_;
+    }
+
+    [[nodiscard]] const EcsCore& ecsCore() const noexcept {
+        return ecsCore_;
+    }
+
+    void shutdown() {
+        ecsCore_.shutdown();
+    }
+
+private:
+    EcsCore ecsCore_{};
 };
 
 class EngineSystem {
