@@ -59,6 +59,8 @@
   - Task: `#31 ~ #35` (`Task-...` 형식)
 
 ## 메모
+- 작업을 시작하기 전에 먼저 관련 issue가 이미 있는지 확인한다.
+- 관련 issue가 없고 docs/policy-only 예외가 아닌 작업이면, 적절한 issue form으로 한국어 issue를 먼저 만든 뒤 branch 작업으로 들어간다.
 - `Docs`, `Chore`, `Analysis`는 `Lightweight Task` form으로 가볍게 등록한다.
 - `Engine`, `Domain`, `Application`, `Build`는 `Implementation Task` form으로 범위와 검증 계획까지 남긴다.
 - 현재 Project 보드의 `Area` 필드에는 `Build` 옵션이 없으므로, Build 성격 task는 issue form과 본문에는 `Build`로 남기고 보드에서는 임시로 가장 가까운 기존 영역에 배치한다.
