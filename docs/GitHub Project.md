@@ -21,6 +21,7 @@
   - `🖥️Application`
   - `🔎Analysis`
   - `📄Docs`
+  - 메모: issue form은 `Build`도 받지만, 현재 Project `Area` 필드에는 `Build` 옵션이 없다.
 - `Sprint`
   - `Sprint 1`
   - `Sprint 2`
@@ -47,7 +48,8 @@
 - `Sprint 1`
   - Epic: `#1 EPIC-1 Engine Foundation`
   - Epic: `#2 EPIC-2 Sprint 1 Demo Vertical Slice`
-  - Task: `#6 ~ #20` (`Task-...` 형식)
+  - Engine foundation tasks: `#6 ~ #13`, `#47`
+  - Demo vertical slice tasks: `#14 ~ #20`, `#52 ~ #55`
 - `Sprint 2`
   - Epic: `#3 EPIC-3 Product Completion for Sprint 2`
   - Epic: `#4 EPIC-4 Compare and Presentation Readiness`
@@ -59,9 +61,11 @@
 ## 메모
 - `Docs`, `Chore`, `Analysis`는 `Lightweight Task` form으로 가볍게 등록한다.
 - `Engine`, `Domain`, `Application`, `Build`는 `Implementation Task` form으로 범위와 검증 계획까지 남긴다.
+- 현재 Project 보드의 `Area` 필드에는 `Build` 옵션이 없으므로, Build 성격 task는 issue form과 본문에는 `Build`로 남기고 보드에서는 임시로 가장 가까운 기존 영역에 배치한다.
 - 세부 작업명, 부모-자식 관계, dependency는 GitHub Project와 issue 자체를 기준으로 관리한다.
 - `blocked by`는 실제로 선행 해결이 필요한 hard dependency에만 건다. 단순한 권장 순서나 같은 Epic 안의 묶음 관계 때문에 불필요하게 직렬화하지 않는다.
 - 하나의 Task가 서로 다른 관심사를 함께 묶어 병렬 진행을 막으면, 별도 Task로 분리해서 dependency를 다시 연결한다.
 - 문서 또는 기여 정책만 다루는 변경은 별도 issue 없이 진행할 수 있다.
 - 변경 범위가 `docs/`, `uml/`, `CONTRIBUTING.md`, PR/issue template, PR 정책 워크플로에만 한정되면 유지보수자는 PR 없이 `main`에 직접 push할 수 있다.
 - Task의 순서는 제목 접두사 뒤 숫자로 관리하지 않는다. 중간 작업이 생기면 새 issue를 추가하고 `Sprint`, `Parent issue`, `blocked by`로 위치를 표현한다.
+- `#23 Task-Implement drawing import or preprocessing to FacilityLayout2D flow`는 범위가 넓어서 삭제했고, Sprint 1 데모용 import 흐름은 `#52 ~ #55`로 분리했다.

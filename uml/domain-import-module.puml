@@ -1,0 +1,95 @@
+@startuml domain-import-module
+title SafeCrowd Domain Import Module (Open-Source Stack)
+
+left to right direction
+skinparam componentStyle rectangle
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam linetype ortho
+
+package "application" {
+  [Import Workflow UI\n(file select / review / accept)] as ImportUi
+}
+
+package "domain" {
+  package "api" {
+    [ImportOrchestrator\n(single import entry)] as Orchestrator
+    [ImportResult\n(layout / issues / trace refs)] as ImportResult
+  }
+
+  package "adapters" {
+    [DxfImportService\n(libdxfrw)] as DxfImport
+    [IfcImportService\n(IfcOpenShell)] as IfcImport
+  }
+
+  package "transform" {
+    [RawImportModel\n(source entities / units /\nlayer or GUID refs)] as RawImportModel
+    [GeometryNormalizer\n(Clipper2 / Boost.Geometry)] as GeometryNormalizer
+    [CanonicalGeometry\n(floors / walls / portals /\nobstacles / vertical links)] as CanonicalGeometry
+    [FacilityLayoutBuilder\n(zone / connection /\nbarrier inference)] as FacilityLayoutBuilder
+    [FacilityLayout\n(zones / links / controls /\nvalidation targets)] as FacilityLayout
+    [ImportValidationService\n(disconnected areas /\nmissing exits / width checks)] as ImportValidation
+    [ImportArtifactStore\n(trace refs / user overrides /\nreimport metadata)] as ImportArtifactStore
+  }
+
+  package "navigation bake" {
+    [NavigationBakeService\n(Recast / Detour)] as NavigationBake
+    [BakedNavigationData\n(navmesh / path queries /\nspawn-goal anchors)] as BakedNavigationData
+  }
+
+  [SimulationSession\n(domain run orchestration)] as SimulationSession
+}
+
+package "engine" {
+  [EngineRuntime\n(control)] as EngineRuntime
+  [EngineWorld\n(resources / commands)] as EngineWorld
+}
+
+ImportUi --> Orchestrator : import file / choose rules
+Orchestrator --> DxfImport : .dxf
+Orchestrator --> IfcImport : .ifc
+DxfImport --> RawImportModel
+IfcImport --> RawImportModel
+RawImportModel --> GeometryNormalizer
+GeometryNormalizer --> CanonicalGeometry
+CanonicalGeometry --> FacilityLayoutBuilder
+FacilityLayoutBuilder --> FacilityLayout
+FacilityLayout --> ImportValidation
+ImportValidation --> ImportResult : layout + issues
+FacilityLayout --> ImportArtifactStore : save trace / overrides
+FacilityLayout --> NavigationBake
+NavigationBake --> BakedNavigationData
+ImportResult --> ImportUi : review / approve / retry
+ImportResult --> SimulationSession : accepted layout
+BakedNavigationData --> SimulationSession : runtime-ready nav data
+SimulationSession --> EngineRuntime : initialize run
+SimulationSession --> EngineWorld : register resources
+
+note bottom of Orchestrator
+  Domain boundary for import.
+  Application passes only file path
+  and review decisions.
+  External SDK types do not escape.
+end note
+
+note bottom of ImportArtifactStore
+  Reimport stability lives here:
+  source handles, GUIDs, user edits,
+  and mapping decisions are preserved
+  outside engine state.
+end note
+
+note bottom of EngineWorld
+  Engine receives plain domain resources only.
+  No libdxfrw, IfcOpenShell, Recast,
+  or Detour headers should be exposed
+  through engine-facing contracts.
+end note
+
+note bottom of NavigationBake
+  DetourCrowd is runtime behavior support,
+  not an import dependency,
+  so it is intentionally excluded here.
+end note
+
+@enduml

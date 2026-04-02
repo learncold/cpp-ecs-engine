@@ -18,12 +18,33 @@
       }
     },
     {
+      "name": "windows-base-no-vcpkg",
+      "hidden": true,
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/vs2022/${presetName}"
+    },
+    {
       "name": "windows-debug",
       "inherits": "windows-base"
     },
     {
+      "name": "windows-debug-no-app",
+      "inherits": "windows-base-no-vcpkg",
+      "cacheVariables": {
+        "SAFECROWD_BUILD_APP": "OFF"
+      }
+    },
+    {
       "name": "windows-release",
       "inherits": "windows-base"
+    },
+    {
+      "name": "windows-release-no-app",
+      "inherits": "windows-base-no-vcpkg",
+      "cacheVariables": {
+        "SAFECROWD_BUILD_APP": "OFF"
+      }
     }
   ],
   "buildPresets": [
@@ -36,6 +57,54 @@
       "name": "build-release",
       "configurePreset": "windows-release",
       "configuration": "Release"
+    },
+    {
+      "name": "build-engine-debug",
+      "configurePreset": "windows-debug-no-app",
+      "configuration": "Debug",
+      "targets": [
+        "ecs_engine"
+      ]
+    },
+    {
+      "name": "build-engine-domain-debug",
+      "configurePreset": "windows-debug-no-app",
+      "configuration": "Debug",
+      "targets": [
+        "safecrowd_domain"
+      ]
+    },
+    {
+      "name": "build-no-app-debug",
+      "configurePreset": "windows-debug-no-app",
+      "configuration": "Debug",
+      "targets": [
+        "safecrowd_tests"
+      ]
+    },
+    {
+      "name": "build-engine-release",
+      "configurePreset": "windows-release-no-app",
+      "configuration": "Release",
+      "targets": [
+        "ecs_engine"
+      ]
+    },
+    {
+      "name": "build-engine-domain-release",
+      "configurePreset": "windows-release-no-app",
+      "configuration": "Release",
+      "targets": [
+        "safecrowd_domain"
+      ]
+    },
+    {
+      "name": "build-no-app-release",
+      "configurePreset": "windows-release-no-app",
+      "configuration": "Release",
+      "targets": [
+        "safecrowd_tests"
+      ]
     }
   ],
   "testPresets": [
@@ -50,6 +119,22 @@
     {
       "name": "test-release",
       "configurePreset": "windows-release",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "test-no-app-debug",
+      "configurePreset": "windows-debug-no-app",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "test-no-app-release",
+      "configurePreset": "windows-release-no-app",
       "configuration": "Release",
       "output": {
         "outputOnFailure": true
