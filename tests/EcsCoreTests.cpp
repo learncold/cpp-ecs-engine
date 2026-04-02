@@ -76,7 +76,7 @@ SC_TEST(EcsCore_DestroyEntity_CleansUpAllComponents) {
 }
 
 SC_TEST(EcsCore_EntityIndex_Reuse_DoesNotLeakComponents) {
-    safecrowd::engine::EcsCore core;
+    safecrowd::engine::EcsCore core(1);
 
     const auto e1 = core.createEntity();
     core.addComponent(e1, Position{7.0f, 8.0f});
