@@ -9,6 +9,7 @@ body:
 
         GitHub assigns the numeric issue number automatically. Enter only the short title after `Task-`.
         Prefer one task per PR, and keep the task scoped tightly enough that it can be reviewed and merged independently.
+        If this task belongs under an existing Epic, add the Epic in `Parent Issue` and then link the issue as a native GitHub `sub-issue` so it appears in the Project view.
   - type: textarea
     id: summary
     attributes:
@@ -21,7 +22,7 @@ body:
     id: parent-issue
     attributes:
       label: Parent Issue
-      description: Link the parent epic when this task belongs under one.
+      description: If this task belongs under an existing Epic, enter that Epic here and then add the native `sub-issue` link after issue creation.
       placeholder: "#1"
   - type: dropdown
     id: area

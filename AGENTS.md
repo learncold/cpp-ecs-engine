@@ -61,6 +61,8 @@
 - Use GitHub issue forms for new work items; blank issues are disabled.
 - Before starting work, check whether a related GitHub issue already exists.
 - If no related issue exists and the current policy does not exempt the work from issue creation, open a new issue in Korean first and then start the implementation.
+- When a new task clearly belongs under an existing Epic, add it under that Epic as a native GitHub `sub-issue`.
+- After linking the task under its Epic, make sure the relationship is visible from the Project view via `Parent issue` / `Sub-issues progress`.
 - If the work falls under the existing docs/policy-only exception, it may proceed without opening a separate issue.
 - Issue types currently supported:
   - `Epic` for larger parent work
