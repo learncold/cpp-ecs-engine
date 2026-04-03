@@ -28,10 +28,10 @@ public:
 
     template <typename T>
     void addComponent(Entity entity, T component) {
+        Signature sig = entityRegistry_.signatureOf(entity);
         const ComponentType typeId = componentRegistry_.getOrRegister<T>();
         componentRegistry_.storageFor<T>().insert(entity, std::move(component));
 
-        Signature sig = entityRegistry_.signatureOf(entity);
         sig.set(typeId);
         entityRegistry_.setSignature(entity, sig);
     }
