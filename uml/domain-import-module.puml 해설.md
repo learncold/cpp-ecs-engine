@@ -23,9 +23,10 @@
 4. `GeometryNormalizer`가 포맷 차이를 제거하고 `CanonicalGeometry`를 만든다.
 5. `FacilityLayoutBuilder`가 zone, connection, barrier 같은 SafeCrowd 공간 구조를 추론한다.
 6. `ImportValidationService`가 끊긴 동선, 누락 출구, 비정상 폭 같은 문제를 진단한다.
-7. `ImportArtifactStore`가 원본 trace, 사용자 수정, 재import 메타데이터를 저장한다.
-8. `NavigationBakeService`가 `FacilityLayout`을 `BakedNavigationData`로 변환한다.
-9. `SimulationSession`이 승인된 layout과 baked nav 데이터를 받아 엔진 리소스로 등록한다.
+7. `ImportResult`는 layout, issue, trace ref, review 상태를 함께 돌려준다.
+8. `ImportArtifactStore`가 원본 trace, 사용자 수정, 재import 메타데이터를 저장한다.
+9. `NavigationBakeService`가 `FacilityLayout2D`를 `BakedNavigationData`로 변환한다.
+10. `SimulationSession`이 승인된 layout과 baked nav 데이터를 받아 엔진 리소스로 등록한다.
 
 ---
 
@@ -37,7 +38,7 @@
 ## `DxfImportService`
 - 개요: `libdxfrw`를 이용한 DXF adapter다.
 - 목적: DXF entity, layer, unit, block 참조를 SafeCrowd 내부 모델로 끌어오는 역할을 한다.
-- 유의사항: DXF 특유의 선/폴리라인 중심 구조는 아직 의미가 약하므로, 여기서 바로 `FacilityLayout`을 만들기보다 `RawImportModel` 단계에 원본 trace를 보존하는 편이 안전하다.
+- 유의사항: DXF 특유의 선/폴리라인 중심 구조는 아직 의미가 약하므로, 여기서 바로 `FacilityLayout2D`를 만들기보다 `RawImportModel` 단계에 원본 trace를 보존하는 편이 안전하다.
 
 ## `IfcImportService`
 - 개요: `IfcOpenShell` 기반 IFC adapter다.
@@ -61,11 +62,11 @@
 
 ## `FacilityLayoutBuilder`
 - 개요: SafeCrowd 문제영역의 공간 구조를 추론하는 계층이다.
-- 목적: `CanonicalGeometry`를 `Zone`, `Connection`, `Barrier`, `Control` 중심의 `FacilityLayout`으로 바꾼다.
+- 목적: `CanonicalGeometry`를 `Zone`, `Connection`, `Barrier`, `Control` 중심의 `FacilityLayout2D`로 바꾼다.
 - 유의사항: 이 계층은 SafeCrowd 핵심 규칙이 들어가는 곳이므로, 범용 geometry 라이브러리 코드를 engine으로 빼는 것보다 여기서 도메인 의미를 분명히 하는 편이 맞다.
 
-## `FacilityLayout`
-- 개요: 시뮬레이션 입력의 기준이 되는 공간 모델이다.
+## `FacilityLayout2D`
+- 개요: Sprint 1 데모와 import 경로의 기준이 되는 2D 공간 모델이다.
 - 목적: import 결과를 검수 가능하고 시나리오에 연결 가능한 구조로 정규화한다.
 - 유의사항: zone ID, 연결 관계, 유효 폭, 방향, 계단 여부, 기본 수용량 같은 필드는 여기서 확정되어야 한다.
 
@@ -81,7 +82,7 @@
 
 ## `NavigationBakeService`
 - 개요: `Recast`와 `Detour`를 이용해 runtime-friendly navigation 데이터를 만드는 계층이다.
-- 목적: `FacilityLayout`을 navmesh, path query, spawn-goal anchor 같은 구조로 bake 한다.
+- 목적: `FacilityLayout2D`를 navmesh, path query, spawn-goal anchor 같은 구조로 bake 한다.
 - 유의사항: 이 단계는 import의 일부이지만 runtime crowd behavior 자체는 아니다. 그래서 `DetourCrowd`는 이 그림에서 의도적으로 제외했다.
 
 ## `BakedNavigationData`
@@ -103,6 +104,6 @@
 
 ## 설계 핵심 요약
 - import 관련 오픈소스 스택은 모두 `domain`에 둔다.
-- `engine`은 `FacilityLayout`과 `BakedNavigationData` 같은 domain 결과만 소비한다.
+- `engine`은 `FacilityLayout2D`와 `BakedNavigationData` 같은 domain 결과만 소비한다.
 - `DetourCrowd`는 runtime behavior 계층이므로 import 모듈 UML에는 넣지 않는다.
 - 재import와 사용자 수정 유지까지 고려하면 `ImportArtifactStore` 같은 추적 계층이 필요하다.
