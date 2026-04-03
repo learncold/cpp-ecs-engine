@@ -22,6 +22,16 @@ public:
     void setSignature(Entity entity, Signature signature);
     [[nodiscard]] Signature signatureOf(Entity entity) const;
 
+    template <typename Fn>
+    void eachAlive(Fn&& fn) const {
+        for (std::size_t i = 0; i < entries_.size(); ++i) {
+            const Entry& entry = entries_[i];
+            if (entry.alive) {
+                fn(Entity{static_cast<EntityIndex>(i), entry.generation}, entry.signature);
+            }
+        }
+    }
+
 private:
     struct Entry {
         EntityGeneration generation{0};
