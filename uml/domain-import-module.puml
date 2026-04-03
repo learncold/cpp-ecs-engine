@@ -14,7 +14,7 @@ package "application" {
 package "domain" {
   package "api" {
     [ImportOrchestrator\n(single import entry)] as Orchestrator
-    [ImportResult\n(layout / issues / trace refs)] as ImportResult
+    [ImportResult\n(layout / issues /\ntrace refs / review state)] as ImportResult
   }
 
   package "adapters" {
@@ -27,7 +27,7 @@ package "domain" {
     [GeometryNormalizer\n(Clipper2 / Boost.Geometry)] as GeometryNormalizer
     [CanonicalGeometry\n(floors / walls / portals /\nobstacles / vertical links)] as CanonicalGeometry
     [FacilityLayoutBuilder\n(zone / connection /\nbarrier inference)] as FacilityLayoutBuilder
-    [FacilityLayout\n(zones / links / controls /\nvalidation targets)] as FacilityLayout
+    [FacilityLayout2D\n(zones / links / controls /\nvalidation targets)] as FacilityLayout
     [ImportValidationService\n(disconnected areas /\nmissing exits / width checks)] as ImportValidation
     [ImportArtifactStore\n(trace refs / user overrides /\nreimport metadata)] as ImportArtifactStore
   }

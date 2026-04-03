@@ -64,6 +64,15 @@ configure_project_target(ecs_engine)
 add_library(safecrowd_domain STATIC
     src/domain/SafeCrowdDomain.h
     src/domain/SafeCrowdDomain.cpp
+    src/domain/Geometry2D.h
+    src/domain/RawImportModel.h
+    src/domain/CanonicalGeometry.h
+    src/domain/FacilityLayout2D.h
+    src/domain/ImportIssue.h
+    src/domain/ImportIssue.cpp
+    src/domain/ImportResult.h
+    src/domain/ImportOrchestrator.h
+    src/domain/ImportContracts.h
 )
 
 target_include_directories(safecrowd_domain
@@ -90,6 +99,7 @@ if (BUILD_TESTING)
         tests/PackedComponentStorageTests.cpp
         tests/SafeCrowdDomainTests.cpp
         tests/EcsCoreTests.cpp
+        tests/ImportContractsTests.cpp
     )
 
     target_include_directories(safecrowd_tests
