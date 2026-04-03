@@ -68,6 +68,8 @@ add_library(safecrowd_domain STATIC
     src/domain/Geometry2D.h
     src/domain/RawImportModel.h
     src/domain/CanonicalGeometry.h
+    src/domain/DxfImportService.h
+    src/domain/DxfImportService.cpp
     src/domain/FacilityLayout2D.h
     src/domain/ImportIssue.h
     src/domain/ImportIssue.cpp
@@ -101,6 +103,7 @@ if (BUILD_TESTING)
         tests/SafeCrowdDomainTests.cpp
         tests/EcsCoreTests.cpp
         tests/ImportContractsTests.cpp
+        tests/DxfImportServiceTests.cpp
         tests/WorldQueryTests.cpp
     )
 

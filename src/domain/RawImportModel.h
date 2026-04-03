@@ -40,14 +40,26 @@ struct SourceTrace {
     std::string externalId{};
 };
 
+struct RawTracedPolyline2D {
+    SourceTrace trace{};
+    Polyline2D geometry{};
+    std::map<std::string, std::string> metadata{};
+};
+
+struct RawTracedPolygon2D {
+    SourceTrace trace{};
+    Polygon2D geometry{};
+    std::map<std::string, std::string> metadata{};
+};
+
 struct RawBlockReference2D {
     std::string blockName{};
     Point2D insertionPoint{};
     double rotationRadians{0.0};
     double scaleX{1.0};
     double scaleY{1.0};
-    std::vector<Polyline2D> polylines{};
-    std::vector<Polygon2D> polygons{};
+    std::vector<RawTracedPolyline2D> polylines{};
+    std::vector<RawTracedPolygon2D> polygons{};
 };
 
 struct RawIfcElement2D {

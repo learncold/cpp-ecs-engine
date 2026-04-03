@@ -16,9 +16,9 @@
 - 후속 개선 사항: 읽기/쓰기 분리 facade나 phase-aware facade로 나눌 수 있다.
 
 ## `WorldQuery`
-- 개요: ECS 데이터 조회용 API다.
-- 목적: 필요한 컴포넌트 조합을 읽고 개별 엔티티의 컴포넌트를 조회하게 한다.
-- 유의사항: 초기에는 단순 signature 필터로 충분하지만, query 도중 변경은 허용하지 않는 원칙이 중요하다.
+- 개요: ECS 컴포넌트 조회와 값 접근용 API다.
+- 목적: 필요한 컴포넌트 조합을 읽고 개별 엔티티의 컴포넌트 값을 조회하거나 갱신하게 한다.
+- 유의사항: 초기에는 단순 signature 필터로 충분하지만, query 중 엔티티 생성/삭제나 컴포넌트 추가/제거 같은 구조 변경은 허용하지 않는 원칙이 중요하다.
 - 후속 개선 사항: cached query, typed iterator, optional access 지원을 확장할 수 있다.
 
 ## `WorldCommands`
