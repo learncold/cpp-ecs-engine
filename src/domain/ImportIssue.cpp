@@ -23,10 +23,16 @@ const char* toString(ImportIssueCode code) noexcept {
     switch (code) {
     case ImportIssueCode::Unknown:
         return "Unknown";
+    case ImportIssueCode::UnsupportedFormat:
+        return "UnsupportedFormat";
+    case ImportIssueCode::FileReadFailed:
+        return "FileReadFailed";
     case ImportIssueCode::UnsupportedEntity:
         return "UnsupportedEntity";
     case ImportIssueCode::MissingSourceGeometry:
         return "MissingSourceGeometry";
+    case ImportIssueCode::MissingBlockDefinition:
+        return "MissingBlockDefinition";
     case ImportIssueCode::InvalidGeometry:
         return "InvalidGeometry";
     case ImportIssueCode::DisconnectedWalkableArea:

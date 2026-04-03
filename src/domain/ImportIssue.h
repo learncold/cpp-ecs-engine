@@ -13,8 +13,11 @@ enum class ImportIssueSeverity {
 
 enum class ImportIssueCode {
     Unknown,
+    UnsupportedFormat,
+    FileReadFailed,
     UnsupportedEntity,
     MissingSourceGeometry,
+    MissingBlockDefinition,
     InvalidGeometry,
     DisconnectedWalkableArea,
     MissingExit,

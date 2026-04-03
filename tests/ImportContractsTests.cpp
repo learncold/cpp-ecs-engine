@@ -57,13 +57,19 @@ SC_TEST(ImportContractsCaptureSprintOneLayoutFields) {
         .scaleY = 1.0,
         .polylines = {
             {
-                .vertices = {
-                    {1.5, 1.0},
-                    {2.5, 1.0},
-                    {2.5, 2.0},
-                    {1.5, 2.0},
+                .trace = {
+                    .sourceId = "block-child-01",
+                    .layerName = "STAIR",
                 },
-                .closed = true,
+                .geometry = {
+                    .vertices = {
+                        {1.5, 1.0},
+                        {2.5, 1.0},
+                        {2.5, 2.0},
+                        {1.5, 2.0},
+                    },
+                    .closed = true,
+                },
             },
         },
     };
