@@ -12,6 +12,9 @@
 #include <utility>
 #include <vector>
 
+#include "domain/FacilityLayoutBuilder.h"
+#include "domain/ImportValidationService.h"
+
 namespace safecrowd::domain {
 namespace {
 
@@ -246,6 +249,32 @@ std::vector<std::string> collectSourceIds(const SourceTrace& trace) {
     }
 
     return sourceIds;
+}
+
+void appendLayoutTraceRef(std::vector<ImportTraceRef>& traceRefs, const std::string& targetId, const ElementProvenance& provenance) {
+    traceRefs.push_back({
+        .targetId = targetId,
+        .sourceIds = provenance.sourceIds,
+        .canonicalIds = provenance.canonicalIds,
+    });
+}
+
+void appendLayoutTraceRefs(const FacilityLayout2D& layout, std::vector<ImportTraceRef>& traceRefs) {
+    for (const auto& zone : layout.zones) {
+        appendLayoutTraceRef(traceRefs, zone.id, zone.provenance);
+    }
+
+    for (const auto& connection : layout.connections) {
+        appendLayoutTraceRef(traceRefs, connection.id, connection.provenance);
+    }
+
+    for (const auto& barrier : layout.barriers) {
+        appendLayoutTraceRef(traceRefs, barrier.id, barrier.provenance);
+    }
+
+    for (const auto& control : layout.controls) {
+        appendLayoutTraceRef(traceRefs, control.id, control.provenance);
+    }
 }
 
 class DxfAsciiParser {
@@ -957,7 +986,28 @@ ImportResult DxfImportService::importFile(const ImportRequest& request) const {
 
     auto groups = loadGroups(request.sourcePath);
     DxfAsciiParser parser(request.sourcePath, std::move(groups));
-    return parser.parse();
+    result = parser.parse();
+
+    if (result.canonicalGeometry.has_value()) {
+        FacilityLayoutBuilder builder;
+        auto buildResult = builder.build(*result.canonicalGeometry);
+        result.layout = std::move(buildResult.layout);
+        result.issues.insert(result.issues.end(), buildResult.issues.begin(), buildResult.issues.end());
+        appendLayoutTraceRefs(*result.layout, result.traceRefs);
+
+        if (request.runValidation) {
+            ImportValidationService validator;
+            auto validationIssues = validator.validate(*result.layout);
+            result.issues.insert(result.issues.end(), validationIssues.begin(), validationIssues.end());
+        }
+    }
+
+    if (!request.preserveRawModel) {
+        result.rawModel.reset();
+    }
+
+    result.reviewStatus = hasBlockingImportIssue(result.issues) ? ImportReviewStatus::Rejected : ImportReviewStatus::Pending;
+    return result;
 }
 
 }  // namespace safecrowd::domain

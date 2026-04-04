@@ -1,6 +1,8 @@
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #include "TestSupport.h"
 
@@ -268,6 +270,270 @@ SEQEND
 EOF
 )";
 
+const char* kNoExitDxf = R"(0
+SECTION
+2
+ENTITIES
+0
+LWPOLYLINE
+8
+WALKABLE
+90
+4
+70
+1
+10
+0
+20
+0
+10
+8
+20
+0
+10
+8
+20
+6
+10
+0
+20
+6
+0
+ENDSEC
+0
+EOF
+)";
+
+const char* kDisconnectedDxf = R"(0
+SECTION
+2
+ENTITIES
+0
+LWPOLYLINE
+8
+WALKABLE
+90
+4
+70
+1
+10
+0
+20
+0
+10
+4
+20
+0
+10
+4
+20
+4
+10
+0
+20
+4
+0
+LWPOLYLINE
+8
+WALKABLE
+90
+4
+70
+1
+10
+8
+20
+0
+10
+12
+20
+0
+10
+12
+20
+4
+10
+8
+20
+4
+0
+LINE
+8
+EXIT
+10
+4
+20
+1.4
+11
+4
+21
+2.6
+0
+ENDSEC
+0
+EOF
+)";
+
+const char* kAdjacentWalkablesDxf = R"(0
+SECTION
+2
+ENTITIES
+0
+LWPOLYLINE
+8
+WALKABLE
+90
+4
+70
+1
+10
+0
+20
+0
+10
+6
+20
+0
+10
+6
+20
+4
+10
+0
+20
+4
+0
+LWPOLYLINE
+8
+WALKABLE
+90
+4
+70
+1
+10
+6
+20
+0
+10
+12
+20
+0
+10
+12
+20
+4
+10
+6
+20
+4
+0
+LINE
+8
+EXIT
+10
+12
+20
+1.0
+11
+12
+21
+3.0
+0
+ENDSEC
+0
+EOF
+)";
+
+const char* kAdjacentWalkablesBlockedByWallDxf = R"(0
+SECTION
+2
+ENTITIES
+0
+LWPOLYLINE
+8
+WALKABLE
+90
+4
+70
+1
+10
+0
+20
+0
+10
+6
+20
+0
+10
+6
+20
+4
+10
+0
+20
+4
+0
+LWPOLYLINE
+8
+WALKABLE
+90
+4
+70
+1
+10
+6
+20
+0
+10
+12
+20
+0
+10
+12
+20
+4
+10
+6
+20
+4
+0
+LINE
+8
+WALL
+10
+6
+20
+0
+11
+6
+21
+4
+0
+LINE
+8
+EXIT
+10
+12
+20
+1.0
+11
+12
+21
+3.0
+0
+ENDSEC
+0
+EOF
+)";
+
+bool containsIssueCode(
+    const std::vector<safecrowd::domain::ImportIssue>& issues,
+    safecrowd::domain::ImportIssueCode code) {
+    return std::any_of(issues.begin(), issues.end(), [&](const auto& issue) {
+        return issue.code == code;
+    });
+}
+
 }  // namespace
 
 SC_TEST(DxfImportServiceBuildsCanonicalGeometryFromHappyPathSample) {
@@ -282,15 +548,21 @@ SC_TEST(DxfImportServiceBuildsCanonicalGeometryFromHappyPathSample) {
 
     SC_EXPECT_TRUE(result.rawModel.has_value());
     SC_EXPECT_TRUE(result.canonicalGeometry.has_value());
+    SC_EXPECT_TRUE(result.layout.has_value());
     SC_EXPECT_EQ(result.rawModel->unit, safecrowd::domain::ImportUnit::Meter);
     SC_EXPECT_EQ(result.rawModel->entities.size(), std::size_t{4});
     SC_EXPECT_EQ(result.canonicalGeometry->walkableAreas.size(), std::size_t{1});
     SC_EXPECT_EQ(result.canonicalGeometry->walls.size(), std::size_t{4});
     SC_EXPECT_EQ(result.canonicalGeometry->openings.size(), std::size_t{1});
     SC_EXPECT_EQ(result.canonicalGeometry->obstacles.size(), std::size_t{1});
+    SC_EXPECT_EQ(result.layout->zones.size(), std::size_t{2});
+    SC_EXPECT_EQ(result.layout->connections.size(), std::size_t{1});
+    SC_EXPECT_EQ(result.layout->barriers.size(), std::size_t{5});
+    SC_EXPECT_TRUE(result.layout->barriers.back().geometry.closed);
+    SC_EXPECT_EQ(result.layout->zones.back().kind, safecrowd::domain::ZoneKind::Exit);
     SC_EXPECT_EQ(result.canonicalGeometry->openings.front().kind, safecrowd::domain::OpeningKind::Exit);
     SC_EXPECT_NEAR(result.canonicalGeometry->openings.front().width, 1.2, 1e-9);
-    SC_EXPECT_EQ(result.traceRefs.size(), std::size_t{7});
+    SC_EXPECT_EQ(result.traceRefs.size(), std::size_t{15});
     SC_EXPECT_EQ(result.traceRefs.front().canonicalIds.front(), result.traceRefs.front().targetId);
     SC_EXPECT_TRUE(!safecrowd::domain::hasBlockingImportIssue(result.issues));
     SC_EXPECT_EQ(result.reviewStatus, safecrowd::domain::ImportReviewStatus::Pending);
@@ -310,6 +582,7 @@ SC_TEST(DxfImportServiceReportsMissingBlockDefinitions) {
 
     SC_EXPECT_TRUE(result.rawModel.has_value());
     SC_EXPECT_TRUE(result.canonicalGeometry.has_value());
+    SC_EXPECT_TRUE(result.layout.has_value());
     SC_EXPECT_TRUE(safecrowd::domain::hasBlockingImportIssue(result.issues));
     SC_EXPECT_EQ(result.issues.front().code, safecrowd::domain::ImportIssueCode::MissingBlockDefinition);
     SC_EXPECT_EQ(result.reviewStatus, safecrowd::domain::ImportReviewStatus::Rejected);
@@ -329,11 +602,88 @@ SC_TEST(DxfImportServiceImportsClassicPolylineEntities) {
 
     SC_EXPECT_TRUE(result.rawModel.has_value());
     SC_EXPECT_TRUE(result.canonicalGeometry.has_value());
+    SC_EXPECT_TRUE(result.layout.has_value());
     SC_EXPECT_EQ(result.rawModel->entities.size(), std::size_t{2});
     SC_EXPECT_EQ(result.canonicalGeometry->walkableAreas.size(), std::size_t{1});
     SC_EXPECT_EQ(result.canonicalGeometry->walls.size(), std::size_t{1});
-    SC_EXPECT_EQ(result.traceRefs.size(), std::size_t{2});
+    SC_EXPECT_EQ(result.layout->zones.size(), std::size_t{1});
+    SC_EXPECT_EQ(result.traceRefs.size(), std::size_t{4});
+    SC_EXPECT_TRUE(safecrowd::domain::hasBlockingImportIssue(result.issues));
+
+    std::filesystem::remove(sourcePath);
+}
+
+SC_TEST(DxfImportServiceRejectsLayoutsWithoutInferredExit) {
+    const auto sourcePath = writeTempFile("safecrowd-no-exit.dxf", kNoExitDxf);
+
+    safecrowd::domain::DxfImportService importer;
+    safecrowd::domain::ImportRequest request;
+    request.sourcePath = sourcePath;
+    request.requestedFormat = safecrowd::domain::ImportedFileFormat::Dxf;
+
+    const auto result = importer.importFile(request);
+
+    SC_EXPECT_TRUE(result.layout.has_value());
+    SC_EXPECT_EQ(result.layout->zones.size(), std::size_t{1});
+    SC_EXPECT_TRUE(containsIssueCode(result.issues, safecrowd::domain::ImportIssueCode::MissingExit));
+    SC_EXPECT_EQ(result.reviewStatus, safecrowd::domain::ImportReviewStatus::Rejected);
+
+    std::filesystem::remove(sourcePath);
+}
+
+SC_TEST(DxfImportServiceRejectsDisconnectedWalkableAreas) {
+    const auto sourcePath = writeTempFile("safecrowd-disconnected.dxf", kDisconnectedDxf);
+
+    safecrowd::domain::DxfImportService importer;
+    safecrowd::domain::ImportRequest request;
+    request.sourcePath = sourcePath;
+    request.requestedFormat = safecrowd::domain::ImportedFileFormat::Dxf;
+
+    const auto result = importer.importFile(request);
+
+    SC_EXPECT_TRUE(result.layout.has_value());
+    SC_EXPECT_EQ(result.layout->zones.size(), std::size_t{3});
+    SC_EXPECT_TRUE(containsIssueCode(result.issues, safecrowd::domain::ImportIssueCode::DisconnectedWalkableArea));
+    SC_EXPECT_EQ(result.reviewStatus, safecrowd::domain::ImportReviewStatus::Rejected);
+
+    std::filesystem::remove(sourcePath);
+}
+
+SC_TEST(DxfImportServiceInfersConnectionsBetweenAdjacentWalkableZones) {
+    const auto sourcePath = writeTempFile("safecrowd-adjacent-walkables.dxf", kAdjacentWalkablesDxf);
+
+    safecrowd::domain::DxfImportService importer;
+    safecrowd::domain::ImportRequest request;
+    request.sourcePath = sourcePath;
+    request.requestedFormat = safecrowd::domain::ImportedFileFormat::Dxf;
+
+    const auto result = importer.importFile(request);
+
+    SC_EXPECT_TRUE(result.layout.has_value());
+    SC_EXPECT_EQ(result.layout->zones.size(), std::size_t{3});
+    SC_EXPECT_EQ(result.layout->connections.size(), std::size_t{2});
+    SC_EXPECT_EQ(result.layout->connections.back().kind, safecrowd::domain::ConnectionKind::Opening);
+    SC_EXPECT_TRUE(!containsIssueCode(result.issues, safecrowd::domain::ImportIssueCode::DisconnectedWalkableArea));
     SC_EXPECT_TRUE(!safecrowd::domain::hasBlockingImportIssue(result.issues));
+
+    std::filesystem::remove(sourcePath);
+}
+
+SC_TEST(DxfImportServiceDoesNotInferConnectionsAcrossWallSeam) {
+    const auto sourcePath = writeTempFile("safecrowd-adjacent-walkables-wall-seam.dxf", kAdjacentWalkablesBlockedByWallDxf);
+
+    safecrowd::domain::DxfImportService importer;
+    safecrowd::domain::ImportRequest request;
+    request.sourcePath = sourcePath;
+    request.requestedFormat = safecrowd::domain::ImportedFileFormat::Dxf;
+
+    const auto result = importer.importFile(request);
+
+    SC_EXPECT_TRUE(result.layout.has_value());
+    SC_EXPECT_EQ(result.layout->zones.size(), std::size_t{3});
+    SC_EXPECT_EQ(result.layout->connections.size(), std::size_t{1});
+    SC_EXPECT_TRUE(containsIssueCode(result.issues, safecrowd::domain::ImportIssueCode::DisconnectedWalkableArea));
+    SC_EXPECT_TRUE(safecrowd::domain::hasBlockingImportIssue(result.issues));
 
     std::filesystem::remove(sourcePath);
 }

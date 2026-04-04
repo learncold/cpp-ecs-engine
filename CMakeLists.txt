@@ -71,10 +71,14 @@ add_library(safecrowd_domain STATIC
     src/domain/DxfImportService.h
     src/domain/DxfImportService.cpp
     src/domain/FacilityLayout2D.h
+    src/domain/FacilityLayoutBuilder.h
+    src/domain/FacilityLayoutBuilder.cpp
     src/domain/ImportIssue.h
     src/domain/ImportIssue.cpp
     src/domain/ImportResult.h
     src/domain/ImportOrchestrator.h
+    src/domain/ImportValidationService.h
+    src/domain/ImportValidationService.cpp
     src/domain/ImportContracts.h
 )
 
@@ -104,6 +108,7 @@ if (BUILD_TESTING)
         tests/EcsCoreTests.cpp
         tests/ImportContractsTests.cpp
         tests/DxfImportServiceTests.cpp
+        tests/FacilityLayoutBuilderTests.cpp
         tests/WorldQueryTests.cpp
     )
 
