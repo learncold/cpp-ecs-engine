@@ -53,7 +53,7 @@ body:
       label: Deliverable
       description: State what concrete output or change should exist when the task is done.
       placeholder: |
-        - Add `docs/GitHub Project.md`
+        - Add `docs/process/GitHub Project.md`
         - Capture the expected team workflow
     validations:
       required: true

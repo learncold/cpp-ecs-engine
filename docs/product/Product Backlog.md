@@ -1,7 +1,7 @@
 # Product Backlog
 
 ## Project Name
-**SafeCrowd: ECS 게임 엔진 기반 군중 행동 시뮬레이션 및 의사결정 지원 시스템**
+**SafeCrowd: 군중 안전 시뮬레이터**
 
 02조  
 202002520 은민수  
@@ -21,7 +21,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| Project Name | SafeCrowd: ECS 게임 엔진 기반 군중 행동 시뮬레이션 및 의사결정 지원 시스템 |
+| Project Name | SafeCrowd: 군중 안전 시뮬레이터 |
 | Version | v1.0 |
 | 작성일 / 수정일 | 2026/04/01 / 2026/04/03 |
 | Product Owner (PO) | 02조 공동 |
