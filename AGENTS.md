@@ -68,7 +68,7 @@
   - `Epic` for larger parent work
   - `Implementation Task` for `Engine` / `Domain` / `Application` / `Build` work
   - `Lightweight Task` for `Docs` / `Chore` / `Analysis` work
-- GitHub Project guidance is documented in `docs/GitHub Project.md`.
+- GitHub Project guidance is documented in `docs/process/GitHub Project.md`.
 - PR titles must follow `[Area] short summary`.
 - Allowed PR areas:
   - `Engine`
@@ -93,9 +93,10 @@
 
 ## Docs
 - After any changes to the project, ensure the documents remain consistent.
-- Architecture notes: `docs/프로젝트 구조.md`
-- Project workflow notes: `docs/GitHub Project.md`
-- Requirements and overview docs are under `docs/`.
+- Architecture notes: `docs/architecture/프로젝트 구조.md`
+- Project workflow notes: `docs/process/GitHub Project.md`
+- Requirements and overview docs are under `docs/product/`.
+- Use `docs/README.md` as the entry point for the document map.
 
 ## Review Priorities
 - Broken build or preset mismatch
