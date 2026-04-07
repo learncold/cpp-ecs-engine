@@ -1,7 +1,11 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
+#include <vector>
 
+#include "engine/CommandBuffer.h"
+#include "engine/EcsCore.h"
 #include "engine/EngineConfig.h"
 #include "engine/EngineStats.h"
 #include "engine/EngineSystem.h"
@@ -12,6 +16,8 @@ namespace safecrowd::engine {
 class EngineRuntime {
 public:
     explicit EngineRuntime(EngineConfig config = {});
+
+    void addSystem(std::unique_ptr<EngineSystem> system);
 
     void initialize();
     void play();
@@ -29,9 +35,12 @@ public:
 private:
     EngineConfig config_;
     EngineStats stats_;
+    EcsCore core_;
+    CommandBuffer buffer_;
     EngineWorld world_;
     FrameClock frameClock_;
     std::uint64_t runIndex_{0};
+    std::vector<std::unique_ptr<EngineSystem>> systems_;
 };
 
 }  // namespace safecrowd::engine
