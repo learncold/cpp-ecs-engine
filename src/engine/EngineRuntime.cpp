@@ -33,12 +33,15 @@ void EngineRuntime::addSystem(std::unique_ptr<EngineSystem> system) {
 
 void EngineRuntime::initialize() {
     frameClock_.reset();
+    core_ = EcsCore{};
+    buffer_ = CommandBuffer{};
     stats_ = {};
     stats_.state = EngineState::Ready;
     ++runIndex_;
 
     for (auto& system : systems_) {
         system->configure(world_);
+        buffer_.flush(core_);
     }
 }
 
@@ -58,6 +61,8 @@ void EngineRuntime::pause() {
 
 void EngineRuntime::stop() {
     frameClock_.reset();
+    core_ = EcsCore{};
+    buffer_ = CommandBuffer{};
     stats_ = {};
     stats_.state = EngineState::Stopped;
 }
@@ -65,6 +70,11 @@ void EngineRuntime::stop() {
 void EngineRuntime::stepFrame(double deltaSeconds) {
     if (stats_.state == EngineState::Stopped) {
         initialize();
+    }
+
+    if (stats_.state == EngineState::Paused) {
+        stats_.fixedStepsThisFrame = 0;
+        return;
     }
 
     frameClock_.beginFrame(deltaSeconds);

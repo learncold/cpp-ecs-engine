@@ -1,5 +1,6 @@
 #include "TestSupport.h"
 
+#include <cstddef>
 #include <memory>
 
 #include "engine/EngineRuntime.h"
@@ -21,6 +22,30 @@ class SpawnMarkerSystem : public safecrowd::engine::EngineSystem {
 public:
     void update(safecrowd::engine::EngineWorld& world, const safecrowd::engine::EngineStepContext&) override {
         world.commands().spawnEntity(Marker{});
+    }
+};
+
+class ConfigureSpawnMarkerSystem : public safecrowd::engine::EngineSystem {
+public:
+    void configure(safecrowd::engine::EngineWorld& world) override {
+        world.commands().spawnEntity(Marker{});
+    }
+
+    void update(safecrowd::engine::EngineWorld&, const safecrowd::engine::EngineStepContext&) override {
+    }
+};
+
+class ConfigureObserveMarkerSystem : public safecrowd::engine::EngineSystem {
+public:
+    std::size_t& count;
+
+    explicit ConfigureObserveMarkerSystem(std::size_t& c) : count(c) {}
+
+    void configure(safecrowd::engine::EngineWorld& world) override {
+        count = world.query().view<Marker>().size();
+    }
+
+    void update(safecrowd::engine::EngineWorld&, const safecrowd::engine::EngineStepContext&) override {
     }
 };
 
@@ -72,6 +97,73 @@ SC_TEST(EngineRuntime_WorldCommands_FlushedAfterEachFixedStep) {
 
     const auto entities = runtime.world().query().view<Marker>();
     SC_EXPECT_EQ(entities.size(), std::size_t{1});
+}
+
+SC_TEST(EngineRuntime_ConfigureCommands_AreVisibleToLaterSystems) {
+    std::size_t configuredMarkerCount = 0;
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 0.25,
+        .maxCatchUpSteps = 4,
+        .baseSeed = 1,
+    });
+
+    runtime.addSystem(std::make_unique<ConfigureSpawnMarkerSystem>());
+    runtime.addSystem(std::make_unique<ConfigureObserveMarkerSystem>(configuredMarkerCount));
+
+    runtime.play();
+
+    SC_EXPECT_EQ(configuredMarkerCount, std::size_t{1});
+    SC_EXPECT_EQ(runtime.world().query().view<Marker>().size(), std::size_t{1});
+}
+
+SC_TEST(EngineRuntime_Stop_ClearsWorldAndPendingCommandsBeforeNextRun) {
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 0.25,
+        .maxCatchUpSteps = 4,
+        .baseSeed = 1,
+    });
+
+    runtime.addSystem(std::make_unique<SpawnMarkerSystem>());
+    runtime.play();
+    runtime.stepFrame(0.25);
+    SC_EXPECT_EQ(runtime.world().query().view<Marker>().size(), std::size_t{1});
+
+    runtime.world().commands().spawnEntity(Marker{});
+    runtime.stop();
+
+    SC_EXPECT_EQ(runtime.world().query().view<Marker>().size(), std::size_t{0});
+
+    runtime.play();
+    runtime.stepFrame(0.25);
+
+    SC_EXPECT_EQ(runtime.world().query().view<Marker>().size(), std::size_t{1});
+}
+
+SC_TEST(EngineRuntime_PausedRuntime_DoesNotAdvanceSimulation) {
+    int count = 0;
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 0.25,
+        .maxCatchUpSteps = 4,
+        .baseSeed = 1,
+    });
+
+    runtime.addSystem(std::make_unique<UpdateCounterSystem>(count));
+    runtime.play();
+    runtime.stepFrame(0.25);
+    runtime.pause();
+    runtime.stepFrame(1.00);
+
+    const auto& pausedStats = runtime.stats();
+    SC_EXPECT_EQ(count, 1);
+    SC_EXPECT_EQ(pausedStats.frameIndex, 1ULL);
+    SC_EXPECT_EQ(pausedStats.fixedStepIndex, 1ULL);
+    SC_EXPECT_EQ(pausedStats.fixedStepsThisFrame, 0U);
+
+    runtime.play();
+    runtime.stepFrame(0.25);
+    SC_EXPECT_EQ(count, 2);
 }
 
 SC_TEST(EngineRuntimePauseAndStopResetLifecycleState) {
