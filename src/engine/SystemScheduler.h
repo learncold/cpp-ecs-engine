@@ -17,7 +17,9 @@ public:
 
     void registerSystem(std::unique_ptr<EngineSystem> system, SystemDescriptor descriptor);
     void configure(EngineWorld& world);
-    void executePhase(UpdatePhase phase, EngineWorld& world, const EngineStepContext& ctx);
+    void executeStartup(EngineWorld& world, const EngineStepContext& ctx);
+    void executePhase(UpdatePhase phase, TriggerPolicy triggerPolicy,
+                      EngineWorld& world, const EngineStepContext& ctx);
 
 private:
     struct Entry {

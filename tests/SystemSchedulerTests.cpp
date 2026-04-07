@@ -1,5 +1,7 @@
 #include "TestSupport.h"
 
+#include <cstddef>
+#include <exception>
 #include <memory>
 #include <vector>
 
@@ -30,6 +32,32 @@ public:
     }
 };
 
+class ConfigureSpawnTagSystem : public safecrowd::engine::EngineSystem {
+public:
+    void configure(safecrowd::engine::EngineWorld& world) override {
+        world.commands().spawnEntity(Tag{});
+    }
+
+    void update(safecrowd::engine::EngineWorld&,
+                const safecrowd::engine::EngineStepContext&) override {
+    }
+};
+
+class ConfigureObserveTagSystem : public safecrowd::engine::EngineSystem {
+public:
+    std::size_t& count;
+
+    explicit ConfigureObserveTagSystem(std::size_t& c) : count(c) {}
+
+    void configure(safecrowd::engine::EngineWorld& world) override {
+        count = world.query().view<Tag>().size();
+    }
+
+    void update(safecrowd::engine::EngineWorld&,
+                const safecrowd::engine::EngineStepContext&) override {
+    }
+};
+
 }  // namespace
 
 SC_TEST(SystemScheduler_ExecutesSystemsInPhaseOrder) {
@@ -44,14 +72,26 @@ SC_TEST(SystemScheduler_ExecutesSystemsInPhaseOrder) {
     std::vector<int> log;
     scheduler.registerSystem(
         std::make_unique<RecordingSystem>(log, 1),
-        {.phase = safecrowd::engine::UpdatePhase::PostSimulation, .order = 0});
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .order = 0,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
     scheduler.registerSystem(
         std::make_unique<RecordingSystem>(log, 2),
-        {.phase = safecrowd::engine::UpdatePhase::PreSimulation, .order = 0});
+        {.phase = safecrowd::engine::UpdatePhase::PreSimulation,
+         .order = 0,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
 
     const safecrowd::engine::EngineStepContext ctx{};
-    scheduler.executePhase(safecrowd::engine::UpdatePhase::PreSimulation, world, ctx);
-    scheduler.executePhase(safecrowd::engine::UpdatePhase::PostSimulation, world, ctx);
+    scheduler.executePhase(
+        safecrowd::engine::UpdatePhase::PreSimulation,
+        safecrowd::engine::TriggerPolicy::EveryFrame,
+        world,
+        ctx);
+    scheduler.executePhase(
+        safecrowd::engine::UpdatePhase::PostSimulation,
+        safecrowd::engine::TriggerPolicy::EveryFrame,
+        world,
+        ctx);
 
     SC_EXPECT_EQ(log.size(), std::size_t{2});
     SC_EXPECT_EQ(log[0], 2);
@@ -76,7 +116,11 @@ SC_TEST(SystemScheduler_ExecutesSystemsInOrderWithinPhase) {
         {.phase = safecrowd::engine::UpdatePhase::FixedSimulation, .order = 0});
 
     const safecrowd::engine::EngineStepContext ctx{};
-    scheduler.executePhase(safecrowd::engine::UpdatePhase::FixedSimulation, world, ctx);
+    scheduler.executePhase(
+        safecrowd::engine::UpdatePhase::FixedSimulation,
+        safecrowd::engine::TriggerPolicy::FixedStep,
+        world,
+        ctx);
 
     SC_EXPECT_EQ(log.size(), std::size_t{2});
     SC_EXPECT_EQ(log[0], 20);
@@ -95,12 +139,34 @@ SC_TEST(SystemScheduler_PhaseIsolation_OtherPhaseSystemsNotExecuted) {
     std::vector<int> log;
     scheduler.registerSystem(
         std::make_unique<RecordingSystem>(log, 1),
-        {.phase = safecrowd::engine::UpdatePhase::PostSimulation, .order = 0});
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .order = 0,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
 
     const safecrowd::engine::EngineStepContext ctx{};
-    scheduler.executePhase(safecrowd::engine::UpdatePhase::FixedSimulation, world, ctx);
+    scheduler.executePhase(
+        safecrowd::engine::UpdatePhase::FixedSimulation,
+        safecrowd::engine::TriggerPolicy::FixedStep,
+        world,
+        ctx);
 
     SC_EXPECT_EQ(log.size(), std::size_t{0});
+}
+
+SC_TEST(SystemScheduler_ConfigureFlushesCommandsBetweenSystems) {
+    safecrowd::engine::EcsCore core;
+    safecrowd::engine::CommandBuffer buffer;
+    safecrowd::engine::SystemScheduler scheduler{core, buffer};
+    safecrowd::engine::EngineWorld world{core, buffer};
+
+    std::size_t configuredCount = 0;
+    scheduler.registerSystem(std::make_unique<ConfigureSpawnTagSystem>(), {});
+    scheduler.registerSystem(std::make_unique<ConfigureObserveTagSystem>(configuredCount), {});
+
+    scheduler.configure(world);
+
+    SC_EXPECT_EQ(configuredCount, std::size_t{1});
+    SC_EXPECT_EQ(world.query().view<Tag>().size(), std::size_t{1});
 }
 
 SC_TEST(SystemScheduler_FlushesCommandBufferAfterPhase) {
@@ -115,8 +181,31 @@ SC_TEST(SystemScheduler_FlushesCommandBufferAfterPhase) {
         {.phase = safecrowd::engine::UpdatePhase::FixedSimulation, .order = 0});
 
     const safecrowd::engine::EngineStepContext ctx{};
-    scheduler.executePhase(safecrowd::engine::UpdatePhase::FixedSimulation, world, ctx);
+    scheduler.executePhase(
+        safecrowd::engine::UpdatePhase::FixedSimulation,
+        safecrowd::engine::TriggerPolicy::FixedStep,
+        world,
+        ctx);
 
     const auto entities = safecrowd::engine::WorldQuery{core}.view<Tag>();
     SC_EXPECT_EQ(entities.size(), std::size_t{1});
+}
+
+SC_TEST(SystemScheduler_RegisterSystem_RejectsUnsupportedIntervalPolicy) {
+    safecrowd::engine::EcsCore core;
+    safecrowd::engine::CommandBuffer buffer;
+    safecrowd::engine::SystemScheduler scheduler{core, buffer};
+
+    std::vector<int> log;
+    bool threw = false;
+    try {
+        scheduler.registerSystem(
+            std::make_unique<RecordingSystem>(log, 1),
+            {.phase = safecrowd::engine::UpdatePhase::PreSimulation,
+             .triggerPolicy = safecrowd::engine::TriggerPolicy::Interval});
+    } catch (const std::exception&) {
+        threw = true;
+    }
+
+    SC_EXPECT_TRUE(threw);
 }
