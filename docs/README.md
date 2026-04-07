@@ -14,9 +14,11 @@
 
 - [architecture/프로젝트 구조.md](architecture/프로젝트 구조.md)
 - [process/GitHub Project.md](process/GitHub Project.md)
+- [process/Pathfinder 조사 기반 반영 계획.md](process/Pathfinder 조사 기반 반영 계획.md)
 - [product/개요서.md](product/개요서.md)
 - [product/사용자 시나리오.md](product/사용자 시나리오.md)
 - [product/위험 정의.md](product/위험 정의.md)
+- [product/고급 위험 모델.md](product/고급 위험 모델.md)
 - [product/Product Backlog.md](product/Product Backlog.md)
 
 ## 유지 규칙
