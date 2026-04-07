@@ -23,7 +23,12 @@ EngineConfig normalizeConfig(EngineConfig config) {
 
 EngineRuntime::EngineRuntime(EngineConfig config)
     : config_(normalizeConfig(config)),
+      world_(core_, buffer_),
       frameClock_(config_) {
+}
+
+void EngineRuntime::addSystem(std::unique_ptr<EngineSystem> system) {
+    systems_.push_back(std::move(system));
 }
 
 void EngineRuntime::initialize() {
@@ -31,6 +36,10 @@ void EngineRuntime::initialize() {
     stats_ = {};
     stats_.state = EngineState::Ready;
     ++runIndex_;
+
+    for (auto& system : systems_) {
+        system->configure(world_);
+    }
 }
 
 void EngineRuntime::play() {
@@ -67,6 +76,20 @@ void EngineRuntime::stepFrame(double deltaSeconds) {
         frameClock_.consumeFixedStep();
         ++stats_.fixedStepIndex;
         ++stats_.fixedStepsThisFrame;
+
+        const EngineStepContext ctx{
+            .frameIndex      = stats_.frameIndex,
+            .fixedStepIndex  = stats_.fixedStepIndex,
+            .alpha           = frameClock_.alpha(),
+            .runIndex        = runIndex_,
+            .derivedSeed     = 0,
+        };
+
+        for (auto& system : systems_) {
+            system->update(world_, ctx);
+        }
+
+        buffer_.flush(core_);
     }
 
     stats_.alpha = frameClock_.alpha();
