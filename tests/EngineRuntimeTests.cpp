@@ -1,7 +1,9 @@
 #include "TestSupport.h"
 
 #include <cstddef>
+#include <exception>
 #include <memory>
+#include <vector>
 
 #include "engine/EngineRuntime.h"
 
@@ -46,6 +48,19 @@ public:
     }
 
     void update(safecrowd::engine::EngineWorld&, const safecrowd::engine::EngineStepContext&) override {
+    }
+};
+
+class RecordPhaseSystem : public safecrowd::engine::EngineSystem {
+public:
+    std::vector<int>& log;
+    int               marker;
+
+    explicit RecordPhaseSystem(std::vector<int>& l, int value)
+        : log(l), marker(value) {}
+
+    void update(safecrowd::engine::EngineWorld&, const safecrowd::engine::EngineStepContext&) override {
+        log.push_back(marker);
     }
 };
 
@@ -117,6 +132,48 @@ SC_TEST(EngineRuntime_ConfigureCommands_AreVisibleToLaterSystems) {
     SC_EXPECT_EQ(runtime.world().query().view<Marker>().size(), std::size_t{1});
 }
 
+SC_TEST(EngineRuntime_ExecutesStartupAndFramePhases) {
+    std::vector<int> log;
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 0.25,
+        .maxCatchUpSteps = 4,
+        .baseSeed = 1,
+    });
+
+    runtime.addSystem(
+        std::make_unique<RecordPhaseSystem>(log, 10),
+        {.phase = safecrowd::engine::UpdatePhase::Startup,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+    runtime.addSystem(
+        std::make_unique<RecordPhaseSystem>(log, 20),
+        {.phase = safecrowd::engine::UpdatePhase::PreSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+    runtime.addSystem(
+        std::make_unique<RecordPhaseSystem>(log, 30),
+        {.phase = safecrowd::engine::UpdatePhase::FixedSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::FixedStep});
+    runtime.addSystem(
+        std::make_unique<RecordPhaseSystem>(log, 40),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+    runtime.addSystem(
+        std::make_unique<RecordPhaseSystem>(log, 50),
+        {.phase = safecrowd::engine::UpdatePhase::RenderSync,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(0.50);
+
+    SC_EXPECT_EQ(log.size(), std::size_t{6});
+    SC_EXPECT_EQ(log[0], 10);
+    SC_EXPECT_EQ(log[1], 20);
+    SC_EXPECT_EQ(log[2], 30);
+    SC_EXPECT_EQ(log[3], 30);
+    SC_EXPECT_EQ(log[4], 40);
+    SC_EXPECT_EQ(log[5], 50);
+}
+
 SC_TEST(EngineRuntime_Stop_ClearsWorldAndPendingCommandsBeforeNextRun) {
     safecrowd::engine::EngineRuntime runtime({
         .fixedDeltaTime = 0.25,
@@ -164,6 +221,23 @@ SC_TEST(EngineRuntime_PausedRuntime_DoesNotAdvanceSimulation) {
     runtime.play();
     runtime.stepFrame(0.25);
     SC_EXPECT_EQ(count, 2);
+}
+
+SC_TEST(EngineRuntime_AddSystem_RejectsUnsupportedIntervalTriggerPolicy) {
+    int count = 0;
+    safecrowd::engine::EngineRuntime runtime;
+
+    bool threw = false;
+    try {
+        runtime.addSystem(
+            std::make_unique<UpdateCounterSystem>(count),
+            {.phase = safecrowd::engine::UpdatePhase::PreSimulation,
+             .triggerPolicy = safecrowd::engine::TriggerPolicy::Interval});
+    } catch (const std::exception&) {
+        threw = true;
+    }
+
+    SC_EXPECT_TRUE(threw);
 }
 
 SC_TEST(EngineRuntimePauseAndStopResetLifecycleState) {

@@ -51,9 +51,14 @@ add_library(ecs_engine STATIC
     src/engine/FrameClock.h
     src/engine/WorldQuery.h
     src/engine/CommandBuffer.h
+    src/engine/UpdatePhase.h
+    src/engine/TriggerPolicy.h
+    src/engine/SystemDescriptor.h
+    src/engine/SystemScheduler.h
     src/engine/EntityRegistry.cpp
     src/engine/EngineRuntime.cpp
     src/engine/FrameClock.cpp
+    src/engine/SystemScheduler.cpp
 )
 
 target_include_directories(ecs_engine
@@ -112,6 +117,7 @@ if (BUILD_TESTING)
         tests/FacilityLayoutBuilderTests.cpp
         tests/WorldQueryTests.cpp
         tests/CommandBufferTests.cpp
+        tests/SystemSchedulerTests.cpp
     )
 
     target_include_directories(safecrowd_tests

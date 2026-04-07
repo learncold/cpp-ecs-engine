@@ -23,12 +23,14 @@ EngineConfig normalizeConfig(EngineConfig config) {
 
 EngineRuntime::EngineRuntime(EngineConfig config)
     : config_(normalizeConfig(config)),
+      scheduler_(core_, buffer_),
       world_(core_, buffer_),
       frameClock_(config_) {
 }
 
-void EngineRuntime::addSystem(std::unique_ptr<EngineSystem> system) {
-    systems_.push_back(std::move(system));
+void EngineRuntime::addSystem(std::unique_ptr<EngineSystem> system,
+                              SystemDescriptor descriptor) {
+    scheduler_.registerSystem(std::move(system), descriptor);
 }
 
 void EngineRuntime::initialize() {
@@ -39,10 +41,16 @@ void EngineRuntime::initialize() {
     stats_.state = EngineState::Ready;
     ++runIndex_;
 
-    for (auto& system : systems_) {
-        system->configure(world_);
-        buffer_.flush(core_);
-    }
+    scheduler_.configure(world_);
+
+    const EngineStepContext startupCtx{
+        .frameIndex      = stats_.frameIndex,
+        .fixedStepIndex  = stats_.fixedStepIndex,
+        .alpha           = 0.0,
+        .runIndex        = runIndex_,
+        .derivedSeed     = 0,
+    };
+    scheduler_.executeStartup(world_, startupCtx);
 }
 
 void EngineRuntime::play() {
@@ -82,12 +90,23 @@ void EngineRuntime::stepFrame(double deltaSeconds) {
     ++stats_.frameIndex;
     stats_.fixedStepsThisFrame = 0;
 
+    EngineStepContext ctx{
+        .frameIndex      = stats_.frameIndex,
+        .fixedStepIndex  = stats_.fixedStepIndex,
+        .alpha           = frameClock_.alpha(),
+        .runIndex        = runIndex_,
+        .derivedSeed     = 0,
+    };
+
+    scheduler_.executePhase(UpdatePhase::PreSimulation, TriggerPolicy::EveryFrame,
+                            world_, ctx);
+
     while (frameClock_.shouldRunFixedStep()) {
         frameClock_.consumeFixedStep();
         ++stats_.fixedStepIndex;
         ++stats_.fixedStepsThisFrame;
 
-        const EngineStepContext ctx{
+        ctx = EngineStepContext{
             .frameIndex      = stats_.frameIndex,
             .fixedStepIndex  = stats_.fixedStepIndex,
             .alpha           = frameClock_.alpha(),
@@ -95,14 +114,19 @@ void EngineRuntime::stepFrame(double deltaSeconds) {
             .derivedSeed     = 0,
         };
 
-        for (auto& system : systems_) {
-            system->update(world_, ctx);
-        }
-
-        buffer_.flush(core_);
+        scheduler_.executePhase(UpdatePhase::FixedSimulation, TriggerPolicy::FixedStep,
+                                world_, ctx);
     }
 
+    ctx.alpha = frameClock_.alpha();
+    scheduler_.executePhase(UpdatePhase::PostSimulation, TriggerPolicy::EveryFrame,
+                            world_, ctx);
+
     stats_.alpha = frameClock_.alpha();
+
+    ctx.alpha = stats_.alpha;
+    scheduler_.executePhase(UpdatePhase::RenderSync, TriggerPolicy::EveryFrame,
+                            world_, ctx);
 }
 
 EngineWorld& EngineRuntime::world() noexcept {
