@@ -118,6 +118,7 @@ if (BUILD_TESTING)
         tests/WorldQueryTests.cpp
         tests/CommandBufferTests.cpp
         tests/SystemSchedulerTests.cpp
+        tests/EngineIntegrationTests.cpp
     )
 
     target_include_directories(safecrowd_tests
