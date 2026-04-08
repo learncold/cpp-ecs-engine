@@ -8,6 +8,12 @@ skinparam shadowing false
 skinparam linetype ortho
 
 package "domain" {
+  abstract class PersistedArtifact {
+    artifactId
+    schema version
+    created at
+  }
+
   class RunResult {
     runId
     status
@@ -71,18 +77,23 @@ package "domain" {
   }
 }
 
+PersistedArtifact <|-- RunResult
+PersistedArtifact <|-- VariationSummary
+PersistedArtifact <|-- ScenarioComparison
+PersistedArtifact <|-- CumulativeArtifact
+
 RunResult *-- RunMetadata
 RunResult *-- MetricSummary
 RunResult o-- DoorHistory
 RunResult o-- RoomHistory
 RunResult o-- MeasurementRegionSeries
 RunResult o-- OccupantHistory : optional
-RunResult --> ArtifactIndex
+RunResult --> ArtifactIndex : raw artifact references
 
-VariationSummary *-- RunResult
+VariationSummary --> RunResult : aggregates persisted runs
 VariationSummary *-- MetricSummary : aggregate
-ScenarioComparison *-- VariationSummary : baseline + alternatives
-CumulativeArtifact --> VariationSummary : built from aggregated runs
+ScenarioComparison --> VariationSummary : baseline + alternatives
+CumulativeArtifact --> VariationSummary : summary bundle
 CumulativeArtifact --> ScenarioComparison : comparison payload
 CumulativeArtifact --> ArtifactIndex : canonical export references
 
@@ -98,6 +109,12 @@ note bottom of VariationSummary
   from a single deterministic run output.
 end note
 
+note bottom of ScenarioComparison
+  ScenarioComparison is also a persisted artifact.
+  It is not a screen-only delta view rebuilt
+  ad hoc every time the user opens comparison.
+end note
+
 note bottom of OccupantHistory
   Occupant history is optional by design.
   The core result pipeline should remain valid
@@ -107,8 +124,14 @@ end note
 note bottom of CumulativeArtifact
   Cumulative artifact is the canonical bundle
   used by export, comparison, and recommendation input.
-  It should reference detailed histories
+  It references persisted summaries and histories
   rather than duplicating every raw sample.
+end note
+
+note bottom of PersistedArtifact
+  Repository-managed result objects share
+  stable identity and schema versioning
+  so downstream workflows can reload them safely.
 end note
 
 @enduml

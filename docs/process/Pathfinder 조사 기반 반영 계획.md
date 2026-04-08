@@ -21,7 +21,7 @@
 - 제품 요구와 사용자 노출 위험 체계는 [위험 정의.md](../product/%EC%9C%84%ED%97%98%20%EC%A0%95%EC%9D%98.md)를 우선 기준으로 삼는다.
 - 상세 물리 모델과 연구 근거는 [고급 위험 모델.md](../product/%EA%B3%A0%EA%B8%89%20%EC%9C%84%ED%97%98%20%EB%AA%A8%EB%8D%B8.md)에 둔다.
 - 단, [고급 위험 모델.md](../product/%EA%B3%A0%EA%B8%89%20%EC%9C%84%ED%97%98%20%EB%AA%A8%EB%8D%B8.md)는 `Pathfinder 정합 확장`과 `연구 후보`를 함께 담는 참고 문서이며, 두 범주를 같은 우선순위로 취급하지 않는다.
-- backlog, UML, issue 제목/본문에서는 `병목/정체/탈출 지연`, `시야 제한 및 길찾기 저하`, `근접도 및 압박 전조`, `운영 갈등`의 4축과 `FacilityLayout/PopulationProfile/EnvironmentState/ControlPlan/ExecutionConfig` 입력 계약을 우선 용어로 사용한다.
+- backlog, UML, issue 제목/본문에서는 `병목/정체/탈출 지연`, `시야 제한 및 길찾기 저하`, `근접도 및 압박 전조`, `운영 갈등`의 4축과 `FacilityLayout/PopulationSpec/EnvironmentState/ControlPlan/ExecutionConfig` 입력 계약을 우선 용어로 사용한다.
 - 단, `추천 기능` 자체는 범위에서 빼지 않는다. 별도 문서로 분리하는 것은 추천 엔진의 상세 규칙과 최적화 로직이다.
 - 압사, 낙상, 역방향/교차류 독립 모델은 별도 설계 문서가 생기기 전까지 UML/issue 기본 범위에 올리지 않는다.
 
@@ -44,11 +44,12 @@
 | --- | --- | --- |
 | 공간 토폴로지 정규화 | `E1` | `Floor/Room/Wall/Door/Obstruction/Obstacle` 구분을 story 수준으로 명시 |
 | 커넥터 모델 | `E1`, `E3` | `stairs/ramp/escalator/walkway` 공통 connector + modifier 구조를 acceptance 기준에 반영 |
+| 통제 가능 구역 | `E1`, `E2` | `ControlZone`을 named room/door/connectors group으로 두고 구역 통제 구조를 acceptance/UML에 반영 |
 | 프로필 제약과 분포 파라미터 | `E2`, `E3` | usable connector restriction, 속도/가속/간격 분포, seed 재현성 보강 |
 | 출구 선택 비용 | `E2`, `E3` | 단순 nearest exit가 아니라 이동 시간/대기/잔여 경로 비용 구조를 명시 |
 | 행동/트리거/태그 | `E2` | 운영 이벤트를 단순 on/off가 아니라 행동 전환 모델로 구체화 |
 | 동적 인원 유입 | `E3` | 초기 배치 외에 source 기반 유입 story 추가 또는 `US-07` 확장 |
-| 결과 아티팩트 | `E4`, `E5`, `E7` | `door history`, `room history`, `measurement regions`, `cumulative JSON`, 선택적 `occupant history` 명시 |
+| 결과 아티팩트 | `E4`, `E5`, `E7` | `door history`, `room history`, `measurement regions`, persisted `ScenarioComparison`, `cumulative JSON`, 선택적 `occupant history` 명시 |
 | 반복 실행 | `E3`, `E5` | run/variation 구조와 Monte Carlo 요약 구분 보강 |
 | results viewer | `E5`, `E7` | 1차 확장 범위로 별도 story 후보 분리 |
 
@@ -102,11 +103,11 @@
 ### 추가할 UML 후보
 | 파일 | 목적 | 중심 레이어 |
 | --- | --- | --- |
-| `uml/domain-scenario-model.puml` | `FacilityLayout`, `Scenario`, `Variation`, `ExecutionConfig`, `PopulationSpec` 관계 고정 | `domain` |
-| `uml/domain-control-model.puml` | `Behavior`, `Trigger`, `OccupantTag`, `OperationalEvent`, `RouteChoicePolicy` 관계 정의 | `domain` |
-| `uml/engine-routing-and-connectors.puml` | room/door/connectors, path cost, dynamic obstacle, flow measurement 구조 정리 | `engine + domain boundary` |
-| `uml/domain-result-artifacts.puml` | `RunResult`, `DoorHistory`, `RoomHistory`, `MeasurementRegionSeries`, `OccupantHistory`, `CumulativeArtifact` 정리 | `domain` |
-| `uml/application-run-results-workflow.puml` | 시나리오 실행에서 결과 확인/비교/내보내기까지 UI 흐름 정리 | `application` |
+| `uml/domain-scenario-model.puml` | `FacilityLayout`, `ControlZone`, `Scenario`, `Variation`, `ExecutionConfig`, `PopulationSpec` 관계 고정 | `domain` |
+| `uml/domain-control-model.puml` | `Behavior`, `Trigger`, `OccupantTag`, `OperationalEvent`, `RouteChoicePolicy`, zone-targeted control 관계 정의 | `domain` |
+| `uml/engine-routing-and-connectors.puml` | room/door/connectors, `ControlZone`, path cost, dynamic obstacle, flow measurement 구조 정리 | `engine + domain boundary` |
+| `uml/domain-result-artifacts.puml` | `RunResult`, `DoorHistory`, `RoomHistory`, `MeasurementRegionSeries`, `OccupantHistory`, `ScenarioComparison`, `CumulativeArtifact` 정리 | `domain` |
+| `uml/application-run-results-workflow.puml` | 시나리오 실행에서 persisted result artifact 확인/비교/내보내기까지 UI 흐름 정리 | `application` |
 
 ### 도면 작성 순서
 1. `domain-scenario-model`
@@ -126,11 +127,11 @@
   - 정적 obstruction과 동적 obstacle을 어떻게 분리할 것인가
   - connector 공통 모델에 어떤 modifier를 둘 것인가
 - `domain-result-artifacts`
-  - run 단위, variation 단위, cumulative 단위를 어떻게 분리할 것인가
+  - run 단위, variation 단위, comparison 단위, cumulative 단위를 어떻게 분리할 것인가
   - 상세 occupant history를 항상 둘지 선택적으로 둘지
 - `application-run-results-workflow`
   - 작성/실행과 재생/분석을 같은 화면에 둘지 분리할지
-  - comparison, export, recommendation을 어느 화면 흐름으로 묶을지
+  - comparison, export, recommendation이 persisted artifact를 어떻게 읽을지
 
 ### UML 산출 규칙
 - 새 `.puml` 파일마다 대응 `해설.md`를 같이 만든다.

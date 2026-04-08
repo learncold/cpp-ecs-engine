@@ -22,7 +22,7 @@ package "domain" {
   [ScenarioBatchRunner\n(spawn baseline / variations)] as BatchRunner
   [SimulationSession\n(single run lifecycle)] as SimulationSession
   [ResultRepository\n(load / persist artifacts)] as ResultRepository
-  [ResultAggregator\n(summary / compare)] as ResultAggregator
+  [ResultAggregator\n(build persisted artifacts)] as ResultAggregator
   [AlternativeRecommendationService\n(candidate generation)] as RecommendationService
 }
 
@@ -32,6 +32,7 @@ package "engine" {
 }
 
 Workspace --> ScenarioEditor : author scenario family
+Workspace --> ResultRepository : reopen saved project
 ScenarioEditor --> RunControl : submit baseline / variation set
 RunControl --> BatchRunner : execute batch
 BatchRunner --> SimulationSession : spawn run
@@ -40,19 +41,19 @@ EngineRuntime --> RenderBridge : live frame snapshots
 RenderBridge --> LiveViewport : present runtime state
 
 BatchRunner --> ResultRepository : persist run artifacts
-ResultRepository --> RunResultsPanel : load run / variation summaries
+BatchRunner --> ResultAggregator : update higher-level artifacts
+ResultAggregator --> ResultRepository : persist variation / comparison / cumulative artifacts
+RunResultsPanel --> ResultRepository : load run / variation summaries
 RunResultsPanel --> ComparisonView : open baseline comparison
-ComparisonView --> ResultAggregator : refresh deltas
-ResultAggregator --> ResultRepository : read cumulative artifacts
+ComparisonView --> ResultRepository : load comparison / cumulative artifacts
 
 ComparisonView --> ExportDialog : export selected artifact bundle
 ExportDialog --> ResultRepository : resolve files
 
 ComparisonView --> RecommendationPanel : inspect recommendation evidence
-RecommendationPanel --> RecommendationService : generate candidates
-RecommendationService --> ResultRepository : read cumulative artifact
-RecommendationService --> ScenarioEditor : create recommended variation
-Workspace --> ResultRepository : reopen saved project
+RecommendationPanel --> RecommendationService : read evidence / scenarioize
+RecommendationService --> ResultRepository : read ScenarioComparison / CumulativeArtifact
+RecommendationPanel --> ScenarioEditor : open recommended variation draft
 
 note bottom of Workspace
   Authoring and analysis live in one project workspace,
@@ -65,6 +66,12 @@ note bottom of RunResultsPanel
   Comparison, export, and recommendation are downstream
   consumers of persisted result artifacts,
   not direct engine state readers.
+end note
+
+note bottom of ComparisonView
+  Comparison reads persisted comparison artifacts.
+  It should not trigger ad hoc domain-side
+  delta calculation as part of basic rendering.
 end note
 
 note bottom of RecommendationPanel

@@ -8,6 +8,29 @@ skinparam shadowing false
 skinparam linetype ortho
 
 package "domain" {
+  package "referenced contracts" {
+    class ControlZone {
+      zoneId
+      name
+    }
+
+    class Door {
+      doorId
+    }
+
+    class Connector {
+      connectorId
+    }
+
+    class DynamicSource {
+      sourceId
+    }
+
+    class DynamicObstacleRule {
+      ruleId
+    }
+  }
+
   class ControlPlan {
     planId
     event sequence
@@ -76,13 +99,23 @@ package "domain" {
   }
 
   class AccessRuleChange {
-    door or connector target
+    direct target
+    access mode
+  }
+
+  class ZoneAccessChange {
+    zone target
     access mode
   }
 
   class SourceRateChange {
     source target
     ingress delta
+  }
+
+  class DynamicObstacleActivation {
+    rule target
+    activation mode
   }
 }
 
@@ -91,6 +124,7 @@ ControlPlan *-- OccupantTag
 ControlPlan *-- Behavior
 ControlPlan *-- BehaviorBinding
 ControlPlan *-- RouteChoiceBinding
+ControlPlan ..> ControlZone : controllable groups
 
 OperationalEvent --> Trigger
 Trigger *-- TriggerCondition
@@ -108,7 +142,15 @@ PathCostModel *-- CostComponent
 
 OperationalEvent o-- BehaviorBinding : activate / replace
 OperationalEvent o-- AccessRuleChange
+OperationalEvent o-- ZoneAccessChange
 OperationalEvent o-- SourceRateChange
+OperationalEvent o-- DynamicObstacleActivation
+
+AccessRuleChange --> Door : target
+AccessRuleChange --> Connector : target
+ZoneAccessChange --> ControlZone : target
+SourceRateChange --> DynamicSource : target
+DynamicObstacleActivation --> DynamicObstacleRule : target
 
 note bottom of ControlPlan
   Control is not modeled as raw on/off flags only.
@@ -127,6 +169,13 @@ note bottom of PathCostModel
   Door choice is expressed as a weighted cost model.
   Typical components are current room travel time,
   queue time, and remaining route cost.
+end note
+
+note bottom of OperationalEvent
+  Event effects can target direct access points,
+  named control zones, dynamic sources,
+  and reusable obstacle rules without
+  collapsing them into one flag bucket.
 end note
 
 @enduml

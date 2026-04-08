@@ -12,12 +12,12 @@ package "application" {
 }
 
 package "domain" {
-  [ScenarioDefinition\n(layout / population /\nenvironment / control)] as ScenarioDefinition
+  [ScenarioDefinition\n(layout / population spec /\nenvironment / control)] as ScenarioDefinition
   [ExecutionConfig\n(time limit / sample /\nseed / repeats)] as ExecutionConfig
   [ScenarioCalibrationService\n(UI input -> internal params)] as Calibration
   [SimulationSession\n(single run orchestration)] as SimulationSession
   [ScenarioBatchRunner\n(baseline / alternatives /\nrepeated runs)] as BatchRunner
-  [ResultAggregator\n(metrics / heatmap / delta)] as ResultAggregator
+  [ResultAggregator\n(persisted summary /\ncomparison / cumulative)] as ResultAggregator
 }
 
 package "engine" {
@@ -38,7 +38,7 @@ ScenarioDefinition --> BatchRunner : baseline / alternatives
 BatchRunner --> Calibration : preset resolution
 Calibration --> SimulationSession : internal params
 BatchRunner --> SimulationSession : spawn runs
-BatchRunner --> ResultAggregator : summarize results
+BatchRunner --> ResultAggregator : build / update persisted artifacts
 SimulationSession --> EngineRuntime : initialize / play / stop
 SimulationSession --> EngineWorld : query / resources / commands
 App --> EngineRuntime : viewport only\n(optional)
@@ -64,9 +64,10 @@ note right of EcsCore
 end note
 
 note right of ResultAggregator
-  Scenario batches compare baseline vs alternatives,
-  preserve seed / repeat settings,
-  and emit metrics plus delta views.
+  Scenario batches preserve seed / repeat settings,
+  then build persisted variation summaries,
+  scenario comparisons, and cumulative artifacts
+  for export, recommendation, and result views.
 end note
 
 note right of App

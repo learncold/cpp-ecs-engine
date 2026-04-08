@@ -12,18 +12,34 @@ package "domain" {
     rooms
     doors
     connectors
+    control zones
   }
 
-  class ConnectorSpec {
+  class Room {
+    roomId
+  }
+
+  class Door {
+    doorId
+  }
+
+  class Connector {
+    connectorId
     kind
     endpoints
-    base traversal rule계단, 램프, 에스컬레이터, 보행로처럼 층간 또는 구간 연결이 필요한 경우 connector와 modifier를 함께 확정할 수 있다. 
+    base traversal rule
   }
 
   class ConnectorModifier {
     speed factor
     queue bias
     access rule
+  }
+
+  class ControlZone {
+    zoneId
+    member references
+    default access mode
   }
 
   class StaticObstruction {
@@ -53,6 +69,7 @@ package "domain" {
     room graph
     door graph
     connector edges
+    zone membership
   }
 }
 
@@ -81,6 +98,11 @@ package "engine" {
     throughput state
   }
 
+  class ZoneAccessOverrideState {
+    zone gates
+    active penalties
+  }
+
   class PathPlannerSystem {
     path query
     reroute update
@@ -99,8 +121,12 @@ package "engine" {
 }
 
 FacilityLayout --> RoutingTopologySnapshot : compile validated topology
-ConnectorSpec *-- ConnectorModifier
-FacilityLayout *-- ConnectorSpec
+Connector *-- ConnectorModifier
+FacilityLayout *-- Connector
+FacilityLayout *-- ControlZone
+ControlZone ..> Room : member rooms
+ControlZone ..> Door : member doors
+ControlZone ..> Connector : member connectors
 FacilityLayout *-- StaticObstruction
 FacilityLayout *-- DynamicObstacleRule
 FacilityLayout *-- MeasurementRegionSpec
@@ -108,20 +134,24 @@ RouteChoicePolicy --> PathCostModel
 
 RoutingTopologySnapshot --> NavigationGraph : load as resource
 RoutingTopologySnapshot --> ConnectorTraversalState : seed connector rules
+RoutingTopologySnapshot --> ZoneAccessOverrideState : seed zone membership
 DynamicObstacleRule --> DynamicObstacleField : runtime activation
 PathCostModel --> TravelCostEvaluator : configure weights
 DynamicObstacleField --> TravelCostEvaluator : penalty source
+ZoneAccessOverrideState --> TravelCostEvaluator : area gate / penalty
 NavigationGraph --> TravelCostEvaluator
 
 PathPlannerSystem --> NavigationGraph
 PathPlannerSystem --> TravelCostEvaluator
 PathPlannerSystem --> ConnectorTraversalState
+PathPlannerSystem --> ZoneAccessOverrideState
 FlowMeasurementService --> MeasurementSample
 MeasurementRegionSpec --> FlowMeasurementService : register measurement regions
 ConnectorTraversalState --> FlowMeasurementService : door / connector throughput
 EngineWorld --> NavigationGraph
 EngineWorld --> DynamicObstacleField
 EngineWorld --> ConnectorTraversalState
+EngineWorld --> ZoneAccessOverrideState
 EngineWorld --> FlowMeasurementService
 
 note bottom of RoutingTopologySnapshot
@@ -135,6 +165,12 @@ note bottom of DynamicObstacleField
   Dynamic obstacle rules update a separate runtime field
   so path cost and access control can change over time
   without rebuilding the whole graph every frame.
+end note
+
+note bottom of ControlZone
+  ControlZone is separate from measurement regions.
+  It is a named controllable group that feeds
+  runtime access overrides rather than result sampling.
 end note
 
 note bottom of FlowMeasurementService

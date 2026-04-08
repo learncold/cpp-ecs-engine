@@ -15,6 +15,7 @@ package "domain" {
       rooms
       doors
       connectors
+      control zones
       measurement regions
     }
 
@@ -47,12 +48,20 @@ package "domain" {
       accessibility gate
     }
 
+    class ControlZone {
+      zoneId
+      name
+      member references
+      default access mode
+    }
+
     class StaticObstruction {
       geometry
       clearance impact
     }
 
     class DynamicObstacleRule {
+      ruleId
       activation window
       affected area
     }
@@ -77,6 +86,7 @@ package "domain" {
     }
 
     class PopulationSpec {
+      population profiles
       initial placements
       dynamic sources
     }
@@ -125,6 +135,10 @@ Floor *-- Room
 FacilityLayout *-- Door
 FacilityLayout *-- Connector
 Connector *-- ConnectorModifier
+FacilityLayout *-- ControlZone
+ControlZone ..> Room : member rooms
+ControlZone ..> Door : member doors
+ControlZone ..> Connector : member connectors
 FacilityLayout *-- StaticObstruction
 FacilityLayout *-- DynamicObstacleRule
 FacilityLayout *-- MeasurementRegionSpec
@@ -147,6 +161,8 @@ PopulationSpec *-- DynamicSource
 InitialPlacement --> Room : anchor
 DynamicSource --> Room : source anchor
 PopulationProfile ..> Connector : usable restriction
+ControlPlan ..> ControlZone : zone-scoped control
+ControlPlan ..> DynamicObstacleRule : activate / deactivate rule
 
 note bottom of ScenarioDefinition
   Existing `ScenarioDefinition` aggregate is kept
@@ -162,11 +178,30 @@ note bottom of ScenarioVariation
   comparison and repeated execution.
 end note
 
+note bottom of PopulationSpec
+  PopulationSpec is the top-level population input contract.
+  It owns profile definitions, initial placements,
+  and source-based inflow settings together.
+end note
+
+note bottom of ControlZone
+  ControlZone stays lightweight on purpose.
+  It is a named room / door / connector group,
+  not a separate geometry-heavy runtime model.
+end note
+
 note bottom of DynamicSource
   Initial placement and source-based inflow
   are modeled separately so Sprint 1 execution
   can start simple and later add ingress logic
   without reshaping the whole scenario contract.
+end note
+
+note bottom of DynamicObstacleRule
+  The layout keeps reusable obstacle rules,
+  but activation belongs to ControlPlan
+  and runtime state rather than the
+  persistent topology itself.
 end note
 
 @enduml
