@@ -18,12 +18,14 @@
 ## `EngineWorld`
 - 개요: query, resources, commands를 묶은 월드 파사드다.
 - 목적: 외부 계층이 raw storage를 직접 만지지 않고도 월드에 접근할 수 있게 한다.
+- 접근 경계: `WorldQuery`는 외부에서 raw `EcsCore`로 직접 생성하지 않고 `EngineWorld::query()`를 통해 획득한다.
 - 유의사항: 단순 편의 객체가 아니라 엔진 접근 규칙을 강제하는 경계로 다뤄야 한다.
 - 후속 개선 사항: 읽기/쓰기 권한 분리 facade로 확장할 수 있다.
 
 ## `WorldQuery`
 - 개요: 엔티티와 컴포넌트 조회 및 값 접근 면이다.
 - 목적: 시스템이 필요한 컴포넌트 집합을 안전하게 순회하고 조회하거나 기존 컴포넌트 값을 갱신하게 한다.
+- 접근 경계: runtime과 시스템은 `EngineWorld`가 가진 query facade를 사용하고, raw ECS 기반 생성 경로는 엔진 내부 구현 세부로 남긴다.
 - 유의사항: 초기 구현은 전체 live entity 순회로 시작해도 되지만, query 중 entity 생성/삭제나 component 추가/제거 같은 구조 변경은 허용하면 안 된다.
 - 후속 개선 사항: query cache, signature index, iterator 최적화를 추가할 수 있다.
 

@@ -44,6 +44,7 @@ add_library(ecs_engine STATIC
     src/engine/EcsCore.h
     src/engine/EngineConfig.h
     src/engine/EngineRuntime.h
+    src/engine/EngineWorld.h
     src/engine/EngineState.h
     src/engine/EngineStats.h
     src/engine/EngineStepContext.h
@@ -58,6 +59,7 @@ add_library(ecs_engine STATIC
     src/engine/EntityRegistry.cpp
     src/engine/EngineRuntime.cpp
     src/engine/FrameClock.cpp
+    src/engine/internal/EngineWorldFactory.h
     src/engine/SystemScheduler.cpp
 )
 

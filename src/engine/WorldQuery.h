@@ -6,10 +6,10 @@
 
 namespace safecrowd::engine {
 
+class EngineWorld;
+
 class WorldQuery {
 public:
-    explicit WorldQuery(EcsCore& core) : core_(core) {}
-
     template <typename... Ts>
     [[nodiscard]] std::vector<Entity> view() const {
         Signature required{};
@@ -50,6 +50,10 @@ public:
     }
 
 private:
+    friend class EngineWorld;
+
+    explicit WorldQuery(EcsCore& core) : core_(core) {}
+
     EcsCore& core_;
 };
 

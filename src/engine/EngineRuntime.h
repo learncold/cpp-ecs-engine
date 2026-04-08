@@ -8,6 +8,7 @@
 #include "engine/EngineConfig.h"
 #include "engine/EngineStats.h"
 #include "engine/EngineSystem.h"
+#include "engine/EngineWorld.h"
 #include "engine/FrameClock.h"
 #include "engine/SystemDescriptor.h"
 #include "engine/SystemScheduler.h"

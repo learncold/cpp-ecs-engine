@@ -28,6 +28,7 @@ package "engine::api" {
     +view<T...>()
     +contains<T>(entity: Entity): bool
     +get<T>(entity: Entity): T&
+    -WorldQuery(core: EcsCore&)
   }
 
   class WorldResources {
@@ -178,6 +179,13 @@ note bottom of WorldCommands
   Mutation requests are recorded first.
   Systems do not mutate ECS storage immediately
   while iterating queries.
+end note
+
+note bottom of WorldQuery
+  Runtime and systems access query capabilities
+  through EngineWorld::query().
+  Raw ECS-backed construction stays behind
+  the engine facade boundary.
 end note
 
 note right of DeterministicRng

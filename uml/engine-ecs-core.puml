@@ -18,6 +18,7 @@ package "engine::api" {
     +view<T...>()
     +contains<T>(entity: Entity): bool
     +get<T>(entity: Entity): T&
+    -WorldQuery(core: EcsCore&)
   }
 
   class WorldCommands {
@@ -111,6 +112,8 @@ end note
 note bottom of WorldQuery
   The first implementation may iterate live entities
   and filter by signature without extra caches.
+  Upper layers obtain it through EngineWorld::query()
+  instead of constructing it directly.
   Higher-level query caching can be added later
   without changing the facade.
 end note
