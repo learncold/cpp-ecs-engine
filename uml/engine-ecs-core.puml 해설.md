@@ -12,12 +12,14 @@
 ## `EngineWorld`
 - 개요: ECS 코어에 접근하는 상위 파사드다.
 - 목적: runtime과 상위 계층이 raw registry 대신 동일한 진입점을 쓰도록 만든다.
+- 접근 경계: `WorldQuery` 같은 ECS 읽기 면도 직접 생성하지 않고 `EngineWorld::query()`를 통해서만 꺼내 쓴다.
 - 유의사항: 편의 객체처럼 보이더라도, 실제로는 계층 경계를 지키는 핵심 요소다.
 - 후속 개선 사항: 읽기/쓰기 분리 facade나 phase-aware facade로 나눌 수 있다.
 
 ## `WorldQuery`
 - 개요: ECS 컴포넌트 조회와 값 접근용 API다.
 - 목적: 필요한 컴포넌트 조합을 읽고 개별 엔티티의 컴포넌트 값을 조회하거나 갱신하게 한다.
+- 접근 경계: 상위 계층은 raw `EcsCore`를 받아 `WorldQuery`를 직접 만들지 않고, `EngineWorld`가 제공하는 query facade를 사용한다.
 - 유의사항: 초기에는 단순 signature 필터로 충분하지만, query 중 엔티티 생성/삭제나 컴포넌트 추가/제거 같은 구조 변경은 허용하지 않는 원칙이 중요하다.
 - 후속 개선 사항: cached query, typed iterator, optional access 지원을 확장할 수 있다.
 

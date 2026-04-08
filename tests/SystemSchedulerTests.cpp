@@ -8,6 +8,7 @@
 #include "engine/CommandBuffer.h"
 #include "engine/EcsCore.h"
 #include "engine/SystemScheduler.h"
+#include "engine/internal/EngineWorldFactory.h"
 
 namespace {
 
@@ -67,7 +68,7 @@ SC_TEST(SystemScheduler_ExecutesSystemsInPhaseOrder) {
 
     safecrowd::engine::EcsCore dummyCore;
     safecrowd::engine::CommandBuffer dummyBuffer;
-    safecrowd::engine::EngineWorld world{dummyCore, dummyBuffer};
+    auto world = safecrowd::engine::internal::EngineWorldFactory::create(dummyCore, dummyBuffer);
 
     std::vector<int> log;
     scheduler.registerSystem(
@@ -105,7 +106,7 @@ SC_TEST(SystemScheduler_ExecutesSystemsInOrderWithinPhase) {
 
     safecrowd::engine::EcsCore dummyCore;
     safecrowd::engine::CommandBuffer dummyBuffer;
-    safecrowd::engine::EngineWorld world{dummyCore, dummyBuffer};
+    auto world = safecrowd::engine::internal::EngineWorldFactory::create(dummyCore, dummyBuffer);
 
     std::vector<int> log;
     scheduler.registerSystem(
@@ -134,7 +135,7 @@ SC_TEST(SystemScheduler_PhaseIsolation_OtherPhaseSystemsNotExecuted) {
 
     safecrowd::engine::EcsCore dummyCore;
     safecrowd::engine::CommandBuffer dummyBuffer;
-    safecrowd::engine::EngineWorld world{dummyCore, dummyBuffer};
+    auto world = safecrowd::engine::internal::EngineWorldFactory::create(dummyCore, dummyBuffer);
 
     std::vector<int> log;
     scheduler.registerSystem(
@@ -157,7 +158,7 @@ SC_TEST(SystemScheduler_ConfigureFlushesCommandsBetweenSystems) {
     safecrowd::engine::EcsCore core;
     safecrowd::engine::CommandBuffer buffer;
     safecrowd::engine::SystemScheduler scheduler{core, buffer};
-    safecrowd::engine::EngineWorld world{core, buffer};
+    auto world = safecrowd::engine::internal::EngineWorldFactory::create(core, buffer);
 
     std::size_t configuredCount = 0;
     scheduler.registerSystem(std::make_unique<ConfigureSpawnTagSystem>(), {});
@@ -174,7 +175,7 @@ SC_TEST(SystemScheduler_FlushesCommandBufferAfterPhase) {
     safecrowd::engine::CommandBuffer buffer;
     safecrowd::engine::SystemScheduler scheduler{core, buffer};
 
-    safecrowd::engine::EngineWorld world{core, buffer};
+    auto world = safecrowd::engine::internal::EngineWorldFactory::create(core, buffer);
 
     scheduler.registerSystem(
         std::make_unique<SpawnTagSystem>(),
@@ -187,7 +188,7 @@ SC_TEST(SystemScheduler_FlushesCommandBufferAfterPhase) {
         world,
         ctx);
 
-    const auto entities = safecrowd::engine::WorldQuery{core}.view<Tag>();
+    const auto entities = world.query().view<Tag>();
     SC_EXPECT_EQ(entities.size(), std::size_t{1});
 }
 
