@@ -87,7 +87,7 @@ struct ControlPoint2D {
 struct SpawnZone2D {
     std::string id{};
     Polygon2D area{};
-    std::size_t targetAgentCount{ 0 }; // ÀÌ ±¸¿ª¿¡ »ı¼ºÇÒ ¿¡ÀÌÀüÆ® ¼ö
+    std::size_t targetAgentCount{ 0 }; // ì´ êµ¬ì—­ì— ìƒì„±í•  ì—ì´ì „íŠ¸ ìˆ˜
     ElementProvenance provenance{};
 };
 
@@ -99,7 +99,7 @@ struct FacilityLayout2D {
     std::vector<Connection2D> connections{};
     std::vector<Barrier2D> barriers{};
     std::vector<ControlPoint2D> controls{};
-    std::vector<SpawnZone2D> spawnXones{};
+    std::vector<SpawnZone2D> spawnZones{};
 };
 
 }  // namespace safecrowd::domain
