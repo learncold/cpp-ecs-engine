@@ -1,13 +1,18 @@
 #pragma once
 
 #include "domain/FacilityLayout2D.h"
+#include "domain/PopulationSpec.h"
 
 namespace safecrowd::domain {
 
-    class DemoFixtureService {
-    public:
-        // Sprint 1 데모를 위한 20x20 크기의 고정 맵을 생성
-        FacilityLayout2D createSprint1DemoLayout() const;
-    };
+struct DemoFixture {
+    FacilityLayout2D layout{};
+    PopulationSpec population{};
+};
+
+class DemoFixtureService {
+public:
+    DemoFixture createSprint1DemoFixture() const;
+};
 
 }  // namespace safecrowd::domain
