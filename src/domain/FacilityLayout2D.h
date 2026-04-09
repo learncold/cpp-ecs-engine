@@ -84,6 +84,13 @@ struct ControlPoint2D {
     ElementProvenance provenance{};
 };
 
+struct SpawnZone2D {
+    std::string id{};
+    Polygon2D area{};
+    std::size_t targetAgentCount{ 0 }; // 이 구역에 생성할 에이전트 수
+    ElementProvenance provenance{};
+};
+
 struct FacilityLayout2D {
     std::string id{};
     std::string name{};
@@ -92,6 +99,7 @@ struct FacilityLayout2D {
     std::vector<Connection2D> connections{};
     std::vector<Barrier2D> barriers{};
     std::vector<ControlPoint2D> controls{};
+    std::vector<SpawnZone2D> spawnZones{};
 };
 
 }  // namespace safecrowd::domain
