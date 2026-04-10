@@ -1,0 +1,13 @@
+<RCC>
+    <qresource prefix="/icons">
+        <file>icons/pause.svg</file>
+        <file>icons/stop.svg</file>
+        <file>icons/start.svg</file>
+        <file>icons/Ground.svg</file>
+        <file>icons/eraser.svg</file>
+        <file>icons/wall.svg</file>
+        <file>icons/exit.svg</file>
+        <file>icons/edit_agent.svg</file>
+        <file>icons/edit_map.svg</file>
+    </qresource>
+</RCC>

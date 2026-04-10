@@ -61,6 +61,7 @@ add_library(ecs_engine STATIC
     src/engine/FrameClock.cpp
     src/engine/internal/EngineWorldFactory.h
     src/engine/SystemScheduler.cpp
+    src/application/resources.qrc
 )
 
 target_include_directories(ecs_engine
