@@ -24,7 +24,7 @@ EngineConfig normalizeConfig(EngineConfig config) {
 EngineRuntime::EngineRuntime(EngineConfig config)
     : config_(normalizeConfig(config)),
       scheduler_(core_, buffer_),
-      world_(EngineWorld::ConstructionToken{}, core_, buffer_),
+      world_(EngineWorld::ConstructionToken{}, core_, resources_, buffer_),
       frameClock_(config_) {
 }
 

@@ -50,6 +50,7 @@ add_library(ecs_engine STATIC
     src/engine/EngineStepContext.h
     src/engine/EngineSystem.h
     src/engine/FrameClock.h
+    src/engine/ResourceStore.h
     src/engine/WorldQuery.h
     src/engine/CommandBuffer.h
     src/engine/UpdatePhase.h
@@ -128,6 +129,7 @@ if (BUILD_TESTING)
         tests/CommandBufferTests.cpp
         tests/SystemSchedulerTests.cpp
         tests/EngineIntegrationTests.cpp
+        tests/ResourceStoreTests.cpp
     )
 
     target_include_directories(safecrowd_tests
