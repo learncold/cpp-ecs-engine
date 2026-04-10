@@ -1,5 +1,5 @@
 @startuml application-run-results-workflow
-title SafeCrowd Application Run and Results Workflow
+title SafeCrowd Application End-to-End Workspace Workflow
 
 left to right direction
 skinparam componentStyle rectangle
@@ -8,76 +8,120 @@ skinparam shadowing false
 skinparam linetype ortho
 
 package "application" {
-  [Project Workspace\n(project open / save)] as Workspace
-  [Scenario Editor\n(layout / population / control)] as ScenarioEditor
-  [Run Control Panel\n(run / pause / stop / repeat)] as RunControl
+  [Project Workspace\n(shared project context)] as Workspace
+  [Project Navigator\n(new / open / save / recent)] as ProjectNavigator
+  [Project Save/Open\n(project persistence actions)] as ProjectIO
+  [Import Workflow UI\n(file select / reimport)] as ImportWorkflow
+  [Import Review\n(issues / approval / blocking)] as ImportReview
+  [Layout Correction\n(canvas / inspector)] as LayoutCorrection
+  [Scenario Library\n(baseline / alternatives /\nrecommended drafts)] as ScenarioLibrary
+  [Template Picker\n(template cards / prerequisites)] as TemplatePicker
+  [Scenario Editor\n(population / environment /\ncontrol / execution)] as ScenarioEditor
+  [Readiness Panel\n(blockers / run gate)] as ReadinessPanel
+  [Run Queue\n(selected variations / repeats)] as RunQueue
+  [Run Control Panel\n(run / pause / stop)] as RunControl
+  [Batch Progress\n(run / variation progress)] as BatchProgress
   [Live Viewport\n(runtime playback)] as LiveViewport
-  [Run Results Panel\n(run / variation summary)] as RunResultsPanel
+  [Heatmap Overlay\n(live / persisted toggle)] as HeatmapOverlay
+  [Run Results Panel\n(run summary)] as RunResultsPanel
+  [Variation Summary\n(repeated-run aggregate)] as VariationSummary
   [Comparison View\n(baseline vs alternatives)] as ComparisonView
-  [Export Dialog\n(report / artifact bundle)] as ExportDialog
-  [Recommendation Panel\n(evidence / scenarioize)] as RecommendationPanel
+  [Recommendation Drawer\n(evidence / scenarioize)] as RecommendationDrawer
+  [Export Dialog\n(canonical artifact bundle)] as ExportDialog
 }
 
 package "domain" {
-  [ScenarioBatchRunner\n(spawn baseline / variations)] as BatchRunner
+  [ProjectRepository\n(layout / scenarios /\nrun metadata / artifact index)] as ProjectRepository
+  [ImportOrchestrator\n(import / validation)] as ImportOrchestrator
+  [ScenarioTemplateCatalog\n(template defaults)] as TemplateCatalog
+  [ScenarioBatchRunner\n(queue / batch orchestration)] as BatchRunner
   [SimulationSession\n(single run lifecycle)] as SimulationSession
-  [ResultRepository\n(load / persist artifacts)] as ResultRepository
-  [ResultAggregator\n(build persisted artifacts)] as ResultAggregator
+  [ResultRepository\n(run / variation /\ncomparison / cumulative)] as ResultRepository
+  [ResultAggregator\n(update persisted summaries)] as ResultAggregator
   [AlternativeRecommendationService\n(candidate generation)] as RecommendationService
 }
 
 package "engine" {
   [EngineRuntime\n(playback control)] as EngineRuntime
-  [IRenderBridge\nframe sync] as RenderBridge
+  [IRenderBridge\n(frame sync)] as RenderBridge
 }
 
-Workspace --> ScenarioEditor : author scenario family
-Workspace --> ResultRepository : reopen saved project
-ScenarioEditor --> RunControl : submit baseline / variation set
-RunControl --> BatchRunner : execute batch
+Workspace --> ProjectNavigator : navigate project lifecycle
+ProjectNavigator --> ProjectIO : save / reopen workspace
+ProjectIO --> ProjectRepository : load / persist project workspace
+
+ProjectNavigator --> ImportWorkflow : import or reimport layout
+ImportWorkflow --> ImportOrchestrator : import file / choose rules
+ImportOrchestrator --> ImportReview : layout + issues
+ImportReview --> LayoutCorrection : inspect / fix blockers
+LayoutCorrection --> ProjectRepository : save corrected layout
+
+ProjectNavigator --> ScenarioLibrary : browse scenario family
+ScenarioLibrary --> TemplatePicker : quick-start new scenario
+TemplatePicker --> TemplateCatalog : list / instantiate templates
+TemplateCatalog --> ScenarioEditor : seed authoring defaults
+ScenarioLibrary --> ScenarioEditor : open baseline / alternative / recommended draft
+ScenarioEditor --> ReadinessPanel : validate required inputs
+ReadinessPanel --> RunQueue : enqueue valid scenarios
+ScenarioEditor --> ProjectRepository : save scenario family changes
+
+RunQueue --> BatchRunner : selected variations / repeats
+RunControl --> BatchRunner : start / pause / stop batch
+BatchRunner --> BatchProgress : publish current run / variation state
 BatchRunner --> SimulationSession : spawn run
 SimulationSession --> EngineRuntime : initialize / play / stop
 EngineRuntime --> RenderBridge : live frame snapshots
 RenderBridge --> LiveViewport : present runtime state
+HeatmapOverlay --> LiveViewport : live overlay selection
 
 BatchRunner --> ResultRepository : persist run artifacts
 BatchRunner --> ResultAggregator : update higher-level artifacts
 ResultAggregator --> ResultRepository : persist variation / comparison / cumulative artifacts
-RunResultsPanel --> ResultRepository : load run / variation summaries
-RunResultsPanel --> ComparisonView : open baseline comparison
-ComparisonView --> ResultRepository : load comparison / cumulative artifacts
+RunResultsPanel --> ResultRepository : load run summaries
+VariationSummary --> ResultRepository : load repeated-run aggregates
+RunResultsPanel --> VariationSummary : inspect aggregated run set
+HeatmapOverlay --> ResultRepository : load persisted heatmap layer
+VariationSummary --> ComparisonView : open baseline comparison
+ComparisonView --> ResultRepository : load ScenarioComparison / CumulativeArtifact
 
 ComparisonView --> ExportDialog : export selected artifact bundle
-ExportDialog --> ResultRepository : resolve files
+ExportDialog --> ResultRepository : resolve canonical export set
 
-ComparisonView --> RecommendationPanel : inspect recommendation evidence
-RecommendationPanel --> RecommendationService : read evidence / scenarioize
+ComparisonView --> RecommendationDrawer : inspect recommendation evidence
+RecommendationDrawer --> RecommendationService : read evidence / scenarioize
 RecommendationService --> ResultRepository : read ScenarioComparison / CumulativeArtifact
-RecommendationPanel --> ScenarioEditor : open recommended variation draft
+RecommendationDrawer --> ScenarioLibrary : create recommended variation draft
 
 note bottom of Workspace
-  Authoring and analysis live in one project workspace,
-  but the workflow still separates scenario editing
-  from results browsing and export.
+  The workspace keeps Project, Authoring, Run, and Analysis
+  in one context, but each step still has its own gate.
+  Layout review, scenario readiness, and persisted results
+  control which panels are available next.
 end note
 
-note bottom of RunResultsPanel
-  Application first lands on run / variation summaries.
-  Comparison, export, and recommendation are downstream
-  consumers of persisted result artifacts,
-  not direct engine state readers.
+note bottom of ProjectRepository
+  ProjectRepository stores layout, scenario family,
+  run / variation metadata, and the canonical artifact index.
+  It is distinct from the result repository on purpose.
+end note
+
+note bottom of ResultRepository
+  ResultRepository is analysis-only storage for persisted
+  run / variation / comparison / cumulative artifacts.
+  Reopening a project should not bypass ProjectRepository.
 end note
 
 note bottom of ComparisonView
-  Comparison reads persisted comparison artifacts.
-  It should not trigger ad hoc domain-side
-  delta calculation as part of basic rendering.
+  Comparison, export, and recommendation are downstream
+  consumers of persisted artifacts only.
+  The view must not trigger ad hoc delta calculation
+  from live engine state as part of normal rendering.
 end note
 
-note bottom of RecommendationPanel
-  Recommendation stays after the result pipeline.
-  It should consume stable cumulative artifacts and
-  comparison deltas rather than ad hoc live metrics.
+note bottom of HeatmapOverlay
+  Live overlays ride the render bridge during playback.
+  Post-run heatmaps come from persisted result artifacts
+  so analysis stays reproducible after the run ends.
 end note
 
 @enduml

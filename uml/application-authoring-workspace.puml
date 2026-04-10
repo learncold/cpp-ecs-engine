@@ -1,0 +1,78 @@
+@startuml application-authoring-workspace
+title SafeCrowd Application Authoring Workspace
+
+left to right direction
+skinparam componentStyle rectangle
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam linetype ortho
+
+package "application" {
+  [Project Navigator\n(new / open / save / recent)] as ProjectNavigator
+  [Project Save/Open\n(workspace persistence)] as ProjectIO
+  [Import Workflow UI\n(file select / reimport)] as ImportWorkflow
+  [Issue Review Panel\n(errors / warnings / approval)] as IssueReview
+  [Layout Canvas + Inspector\n(topology correction)] as LayoutCanvas
+  [Scenario Library\n(baseline / alternatives /\nrecommended drafts)] as ScenarioLibrary
+  [Scenario Template Picker\n(template cards / prerequisites)] as TemplatePicker
+  [Scenario Editor Tabs\n(population / environment /\ncontrol / execution)] as ScenarioEditorTabs
+  [Readiness Panel\n(required fields / blockers)] as ReadinessPanel
+  [Variation Diff List\n(changed items vs baseline)] as VariationDiffList
+}
+
+package "domain" {
+  [ProjectRepository\n(layout / scenario workspace)] as ProjectRepository
+  [ImportOrchestrator\n(import / validation)] as ImportOrchestrator
+  [ScenarioTemplateCatalog\n(template defaults /\nprerequisite checks)] as TemplateCatalog
+}
+
+ProjectNavigator --> ProjectIO : open / save project
+ProjectIO --> ProjectRepository : load / persist workspace
+
+ProjectNavigator --> ImportWorkflow : import or reimport layout
+ImportWorkflow --> ImportOrchestrator : import file / choose rules
+ImportOrchestrator --> IssueReview : layout + issues
+IssueReview --> LayoutCanvas : inspect blocker location
+LayoutCanvas --> ProjectRepository : save corrected layout
+
+ProjectNavigator --> ScenarioLibrary : browse scenario family
+ScenarioLibrary --> TemplatePicker : quick-start new scenario
+TemplatePicker --> TemplateCatalog : list / instantiate templates
+TemplateCatalog --> ScenarioEditorTabs : seed authoring defaults
+
+ScenarioLibrary --> ScenarioEditorTabs : open baseline / alternative / recommended
+ScenarioEditorTabs --> ReadinessPanel : validate inputs
+ScenarioEditorTabs --> VariationDiffList : record baseline deltas
+ScenarioEditorTabs --> ProjectRepository : save drafts / labels
+
+VariationDiffList --> ScenarioLibrary : trace scenario role
+ReadinessPanel --> ScenarioEditorTabs : highlight missing fields
+ReadinessPanel --> ScenarioLibrary : expose run-ready state
+
+note bottom of IssueReview
+  Blocking import issues live here first.
+  Run stays disabled until the layout is reviewed
+  and remaining blockers are cleared or accepted.
+end note
+
+note bottom of TemplatePicker
+  Template cards show intended use, risk axis,
+  and required layout features such as
+  multiple exits, connectors, or control zones.
+  Missing prerequisites must be visible before apply.
+end note
+
+note bottom of ScenarioLibrary
+  Baseline, alternatives, and recommended drafts
+  stay distinct in the library so comparison and
+  scenarioize flows keep their lineage clear.
+end note
+
+note bottom of VariationDiffList
+  Diff tracking records changed inputs such as
+  control events, route cost assumptions,
+  inflow settings, visibility conditions,
+  and template origin metadata.
+end note
+
+@enduml

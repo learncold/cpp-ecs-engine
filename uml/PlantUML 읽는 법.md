@@ -3,9 +3,10 @@
 ## 목적
 이 문서는 `uml/` 폴더의 PlantUML 다이어그램을 렌더링해서 볼 때, 각 요소와 선이 무엇을 뜻하는지 빠르게 이해할 수 있도록 정리한 문서이다.
 
-이 프로젝트에서는 크게 두 종류를 본다.
+이 프로젝트에서는 크게 세 종류를 본다.
 - 상위 구조를 보여주는 **component/package 중심 그림**
 - 엔진 내부 타입 관계를 보여주는 **class diagram**
+- UI 게이팅과 흐름을 보여주는 **state diagram**
 
 ---
 
@@ -46,6 +47,11 @@
 - 의미: 설계 의도, 제약, 구현 메모를 붙이는 설명 상자다.
 - 이 프로젝트 예시: `WorldCommands`가 즉시 mutation하지 않는다는 설명, `EcsCore`가 재사용 가능한 엔진 코어라는 설명
 - 읽는 법: 선과 박스만 보면 놓치기 쉬운 설계 규칙을 보충하는 텍스트다.
+
+### 상태 원과 상태 박스
+- 의미: 화면이나 워크플로가 어떤 상태를 거치며 전이되는지 표현한다.
+- 이 프로젝트 예시: `NoProject`, `ScenarioReady`, `ComparisonReady`
+- 읽는 법: "지금 UI가 어느 조건을 만족한 상태인가"와 "무슨 이벤트로 다음 상태로 가는가"를 본다.
 
 ---
 
@@ -97,6 +103,13 @@ PlantUML에서 선은 크게 두 가지를 같이 본다.
 - 읽는 법: "왼쪽이 오른쪽 인터페이스를 구현한다"
 - 예시:
   - `PackedComponentStorage ..|> IComponentStorage`
+
+### 상태도에서의 `-->`
+- 의미: 상태 전이
+- 읽는 법: "`A` 상태에서 어떤 이벤트나 조건이 만족되면 `B` 상태로 이동한다"
+- 예시:
+  - `ScenarioReady --> BatchRunning : Run clicked`
+  - `ComparisonReady --> RecommendationReady : ScenarioComparison + CumulativeArtifact ready`
 
 ### `..>`
 - 의미가 같은 표기가 여러 문맥에서 쓰일 수 있음
@@ -202,6 +215,10 @@ PlantUML에서 선은 크게 두 가지를 같이 본다.
 - 그렇다.
 - 이 프로젝트 UML에서는 노트에 실제 구현 규칙이 많이 들어 있다.
 - 예를 들어 deferred mutation, reusable engine, query cache 후순위 같은 정보는 노트를 봐야 정확히 이해된다.
+
+### 상태도는 어떤 용도로 보나?
+- application state diagram은 화면 구성을 보여주기보다 "버튼과 패널이 언제 활성화되는가"를 읽는 용도로 본다.
+- 따라서 상태명과 전이 라벨은 UI 문구이면서 동시에 요구사항 계약이기도 하다.
 
 ---
 

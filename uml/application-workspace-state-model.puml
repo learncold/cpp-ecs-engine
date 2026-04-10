@@ -1,0 +1,80 @@
+@startuml application-workspace-state-model
+title SafeCrowd Application Workspace State Model
+
+hide empty description
+skinparam shadowing false
+skinparam linetype ortho
+
+[*] --> NoProject
+
+NoProject --> LayoutNeedsReview : import layout / open pending project
+NoProject --> LayoutReady : open approved project
+
+LayoutNeedsReview --> LayoutReady : review approved\nblockers cleared
+LayoutNeedsReview --> NoProject : close project
+
+LayoutReady --> ScenarioDraftInvalid : new scenario / invalid edit
+LayoutReady --> ScenarioReady : open valid scenario
+LayoutReady --> NoProject : close project
+
+ScenarioDraftInvalid --> ScenarioReady : required fields satisfied
+ScenarioDraftInvalid --> LayoutNeedsReview : reimport adds blockers
+ScenarioDraftInvalid --> NoProject : close project
+
+ScenarioReady --> BatchRunning : Run clicked\n[approved layout && valid scenario]
+ScenarioReady --> LayoutNeedsReview : layout changed / review needed
+ScenarioReady --> NoProject : close project
+
+BatchRunning --> BatchPaused : Pause clicked
+BatchPaused --> BatchRunning : Resume clicked
+BatchRunning --> AggregationPending : batch finished
+BatchRunning --> ScenarioReady : Stop clicked
+BatchPaused --> ScenarioReady : Stop clicked
+
+AggregationPending --> ResultsAvailable : RunResult + VariationSummary persisted
+AggregationPending --> ScenarioReady : scenario changed / rerun requested
+
+ResultsAvailable --> ComparisonReady : baseline + alternative summary available
+ResultsAvailable --> ScenarioReady : edit scenario / rerun
+
+ComparisonReady --> RecommendationReady : ScenarioComparison + CumulativeArtifact ready
+ComparisonReady --> ResultsAvailable : alternative deselected
+ComparisonReady --> ScenarioReady : scenario family changed
+
+RecommendationReady --> ScenarioReady : scenarioize recommendation / edit draft
+RecommendationReady --> ComparisonReady : dismiss recommendation
+RecommendationReady --> NoProject : close project
+
+note right of LayoutNeedsReview
+  Run stays disabled while blocking import issues
+  or unapproved topology changes remain.
+end note
+
+note right of ScenarioReady
+  Run is enabled only when the layout is approved
+  and the selected scenario passes readiness checks.
+end note
+
+note right of AggregationPending
+  Live playback can be finished while persisted
+  variation / comparison artifacts are still
+  being assembled for downstream analysis.
+end note
+
+note right of ResultsAvailable
+  Run Results and Variation Summary can open here.
+  Export still waits for the canonical bundle.
+end note
+
+note right of ComparisonReady
+  Comparison is enabled only when a baseline and
+  at least one alternative VariationSummary exist.
+end note
+
+note right of RecommendationReady
+  Recommendation is enabled only when both
+  ScenarioComparison and CumulativeArtifact exist.
+  Export is enabled when the canonical bundle is ready.
+end note
+
+@enduml
