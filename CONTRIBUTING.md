@@ -67,6 +67,7 @@ PR 제목은 아래 형식을 따릅니다.
 - 아키텍처 규칙 점검 결과
 - 빌드/테스트 검증 결과 또는 미실행 사유
 - 남은 리스크나 후속 작업
+- docs/policy-only PR이고 변경 경로가 `docs/`, `uml/`, `CONTRIBUTING.md`, PR/issue template, `pr-policy.yml`에만 한정되면 `Related Issue`에는 `None (docs/policy-only PR)`를 사용합니다.
 
 ## 아키텍처 체크
 
