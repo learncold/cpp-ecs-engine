@@ -7,13 +7,23 @@
 
 ## `safecrowd_app (Qt App)`
 - 개요: Qt 기반 실행 파일과 사용자 인터페이스 진입점이다.
-- 목적: 시나리오 편집, 실행 제어, 결과 열람 같은 사용자 상호작용을 담당한다.
-- 유의사항: 비교 계산, 추천 규칙, ECS 세부 로직을 UI에 두지 않는다.
+- 목적: `Project`, `Authoring`, `Run`, `Analysis` 네 작업 영역을 묶어 사용자 흐름을 조정한다.
+- 유의사항: 비교 계산, 추천 규칙, ECS 세부 로직, 저장 포맷 세부를 UI에 두지 않는다.
+
+## `ProjectRepository`
+- 개요: 레이아웃, 시나리오 workspace, run/variation 메타데이터, artifact index를 저장하고 다시 여는 도메인 계약이다.
+- 목적: 프로젝트 복원과 결과 조회를 다른 책임으로 분리한다.
+- 유의사항: persisted 결과 분석 진입점으로 쓰지 않는다.
 
 ## `ScenarioDefinition`
 - 개요: SafeCrowd의 authoring aggregate다.
 - 목적: `FacilityLayout`, `PopulationSpec`, `EnvironmentState`, `ControlPlan`, `ExecutionConfig`를 한 실행 단위로 묶는다.
 - 유의사항: `PopulationProfile`은 상위 입력 계약이 아니라 `PopulationSpec`의 하위 요소로 유지한다.
+
+## `ScenarioTemplateCatalog`
+- 개요: authoring 기본값과 템플릿 빠른 시작 구성을 돌려주는 도메인 helper다.
+- 목적: 템플릿 카드 설명과 기본값 조합 규칙을 UI에서 분리한다.
+- 유의사항: 템플릿은 application의 카드 배치가 아니라 domain 계약으로 유지한다.
 
 ## `ExecutionConfig`
 - 개요: 제한시간, 샘플링 주기, seed, 반복 횟수 같은 실행 계약이다.
@@ -39,6 +49,16 @@
 - 개요: run 결과로부터 persisted variation/comparison/cumulative artifact를 생성하거나 갱신하는 도메인 서비스다.
 - 목적: 결과 화면, 내보내기, 추천이 같은 저장된 결과 계약을 읽게 만든다.
 - 유의사항: 화면 렌더링 시점의 ad hoc delta 계산기로 쓰지 않는다.
+
+## `ResultRepository`
+- 개요: run, variation, comparison, cumulative artifact를 저장하고 다시 여는 도메인 계약이다.
+- 목적: 결과 화면, 내보내기, 추천이 같은 persisted 결과 진입점을 사용하게 한다.
+- 유의사항: 프로젝트 복원은 이 저장소가 아니라 `ProjectRepository`를 통해 수행한다.
+
+## `AlternativeRecommendationService`
+- 개요: persisted comparison과 cumulative artifact를 읽어 운영 대안 후보를 생성하는 도메인 서비스다.
+- 목적: 추천을 설명 가능한 domain 정책으로 유지한다.
+- 유의사항: live runtime state를 직접 읽는 추천 경로를 만들지 않는다.
 
 ## `EngineRuntime`
 - 개요: 엔진 실행 루프와 수명주기를 관리하는 API 진입점이다.

@@ -27,6 +27,7 @@ private:
     QPushButton* startButton_{nullptr};
     QPushButton* pauseButton_{nullptr};
     QPushButton* stopButton_{nullptr};
+    QLabel* workspaceStageValue_{nullptr};
     QLabel* runtimeStateValue_{nullptr};
     QLabel* frameValue_{nullptr};
     QLabel* fixedStepValue_{nullptr};

@@ -8,16 +8,20 @@ skinparam shadowing false
 skinparam linetype ortho
 
 package "application" {
-  [safecrowd_app\n(Qt App)] as App
+  [safecrowd_app\n(Qt App / workspace shell)] as App
 }
 
 package "domain" {
+  [ProjectRepository\n(layout / scenario workspace /\nartifact index)] as ProjectRepository
   [ScenarioDefinition\n(layout / population spec /\nenvironment / control)] as ScenarioDefinition
+  [ScenarioTemplateCatalog\n(authoring defaults /\nquick-start templates)] as TemplateCatalog
   [ExecutionConfig\n(time limit / sample /\nseed / repeats)] as ExecutionConfig
   [ScenarioCalibrationService\n(UI input -> internal params)] as Calibration
   [SimulationSession\n(single run orchestration)] as SimulationSession
   [ScenarioBatchRunner\n(baseline / alternatives /\nrepeated runs)] as BatchRunner
   [ResultAggregator\n(persisted summary /\ncomparison / cumulative)] as ResultAggregator
+  [ResultRepository\n(run / variation /\ncomparison / cumulative)] as ResultRepository
+  [AlternativeRecommendationService\n(evidence-based candidates)] as RecommendationService
 }
 
 package "engine" {
@@ -31,14 +35,21 @@ package "engine" {
   [ECS Core\n(EntityRegistry / ComponentRegistry /\nPackedComponentStorage)] as EcsCore
 }
 
-App --> ScenarioDefinition : edit / persist
+App --> ProjectRepository : open / save workspace
+ProjectRepository --> ScenarioDefinition : load / persist authoring aggregate
+App --> ScenarioDefinition : edit authoring state
+App --> TemplateCatalog : instantiate templates
 App --> BatchRunner : run / compare
+App --> ResultRepository : load persisted analysis
 ExecutionConfig --> BatchRunner : experiment contract
 ScenarioDefinition --> BatchRunner : baseline / alternatives
 BatchRunner --> Calibration : preset resolution
 Calibration --> SimulationSession : internal params
 BatchRunner --> SimulationSession : spawn runs
 BatchRunner --> ResultAggregator : build / update persisted artifacts
+ResultAggregator --> ResultRepository : persist summaries
+RecommendationService --> ResultRepository : read comparison / cumulative artifacts
+App --> RecommendationService : scenarioize recommendation
 SimulationSession --> EngineRuntime : initialize / play / stop
 SimulationSession --> EngineWorld : query / resources / commands
 App --> EngineRuntime : viewport only\n(optional)
@@ -71,7 +82,18 @@ note right of ResultAggregator
 end note
 
 note right of App
-  Qt UI and app entry point
+  Qt UI and app entry point.
+  The application exposes Project / Authoring /
+  Run / Analysis workspaces and gates panel access
+  through layout review, scenario readiness,
+  and persisted-result availability.
+end note
+
+note right of ProjectRepository
+  ProjectRepository and ResultRepository stay separate.
+  Workspace restore goes through the project repository,
+  while persisted run / comparison analysis
+  goes through the result repository.
 end note
 
 @enduml

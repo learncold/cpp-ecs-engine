@@ -75,6 +75,9 @@ add_library(safecrowd_domain STATIC
     src/domain/SafeCrowdDomain.cpp
     src/domain/Geometry2D.h
     src/domain/PopulationSpec.h
+    src/domain/ScenarioAuthoring.h
+    src/domain/ProjectRepository.h
+    src/domain/ScenarioTemplateCatalog.h
     src/domain/RawImportModel.h
     src/domain/CanonicalGeometry.h
     src/domain/DemoFixtureService.h
