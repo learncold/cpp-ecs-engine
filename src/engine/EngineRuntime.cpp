@@ -36,6 +36,7 @@ void EngineRuntime::addSystem(std::unique_ptr<EngineSystem> system,
 void EngineRuntime::initialize() {
     frameClock_.reset();
     core_ = EcsCore{};
+    resources_ = ResourceStore{};
     buffer_ = CommandBuffer{};
     stats_ = {};
     stats_.state = EngineState::Ready;
@@ -70,6 +71,7 @@ void EngineRuntime::pause() {
 void EngineRuntime::stop() {
     frameClock_.reset();
     core_ = EcsCore{};
+    resources_ = ResourceStore{};
     buffer_ = CommandBuffer{};
     stats_ = {};
     stats_.state = EngineState::Stopped;

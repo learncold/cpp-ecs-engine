@@ -282,3 +282,25 @@ SC_TEST(EngineRuntime_WorldResources_AccessibleThroughEngineWorld) {
     SC_EXPECT_TRUE(runtime.world().resources().contains<SharedCounter>());
     SC_EXPECT_EQ(runtime.world().resources().get<SharedCounter>().value, 7);
 }
+
+SC_TEST(EngineRuntime_Stop_ClearsWorldResourcesBeforeNextRun) {
+    safecrowd::engine::EngineRuntime runtime;
+
+    runtime.world().resources().set(SharedCounter{11});
+    SC_EXPECT_TRUE(runtime.world().resources().contains<SharedCounter>());
+
+    runtime.stop();
+
+    SC_EXPECT_TRUE(!runtime.world().resources().contains<SharedCounter>());
+}
+
+SC_TEST(EngineRuntime_Initialize_ClearsExistingWorldResources) {
+    safecrowd::engine::EngineRuntime runtime;
+
+    runtime.world().resources().set(SharedCounter{13});
+    SC_EXPECT_TRUE(runtime.world().resources().contains<SharedCounter>());
+
+    runtime.initialize();
+
+    SC_EXPECT_TRUE(!runtime.world().resources().contains<SharedCounter>());
+}
