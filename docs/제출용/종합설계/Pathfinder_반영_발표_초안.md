@@ -87,5 +87,46 @@ run 요약, variation 요약, 비교, 누적 기록의 분리는, 개별 실행 
 # 슬라이드 10
 일부 User Story의 Acceptance Criteria가 변경되어 Sprint 별 배치도 조금씩 변경되었습니다.
 
-# 슬라이드 11 - 구현내용
-(추가 예정)
+# 슬라이드 11 - Engine 파트 구현 범위
+이제 구현 내용 중에서 제가 담당한 Engine 파트를 간단히 설명드리겠습니다.
+저희 프로젝트는 `application -> domain -> engine` 계층 구조를 유지하고 있는데, 여기서 Engine은 SafeCrowd에서 범용 ECS 실행 기반을 담당합니다.
+제가 구현한 범위는 크게 다섯 가지로, `EcsCore`, `WorldQuery`, `CommandBuffer`, `EngineRuntime`, `SystemScheduler`입니다.
+이 작업은 한 번에 큰 덩어리로 프로젝트에 구현한 것이 아니라, 이슈 단위로 쪼개서 브랜치와 PR 흐름으로 진행했습니다.
+예를 들어 이슈 `#8`에서는 `ComponentRegistry`와 `EcsCore`를, 이슈 `#9`에서는 `WorldQuery`를, 이슈 `#10`에서는 `CommandBuffer`를, 이슈 `#12`에서는 `EngineRuntime`을, 그리고 이슈 `#47`에서는 `SystemScheduler`를 구현했습니다.
+즉 엔티티와 컴포넌트를 저장하고 관리하는 코어부터, 시스템이 월드를 읽고 변경하는 방식, 그리고 실제 실행 루프와 스케줄링까지 단계적으로 확장한 것입니다.
+이번 구현의 목표는 단순히 데이터를 담는 자료구조를 만드는 것이 아니라, 이후 시뮬레이션 로직이 안정적으로 올라갈 수 있는 실행 환경을 먼저 구축하는 것이었습니다.
+
+# 슬라이드 12 - ECS 실행 구조 설계
+구조를 보면 먼저 `EcsCore`가 엔티티 생성과 삭제, 컴포넌트 추가와 제거를 통합 관리합니다.
+이때 컴포넌트가 추가되거나 제거되면 엔티티의 `Signature` 비트셋이 자동으로 갱신되도록 해서, 각 엔티티가 어떤 컴포넌트 조합을 가지고 있는지 일관되게 추적할 수 있도록 했습니다.
+그 위에서 `WorldQuery`는 시스템이 필요한 엔티티만 조회할 수 있는 읽기 전용 인터페이스를 제공합니다.
+반대로 구조 변경은 즉시 반영하지 않고, `CommandBuffer`와 `WorldCommands`를 통해 먼저 명령으로 기록한 뒤 나중에 한 번에 반영하도록 했습니다.
+이렇게 읽기와 쓰기를 분리하도록 구현한 이유는, 시스템 실행 중 월드 구조를 바로 바꾸면 순회 안정성이 깨질 수 있기 때문입니다.
+
+# 슬라이드 13 - Runtime과 Scheduler 구현 및 검증
+이 구조 위에서 `EngineRuntime`은 전체 실행을 담당하는 최소 오케스트레이터 역할을 합니다.
+프레임 시간을 누적한 뒤 `fixed timestep` 기준으로 필요한 만큼 simulation step을 반복 실행하고, 각 step마다 시스템이 호출되도록 구성했습니다.
+그리고 `SystemScheduler`에서는 시스템마다 `phase`와 `order`를 지정할 수 있게 해서, `Startup`, `PreSimulation`, `FixedSimulation`, `PostSimulation`, `RenderSync` 같은 단계별 실행 순서를 제어할 수 있도록 했습니다.
+또 각 phase가 끝나는 경계에서 `CommandBuffer`를 flush하도록 하여, 시스템이 실행되는 도중에는 구조 변경이 쌓이기만 하고 실제 반영은 일관된 시점에 일어나도록 했습니다.
+마지막으로 이 구현은 `EcsCore`, `WorldQuery`, `CommandBuffer`, `EngineRuntime`, `SystemScheduler` 각각에 대해 테스트 코드를 작성해 생명주기 관리, 조회 필터링, deferred mutation, fixed-step 실행, phase 순서 보장을 검증했습니다.
+정리하면, SafeCrowd에서 engine 파트 구현은 이후 도메인 시뮬레이션 로직을 안정적으로 올릴 수 있도록 ECS의 저장 구조와 실행 구조를 함께 구축한 작업이라고 말씀드릴 수 있습니다.
+
+# 슬라이드 14 - 2DMap
+도메인 계층의 구현 내용을 설명하기에 앞서 계층의 역할에 대해 설명하겠습니다. 도메인 계층은 시설 레이아웃 정의와 에이전트 이동 로직 등 시뮬레이션의 핵심 규칙과 데이터 구조를 포함하는 계층입니다. 시뮬레이션의 토대가 되는 Map은 FacilityLayout2D, Zone2D, Connection2D, Barrier2D, SpawnZone2D로 이루어져 있습니다.
+FacilityLayout2D는 전체 시뮬레이션의 최상위 컨테이너입니다.
+Zone2D는 보행자가 이동할 수 있는 구역,
+Connection2D는 구역과 구역을 잇는 통로,
+Barrier2D는 에이전트의 이동을 막는 고정 장애물,
+SpawnZone2D 에이전트의 생성 지점 역할을 수행합니다.
+출구는 Zone2D의 하위 속성으로 지정되고, 출구와 연결된 Connection2D 객체도 출구 속성을 갖습니다. 이 요소들은 에이전트의 경로 계산에 사용되고, 에이전트가 exitzone에 도달하면 도착한 것으로 판단하게 됩니다.
+
+# 슬라이드 15 - Agent
+스폰된 에이전트는 Position, Velocity, Goal, Agent 컴포넌트를 가집니다.
+Position은 에이전트의 좌표, Velocity는 에이전트의 이동 방향과 속도, Goal은 목적지와 도착 여부, Agent는 에이전트 개인의 물리적 크기나 이동 능력치 등의 고유 속성을 정의합니다.
+에이전트는 방향 벡터에 maxspeed 값을 곱해 이동 속도를 정합니다. 만약, 에이전트가 목적지에 도달했다면 goal의 도착 여부 값을 true로 설정하고 속도를 0으로 조정합니다.
+충돌 여부 탐지를 위해서는 이동 경로상에 있는 벽 데이터를 가져와 다음 프레임 위치가 벽과 충돌이 발생하는지 계산합니다. 충돌이 발생하지 않은 경우, 속도를 그대로 유지하고 충돌이 발생한 경우, 벽의 법선 벡터를 구해 벽을 따라 이동하도록 처리합니다.
+각 에이전트는 goal에 도착할 때까지 이 과정을 반복합니다.
+
+# 슬라이드 16 - Import module
+이 슬라이드는 Domain 계층에서 import 모듈이 도면 파일을 시뮬레이션에 사용할 수 있는 구조로 바꾸는 과정을 보여줍니다. 먼저 DxfImportService가 DXF 도면을 읽어 필요한 선과 도형 정보를 가져옵니다. 이 원본 정보는 RawImportModel에 한 번 보관해서, 나중에 문제가 생겼을 때 어떤 도면 요소에서 나온 것인지 추적할 수 있게 합니다. 그다음 CanonicalGeometry 단계에서 도면의 여러 요소를 벽, 출구, 보행 가능 영역처럼 공통된 의미로 정리합니다. 이후 FacilityLayoutBuilder가 이 정보를 방, 복도, 연결 통로 같은 시뮬레이션용 공간 구조로 변환합니다. 마지막으로 ImportValidationService가 출구 누락이나 끊긴 동선 같은 문제를 검사하고, ImportResult가 최종 결과와 문제 목록을 함께 넘겨서 사용자가 확인한 뒤 다음 단계로 넘어가게 합니다.
+
