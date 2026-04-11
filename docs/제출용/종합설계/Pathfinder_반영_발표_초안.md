@@ -89,3 +89,7 @@ run 요약, variation 요약, 비교, 누적 기록의 분리는, 개별 실행 
 
 # 슬라이드 11 - 구현내용
 (추가 예정)
+
+
+# 슬라이드 16 - Import module
+이 슬라이드는 Domain 계층에서 import 모듈이 도면 파일을 시뮬레이션에 사용할 수 있는 구조로 바꾸는 과정을 보여줍니다. 먼저 DxfImportService가 DXF 도면을 읽어 필요한 선과 도형 정보를 가져옵니다. 이 원본 정보는 RawImportModel에 한 번 보관해서, 나중에 문제가 생겼을 때 어떤 도면 요소에서 나온 것인지 추적할 수 있게 합니다. 그다음 CanonicalGeometry 단계에서 도면의 여러 요소를 벽, 출구, 보행 가능 영역처럼 공통된 의미로 정리합니다. 이후 FacilityLayoutBuilder가 이 정보를 방, 복도, 연결 통로 같은 시뮬레이션용 공간 구조로 변환합니다. 마지막으로 ImportValidationService가 출구 누락이나 끊긴 동선 같은 문제를 검사하고, ImportResult가 최종 결과와 문제 목록을 함께 넘겨서 사용자가 확인한 뒤 다음 단계로 넘어가게 합니다.
