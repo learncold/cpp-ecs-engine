@@ -1,32 +1,32 @@
 #include "domain/snapshot.h"
 #include "domain/AgentComponents.h"
-#include "domain/metrics.h"
+#include "domain/Metrics.h"
 #include "engine/ComponentRegistry.h"
 
 namespace safecrowd::domain {
 
-    // ÀÎÀÚ Å¸ÀÔÀ» safecrowd::engine::ComponentRegistry·Î ¸íÈ®È÷ ÁöÁ¤ (E0276 ÇØ°á)
+    // ì¸ì íƒ€ì…ì„ safecrowd::engine::ComponentRegistryë¡œ ëª…í™•íˆ ì§€ì • (E0276 í•´ê²°)
     SimulationSnapshot buildSnapshot(const safecrowd::engine::ComponentRegistry& registry, uint64_t frame, float time) {
         SimulationSnapshot snapshot;
         snapshot.frameIndex = frame;
         snapshot.simulationTime = time;
 
-        // ¿ì¸® ¿£ÁøÀÇ ÀúÀå¼Ò(Storage)¿¡¼­ µ¥ÀÌÅÍ¸¦ ·Îµå
+        // ìš°ë¦¬ ì—”ì§„ì˜ ì €ì¥ì†Œ(Storage)ì—ì„œ ë°ì´í„°ë¥¼ ë¡œë“œ
         auto& posStorage = registry.storageFor<Position>();
         auto& compStorage = registry.storageFor<CompressionData>();
 
         snapshot.agentCount = static_cast<uint32_t>(posStorage.size());
         snapshot.agents.reserve(snapshot.agentCount);
 
-        // PositionÀ» °¡Áø ¸ğµç ¿£Æ¼Æ¼¸¦ ¼øÈ¸ÇÏ¸ç ½º³À¼¦ »ı¼º
+        // Positionì„ ê°€ì§„ ëª¨ë“  ì—”í‹°í‹°ë¥¼ ìˆœíšŒí•˜ë©° ìŠ¤ëƒ…ìƒ· ìƒì„±
         for (const auto& entity : posStorage.getEntities()) {
-            // ÇØ´ç ¿£Æ¼Æ¼¿¡ ¾Ğ¹Ú ÁöÇ¥ µ¥ÀÌÅÍµµ ÀÖ´ÂÁö È®ÀÎ
+            // í•´ë‹¹ ì—”í‹°í‹°ì— ì••ë°• ì§€í‘œ ë°ì´í„°ë„ ìˆëŠ”ì§€ í™•ì¸
             if (!compStorage.contains(entity)) continue;
 
             const auto& pos = posStorage.get(entity);
             const auto& metrics = compStorage.get(entity);
 
-            // AgentSnapshot ±¸Á¶Ã¼¿¡ ¸ÂÃç µ¥ÀÌÅÍ »ğÀÔ
+            // AgentSnapshot êµ¬ì¡°ì²´ì— ë§ì¶° ë°ì´í„° ì‚½ì…
             snapshot.agents.push_back({
                 static_cast<uint32_t>(entity.index), // id
                 pos.value,                            // position (Point2D)
