@@ -1,4 +1,4 @@
-#include "domain/snapshot.h"
+#include "domain/Snapshot.h"
 #include "domain/AgentComponents.h"
 #include "domain/Metrics.h"
 #include "engine/ComponentRegistry.h"
