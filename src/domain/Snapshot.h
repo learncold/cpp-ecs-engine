@@ -2,7 +2,7 @@
 #include <vector>
 #include <cstdint>
 #include "domain/Geometry2D.h"
-#include "domain/metrics.h"
+#include "domain/Metrics.h"
 
 namespace safecrowd::engine {
     class ComponentRegistry;
@@ -23,7 +23,7 @@ namespace safecrowd::domain {
         std::vector<AgentSnapshot> agents;
     };
 
-    // ³×ÀÓ½ºÆäÀÌ½º¸¦ safecrowd::engineÀ¸·Î ¸í½Ã
+    // ë„¤ì„ìŠ¤í˜ì´ìŠ¤ë¥¼ safecrowd::engineìœ¼ë¡œ ëª…ì‹œ
     SimulationSnapshot buildSnapshot(const safecrowd::engine::ComponentRegistry& registry, uint64_t frame, float time);
 
 } // namespace safecrowd::domain
