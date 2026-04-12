@@ -94,6 +94,11 @@ add_library(safecrowd_domain STATIC
     src/domain/ImportValidationService.h
     src/domain/ImportValidationService.cpp
     src/domain/ImportContracts.h
+    src/domain/AgentComponents.h
+    src/domain/CompressionSystem.cpp
+    src/domain/Metrics.h
+    src/domain/Snapshot.cpp
+    src/domain/Snapshot.h
 )
 
 target_include_directories(safecrowd_domain

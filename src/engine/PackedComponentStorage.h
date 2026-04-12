@@ -61,6 +61,10 @@ public:
         return components_.size();
     }
 
+    [[nodiscard]] const std::vector<Entity>& getEntities() const noexcept {
+        return entities_;
+    }
+
 private:
     struct EntityHash {
         [[nodiscard]] std::size_t operator()(const Entity& entity) const noexcept {
