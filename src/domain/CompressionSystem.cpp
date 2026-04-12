@@ -1,7 +1,7 @@
 #include "domain/CompressionSystem.h"
 #include "domain/FacilityLayout2D.h"
 #include "domain/AgentComponents.h" 
-#include "domain/metrics.h"
+#include "domain/Metrics.h"
 #include <algorithm>
 #include <cmath>
 
@@ -23,18 +23,18 @@ namespace safecrowd::domain {
     }
 
     void CompressionSystem::update(engine::ComponentRegistry& registry, float dt) {
-        // ÇÊ¿äÇÑ ½ºÅä¸®ÁöµéÀ» ·Îµå
+        // í•„ìš”í•œ ìŠ¤í† ë¦¬ì§€ë“¤ì„ ë¡œë“œ
         auto& posStorage = registry.storageFor<Position>();
         auto& agentStorage = registry.storageFor<Agent>();
         auto& compStorage = registry.storageFor<CompressionData>();
 
-        // Barrier2D ½ºÅä¸®Áö°¡ ÀÖ´ÂÁö È®ÀÎ
+        // Barrier2D ìŠ¤í† ë¦¬ì§€ê°€ ìˆëŠ”ì§€ í™•ì¸
         if (!registry.isRegistered<Barrier2D>()) return;
         auto& barrierStorage = registry.storageFor<Barrier2D>();
 
-        // PositionÀ» °¡Áø ¸ğµç ¿£Æ¼Æ¼¸¦ ¼øÈ¸
+        // Positionì„ ê°€ì§„ ëª¨ë“  ì—”í‹°í‹°ë¥¼ ìˆœíšŒ
         for (const auto& entity : posStorage.getEntities()) {
-            // Agent¿Í CompressionData ÄÄÆ÷³ÍÆ®°¡ ¸ğµÎ ÀÖ´ÂÁö È®ÀÎ
+            // Agentì™€ CompressionData ì»´í¬ë„ŒíŠ¸ê°€ ëª¨ë‘ ìˆëŠ”ì§€ í™•ì¸
             if (!agentStorage.contains(entity) || !compStorage.contains(entity)) continue;
 
             const auto& pos = posStorage.get(entity);
@@ -43,7 +43,7 @@ namespace safecrowd::domain {
 
             float currentForce = 0.0f;
 
-            // [±ºÁß °£ ¾Ğ¹Ú]
+            // [êµ°ì¤‘ ê°„ ì••ë°•]
             for (const auto& otherEntity : posStorage.getEntities()) {
                 if (entity.index == otherEntity.index && entity.generation == otherEntity.generation) continue;
                 if (!agentStorage.contains(otherEntity)) continue;
@@ -59,7 +59,7 @@ namespace safecrowd::domain {
                 }
             }
 
-            // [º®/Àå¾Ö¹° ¾Ğ¹Ú]
+            // [ë²½/ì¥ì• ë¬¼ ì••ë°•]
             for (const auto& barrierEntity : barrierStorage.getEntities()) {
                 const auto& barrier = barrierStorage.get(barrierEntity);
                 const auto& vertices = barrier.geometry.vertices;
@@ -81,7 +81,7 @@ namespace safecrowd::domain {
 
             compression.force = currentForce;
 
-            // [°íÀ§Çè »óÅÂ ¾÷µ¥ÀÌÆ®]
+            // [ê³ ìœ„í—˜ ìƒíƒœ ì—…ë°ì´íŠ¸]
             const float FORCE_THRESHOLD = 0.5f;
             if (compression.force > FORCE_THRESHOLD) {
                 compression.exposure += dt;
