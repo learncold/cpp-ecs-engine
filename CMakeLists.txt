@@ -96,6 +96,7 @@ add_library(safecrowd_domain STATIC
     src/domain/ImportContracts.h
     src/domain/AgentComponents.h
     src/domain/CompressionSystem.cpp
+    src/domain/CompressionSystem.h
     src/domain/Metrics.h
     src/domain/Snapshot.cpp
     src/domain/Snapshot.h
