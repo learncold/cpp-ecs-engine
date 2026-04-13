@@ -236,7 +236,43 @@ SC_TEST(EngineRuntime_PausedRuntime_DoesNotAdvanceSimulation) {
     SC_EXPECT_EQ(count, 2);
 }
 
-SC_TEST(EngineRuntime_AddSystem_RejectsUnsupportedIntervalTriggerPolicy) {
+SC_TEST(EngineRuntime_IntervalSystemsFollowTheirPhaseCadence) {
+    int frameCadenceCount = 0;
+    int fixedCadenceCount = 0;
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 0.25,
+        .maxCatchUpSteps = 4,
+        .baseSeed = 1,
+    });
+
+    runtime.addSystem(
+        std::make_unique<UpdateCounterSystem>(frameCadenceCount),
+        {.phase = safecrowd::engine::UpdatePhase::PreSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::Interval,
+         .intervalTicks = 2});
+    runtime.addSystem(
+        std::make_unique<UpdateCounterSystem>(fixedCadenceCount),
+        {.phase = safecrowd::engine::UpdatePhase::FixedSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::Interval,
+         .intervalTicks = 2});
+
+    runtime.play();
+
+    runtime.stepFrame(0.50);
+    SC_EXPECT_EQ(frameCadenceCount, 1);
+    SC_EXPECT_EQ(fixedCadenceCount, 1);
+
+    runtime.stepFrame(0.25);
+    SC_EXPECT_EQ(frameCadenceCount, 1);
+    SC_EXPECT_EQ(fixedCadenceCount, 2);
+
+    runtime.stepFrame(0.25);
+    SC_EXPECT_EQ(frameCadenceCount, 2);
+    SC_EXPECT_EQ(fixedCadenceCount, 2);
+}
+
+SC_TEST(EngineRuntime_AddSystem_RejectsZeroIntervalTicks) {
     int count = 0;
     safecrowd::engine::EngineRuntime runtime;
 
@@ -245,12 +281,43 @@ SC_TEST(EngineRuntime_AddSystem_RejectsUnsupportedIntervalTriggerPolicy) {
         runtime.addSystem(
             std::make_unique<UpdateCounterSystem>(count),
             {.phase = safecrowd::engine::UpdatePhase::PreSimulation,
-             .triggerPolicy = safecrowd::engine::TriggerPolicy::Interval});
+             .triggerPolicy = safecrowd::engine::TriggerPolicy::Interval,
+             .intervalTicks = 0});
     } catch (const std::exception&) {
         threw = true;
     }
 
     SC_EXPECT_TRUE(threw);
+}
+
+SC_TEST(EngineRuntime_InitializeAndStop_ResetIntervalCadenceState) {
+    int count = 0;
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 0.25,
+        .maxCatchUpSteps = 4,
+        .baseSeed = 1,
+    });
+
+    runtime.addSystem(
+        std::make_unique<UpdateCounterSystem>(count),
+        {.phase = safecrowd::engine::UpdatePhase::FixedSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::Interval,
+         .intervalTicks = 3});
+
+    runtime.play();
+    runtime.stepFrame(0.25);
+    runtime.stepFrame(0.25);
+    SC_EXPECT_EQ(count, 1);
+
+    runtime.initialize();
+    runtime.stepFrame(0.25);
+    SC_EXPECT_EQ(count, 2);
+
+    runtime.stop();
+    runtime.play();
+    runtime.stepFrame(0.25);
+    SC_EXPECT_EQ(count, 3);
 }
 
 SC_TEST(EngineRuntimePauseAndStopResetLifecycleState) {

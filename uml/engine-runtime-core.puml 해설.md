@@ -50,6 +50,7 @@
 ## `SystemDescriptor`
 - 개요: 시스템의 phase, 순서, 간격, 의존성 제약을 설명하는 메타데이터다.
 - 목적: 시스템 실행 순서를 코드 바깥의 선언 정보로 표현하기 위해 필요하다.
+- 현재 구현 포인트: `TriggerPolicy::Interval`을 쓰는 시스템은 `intervalTicks`로 cadence를 선언하고, frame phase와 fixed-step phase에서 각각 자기 cadence 기준으로 판정된다.
 - 유의사항: descriptor가 너무 많은 실행 정책을 한꺼번에 품기 시작하면 scheduler가 과도하게 복잡해진다.
 - 후속 개선 사항: conflict validation, category grouping, debug print를 추가할 수 있다.
 
@@ -104,6 +105,7 @@
 ## `SystemScheduler`
 - 개요: 시스템 등록과 phase별 실행을 담당하는 스케줄러다.
 - 목적: 어떤 시스템이 언제 어떤 순서로 실행되는지 중앙에서 관리한다.
+- 현재 구현 포인트: phase 호출이 들어오면 descriptor의 `TriggerPolicy`를 직접 판정하고, `Interval`용 cadence 상태는 scheduler가 보관했다가 `initialize()`/`stop()` 경계에서 reset된다.
 - 유의사항: scheduler는 직접 도메인 규칙을 품는 객체가 아니라 실행 순서를 보장하는 범용 도구여야 한다.
 - 후속 개선 사항: descriptor validation, parallel phase, system profiling을 확장할 수 있다.
 

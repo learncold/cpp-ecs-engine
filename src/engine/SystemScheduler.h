@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -18,13 +19,14 @@ public:
     void registerSystem(std::unique_ptr<EngineSystem> system, SystemDescriptor descriptor);
     void configure(EngineWorld& world);
     void executeStartup(EngineWorld& world, const EngineStepContext& ctx);
-    void executePhase(UpdatePhase phase, TriggerPolicy triggerPolicy,
-                      EngineWorld& world, const EngineStepContext& ctx);
+    void executePhase(UpdatePhase phase, EngineWorld& world, const EngineStepContext& ctx);
+    void resetCadenceState();
 
 private:
     struct Entry {
         std::unique_ptr<EngineSystem> system;
         SystemDescriptor              descriptor;
+        std::uint32_t                 intervalCountdown{0};
     };
 
     EcsCore&       core_;
