@@ -8,8 +8,9 @@ class EngineWorldFactory {
 public:
     EngineWorldFactory() = delete;
 
-    [[nodiscard]] static EngineWorld create(EcsCore& core, CommandBuffer& buffer) {
-        return EngineWorld(EngineWorld::ConstructionToken{}, core, buffer);
+    [[nodiscard]] static EngineWorld create(EcsCore& core, ResourceStore& resources,
+                                            CommandBuffer& buffer) {
+        return EngineWorld(EngineWorld::ConstructionToken{}, core, resources, buffer);
     }
 };
 

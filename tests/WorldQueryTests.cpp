@@ -21,12 +21,14 @@ struct Velocity {
 static_assert(!std::is_constructible_v<safecrowd::engine::WorldQuery, safecrowd::engine::EcsCore&>);
 static_assert(!std::is_constructible_v<safecrowd::engine::EngineWorld,
                                        safecrowd::engine::EcsCore&,
+                                       safecrowd::engine::ResourceStore&,
                                        safecrowd::engine::CommandBuffer&>);
 
 SC_TEST(WorldQuery_ViewFiltersEntitiesBySignature) {
     safecrowd::engine::EcsCore core;
+    safecrowd::engine::ResourceStore resources;
     safecrowd::engine::CommandBuffer buffer;
-    auto world = safecrowd::engine::internal::EngineWorldFactory::create(core, buffer);
+    auto world = safecrowd::engine::internal::EngineWorldFactory::create(core, resources, buffer);
 
     const auto e1 = core.createEntity();
     const auto e2 = core.createEntity();
@@ -44,8 +46,9 @@ SC_TEST(WorldQuery_ViewFiltersEntitiesBySignature) {
 
 SC_TEST(WorldQuery_ViewReturnsEmptyIfTypeNotRegistered) {
     safecrowd::engine::EcsCore core;
+    safecrowd::engine::ResourceStore resources;
     safecrowd::engine::CommandBuffer buffer;
-    auto world = safecrowd::engine::internal::EngineWorldFactory::create(core, buffer);
+    auto world = safecrowd::engine::internal::EngineWorldFactory::create(core, resources, buffer);
 
     static_cast<void>(core.createEntity());
 
@@ -55,8 +58,9 @@ SC_TEST(WorldQuery_ViewReturnsEmptyIfTypeNotRegistered) {
 
 SC_TEST(WorldQuery_ViewExcludesDestroyedEntities) {
     safecrowd::engine::EcsCore core;
+    safecrowd::engine::ResourceStore resources;
     safecrowd::engine::CommandBuffer buffer;
-    auto world = safecrowd::engine::internal::EngineWorldFactory::create(core, buffer);
+    auto world = safecrowd::engine::internal::EngineWorldFactory::create(core, resources, buffer);
 
     const auto e1 = core.createEntity();
     core.addComponent(e1, Position{});
@@ -72,8 +76,9 @@ SC_TEST(WorldQuery_ViewExcludesDestroyedEntities) {
 
 SC_TEST(WorldQuery_ContainsReflectsComponentPresence) {
     safecrowd::engine::EcsCore core;
+    safecrowd::engine::ResourceStore resources;
     safecrowd::engine::CommandBuffer buffer;
-    auto world = safecrowd::engine::internal::EngineWorldFactory::create(core, buffer);
+    auto world = safecrowd::engine::internal::EngineWorldFactory::create(core, resources, buffer);
 
     const auto e = core.createEntity();
     core.addComponent(e, Position{});
@@ -84,8 +89,9 @@ SC_TEST(WorldQuery_ContainsReflectsComponentPresence) {
 
 SC_TEST(WorldQuery_GetReturnsComponentRef) {
     safecrowd::engine::EcsCore core;
+    safecrowd::engine::ResourceStore resources;
     safecrowd::engine::CommandBuffer buffer;
-    auto world = safecrowd::engine::internal::EngineWorldFactory::create(core, buffer);
+    auto world = safecrowd::engine::internal::EngineWorldFactory::create(core, resources, buffer);
 
     const auto e = core.createEntity();
     core.addComponent(e, Position{3.0f, 4.0f});
