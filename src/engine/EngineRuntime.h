@@ -10,6 +10,7 @@
 #include "engine/EngineSystem.h"
 #include "engine/EngineWorld.h"
 #include "engine/FrameClock.h"
+#include "engine/ResourceStore.h"
 #include "engine/SystemDescriptor.h"
 #include "engine/SystemScheduler.h"
 
@@ -39,6 +40,7 @@ private:
     EngineConfig    config_;
     EngineStats     stats_;
     EcsCore         core_;
+    ResourceStore   resources_;
     CommandBuffer   buffer_;
     SystemScheduler scheduler_;
     EngineWorld     world_;

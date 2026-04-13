@@ -4,7 +4,6 @@
 #include "engine/EngineStepContext.h"
 
 namespace safecrowd::engine {
-
 class EngineSystem {
 public:
     virtual ~EngineSystem() = default;
