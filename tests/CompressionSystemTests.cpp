@@ -8,6 +8,7 @@
 #include "domain/Metrics.h"
 #include "engine/CommandBuffer.h"
 #include "engine/EcsCore.h"
+#include "engine/ResourceStore.h"
 #include "engine/internal/EngineWorldFactory.h"
 
 namespace {
@@ -47,8 +48,9 @@ void addBarrier(EcsCore& core,
 
 SC_TEST(CompressionSystem_UpdatesAgentOverlapWithoutBarrierEntitiesAndPreservesExposure) {
     EcsCore core;
+    safecrowd::engine::ResourceStore resources;
     CommandBuffer buffer;
-    auto world = safecrowd::engine::internal::EngineWorldFactory::create(core, buffer);
+    auto world = safecrowd::engine::internal::EngineWorldFactory::create(core, resources, buffer);
 
     const Entity first = addAgent(core, 0.0, 0.0);
     const Entity second = addAgent(core, 0.0, 0.0);
@@ -74,8 +76,9 @@ SC_TEST(CompressionSystem_UpdatesAgentOverlapWithoutBarrierEntitiesAndPreservesE
 
 SC_TEST(CompressionSystem_CombinesExposureWithCurrentForceForCriticalState) {
     EcsCore core;
+    safecrowd::engine::ResourceStore resources;
     CommandBuffer buffer;
-    auto world = safecrowd::engine::internal::EngineWorldFactory::create(core, buffer);
+    auto world = safecrowd::engine::internal::EngineWorldFactory::create(core, resources, buffer);
 
     const Entity first = addAgent(core, 0.0, 0.0);
     addAgent(core, 0.0, 0.0);

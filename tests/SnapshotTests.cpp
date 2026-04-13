@@ -7,6 +7,7 @@
 #include "domain/Snapshot.h"
 #include "engine/CommandBuffer.h"
 #include "engine/EcsCore.h"
+#include "engine/ResourceStore.h"
 #include "engine/internal/EngineWorldFactory.h"
 
 namespace {
@@ -40,8 +41,9 @@ std::uint64_t packEntityId(Entity entity) {
 
 SC_TEST(SimulationSnapshot_OmitsCompressionChannelsWhenMetricsAreIncomplete) {
     EcsCore core;
+    safecrowd::engine::ResourceStore resources;
     CommandBuffer buffer;
-    auto world = safecrowd::engine::internal::EngineWorldFactory::create(core, buffer);
+    auto world = safecrowd::engine::internal::EngineWorldFactory::create(core, resources, buffer);
 
     addAgent(core, 0.0, 0.0, true);
     addAgent(core, 1.0, 1.0, false);
@@ -61,8 +63,9 @@ SC_TEST(SimulationSnapshot_OmitsCompressionChannelsWhenMetricsAreIncomplete) {
 
 SC_TEST(SimulationSnapshot_BuildsAlignedCompressionChannelsWhenMetricsExistForAllAgents) {
     EcsCore core;
+    safecrowd::engine::ResourceStore resources;
     CommandBuffer buffer;
-    auto world = safecrowd::engine::internal::EngineWorldFactory::create(core, buffer);
+    auto world = safecrowd::engine::internal::EngineWorldFactory::create(core, resources, buffer);
 
     const Entity first = addAgent(core, 0.0, 0.0, true);
     const Entity second = addAgent(core, 2.0, 3.0, true);
@@ -89,8 +92,9 @@ SC_TEST(SimulationSnapshot_BuildsAlignedCompressionChannelsWhenMetricsExistForAl
 
 SC_TEST(SimulationSnapshot_PacksEntityGenerationIntoStableIds) {
     EcsCore core(1);
+    safecrowd::engine::ResourceStore resources;
     CommandBuffer buffer;
-    auto world = safecrowd::engine::internal::EngineWorldFactory::create(core, buffer);
+    auto world = safecrowd::engine::internal::EngineWorldFactory::create(core, resources, buffer);
 
     const Entity original = addAgent(core, 0.0, 0.0, false);
     core.destroyEntity(original);
