@@ -1,9 +1,23 @@
 #include "domain/SafeCrowdDomain.h"
 
+#include <memory>
+
+#include "domain/CompressionSystem.h"
+#include "engine/SystemDescriptor.h"
+#include "engine/TriggerPolicy.h"
+#include "engine/UpdatePhase.h"
+
 namespace safecrowd::domain {
 
 SafeCrowdDomain::SafeCrowdDomain(engine::EngineRuntime& runtime)
     : runtime_(runtime) {
+    runtime_.addSystem(
+        std::make_unique<CompressionSystem>(runtime_.config().fixedDeltaTime),
+        {
+            .phase = engine::UpdatePhase::FixedSimulation,
+            .order = 0,
+            .triggerPolicy = engine::TriggerPolicy::FixedStep,
+        });
 }
 
 void SafeCrowdDomain::start() {
@@ -30,6 +44,19 @@ SimulationSummary SafeCrowdDomain::summary() const {
         .fixedStepIndex = stats.fixedStepIndex,
         .alpha = stats.alpha,
     };
+}
+
+SimulationSnapshot SafeCrowdDomain::snapshot() const {
+    const auto& stats = runtime_.stats();
+    const double simulationTime =
+        (static_cast<double>(stats.fixedStepIndex) + stats.alpha) *
+        runtime_.config().fixedDeltaTime;
+
+    return buildSnapshot(
+        runtime_.world().query(),
+        stats.frameIndex,
+        stats.fixedStepIndex,
+        simulationTime);
 }
 
 engine::EngineRuntime& SafeCrowdDomain::runtime() noexcept {
