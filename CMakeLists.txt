@@ -125,6 +125,8 @@ if (BUILD_TESTING)
         tests/EngineRuntimeTests.cpp
         tests/PackedComponentStorageTests.cpp
         tests/SafeCrowdDomainTests.cpp
+        tests/CompressionSystemTests.cpp
+        tests/SnapshotTests.cpp
         tests/EcsCoreTests.cpp
         tests/ImportContractsTests.cpp
         tests/DxfImportServiceTests.cpp

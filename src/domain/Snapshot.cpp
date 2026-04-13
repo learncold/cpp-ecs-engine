@@ -1,40 +1,98 @@
 #include "domain/Snapshot.h"
+
 #include "domain/AgentComponents.h"
 #include "domain/Metrics.h"
-#include "engine/ComponentRegistry.h"
+#include "engine/Entity.h"
+#include "engine/WorldQuery.h"
 
 namespace safecrowd::domain {
+namespace {
 
-    // 인자 타입을 safecrowd::engine::ComponentRegistry로 명확히 지정 (E0276 해결)
-    SimulationSnapshot buildSnapshot(const safecrowd::engine::ComponentRegistry& registry, uint64_t frame, float time) {
-        SimulationSnapshot snapshot;
-        snapshot.frameIndex = frame;
-        snapshot.simulationTime = time;
+std::uint64_t packEntityId(engine::Entity entity) {
+    return (static_cast<std::uint64_t>(entity.generation) << 32U) |
+           static_cast<std::uint64_t>(entity.index);
+}
 
-        // 우리 엔진의 저장소(Storage)에서 데이터를 로드
-        auto& posStorage = registry.storageFor<Position>();
-        auto& compStorage = registry.storageFor<CompressionData>();
+bool hasCompressionMetricsForAllAgents(const engine::WorldQuery& query,
+                                       const std::vector<engine::Entity>& agentEntities) {
+    if (agentEntities.empty()) {
+        return false;
+    }
 
-        snapshot.agentCount = static_cast<uint32_t>(posStorage.size());
-        snapshot.agents.reserve(snapshot.agentCount);
-
-        // Position을 가진 모든 엔티티를 순회하며 스냅샷 생성
-        for (const auto& entity : posStorage.getEntities()) {
-            // 해당 엔티티에 압박 지표 데이터도 있는지 확인
-            if (!compStorage.contains(entity)) continue;
-
-            const auto& pos = posStorage.get(entity);
-            const auto& metrics = compStorage.get(entity);
-
-            // AgentSnapshot 구조체에 맞춰 데이터 삽입
-            snapshot.agents.push_back({
-                static_cast<uint32_t>(entity.index), // id
-                pos.value,                            // position (Point2D)
-                metrics                               // metrics (CompressionData)
-                });
+    for (const auto entity : agentEntities) {
+        if (!query.contains<CompressionData>(entity)) {
+            return false;
         }
+    }
 
+    return true;
+}
+
+}  // namespace
+
+const SnapshotScalarChannel* SimulationSnapshot::findScalarChannel(std::string_view key) const noexcept {
+    for (const auto& channel : scalarChannels) {
+        if (channel.key == key) {
+            return &channel;
+        }
+    }
+
+    return nullptr;
+}
+
+const SnapshotFlagChannel* SimulationSnapshot::findFlagChannel(std::string_view key) const noexcept {
+    for (const auto& channel : flagChannels) {
+        if (channel.key == key) {
+            return &channel;
+        }
+    }
+
+    return nullptr;
+}
+
+SimulationSnapshot buildSnapshot(const engine::WorldQuery& query,
+                                 std::uint64_t frame,
+                                 std::uint64_t fixedStep,
+                                 double simulationTime) {
+    SimulationSnapshot snapshot;
+    snapshot.frameIndex = frame;
+    snapshot.fixedStepIndex = fixedStep;
+    snapshot.simulationTime = simulationTime;
+
+    const auto agentEntities = query.view<Position, Agent>();
+    snapshot.agentCount = static_cast<std::uint32_t>(agentEntities.size());
+    snapshot.agentIds.reserve(snapshot.agentCount);
+    snapshot.positions.reserve(snapshot.agentCount);
+
+    for (const auto entity : agentEntities) {
+        snapshot.agentIds.push_back(packEntityId(entity));
+        snapshot.positions.push_back(query.get<Position>(entity).value);
+    }
+
+    if (!hasCompressionMetricsForAllAgents(query, agentEntities)) {
         return snapshot;
     }
 
-} // namespace safecrowd::domain
+    SnapshotScalarChannel forceChannel{std::string(kCompressionForceChannelName), {}};
+    SnapshotScalarChannel exposureChannel{std::string(kCompressionExposureChannelName), {}};
+    SnapshotFlagChannel criticalChannel{std::string(kCompressionCriticalChannelName), {}};
+
+    forceChannel.values.reserve(snapshot.agentCount);
+    exposureChannel.values.reserve(snapshot.agentCount);
+    criticalChannel.values.reserve(snapshot.agentCount);
+
+    for (const auto entity : agentEntities) {
+        const auto& metrics = query.get<CompressionData>(entity);
+        forceChannel.values.push_back(metrics.force);
+        exposureChannel.values.push_back(metrics.exposure);
+        criticalChannel.values.push_back(metrics.isCritical ? 1U : 0U);
+    }
+
+    snapshot.scalarChannels.push_back(std::move(forceChannel));
+    snapshot.scalarChannels.push_back(std::move(exposureChannel));
+    snapshot.flagChannels.push_back(std::move(criticalChannel));
+
+    return snapshot;
+}
+
+}  // namespace safecrowd::domain

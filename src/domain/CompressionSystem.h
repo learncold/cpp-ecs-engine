@@ -1,14 +1,18 @@
 #pragma once
 
-#include "engine/ComponentRegistry.h" 
+#include "engine/EngineSystem.h"
 
 namespace safecrowd::domain {
 
-    // 시스템 클래스 선언
-    class CompressionSystem {
-    public:
-        // 업데이트 함수 선언
-        void update(engine::ComponentRegistry& registry, float dt);
-    };
+class CompressionSystem final : public engine::EngineSystem {
+public:
+    explicit CompressionSystem(double timeStepSeconds);
 
-} // namespace safecrowd::domain
+    void update(engine::EngineWorld& world,
+                const engine::EngineStepContext& step) override;
+
+private:
+    float timeStepSeconds_{0.0f};
+};
+
+}  // namespace safecrowd::domain

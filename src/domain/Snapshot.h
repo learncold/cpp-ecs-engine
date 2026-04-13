@@ -1,29 +1,49 @@
 #pragma once
-#include <vector>
+
 #include <cstdint>
+#include <string>
+#include <string_view>
+#include <vector>
+
 #include "domain/Geometry2D.h"
-#include "domain/Metrics.h"
 
 namespace safecrowd::engine {
-    class ComponentRegistry;
+class WorldQuery;
 }
 
 namespace safecrowd::domain {
 
-    struct AgentSnapshot {
-        uint32_t id;
-        Point2D position;
-        CompressionData metrics;
-    };
+inline constexpr std::string_view kCompressionForceChannelName = "compression.force";
+inline constexpr std::string_view kCompressionExposureChannelName = "compression.exposure";
+inline constexpr std::string_view kCompressionCriticalChannelName = "compression.critical";
 
-    struct SimulationSnapshot {
-        uint64_t frameIndex = 0;
-        float simulationTime = 0.0f;
-        uint32_t agentCount = 0;
-        std::vector<AgentSnapshot> agents;
-    };
+struct SnapshotScalarChannel {
+    std::string key;
+    std::vector<float> values;
+};
 
-    // 네임스페이스를 safecrowd::engine으로 명시
-    SimulationSnapshot buildSnapshot(const safecrowd::engine::ComponentRegistry& registry, uint64_t frame, float time);
+struct SnapshotFlagChannel {
+    std::string key;
+    std::vector<std::uint8_t> values;
+};
 
-} // namespace safecrowd::domain
+struct SimulationSnapshot {
+    std::uint64_t frameIndex{0};
+    std::uint64_t fixedStepIndex{0};
+    double simulationTime{0.0};
+    std::uint32_t agentCount{0};
+    std::vector<std::uint64_t> agentIds;
+    std::vector<Point2D> positions;
+    std::vector<SnapshotScalarChannel> scalarChannels;
+    std::vector<SnapshotFlagChannel> flagChannels;
+
+    [[nodiscard]] const SnapshotScalarChannel* findScalarChannel(std::string_view key) const noexcept;
+    [[nodiscard]] const SnapshotFlagChannel* findFlagChannel(std::string_view key) const noexcept;
+};
+
+SimulationSnapshot buildSnapshot(const engine::WorldQuery& query,
+                                 std::uint64_t frame,
+                                 std::uint64_t fixedStep,
+                                 double simulationTime);
+
+}  // namespace safecrowd::domain

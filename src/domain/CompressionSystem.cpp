@@ -1,99 +1,121 @@
 #include "domain/CompressionSystem.h"
+
+#include "domain/AgentComponents.h"
 #include "domain/FacilityLayout2D.h"
-#include "domain/AgentComponents.h" 
 #include "domain/Metrics.h"
+
 #include <algorithm>
 #include <cmath>
 
 namespace safecrowd::domain {
+namespace {
 
-    static float distanceBetween(const Point2D& p1, const Point2D& p2) {
-        float dx = static_cast<float>(p1.x - p2.x);
-        float dy = static_cast<float>(p1.y - p2.y);
-        return std::sqrt(dx * dx + dy * dy);
+constexpr float kForceThreshold = 0.5f;
+constexpr float kExposureThreshold = 2.0f;
+
+double distanceBetween(const Point2D& lhs, const Point2D& rhs) {
+    const double dx = lhs.x - rhs.x;
+    const double dy = lhs.y - rhs.y;
+    return std::sqrt(dx * dx + dy * dy);
+}
+
+double distancePointToSegment(const Point2D& point, const Point2D& start, const Point2D& end) {
+    const double dx = end.x - start.x;
+    const double dy = end.y - start.y;
+    const double lengthSquared = (dx * dx) + (dy * dy);
+
+    if (lengthSquared == 0.0) {
+        return distanceBetween(point, start);
     }
 
-    static float distancePointToSegment(const Point2D& p, const Point2D& a, const Point2D& b) {
-        float l2 = static_cast<float>(std::pow(b.x - a.x, 2) + std::pow(b.y - a.y, 2));
-        if (l2 == 0.0f) return distanceBetween(p, a);
+    const double t = std::clamp(
+        (((point.x - start.x) * dx) + ((point.y - start.y) * dy)) / lengthSquared,
+        0.0,
+        1.0);
+    const Point2D projection{
+        .x = start.x + (t * dx),
+        .y = start.y + (t * dy),
+    };
+    return distanceBetween(point, projection);
+}
 
-        float t = std::clamp(static_cast<float>(((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / l2), 0.0f, 1.0f);
-        Point2D projection = { a.x + t * (b.x - a.x), a.y + t * (b.y - a.y) };
-        return distanceBetween(p, projection);
+double barrierCompression(const Barrier2D& barrier, const Point2D& position, double radius) {
+    if (!barrier.blocksMovement || barrier.geometry.vertices.size() < 2) {
+        return 0.0;
     }
 
-    void CompressionSystem::update(engine::ComponentRegistry& registry, float dt) {
-        // 필요한 스토리지들을 로드
-        auto& posStorage = registry.storageFor<Position>();
-        auto& agentStorage = registry.storageFor<Agent>();
-        auto& compStorage = registry.storageFor<CompressionData>();
+    double force = 0.0;
+    const auto& vertices = barrier.geometry.vertices;
 
-        // Barrier2D 스토리지가 있는지 확인
-        if (!registry.isRegistered<Barrier2D>()) return;
-        auto& barrierStorage = registry.storageFor<Barrier2D>();
-
-        // Position을 가진 모든 엔티티를 순회
-        for (const auto& entity : posStorage.getEntities()) {
-            // Agent와 CompressionData 컴포넌트가 모두 있는지 확인
-            if (!agentStorage.contains(entity) || !compStorage.contains(entity)) continue;
-
-            const auto& pos = posStorage.get(entity);
-            const auto& agent = agentStorage.get(entity);
-            auto& compression = compStorage.get(entity);
-
-            float currentForce = 0.0f;
-
-            // [군중 간 압박]
-            for (const auto& otherEntity : posStorage.getEntities()) {
-                if (entity.index == otherEntity.index && entity.generation == otherEntity.generation) continue;
-                if (!agentStorage.contains(otherEntity)) continue;
-
-                const auto& otherPos = posStorage.get(otherEntity);
-                const auto& otherAgent = agentStorage.get(otherEntity);
-
-                float dist = distanceBetween(pos.value, otherPos.value);
-                float combinedRadius = agent.radius + otherAgent.radius;
-
-                if (dist < combinedRadius) {
-                    currentForce += (combinedRadius - dist);
-                }
-            }
-
-            // [벽/장애물 압박]
-            for (const auto& barrierEntity : barrierStorage.getEntities()) {
-                const auto& barrier = barrierStorage.get(barrierEntity);
-                const auto& vertices = barrier.geometry.vertices;
-                if (vertices.size() < 2) continue;
-
-                for (size_t i = 0; i < vertices.size() - 1; ++i) {
-                    float distToWall = distancePointToSegment(pos.value, vertices[i], vertices[i + 1]);
-                    if (distToWall < agent.radius) {
-                        currentForce += (agent.radius - distToWall);
-                    }
-                }
-                if (barrier.geometry.closed) {
-                    float distToWall = distancePointToSegment(pos.value, vertices.back(), vertices.front());
-                    if (distToWall < agent.radius) {
-                        currentForce += (agent.radius - distToWall);
-                    }
-                }
-            }
-
-            compression.force = currentForce;
-
-            // [고위험 상태 업데이트]
-            const float FORCE_THRESHOLD = 0.5f;
-            if (compression.force > FORCE_THRESHOLD) {
-                compression.exposure += dt;
-            }
-            else {
-                compression.exposure = std::max(0.0f, compression.exposure - dt * 0.5f);
-            }
-
-            const float EXPOSURE_THRESHOLD = 2.0f;
-            compression.isCritical = (compression.force > FORCE_THRESHOLD) &&
-                (compression.exposure > EXPOSURE_THRESHOLD);
+    for (std::size_t index = 0; index + 1 < vertices.size(); ++index) {
+        const double distance = distancePointToSegment(position, vertices[index], vertices[index + 1]);
+        if (distance < radius) {
+            force += radius - distance;
         }
     }
 
-} // namespace safecrowd::domain
+    if (barrier.geometry.closed) {
+        const double distance = distancePointToSegment(position, vertices.back(), vertices.front());
+        if (distance < radius) {
+            force += radius - distance;
+        }
+    }
+
+    return force;
+}
+
+}  // namespace
+
+CompressionSystem::CompressionSystem(double timeStepSeconds)
+    : timeStepSeconds_(static_cast<float>(std::max(0.0, timeStepSeconds))) {
+}
+
+void CompressionSystem::update(engine::EngineWorld& world,
+                               const engine::EngineStepContext& step) {
+    (void)step;
+
+    auto& query = world.query();
+    const auto agentEntities = query.view<Position, Agent, CompressionData>();
+    const auto barrierEntities = query.view<Barrier2D>();
+
+    for (const auto entity : agentEntities) {
+        const auto& position = query.get<Position>(entity);
+        const auto& agent = query.get<Agent>(entity);
+        auto& compression = query.get<CompressionData>(entity);
+
+        double currentForce = 0.0;
+
+        for (const auto otherEntity : agentEntities) {
+            if (otherEntity == entity) {
+                continue;
+            }
+
+            const auto& otherPosition = query.get<Position>(otherEntity);
+            const auto& otherAgent = query.get<Agent>(otherEntity);
+            const double distance = distanceBetween(position.value, otherPosition.value);
+            const double combinedRadius = static_cast<double>(agent.radius + otherAgent.radius);
+
+            if (distance < combinedRadius) {
+                currentForce += combinedRadius - distance;
+            }
+        }
+
+        for (const auto barrierEntity : barrierEntities) {
+            currentForce += barrierCompression(
+                query.get<Barrier2D>(barrierEntity),
+                position.value,
+                static_cast<double>(agent.radius));
+        }
+
+        compression.force = static_cast<float>(currentForce);
+        if (compression.force > kForceThreshold) {
+            compression.exposure += timeStepSeconds_;
+        }
+
+        compression.isCritical =
+            compression.force > kForceThreshold &&
+            compression.exposure >= kExposureThreshold;
+    }
+}
+
+}  // namespace safecrowd::domain
