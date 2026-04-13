@@ -38,6 +38,7 @@ void EngineRuntime::initialize() {
     core_ = EcsCore{};
     resources_ = ResourceStore{};
     buffer_ = CommandBuffer{};
+    scheduler_.resetCadenceState();
     stats_ = {};
     stats_.state = EngineState::Ready;
     ++runIndex_;
@@ -73,6 +74,7 @@ void EngineRuntime::stop() {
     core_ = EcsCore{};
     resources_ = ResourceStore{};
     buffer_ = CommandBuffer{};
+    scheduler_.resetCadenceState();
     stats_ = {};
     stats_.state = EngineState::Stopped;
 }
@@ -100,8 +102,7 @@ void EngineRuntime::stepFrame(double deltaSeconds) {
         .derivedSeed     = 0,
     };
 
-    scheduler_.executePhase(UpdatePhase::PreSimulation, TriggerPolicy::EveryFrame,
-                            world_, ctx);
+    scheduler_.executePhase(UpdatePhase::PreSimulation, world_, ctx);
 
     while (frameClock_.shouldRunFixedStep()) {
         frameClock_.consumeFixedStep();
@@ -116,19 +117,16 @@ void EngineRuntime::stepFrame(double deltaSeconds) {
             .derivedSeed     = 0,
         };
 
-        scheduler_.executePhase(UpdatePhase::FixedSimulation, TriggerPolicy::FixedStep,
-                                world_, ctx);
+        scheduler_.executePhase(UpdatePhase::FixedSimulation, world_, ctx);
     }
 
     ctx.alpha = frameClock_.alpha();
-    scheduler_.executePhase(UpdatePhase::PostSimulation, TriggerPolicy::EveryFrame,
-                            world_, ctx);
+    scheduler_.executePhase(UpdatePhase::PostSimulation, world_, ctx);
 
     stats_.alpha = frameClock_.alpha();
 
     ctx.alpha = stats_.alpha;
-    scheduler_.executePhase(UpdatePhase::RenderSync, TriggerPolicy::EveryFrame,
-                            world_, ctx);
+    scheduler_.executePhase(UpdatePhase::RenderSync, world_, ctx);
 }
 
 EngineWorld& EngineRuntime::world() noexcept {

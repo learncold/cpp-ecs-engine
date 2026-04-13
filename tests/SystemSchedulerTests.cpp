@@ -88,12 +88,10 @@ SC_TEST(SystemScheduler_ExecutesSystemsInPhaseOrder) {
     const safecrowd::engine::EngineStepContext ctx{};
     scheduler.executePhase(
         safecrowd::engine::UpdatePhase::PreSimulation,
-        safecrowd::engine::TriggerPolicy::EveryFrame,
         world,
         ctx);
     scheduler.executePhase(
         safecrowd::engine::UpdatePhase::PostSimulation,
-        safecrowd::engine::TriggerPolicy::EveryFrame,
         world,
         ctx);
 
@@ -124,7 +122,6 @@ SC_TEST(SystemScheduler_ExecutesSystemsInOrderWithinPhase) {
     const safecrowd::engine::EngineStepContext ctx{};
     scheduler.executePhase(
         safecrowd::engine::UpdatePhase::FixedSimulation,
-        safecrowd::engine::TriggerPolicy::FixedStep,
         world,
         ctx);
 
@@ -154,7 +151,6 @@ SC_TEST(SystemScheduler_PhaseIsolation_OtherPhaseSystemsNotExecuted) {
     const safecrowd::engine::EngineStepContext ctx{};
     scheduler.executePhase(
         safecrowd::engine::UpdatePhase::FixedSimulation,
-        safecrowd::engine::TriggerPolicy::FixedStep,
         world,
         ctx);
 
@@ -195,7 +191,6 @@ SC_TEST(SystemScheduler_FlushesCommandBufferAfterPhase) {
     const safecrowd::engine::EngineStepContext ctx{};
     scheduler.executePhase(
         safecrowd::engine::UpdatePhase::FixedSimulation,
-        safecrowd::engine::TriggerPolicy::FixedStep,
         world,
         ctx);
 
@@ -203,7 +198,102 @@ SC_TEST(SystemScheduler_FlushesCommandBufferAfterPhase) {
     SC_EXPECT_EQ(entities.size(), std::size_t{1});
 }
 
-SC_TEST(SystemScheduler_RegisterSystem_RejectsUnsupportedIntervalPolicy) {
+SC_TEST(SystemScheduler_IntervalSystemsUseFrameCadenceDeterministically) {
+    safecrowd::engine::EcsCore core;
+    safecrowd::engine::CommandBuffer buffer;
+    safecrowd::engine::SystemScheduler scheduler{core, buffer};
+
+    safecrowd::engine::EcsCore dummyCore;
+    safecrowd::engine::ResourceStore dummyResources;
+    safecrowd::engine::CommandBuffer dummyBuffer;
+    auto world = safecrowd::engine::internal::EngineWorldFactory::create(
+        dummyCore, dummyResources, dummyBuffer);
+
+    std::vector<int> log;
+    scheduler.registerSystem(
+        std::make_unique<RecordingSystem>(log, 1),
+        {.phase = safecrowd::engine::UpdatePhase::PreSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::Interval,
+         .intervalTicks = 2});
+
+    const safecrowd::engine::EngineStepContext ctx{};
+    for (int i = 0; i < 5; ++i) {
+        scheduler.executePhase(
+            safecrowd::engine::UpdatePhase::PreSimulation,
+            world,
+            ctx);
+    }
+
+    SC_EXPECT_EQ(log.size(), std::size_t{3});
+}
+
+SC_TEST(SystemScheduler_IntervalSystemsUseFixedStepCadenceDeterministically) {
+    safecrowd::engine::EcsCore core;
+    safecrowd::engine::CommandBuffer buffer;
+    safecrowd::engine::SystemScheduler scheduler{core, buffer};
+
+    safecrowd::engine::EcsCore dummyCore;
+    safecrowd::engine::ResourceStore dummyResources;
+    safecrowd::engine::CommandBuffer dummyBuffer;
+    auto world = safecrowd::engine::internal::EngineWorldFactory::create(
+        dummyCore, dummyResources, dummyBuffer);
+
+    std::vector<int> log;
+    scheduler.registerSystem(
+        std::make_unique<RecordingSystem>(log, 1),
+        {.phase = safecrowd::engine::UpdatePhase::FixedSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::Interval,
+         .intervalTicks = 3});
+
+    const safecrowd::engine::EngineStepContext ctx{};
+    for (int i = 0; i < 5; ++i) {
+        scheduler.executePhase(
+            safecrowd::engine::UpdatePhase::FixedSimulation,
+            world,
+            ctx);
+    }
+
+    SC_EXPECT_EQ(log.size(), std::size_t{2});
+}
+
+SC_TEST(SystemScheduler_ResetCadenceState_RestartsIntervalSequence) {
+    safecrowd::engine::EcsCore core;
+    safecrowd::engine::CommandBuffer buffer;
+    safecrowd::engine::SystemScheduler scheduler{core, buffer};
+
+    safecrowd::engine::EcsCore dummyCore;
+    safecrowd::engine::ResourceStore dummyResources;
+    safecrowd::engine::CommandBuffer dummyBuffer;
+    auto world = safecrowd::engine::internal::EngineWorldFactory::create(
+        dummyCore, dummyResources, dummyBuffer);
+
+    std::vector<int> log;
+    scheduler.registerSystem(
+        std::make_unique<RecordingSystem>(log, 1),
+        {.phase = safecrowd::engine::UpdatePhase::PreSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::Interval,
+         .intervalTicks = 2});
+
+    const safecrowd::engine::EngineStepContext ctx{};
+    scheduler.executePhase(
+        safecrowd::engine::UpdatePhase::PreSimulation,
+        world,
+        ctx);
+    scheduler.executePhase(
+        safecrowd::engine::UpdatePhase::PreSimulation,
+        world,
+        ctx);
+
+    scheduler.resetCadenceState();
+    scheduler.executePhase(
+        safecrowd::engine::UpdatePhase::PreSimulation,
+        world,
+        ctx);
+
+    SC_EXPECT_EQ(log.size(), std::size_t{2});
+}
+
+SC_TEST(SystemScheduler_RegisterSystem_RejectsZeroIntervalTicks) {
     safecrowd::engine::EcsCore core;
     safecrowd::engine::CommandBuffer buffer;
     safecrowd::engine::SystemScheduler scheduler{core, buffer};
@@ -214,7 +304,8 @@ SC_TEST(SystemScheduler_RegisterSystem_RejectsUnsupportedIntervalPolicy) {
         scheduler.registerSystem(
             std::make_unique<RecordingSystem>(log, 1),
             {.phase = safecrowd::engine::UpdatePhase::PreSimulation,
-             .triggerPolicy = safecrowd::engine::TriggerPolicy::Interval});
+             .triggerPolicy = safecrowd::engine::TriggerPolicy::Interval,
+             .intervalTicks = 0});
     } catch (const std::exception&) {
         threw = true;
     }

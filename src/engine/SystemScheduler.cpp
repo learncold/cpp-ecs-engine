@@ -7,21 +7,37 @@ namespace safecrowd::engine {
 namespace {
 
 void validateDescriptor(const SystemDescriptor& descriptor) {
-    if (descriptor.triggerPolicy == TriggerPolicy::Interval) {
-        throw std::invalid_argument("TriggerPolicy::Interval is not supported yet.");
+    if (descriptor.triggerPolicy == TriggerPolicy::Interval &&
+        descriptor.intervalTicks == 0) {
+        throw std::invalid_argument(
+            "TriggerPolicy::Interval requires intervalTicks > 0.");
     }
 
-    if (descriptor.phase == UpdatePhase::FixedSimulation &&
-        descriptor.triggerPolicy != TriggerPolicy::FixedStep) {
-        throw std::invalid_argument(
-            "FixedSimulation systems must use TriggerPolicy::FixedStep.");
-    }
+    switch (descriptor.phase) {
+    case UpdatePhase::Startup:
+        if (descriptor.triggerPolicy != TriggerPolicy::EveryFrame) {
+            throw std::invalid_argument(
+                "Startup systems must use TriggerPolicy::EveryFrame.");
+        }
+        break;
 
-    if (descriptor.phase != UpdatePhase::FixedSimulation &&
-        descriptor.phase != UpdatePhase::Startup &&
-        descriptor.triggerPolicy != TriggerPolicy::EveryFrame) {
-        throw std::invalid_argument(
-            "Frame phases must use TriggerPolicy::EveryFrame.");
+    case UpdatePhase::FixedSimulation:
+        if (descriptor.triggerPolicy == TriggerPolicy::EveryFrame) {
+            throw std::invalid_argument(
+                "FixedSimulation systems must use TriggerPolicy::FixedStep or "
+                "TriggerPolicy::Interval.");
+        }
+        break;
+
+    case UpdatePhase::PreSimulation:
+    case UpdatePhase::PostSimulation:
+    case UpdatePhase::RenderSync:
+        if (descriptor.triggerPolicy == TriggerPolicy::FixedStep) {
+            throw std::invalid_argument(
+                "Frame phases must use TriggerPolicy::EveryFrame or "
+                "TriggerPolicy::Interval.");
+        }
+        break;
     }
 }
 
@@ -55,15 +71,46 @@ void SystemScheduler::executeStartup(EngineWorld& world, const EngineStepContext
     buffer_.flush(core_);
 }
 
-void SystemScheduler::executePhase(UpdatePhase phase, TriggerPolicy triggerPolicy,
-                                   EngineWorld& world, const EngineStepContext& ctx) {
+void SystemScheduler::executePhase(UpdatePhase phase, EngineWorld& world,
+                                   const EngineStepContext& ctx) {
+    auto shouldExecuteInterval = [](Entry& entry) {
+        if (entry.intervalCountdown == 0) {
+            entry.intervalCountdown = entry.descriptor.intervalTicks - 1;
+            return true;
+        }
+
+        --entry.intervalCountdown;
+        return false;
+    };
+
     for (auto& e : entries_) {
-        if (e.descriptor.phase == phase &&
-            e.descriptor.triggerPolicy == triggerPolicy) {
+        if (e.descriptor.phase != phase) {
+            continue;
+        }
+
+        bool shouldExecute = false;
+        switch (e.descriptor.triggerPolicy) {
+        case TriggerPolicy::EveryFrame:
+        case TriggerPolicy::FixedStep:
+            shouldExecute = true;
+            break;
+
+        case TriggerPolicy::Interval:
+            shouldExecute = shouldExecuteInterval(e);
+            break;
+        }
+
+        if (shouldExecute) {
             e.system->update(world, ctx);
         }
     }
     buffer_.flush(core_);
+}
+
+void SystemScheduler::resetCadenceState() {
+    for (auto& e : entries_) {
+        e.intervalCountdown = 0;
+    }
 }
 
 }  // namespace safecrowd::engine
