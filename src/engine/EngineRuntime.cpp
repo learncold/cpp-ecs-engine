@@ -19,13 +19,26 @@ EngineConfig normalizeConfig(EngineConfig config) {
     return config;
 }
 
+EngineStepContext makeStepContext(const DeterministicRng& rng, std::uint64_t frameIndex,
+                                  std::uint64_t fixedStepIndex, double alpha,
+                                  std::uint64_t runIndex) {
+    return EngineStepContext{
+        .frameIndex      = frameIndex,
+        .fixedStepIndex  = fixedStepIndex,
+        .alpha           = alpha,
+        .runIndex        = runIndex,
+        .derivedSeed     = rng.derive(runIndex, fixedStepIndex),
+    };
+}
+
 }  // namespace
 
 EngineRuntime::EngineRuntime(EngineConfig config)
     : config_(normalizeConfig(config)),
       scheduler_(core_, buffer_),
       world_(EngineWorld::ConstructionToken{}, core_, resources_, buffer_),
-      frameClock_(config_) {
+      frameClock_(config_),
+      rng_(config_.baseSeed) {
 }
 
 void EngineRuntime::addSystem(std::unique_ptr<EngineSystem> system,
@@ -39,19 +52,15 @@ void EngineRuntime::initialize() {
     resources_ = ResourceStore{};
     buffer_ = CommandBuffer{};
     scheduler_.resetCadenceState();
+    rng_.reseed(config_.baseSeed);
     stats_ = {};
     stats_.state = EngineState::Ready;
     ++runIndex_;
 
     scheduler_.configure(world_);
 
-    const EngineStepContext startupCtx{
-        .frameIndex      = stats_.frameIndex,
-        .fixedStepIndex  = stats_.fixedStepIndex,
-        .alpha           = 0.0,
-        .runIndex        = runIndex_,
-        .derivedSeed     = 0,
-    };
+    const EngineStepContext startupCtx = makeStepContext(
+        rng_, stats_.frameIndex, stats_.fixedStepIndex, 0.0, runIndex_);
     scheduler_.executeStartup(world_, startupCtx);
 }
 
@@ -75,6 +84,7 @@ void EngineRuntime::stop() {
     resources_ = ResourceStore{};
     buffer_ = CommandBuffer{};
     scheduler_.resetCadenceState();
+    rng_.reseed(config_.baseSeed);
     stats_ = {};
     stats_.state = EngineState::Stopped;
 }
@@ -94,13 +104,8 @@ void EngineRuntime::stepFrame(double deltaSeconds) {
     ++stats_.frameIndex;
     stats_.fixedStepsThisFrame = 0;
 
-    EngineStepContext ctx{
-        .frameIndex      = stats_.frameIndex,
-        .fixedStepIndex  = stats_.fixedStepIndex,
-        .alpha           = frameClock_.alpha(),
-        .runIndex        = runIndex_,
-        .derivedSeed     = 0,
-    };
+    auto ctx = makeStepContext(rng_, stats_.frameIndex, stats_.fixedStepIndex,
+                               frameClock_.alpha(), runIndex_);
 
     scheduler_.executePhase(UpdatePhase::PreSimulation, world_, ctx);
 
@@ -109,13 +114,8 @@ void EngineRuntime::stepFrame(double deltaSeconds) {
         ++stats_.fixedStepIndex;
         ++stats_.fixedStepsThisFrame;
 
-        ctx = EngineStepContext{
-            .frameIndex      = stats_.frameIndex,
-            .fixedStepIndex  = stats_.fixedStepIndex,
-            .alpha           = frameClock_.alpha(),
-            .runIndex        = runIndex_,
-            .derivedSeed     = 0,
-        };
+        ctx = makeStepContext(rng_, stats_.frameIndex, stats_.fixedStepIndex,
+                              frameClock_.alpha(), runIndex_);
 
         scheduler_.executePhase(UpdatePhase::FixedSimulation, world_, ctx);
     }

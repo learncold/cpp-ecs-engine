@@ -45,6 +45,9 @@ note bottom of Runtime
   Time, phase order, deferred mutation,
   deterministic random streams,
   and execution orchestration.
+  Runtime-owned cadence and seed state
+  reset at initialize/stop boundaries
+  so restarts do not inherit hidden state.
   Initial engine scope prioritizes
   fixed-step scheduling over advanced
   event or snapshot extensions.

@@ -168,6 +168,8 @@ note bottom of SystemScheduler
   and before/after constraints live here.
   Runtime reaches world state through EngineWorld,
   not through raw ECS storage.
+  Interval cadence state is reset when
+  the runtime is initialized or stopped.
 end note
 
 note bottom of ResourceStore
@@ -191,6 +193,8 @@ end note
 note right of DeterministicRng
   Repeatable seed streams are derived per run
   so scenario batches can be reproduced.
+  The runtime reseeds it at initialize/stop
+  boundaries before a new run begins.
 end note
 
 note right of EcsCore

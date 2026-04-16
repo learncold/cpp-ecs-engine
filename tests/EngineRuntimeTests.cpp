@@ -1,6 +1,7 @@
 #include "TestSupport.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <memory>
 #include <vector>
@@ -64,6 +65,22 @@ public:
 
     void update(safecrowd::engine::EngineWorld&, const safecrowd::engine::EngineStepContext&) override {
         log.push_back(marker);
+    }
+};
+
+class RecordSeedSystem : public safecrowd::engine::EngineSystem {
+public:
+    std::vector<std::uint64_t>& seeds;
+    std::vector<std::uint64_t>& runs;
+
+    RecordSeedSystem(std::vector<std::uint64_t>& seedLog,
+                     std::vector<std::uint64_t>& runLog)
+        : seeds(seedLog), runs(runLog) {}
+
+    void update(safecrowd::engine::EngineWorld&,
+                const safecrowd::engine::EngineStepContext& step) override {
+        seeds.push_back(step.derivedSeed);
+        runs.push_back(step.runIndex);
     }
 };
 
@@ -370,4 +387,48 @@ SC_TEST(EngineRuntime_Initialize_ClearsExistingWorldResources) {
     runtime.initialize();
 
     SC_EXPECT_TRUE(!runtime.world().resources().contains<SharedCounter>());
+}
+
+SC_TEST(EngineRuntime_StopAndRestart_RebuildsDeterministicSeedStream) {
+    std::vector<std::uint64_t> firstSeeds;
+    std::vector<std::uint64_t> firstRuns;
+    safecrowd::engine::EngineRuntime firstRuntime({
+        .fixedDeltaTime = 0.25,
+        .maxCatchUpSteps = 4,
+        .baseSeed = 19,
+    });
+
+    firstRuntime.addSystem(std::make_unique<RecordSeedSystem>(firstSeeds, firstRuns));
+    firstRuntime.play();
+    firstRuntime.stepFrame(0.25);
+    firstRuntime.stop();
+    firstRuntime.play();
+    firstRuntime.stepFrame(0.25);
+
+    std::vector<std::uint64_t> secondSeeds;
+    std::vector<std::uint64_t> secondRuns;
+    safecrowd::engine::EngineRuntime secondRuntime({
+        .fixedDeltaTime = 0.25,
+        .maxCatchUpSteps = 4,
+        .baseSeed = 19,
+    });
+
+    secondRuntime.addSystem(std::make_unique<RecordSeedSystem>(secondSeeds, secondRuns));
+    secondRuntime.play();
+    secondRuntime.stepFrame(0.25);
+    secondRuntime.stop();
+    secondRuntime.play();
+    secondRuntime.stepFrame(0.25);
+
+    SC_EXPECT_EQ(firstSeeds.size(), std::size_t{2});
+    SC_EXPECT_EQ(secondSeeds.size(), std::size_t{2});
+    SC_EXPECT_EQ(firstRuns.size(), std::size_t{2});
+    SC_EXPECT_EQ(secondRuns.size(), std::size_t{2});
+    SC_EXPECT_EQ(firstRuns[0], 1ULL);
+    SC_EXPECT_EQ(firstRuns[1], 2ULL);
+    SC_EXPECT_EQ(secondRuns[0], 1ULL);
+    SC_EXPECT_EQ(secondRuns[1], 2ULL);
+    SC_EXPECT_EQ(firstSeeds[0], secondSeeds[0]);
+    SC_EXPECT_EQ(firstSeeds[1], secondSeeds[1]);
+    SC_EXPECT_TRUE(firstSeeds[0] != firstSeeds[1]);
 }

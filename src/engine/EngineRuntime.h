@@ -4,6 +4,7 @@
 #include <memory>
 
 #include "engine/CommandBuffer.h"
+#include "engine/DeterministicRng.h"
 #include "engine/EcsCore.h"
 #include "engine/EngineConfig.h"
 #include "engine/EngineStats.h"
@@ -45,6 +46,7 @@ private:
     SystemScheduler scheduler_;
     EngineWorld     world_;
     FrameClock      frameClock_;
+    DeterministicRng rng_;
     std::uint64_t   runIndex_{0};
 };
 

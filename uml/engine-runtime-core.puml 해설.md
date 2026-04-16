@@ -107,6 +107,7 @@
 - 목적: 어떤 시스템이 언제 어떤 순서로 실행되는지 중앙에서 관리한다.
 - 현재 구현 포인트: phase 호출이 들어오면 descriptor의 `TriggerPolicy`를 직접 판정하고, `Interval`용 cadence 상태는 scheduler가 보관했다가 `initialize()`/`stop()` 경계에서 reset된다.
 - 유의사항: scheduler는 직접 도메인 규칙을 품는 객체가 아니라 실행 순서를 보장하는 범용 도구여야 한다.
+- 구현 메모: `Interval` trigger의 cadence 상태는 runtime lifecycle에 속하므로 `initialize()`와 `stop()` 경계에서 reset되어야 한다.
 - 후속 개선 사항: descriptor validation, parallel phase, system profiling을 확장할 수 있다.
 
 ## `ResourceStore`
@@ -125,6 +126,7 @@
 - 개요: seed 기반 반복 가능한 난수 스트림 제공자다.
 - 목적: 같은 시나리오와 설정이면 같은 실행을 재현할 수 있게 한다.
 - 유의사항: 전역 랜덤 사용을 허용하면 재현성이 쉽게 깨지므로, 스트림 진입점을 통일하는 편이 좋다.
+- 구현 메모: runtime은 새 run을 시작하기 전에 `DeterministicRng`를 base seed로 다시 reseed해 이전 실행의 숨은 상태가 남지 않게 해야 한다.
 - 후속 개선 사항: system별 stream 분리, jump-ahead, 통계 검증 도구를 추가할 수 있다.
 
 ## `EcsCore`
