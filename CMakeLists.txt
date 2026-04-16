@@ -62,6 +62,7 @@ add_library(ecs_engine STATIC
     src/engine/EngineRuntime.cpp
     src/engine/FrameClock.cpp
     src/engine/internal/EngineWorldFactory.h
+    src/engine/internal/EngineRuntimeTestAccess.h
     src/engine/SystemScheduler.cpp
 )
 

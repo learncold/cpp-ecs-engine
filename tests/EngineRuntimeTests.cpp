@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "engine/EngineRuntime.h"
+#include "engine/internal/EngineRuntimeTestAccess.h"
 
 namespace {
 
@@ -387,6 +388,39 @@ SC_TEST(EngineRuntime_Initialize_ClearsExistingWorldResources) {
     runtime.initialize();
 
     SC_EXPECT_TRUE(!runtime.world().resources().contains<SharedCounter>());
+}
+
+SC_TEST(EngineRuntime_Initialize_RebuildsDeterministicRngState) {
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 0.25,
+        .maxCatchUpSteps = 4,
+        .baseSeed = 23,
+    });
+
+    runtime.initialize();
+    auto& rng = safecrowd::engine::internal::EngineRuntimeTestAccess::rng(runtime);
+    const auto firstAfterInitialize = rng.next();
+    (void)rng.next();
+
+    runtime.initialize();
+
+    SC_EXPECT_EQ(rng.next(), firstAfterInitialize);
+}
+
+SC_TEST(EngineRuntime_Stop_RebuildsDeterministicRngState) {
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 0.25,
+        .maxCatchUpSteps = 4,
+        .baseSeed = 29,
+    });
+
+    auto& rng = safecrowd::engine::internal::EngineRuntimeTestAccess::rng(runtime);
+    const auto expectedFirstValue = rng.next();
+    (void)rng.next();
+
+    runtime.stop();
+
+    SC_EXPECT_EQ(rng.next(), expectedFirstValue);
 }
 
 SC_TEST(EngineRuntime_StopAndRestart_RebuildsDeterministicSeedStream) {

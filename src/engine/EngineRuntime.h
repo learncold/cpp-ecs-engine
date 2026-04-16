@@ -17,6 +17,10 @@
 
 namespace safecrowd::engine {
 
+namespace internal {
+class EngineRuntimeTestAccess;
+}
+
 class EngineRuntime {
 public:
     explicit EngineRuntime(EngineConfig config = {});
@@ -38,6 +42,8 @@ public:
     std::uint64_t runIndex() const noexcept;
 
 private:
+    friend class internal::EngineRuntimeTestAccess;
+
     EngineConfig    config_;
     EngineStats     stats_;
     EcsCore         core_;
