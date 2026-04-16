@@ -4,6 +4,7 @@
 #include <memory>
 
 #include "engine/CommandBuffer.h"
+#include "engine/DeterministicRng.h"
 #include "engine/EcsCore.h"
 #include "engine/EngineConfig.h"
 #include "engine/EngineStats.h"
@@ -15,6 +16,10 @@
 #include "engine/SystemScheduler.h"
 
 namespace safecrowd::engine {
+
+namespace internal {
+class EngineRuntimeTestAccess;
+}
 
 class EngineRuntime {
 public:
@@ -37,6 +42,8 @@ public:
     std::uint64_t runIndex() const noexcept;
 
 private:
+    friend class internal::EngineRuntimeTestAccess;
+
     EngineConfig    config_;
     EngineStats     stats_;
     EcsCore         core_;
@@ -45,6 +52,7 @@ private:
     SystemScheduler scheduler_;
     EngineWorld     world_;
     FrameClock      frameClock_;
+    DeterministicRng rng_;
     std::uint64_t   runIndex_{0};
 };
 

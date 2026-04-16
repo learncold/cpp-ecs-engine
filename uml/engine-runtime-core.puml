@@ -73,12 +73,6 @@ package "engine::api" {
     +derivedSeed
   }
 
-  class RunContext {
-    +runIndex
-    +baseSeed
-    +derivedSeed
-  }
-
   enum UpdatePhase {
     Startup
     PreSimulation
@@ -127,7 +121,9 @@ package "engine::runtime" {
 
   class DeterministicRng {
     +reseed(seed: uint64)
-    +streamFor(systemKey, runIndex)
+    +baseSeed(): uint64
+    +derive(runIndex, fixedStepIndex): uint64
+    +next(): uint64
   }
 
 }
@@ -144,7 +140,6 @@ EngineRuntime *-- DeterministicRng
 EngineRuntime o-- IRenderBridge
 EngineRuntime --> EngineConfig
 EngineRuntime --> EngineStats
-EngineRuntime --> RunContext
 
 EngineWorld *-- WorldQuery
 EngineWorld *-- WorldResources
@@ -160,7 +155,6 @@ SystemScheduler --> SystemDescriptor
 SystemScheduler --> EngineWorld : uses facade
 SystemScheduler --> CommandBuffer : flushes at phase boundaries
 
-DeterministicRng --> RunContext : derives repeatable streams
 CommandBuffer --> EcsCore : applies deferred mutations
 
 note bottom of SystemScheduler
@@ -168,6 +162,8 @@ note bottom of SystemScheduler
   and before/after constraints live here.
   Runtime reaches world state through EngineWorld,
   not through raw ECS storage.
+  Interval cadence state is reset when
+  the runtime is initialized or stopped.
 end note
 
 note bottom of ResourceStore
@@ -189,8 +185,11 @@ note bottom of WorldQuery
 end note
 
 note right of DeterministicRng
-  Repeatable seed streams are derived per run
-  so scenario batches can be reproduced.
+  Repeatable step seeds are derived from
+  baseSeed, runIndex, and fixedStepIndex,
+  then stored in EngineStepContext.
+  The runtime reseeds it at initialize/stop
+  boundaries before a new run begins.
 end note
 
 note right of EcsCore

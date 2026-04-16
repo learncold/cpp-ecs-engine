@@ -43,6 +43,7 @@ add_library(ecs_engine STATIC
     src/engine/ComponentRegistry.h
     src/engine/EcsCore.h
     src/engine/EngineConfig.h
+    src/engine/DeterministicRng.h
     src/engine/EngineRuntime.h
     src/engine/EngineWorld.h
     src/engine/EngineState.h
@@ -61,6 +62,7 @@ add_library(ecs_engine STATIC
     src/engine/EngineRuntime.cpp
     src/engine/FrameClock.cpp
     src/engine/internal/EngineWorldFactory.h
+    src/engine/internal/EngineRuntimeTestAccess.h
     src/engine/SystemScheduler.cpp
 )
 
@@ -138,6 +140,7 @@ if (BUILD_TESTING)
         tests/SystemSchedulerTests.cpp
         tests/EngineIntegrationTests.cpp
         tests/ResourceStoreTests.cpp
+        tests/DeterministicRngTests.cpp
     )
 
     target_include_directories(safecrowd_tests
