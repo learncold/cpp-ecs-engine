@@ -18,7 +18,7 @@ LayoutReady --> ScenarioReady : open valid scenario
 LayoutReady --> NoProject : close project
 
 ScenarioDraftInvalid --> ScenarioReady : required fields satisfied
-ScenarioDraftInvalid --> LayoutNeedsReview : reimport adds blockers
+ScenarioDraftInvalid --> LayoutNeedsReview : layout changed / review needed
 ScenarioDraftInvalid --> NoProject : close project
 
 ScenarioReady --> BatchRunning : Run clicked\n[approved layout && valid scenario]
@@ -32,7 +32,7 @@ BatchRunning --> ScenarioReady : Stop clicked
 BatchPaused --> ScenarioReady : Stop clicked
 
 AggregationPending --> ResultsAvailable : RunResult + VariationSummary persisted
-AggregationPending --> ScenarioReady : scenario changed / rerun requested
+AggregationPending --> ScenarioReady : edit scenario / rerun
 
 ResultsAvailable --> ComparisonReady : baseline + alternative summary available
 ResultsAvailable --> ScenarioReady : edit scenario / rerun
