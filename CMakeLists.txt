@@ -184,5 +184,20 @@ if (SAFECROWD_BUILD_APP)
             Qt6::Widgets
     )
 
+    set(_qt_platform_plugin
+        "$<IF:$<CONFIG:Debug>,${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/debug/Qt6/plugins/platforms/qwindowsd.dll,${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/Qt6/plugins/platforms/qwindows.dll>"
+    )
+    set(_qt_platform_plugin_name
+        "$<IF:$<CONFIG:Debug>,qwindowsd.dll,qwindows.dll>"
+    )
+
+    add_custom_command(TARGET safecrowd_app POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:safecrowd_app>/platforms"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${_qt_platform_plugin}"
+            "$<TARGET_FILE_DIR:safecrowd_app>/platforms/${_qt_platform_plugin_name}"
+        VERBATIM
+    )
+
     configure_project_target(safecrowd_app)
 endif()
