@@ -20,7 +20,6 @@
 - [product/위험 정의.md](product/위험 정의.md)
 - [product/고급 위험 모델.md](product/고급 위험 모델.md)
 - [product/Product Backlog.md](product/Product Backlog.md)
-- [product/Product Backlog - Pathfinder 반영안.md](product/Product%20Backlog%20-%20Pathfinder%20반영안.md)
 
 ## 유지 규칙
 
