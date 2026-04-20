@@ -4,6 +4,7 @@
 
 ## 문서 목적
 이 문서는 SafeCrowd의 실행 후반과 결과 분석 UI를 설명한다. 핵심은 `live playback`과 `persisted artifact 기반 분석`을 한 화면 군 안에서 연결하되, 데이터 출처를 섞지 않는 것이다.
+이 workspace 역시 별도 프로젝트가 아니라 authoring 단계와 같은 project context를 이어받는 후반 영역이다. 사용자가 다시 프로젝트를 열었을 때 복원 진입은 `ProjectRepository`가 담당하고, 이 문서의 분석 패널은 그 위에서 `ResultRepository`가 관리하는 persisted artifact만 읽는다.
 
 ## `Run Control`
 - 개요: batch 실행의 시작, 일시정지, 정지를 요청하는 패널이다.
@@ -53,4 +54,4 @@
 ## `ResultRepository` / `ResultAggregator`
 - 개요: `ResultRepository`는 run/variation/comparison/cumulative artifact 저장소이고, `ResultAggregator`는 상위 결과를 생성하는 서비스다.
 - 목적: 분석 패널들이 같은 persisted 결과 계약을 읽게 한다.
-- 유의사항: comparison, export, recommendation의 선행 조건은 이 저장소에 결과가 존재하는지로 판단한다.
+- 유의사항: comparison, export, recommendation의 선행 조건은 이 저장소에 결과가 존재하는지로 판단한다. 프로젝트를 다시 여는 경로 자체는 `ProjectRepository` 책임이고, `ResultRepository`는 analysis 전용 저장소로 제한한다.

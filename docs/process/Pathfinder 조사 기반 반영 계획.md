@@ -107,14 +107,12 @@
 | `uml/domain-control-model.puml` | `Behavior`, `Trigger`, `OccupantTag`, `OperationalEvent`, `RouteChoicePolicy`, zone-targeted control 관계 정의 | `domain` |
 | `uml/engine-routing-and-connectors.puml` | room/door/connectors, `ControlZone`, path cost, dynamic obstacle, flow measurement 구조 정리 | `engine + domain boundary` |
 | `uml/domain-result-artifacts.puml` | `RunResult`, `DoorHistory`, `RoomHistory`, `MeasurementRegionSeries`, `OccupantHistory`, `ScenarioComparison`, `CumulativeArtifact` 정리 | `domain` |
-| `uml/application-run-results-workflow.puml` | 시나리오 실행에서 persisted result artifact 확인/비교/내보내기까지 UI 흐름 정리 | `application` |
 
 ### 도면 작성 순서
 1. `domain-scenario-model`
 2. `domain-control-model`
 3. `engine-routing-and-connectors`
 4. `domain-result-artifacts`
-5. `application-run-results-workflow`
 
 ### 도면별 핵심 질문
 - `domain-scenario-model`

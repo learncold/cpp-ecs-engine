@@ -4,6 +4,7 @@
 
 ## 문서 목적
 이 문서는 SafeCrowd의 authoring 단계 UI를 설명한다. 목표는 `레이아웃 검토/보정`, `시나리오 생성`, `템플릿 빠른 시작`, `실행 준비 상태 확인`이 어디에서 이뤄지는지 고정하는 것이다.
+이 workspace는 독립된 화면 묶음이 아니라 같은 프로젝트 컨텍스트의 앞단이다. 사용자가 여기서 확정한 레이아웃과 시나리오 family는 이후 analysis workspace에서도 같은 `ProjectRepository` 기반 project context로 이어진다.
 
 ## `Project Navigator`
 - 개요: 프로젝트를 새로 만들고, 다시 열고, 저장하는 authoring 진입점이다.
@@ -53,4 +54,4 @@
 ## `ProjectRepository` / `ScenarioTemplateCatalog`
 - 개요: `ProjectRepository`는 workspace 저장 계약이고, `ScenarioTemplateCatalog`는 템플릿 기본값과 전제조건을 반환하는 domain 계약이다.
 - 목적: authoring UI가 파일 경로나 템플릿 규칙을 직접 소유하지 않게 한다.
-- 유의사항: 두 계약 모두 application의 UI 배치와는 분리된 domain 책임으로 본다.
+- 유의사항: 두 계약 모두 application의 UI 배치와는 분리된 domain 책임으로 본다. 특히 `ProjectRepository`는 project restore의 정본이고, 후행 analysis 결과 저장소와 책임을 섞지 않는다.
