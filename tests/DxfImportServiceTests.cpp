@@ -669,6 +669,25 @@ SC_TEST(DxfImportServiceInfersConnectionsBetweenAdjacentWalkableZones) {
     std::filesystem::remove(sourcePath);
 }
 
+SC_TEST(DxfImportServiceImportsOfficeSuiteFixtureWithoutBlockingIssues) {
+    const auto sourcePath = std::filesystem::path(__FILE__).parent_path() / "dxf" / "office_suite.dxf";
+
+    safecrowd::domain::DxfImportService importer;
+    safecrowd::domain::ImportRequest request;
+    request.sourcePath = sourcePath;
+    request.requestedFormat = safecrowd::domain::ImportedFileFormat::Dxf;
+
+    const auto result = importer.importFile(request);
+
+    SC_EXPECT_TRUE(result.rawModel.has_value());
+    SC_EXPECT_TRUE(result.canonicalGeometry.has_value());
+    SC_EXPECT_TRUE(result.layout.has_value());
+    SC_EXPECT_TRUE(!safecrowd::domain::hasBlockingImportIssue(result.issues));
+    SC_EXPECT_EQ(result.reviewStatus, safecrowd::domain::ImportReviewStatus::Pending);
+    SC_EXPECT_TRUE(result.layout->zones.size() >= std::size_t{7});
+    SC_EXPECT_TRUE(result.layout->connections.size() >= std::size_t{5});
+}
+
 SC_TEST(DxfImportServiceDoesNotInferConnectionsAcrossWallSeam) {
     const auto sourcePath = writeTempFile("safecrowd-adjacent-walkables-wall-seam.dxf", kAdjacentWalkablesBlockedByWallDxf);
 

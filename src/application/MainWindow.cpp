@@ -1,6 +1,10 @@
 #include "application/MainWindow.h"
 
+#include <algorithm>
+
 #include <QFormLayout>
+#include <QAbstractItemView>
+#include <QFileDialog>
 #include <QFrame>
 #include <QGridLayout>
 #include <QGroupBox>
@@ -9,8 +13,10 @@
 #include <QListWidget>
 #include <QListWidgetItem>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QStackedWidget>
 #include <QStyle>
+#include <QStringList>
 #include <QTabWidget>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -97,6 +103,56 @@ QString workspaceStageAccent(WorkspaceStage stage) {
     }
 
     return "#6b7280";
+}
+
+QString importReviewStatusToString(safecrowd::domain::ImportReviewStatus status) {
+    using safecrowd::domain::ImportReviewStatus;
+
+    switch (status) {
+    case ImportReviewStatus::NotRequired:
+        return "Not Required";
+    case ImportReviewStatus::Pending:
+        return "Pending Review";
+    case ImportReviewStatus::Approved:
+        return "Approved";
+    case ImportReviewStatus::Rejected:
+        return "Rejected";
+    }
+
+    return "Unknown";
+}
+
+QString formatIssueLabel(const safecrowd::domain::ImportIssue& issue) {
+    return QString("[%1] %2")
+        .arg(safecrowd::domain::toString(issue.code),
+             QString::fromStdString(issue.message));
+}
+
+QString joinStringList(const std::vector<std::string>& values) {
+    QStringList parts;
+    for (const auto& value : values) {
+        parts.push_back(QString::fromStdString(value));
+    }
+    return parts.join(", ");
+}
+
+QString pathToQString(const std::filesystem::path& path) {
+    return QString::fromLocal8Bit(path.string().c_str());
+}
+
+bool listContainsValue(const std::vector<std::string>& values, const std::string& needle) {
+    return std::find(values.begin(), values.end(), needle) != values.end();
+}
+
+bool traceMatchesIssue(const safecrowd::domain::ImportTraceRef& traceRef, const safecrowd::domain::ImportIssue& issue) {
+    if (!issue.targetId.empty() && traceRef.targetId == issue.targetId) {
+        return true;
+    }
+
+    return (!issue.sourceId.empty() && listContainsValue(traceRef.sourceIds, issue.sourceId))
+        || (!issue.targetId.empty() && listContainsValue(traceRef.sourceIds, issue.targetId))
+        || (!issue.sourceId.empty() && listContainsValue(traceRef.canonicalIds, issue.sourceId))
+        || (!issue.targetId.empty() && listContainsValue(traceRef.canonicalIds, issue.targetId));
 }
 
 bool canOpenRunWorkspace(WorkspaceStage stage) {
@@ -460,45 +516,122 @@ MainWindow::MainWindow(safecrowd::domain::SafeCrowdDomain& domain, QWidget* pare
         "<b>ResultRepository</b> stays analysis-only and is consumed after persisted results exist.",
         projectPage), 1, 0, 1, 2);
 
-    auto* authoringPage = new QWidget(workspaceTabs_);
-    auto* authoringLayout = new QGridLayout(authoringPage);
+    auto* authoringPage = new QScrollArea(workspaceTabs_);
+    authoringPage->setWidgetResizable(true);
+    authoringPage->setFrameShape(QFrame::NoFrame);
+    auto* authoringContent = new QWidget(authoringPage);
+    authoringPage->setWidget(authoringContent);
+
+    auto* authoringLayout = new QGridLayout(authoringContent);
     authoringLayout->setContentsMargins(0, 0, 0, 0);
     authoringLayout->setHorizontalSpacing(12);
     authoringLayout->setVerticalSpacing(12);
     authoringLayout->setColumnStretch(0, 1);
     authoringLayout->setColumnStretch(1, 1);
-    authoringLayout->addWidget(createInfoGroup(
-        "Import Workflow UI",
-        "DXF import, reimport, and source selection enter here before any scenario authoring begins.",
-        authoringPage), 0, 0);
-    authoringLayout->addWidget(createInfoGroup(
-        "Issue Review Panel",
-        "Blocking topology issues, warnings, approval state, and traceable problem locations surface here before run is enabled.",
-        authoringPage), 0, 1);
-    authoringLayout->addWidget(createInfoGroup(
-        "Layout Canvas + Inspector",
-        "Manual correction stays a 2D topology editor with inspector support, not a full CAD environment.",
-        authoringPage), 1, 0);
+    authoringLayout->setRowStretch(4, 1);
+
+    auto* importWorkflowGroup = new QGroupBox("Import Workflow UI", authoringContent);
+    auto* importWorkflowLayout = new QVBoxLayout(importWorkflowGroup);
+    importWorkflowLayout->setSpacing(10);
+    importWorkflowLayout->addWidget(createBodyLabel(
+        "Select a DXF source, run import or reimport, and keep the layout review gate explicit before scenario authoring begins.",
+        importWorkflowGroup));
+
+    auto* importButtonLayout = new QHBoxLayout();
+    browseImportButton_ = new QPushButton("Browse DXF", importWorkflowGroup);
+    importSelectedFileButton_ = new QPushButton("Import Selected File", importWorkflowGroup);
+    reimportButton_ = new QPushButton("Reimport Current Source", importWorkflowGroup);
+    importButtonLayout->addWidget(browseImportButton_);
+    importButtonLayout->addWidget(importSelectedFileButton_);
+    importButtonLayout->addWidget(reimportButton_);
+    importWorkflowLayout->addLayout(importButtonLayout);
+
+    auto* importDetailsLayout = new QFormLayout();
+    importDetailsLayout->setLabelAlignment(Qt::AlignLeft);
+    importDetailsLayout->setFormAlignment(Qt::AlignTop | Qt::AlignLeft);
+    importSourceValue_ = createValueLabel(importWorkflowGroup);
+    importSummaryValue_ = createValueLabel(importWorkflowGroup);
+    importReviewStatusValue_ = createValueLabel(importWorkflowGroup);
+    importCountsValue_ = createValueLabel(importWorkflowGroup);
+    importAuthoringGateValue_ = createValueLabel(importWorkflowGroup);
+    importDetailsLayout->addRow("Source", importSourceValue_);
+    importDetailsLayout->addRow("Summary", importSummaryValue_);
+    importDetailsLayout->addRow("Review status", importReviewStatusValue_);
+    importDetailsLayout->addRow("Counts", importCountsValue_);
+    importDetailsLayout->addRow("Gate", importAuthoringGateValue_);
+    importWorkflowLayout->addLayout(importDetailsLayout);
+    importWorkflowLayout->addStretch();
+    authoringLayout->addWidget(importWorkflowGroup, 0, 0);
+
+    auto* issueReviewGroup = new QGroupBox("Issue Review Panel", authoringContent);
+    auto* issueReviewLayout = new QVBoxLayout(issueReviewGroup);
+    issueReviewLayout->setSpacing(10);
+    issueReviewLayout->addWidget(createBodyLabel(
+        "Blocking issues and warnings stay separated here so approval, rejection, and correction entry are explicit before run readiness is considered.",
+        issueReviewGroup));
+
+    auto* issueListsLayout = new QGridLayout();
+    issueListsLayout->setHorizontalSpacing(10);
+    issueListsLayout->setVerticalSpacing(8);
+    issueListsLayout->addWidget(createRoleLabel("Blocking Issues", "detailTitle", issueReviewGroup), 0, 0);
+    issueListsLayout->addWidget(createRoleLabel("Warnings / Follow-up", "detailTitle", issueReviewGroup), 0, 1);
+    blockingIssuesList_ = new QListWidget(issueReviewGroup);
+    warningIssuesList_ = new QListWidget(issueReviewGroup);
+    blockingIssuesList_->setSelectionMode(QAbstractItemView::SingleSelection);
+    warningIssuesList_->setSelectionMode(QAbstractItemView::SingleSelection);
+    blockingIssuesList_->setMinimumHeight(168);
+    warningIssuesList_->setMinimumHeight(168);
+    issueListsLayout->addWidget(blockingIssuesList_, 1, 0);
+    issueListsLayout->addWidget(warningIssuesList_, 1, 1);
+    issueReviewLayout->addLayout(issueListsLayout);
+
+    importIssueDetailValue_ = createValueLabel(issueReviewGroup);
+    issueReviewLayout->addWidget(importIssueDetailValue_);
+
+    auto* issueActionLayout = new QHBoxLayout();
+    approveImportButton_ = new QPushButton("Approve Review", issueReviewGroup);
+    rejectImportButton_ = new QPushButton("Reject Review", issueReviewGroup);
+    openLayoutCorrectionButton_ = new QPushButton("Open Layout Correction Entry", issueReviewGroup);
+    issueActionLayout->addWidget(approveImportButton_);
+    issueActionLayout->addWidget(rejectImportButton_);
+    issueActionLayout->addWidget(openLayoutCorrectionButton_);
+    issueReviewLayout->addLayout(issueActionLayout);
+    authoringLayout->addWidget(issueReviewGroup, 0, 1);
+
+    auto* layoutCorrectionGroup = new QGroupBox("Layout Canvas + Inspector", authoringContent);
+    auto* layoutCorrectionLayout = new QVBoxLayout(layoutCorrectionGroup);
+    layoutCorrectionLayout->setSpacing(10);
+    layoutCorrectionLayout->addWidget(createBodyLabel(
+        "The actual topology correction editor is still tracked by #77. This surface now exposes the explicit handoff target from import review.",
+        layoutCorrectionGroup));
+    auto* layoutCorrectionDetails = new QFormLayout();
+    layoutCorrectionDetails->setLabelAlignment(Qt::AlignLeft);
+    layoutCorrectionDetails->setFormAlignment(Qt::AlignTop | Qt::AlignLeft);
+    layoutCorrectionTargetValue_ = createValueLabel(layoutCorrectionGroup);
+    layoutCorrectionDetails->addRow("Correction target", layoutCorrectionTargetValue_);
+    layoutCorrectionLayout->addLayout(layoutCorrectionDetails);
+    layoutCorrectionLayout->addStretch();
+    authoringLayout->addWidget(layoutCorrectionGroup, 1, 0);
     authoringLayout->addWidget(createInfoGroup(
         "Scenario Library",
         "Baseline, alternatives, and recommended drafts remain distinct so lineage is clear before comparison and scenarioize flows.",
-        authoringPage), 1, 1);
+        authoringContent), 1, 1);
     authoringLayout->addWidget(createInfoGroup(
         "Scenario Template Picker",
         "Template cards will expose intended use, risk axis, and layout prerequisites through ScenarioTemplateCatalog quick starts.",
-        authoringPage), 2, 0);
+        authoringContent), 2, 0);
     authoringLayout->addWidget(createInfoGroup(
         "Scenario Editor Tabs",
         "Population, Environment, Control, and Execution contracts stay separated here so authoring does not collapse into one form.",
-        authoringPage), 2, 1);
+        authoringContent), 2, 1);
     authoringLayout->addWidget(createInfoGroup(
         "Readiness Panel",
         "Required field gaps, remaining blockers, and run gating are centralized here instead of being hidden behind disabled run buttons.",
-        authoringPage), 3, 0);
+        authoringContent), 3, 0);
     authoringLayout->addWidget(createInfoGroup(
         "Variation Diff List",
         "Changed items versus baseline track route cost assumptions, control changes, inflow settings, visibility conditions, and template origin.",
-        authoringPage), 3, 1);
+        authoringContent), 3, 1);
 
     auto* runPage = new QWidget(workspaceTabs_);
     auto* runLayout = new QGridLayout(runPage);
@@ -634,6 +767,24 @@ MainWindow::MainWindow(safecrowd::domain::SafeCrowdDomain& domain, QWidget* pare
         openSelectedRecentProject();
     });
     connect(closeWorkspaceButton_, &QPushButton::clicked, this, [this]() { closeWorkspace(); });
+    connect(browseImportButton_, &QPushButton::clicked, this, [this]() { browseImportFile(); });
+    connect(importSelectedFileButton_, &QPushButton::clicked, this, [this]() { importSelectedFile(); });
+    connect(reimportButton_, &QPushButton::clicked, this, [this]() { reimportSelectedFile(); });
+    connect(approveImportButton_, &QPushButton::clicked, this, [this]() { approveImportReview(); });
+    connect(rejectImportButton_, &QPushButton::clicked, this, [this]() { rejectImportReview(); });
+    connect(openLayoutCorrectionButton_, &QPushButton::clicked, this, [this]() { openLayoutCorrectionEntry(); });
+    connect(blockingIssuesList_, &QListWidget::currentRowChanged, this, [this](int row) {
+        if (row >= 0) {
+            warningIssuesList_->clearSelection();
+        }
+        refreshImportIssueSelection();
+    });
+    connect(warningIssuesList_, &QListWidget::currentRowChanged, this, [this](int row) {
+        if (row >= 0) {
+            blockingIssuesList_->clearSelection();
+        }
+        refreshImportIssueSelection();
+    });
 
     connect(startButton_, &QPushButton::clicked, this, [this]() { startSimulation(); });
     connect(pauseButton_, &QPushButton::clicked, this, [this]() { pauseSimulation(); });
@@ -647,6 +798,7 @@ MainWindow::MainWindow(safecrowd::domain::SafeCrowdDomain& domain, QWidget* pare
     applyTheme();
     populateSampleRecentProjects();
     rebuildRecentProjectsList();
+    refreshImportWorkflow();
     refreshWorkspaceChrome();
     refreshRuntimePanel();
 }
@@ -854,6 +1006,432 @@ void MainWindow::refreshNavigator() {
     }
 }
 
+void MainWindow::resetImportWorkflow() {
+    importSourcePath_.clear();
+    currentImportResult_.reset();
+}
+
+void MainWindow::refreshImportWorkflow() {
+    using safecrowd::domain::ImportIssueSeverity;
+
+    blockingIssuesList_->clear();
+    warningIssuesList_->clear();
+
+    if (!currentWorkspace_.has_value()) {
+        importSourceValue_->setText("Open or create a workspace first.");
+        importSummaryValue_->setText("Import workflow is unavailable while the app is in No Project.");
+        importReviewStatusValue_->setText("Not started");
+        importCountsValue_->setText("0 raw entities  |  0 zones  |  0 connections  |  0 blocking  |  0 warnings");
+        importAuthoringGateValue_->setText("Project Navigator owns entry until a workspace is opened.");
+        importIssueDetailValue_->setText("Select or import a layout to populate review issues.");
+        layoutCorrectionTargetValue_->setText("No correction target selected.");
+        browseImportButton_->setEnabled(false);
+        importSelectedFileButton_->setEnabled(false);
+        reimportButton_->setEnabled(false);
+        approveImportButton_->setEnabled(false);
+        rejectImportButton_->setEnabled(false);
+        openLayoutCorrectionButton_->setEnabled(false);
+        return;
+    }
+
+    browseImportButton_->setEnabled(true);
+    importSelectedFileButton_->setEnabled(!importSourcePath_.empty());
+    reimportButton_->setEnabled(!importSourcePath_.empty());
+
+    if (!importSourcePath_.empty()) {
+        importSourceValue_->setText(pathToQString(importSourcePath_));
+    } else {
+        importSourceValue_->setText("No DXF source selected yet.");
+    }
+
+    if (!currentImportResult_.has_value()) {
+        importReviewStatusValue_->setText("Not started");
+        importCountsValue_->setText("0 raw entities  |  0 zones  |  0 connections  |  0 blocking  |  0 warnings");
+
+        switch (currentWorkspace_->stage) {
+        case WorkspaceStage::LayoutReady:
+            importSummaryValue_->setText(
+                "The workspace is already carrying an approved layout state. Reimporting a DXF will reopen review.");
+            importAuthoringGateValue_->setText(
+                "Layout is approved in the current shell, but run still waits for scenario readiness.");
+            break;
+        case WorkspaceStage::LayoutNeedsReview:
+            importSummaryValue_->setText(
+                "Choose a DXF source and run import. Blocking issues and approval state will appear here before authoring continues.");
+            importAuthoringGateValue_->setText(
+                "Run stays blocked until layout import completes and the review is explicitly approved.");
+            break;
+        default:
+            importSummaryValue_->setText(
+                "No live import result is attached to this workspace yet. Reimporting a DXF will demote the workspace back to layout review.");
+            importAuthoringGateValue_->setText(
+                "Import workflow is idle. Reimport is available, but run/analysis gating follows the current workspace stage.");
+            break;
+        }
+
+        importIssueDetailValue_->setText("No import issue selected.");
+        layoutCorrectionTargetValue_->setText("No correction target selected.");
+        approveImportButton_->setEnabled(false);
+        rejectImportButton_->setEnabled(false);
+        openLayoutCorrectionButton_->setEnabled(false);
+        return;
+    }
+
+    const auto& result = *currentImportResult_;
+
+    int blockingCount = 0;
+    int warningCount = 0;
+    for (std::size_t index = 0; index < result.issues.size(); ++index) {
+        const auto& issue = result.issues[index];
+        auto* item = new QListWidgetItem(formatIssueLabel(issue));
+        item->setData(Qt::UserRole, static_cast<int>(index));
+
+        if (issue.blocksSimulation()) {
+            ++blockingCount;
+            blockingIssuesList_->addItem(item);
+        } else {
+            if (issue.severity == ImportIssueSeverity::Warning) {
+                ++warningCount;
+            }
+            warningIssuesList_->addItem(item);
+        }
+    }
+
+    if (warningCount == 0) {
+        for (const auto& issue : result.issues) {
+            if (!issue.blocksSimulation() && issue.severity != ImportIssueSeverity::Warning) {
+                ++warningCount;
+            }
+        }
+    }
+
+    QString summaryText = "Import executed, but no FacilityLayout output was produced yet.";
+    if (result.layout.has_value()) {
+        const auto& layout = *result.layout;
+        const QString layoutName = layout.name.empty() ? QStringLiteral("draft") : QString::fromStdString(layout.name);
+        const QString sourceName =
+            importSourcePath_.empty() ? QStringLiteral("the current source") : pathToQString(importSourcePath_.filename());
+        summaryText = QString("FacilityLayout %1 produced from %2 with %3 zones and %4 connections.")
+                          .arg(layoutName)
+                          .arg(sourceName)
+                          .arg(layout.zones.size())
+                          .arg(layout.connections.size());
+    } else if (result.canonicalGeometry.has_value()) {
+        const QString sourceName =
+            importSourcePath_.empty() ? QStringLiteral("the current source") : pathToQString(importSourcePath_.filename());
+        summaryText = QString("Canonical geometry exists, but layout synthesis is incomplete for %1.")
+                          .arg(sourceName);
+    }
+
+    importSummaryValue_->setText(summaryText);
+    importReviewStatusValue_->setText(importReviewStatusToString(result.reviewStatus));
+
+    const std::size_t rawEntityCount = result.rawModel.has_value() ? result.rawModel->entities.size() : 0;
+    const std::size_t walkableCount =
+        result.canonicalGeometry.has_value() ? result.canonicalGeometry->walkableAreas.size() : 0;
+    const std::size_t zoneCount = result.layout.has_value() ? result.layout->zones.size() : 0;
+    const std::size_t connectionCount = result.layout.has_value() ? result.layout->connections.size() : 0;
+    importCountsValue_->setText(
+        QString("%1 raw entities  |  %2 walkable  |  %3 zones  |  %4 connections  |  %5 blocking  |  %6 warnings")
+            .arg(rawEntityCount)
+            .arg(walkableCount)
+            .arg(zoneCount)
+            .arg(connectionCount)
+            .arg(blockingCount)
+            .arg(warningCount));
+
+    if (!result.layout.has_value()) {
+        importAuthoringGateValue_->setText(
+            "Import did not produce a usable FacilityLayout. Approval is disabled and run stays blocked.");
+    } else if (safecrowd::domain::hasBlockingImportIssue(result.issues)) {
+        importAuthoringGateValue_->setText(
+            "Blocking issues remain. Approval is disabled until those issues are corrected or the source is reimported.");
+    } else if (result.reviewStatus == safecrowd::domain::ImportReviewStatus::Approved) {
+        importAuthoringGateValue_->setText(
+            "Layout review is approved. Scenario authoring may continue, while run still waits for scenario readiness.");
+    } else if (result.reviewStatus == safecrowd::domain::ImportReviewStatus::Rejected) {
+        importAuthoringGateValue_->setText(
+            "Review is rejected. Reimport or correction entry must resolve the issue set before authoring continues.");
+    } else {
+        importAuthoringGateValue_->setText(
+            "No blocking issues remain. Approve review to promote the workspace to Layout Ready.");
+    }
+
+    approveImportButton_->setEnabled(
+        result.layout.has_value()
+        && !safecrowd::domain::hasBlockingImportIssue(result.issues)
+        && result.reviewStatus != safecrowd::domain::ImportReviewStatus::Approved);
+    rejectImportButton_->setEnabled(result.reviewStatus != safecrowd::domain::ImportReviewStatus::Rejected);
+
+    if (blockingIssuesList_->count() > 0) {
+        blockingIssuesList_->setCurrentRow(0);
+    } else if (warningIssuesList_->count() > 0) {
+        warningIssuesList_->setCurrentRow(0);
+    } else {
+        importIssueDetailValue_->setText("The current import produced no review issues.");
+        openLayoutCorrectionButton_->setEnabled(false);
+    }
+
+    refreshImportIssueSelection();
+}
+
+void MainWindow::refreshImportIssueSelection() {
+    if (!currentImportResult_.has_value()) {
+        importIssueDetailValue_->setText("No import issue selected.");
+        layoutCorrectionTargetValue_->setText("No correction target selected.");
+        openLayoutCorrectionButton_->setEnabled(false);
+        return;
+    }
+
+    QListWidgetItem* selectedItem = blockingIssuesList_->currentItem();
+    if (selectedItem == nullptr) {
+        selectedItem = warningIssuesList_->currentItem();
+    }
+
+    if (selectedItem == nullptr) {
+        if (currentImportResult_->issues.empty()) {
+            importIssueDetailValue_->setText("The current import produced no review issues.");
+            layoutCorrectionTargetValue_->setText("No correction target selected.");
+        } else {
+            importIssueDetailValue_->setText("Select an import issue to inspect traces and correction context.");
+        }
+        openLayoutCorrectionButton_->setEnabled(false);
+        return;
+    }
+
+    const int issueIndex = selectedItem->data(Qt::UserRole).toInt();
+    if (issueIndex < 0 || issueIndex >= static_cast<int>(currentImportResult_->issues.size())) {
+        importIssueDetailValue_->setText("Issue selection is out of sync with the current import result.");
+        openLayoutCorrectionButton_->setEnabled(false);
+        return;
+    }
+
+    const auto& issue = currentImportResult_->issues[issueIndex];
+    QStringList traceLines;
+    for (const auto& traceRef : currentImportResult_->traceRefs) {
+        if (!traceMatchesIssue(traceRef, issue)) {
+            continue;
+        }
+
+        const QString sourceIds = joinStringList(traceRef.sourceIds);
+        const QString canonicalIds = joinStringList(traceRef.canonicalIds);
+        traceLines.push_back(QString("layout target=%1 | source=%2 | canonical=%3")
+                                 .arg(QString::fromStdString(traceRef.targetId))
+                                 .arg(sourceIds.isEmpty() ? QStringLiteral("-") : sourceIds)
+                                 .arg(canonicalIds.isEmpty() ? QStringLiteral("-") : canonicalIds));
+    }
+
+    importIssueDetailValue_->setText(
+        QString("<b>%1</b><br/>Severity: %2<br/>Code: %3<br/>Message: %4<br/>Source: %5<br/>Target: %6<br/>Trace refs: %7")
+            .arg(issue.blocksSimulation() ? "Blocking issue" : "Warning / follow-up")
+            .arg(safecrowd::domain::toString(issue.severity))
+            .arg(safecrowd::domain::toString(issue.code))
+            .arg(QString::fromStdString(issue.message))
+            .arg(issue.sourceId.empty() ? QStringLiteral("-") : QString::fromStdString(issue.sourceId))
+            .arg(issue.targetId.empty() ? QStringLiteral("-") : QString::fromStdString(issue.targetId))
+            .arg(traceLines.isEmpty() ? QStringLiteral("No matching trace refs.") : traceLines.join("<br/>")));
+    openLayoutCorrectionButton_->setEnabled(true);
+}
+
+void MainWindow::browseImportFile() {
+    const QString selectedFile = QFileDialog::getOpenFileName(
+        this,
+        "Select Layout Source",
+        importSourcePath_.empty() ? QString() : pathToQString(importSourcePath_.parent_path()),
+        "DXF files (*.dxf);;All files (*.*)");
+
+    if (selectedFile.isEmpty()) {
+        return;
+    }
+
+    importSourcePath_ = std::filesystem::path(selectedFile.toStdString());
+    navigatorFeedbackValue_->setText(
+        QString("Selected <b>%1</b> for import review. Run import to populate blocking issues, warnings, and approval state.")
+            .arg(pathToQString(importSourcePath_.filename())));
+    refreshImportWorkflow();
+}
+
+void MainWindow::importSelectedFile() {
+    using safecrowd::domain::ImportRequest;
+    using safecrowd::domain::ImportReviewStatus;
+    using safecrowd::domain::ImportedFileFormat;
+
+    if (!currentWorkspace_.has_value()) {
+        navigatorFeedbackValue_->setText("Open or create a workspace before starting layout import.");
+        return;
+    }
+
+    if (importSourcePath_.empty()) {
+        navigatorFeedbackValue_->setText("Choose a DXF source first. Import review cannot start without a file.");
+        return;
+    }
+
+    stopSimulation();
+
+    currentImportResult_ = importService_.importFile(ImportRequest{
+        .sourcePath = importSourcePath_,
+        .requestedFormat = ImportedFileFormat::Dxf,
+        .preserveRawModel = true,
+        .runValidation = true,
+    });
+
+    const bool hasBlockingIssues = safecrowd::domain::hasBlockingImportIssue(currentImportResult_->issues);
+    int blockingCount = 0;
+    for (const auto& issue : currentImportResult_->issues) {
+        if (issue.blocksSimulation()) {
+            ++blockingCount;
+        }
+    }
+
+    const QString importStem = pathToQString(importSourcePath_.stem());
+    currentWorkspace_->displayName = importStem.isEmpty() ? QStringLiteral("Imported Layout Draft") : importStem;
+    currentWorkspace_->stage =
+        currentImportResult_->reviewStatus == ImportReviewStatus::Approved && currentImportResult_->readyForSimulation()
+        ? WorkspaceStage::LayoutReady
+        : WorkspaceStage::LayoutNeedsReview;
+    currentWorkspace_->scenarioCount = 0;
+    currentWorkspace_->artifactCount = 0;
+    currentWorkspace_->restoreSummary =
+        hasBlockingIssues
+        ? QString("Imported from %1 with blocking review issues. Scenario and run readiness are reset until review clears.")
+              .arg(pathToQString(importSourcePath_.filename()))
+        : QString("Imported from %1. Layout review is pending explicit approval before scenario authoring continues.")
+              .arg(pathToQString(importSourcePath_.filename()));
+
+    workspaceTabs_->setCurrentIndex(1);
+    navigatorFeedbackValue_->setText(
+        hasBlockingIssues
+        ? QString("Imported <b>%1</b> with %2 blocking issue(s). Approval is disabled until correction or reimport.")
+              .arg(pathToQString(importSourcePath_.filename()))
+              .arg(blockingCount)
+        : QString("Imported <b>%1</b>. Review is pending; approve the layout to move the workspace to Layout Ready.")
+              .arg(pathToQString(importSourcePath_.filename())));
+    refreshImportWorkflow();
+    refreshWorkspaceChrome();
+    refreshRuntimePanel();
+}
+
+void MainWindow::reimportSelectedFile() {
+    if (importSourcePath_.empty()) {
+        navigatorFeedbackValue_->setText("No import source is selected yet. Browse to a DXF file first.");
+        return;
+    }
+
+    navigatorFeedbackValue_->setText(
+        QString("Reimporting <b>%1</b>. Any prior scenario/run readiness will be reset to layout review.")
+            .arg(pathToQString(importSourcePath_.filename())));
+    importSelectedFile();
+}
+
+void MainWindow::approveImportReview() {
+    using safecrowd::domain::ImportReviewStatus;
+
+    if (!currentWorkspace_.has_value() || !currentImportResult_.has_value()) {
+        navigatorFeedbackValue_->setText("No import result is available to approve.");
+        return;
+    }
+
+    if (!currentImportResult_->layout.has_value()) {
+        navigatorFeedbackValue_->setText(
+            "Approval is disabled because the import did not produce a FacilityLayout.");
+        refreshImportWorkflow();
+        return;
+    }
+
+    if (safecrowd::domain::hasBlockingImportIssue(currentImportResult_->issues)) {
+        navigatorFeedbackValue_->setText(
+            "Blocking issues still remain. Resolve them through correction entry or reimport before approving the review.");
+        refreshImportWorkflow();
+        return;
+    }
+
+    currentImportResult_->reviewStatus = ImportReviewStatus::Approved;
+    currentWorkspace_->stage = WorkspaceStage::LayoutReady;
+    currentWorkspace_->restoreSummary =
+        QString("Layout review approved for %1. Scenario authoring may continue from an approved layout.")
+            .arg(importSourcePath_.empty() ? currentWorkspace_->displayName : pathToQString(importSourcePath_.filename()));
+
+    workspaceTabs_->setCurrentIndex(1);
+    navigatorFeedbackValue_->setText(
+        QString("Layout review approved for <b>%1</b>. The workspace is now Layout Ready, but run still waits for scenario readiness.")
+            .arg(currentWorkspace_->displayName));
+    refreshImportWorkflow();
+    refreshWorkspaceChrome();
+    refreshRuntimePanel();
+}
+
+void MainWindow::rejectImportReview() {
+    using safecrowd::domain::ImportReviewStatus;
+
+    if (!currentWorkspace_.has_value() || !currentImportResult_.has_value()) {
+        navigatorFeedbackValue_->setText("No import result is available to reject.");
+        return;
+    }
+
+    currentImportResult_->reviewStatus = ImportReviewStatus::Rejected;
+    currentWorkspace_->stage = WorkspaceStage::LayoutNeedsReview;
+    currentWorkspace_->restoreSummary =
+        QString("Layout review rejected for %1. Reimport or correction entry must resolve the current issue set.")
+            .arg(importSourcePath_.empty() ? currentWorkspace_->displayName : pathToQString(importSourcePath_.filename()));
+
+    workspaceTabs_->setCurrentIndex(1);
+    navigatorFeedbackValue_->setText(
+        QString("Layout review rejected for <b>%1</b>. Run remains blocked until the review is cleared.")
+            .arg(currentWorkspace_->displayName));
+    refreshImportWorkflow();
+    refreshWorkspaceChrome();
+    refreshRuntimePanel();
+}
+
+void MainWindow::openLayoutCorrectionEntry() {
+    if (!currentImportResult_.has_value()) {
+        navigatorFeedbackValue_->setText("No import review is active. Start import before opening correction entry.");
+        return;
+    }
+
+    QListWidgetItem* selectedItem = blockingIssuesList_->currentItem();
+    if (selectedItem == nullptr) {
+        selectedItem = warningIssuesList_->currentItem();
+    }
+
+    if (selectedItem == nullptr) {
+        navigatorFeedbackValue_->setText("Select an issue first. Correction entry follows an explicit issue selection.");
+        return;
+    }
+
+    const int issueIndex = selectedItem->data(Qt::UserRole).toInt();
+    if (issueIndex < 0 || issueIndex >= static_cast<int>(currentImportResult_->issues.size())) {
+        navigatorFeedbackValue_->setText("The selected issue could not be resolved from the current import result.");
+        return;
+    }
+
+    const auto& issue = currentImportResult_->issues[issueIndex];
+    QStringList traceSummaries;
+    for (const auto& traceRef : currentImportResult_->traceRefs) {
+        if (!traceMatchesIssue(traceRef, issue)) {
+            continue;
+        }
+
+        const QString sourceIds = joinStringList(traceRef.sourceIds);
+        traceSummaries.push_back(
+            QString("target=%1 / source=%2")
+                .arg(QString::fromStdString(traceRef.targetId))
+                .arg(sourceIds.isEmpty() ? QStringLiteral("-") : sourceIds));
+    }
+
+    layoutCorrectionTargetValue_->setText(
+        QString("%1<br/>Source: %2<br/>Target: %3<br/>Trace: %4<br/><br/>#77 editor pending: this is the explicit correction entry target only.")
+            .arg(QString::fromStdString(issue.message))
+            .arg(issue.sourceId.empty() ? QStringLiteral("-") : QString::fromStdString(issue.sourceId))
+            .arg(issue.targetId.empty() ? QStringLiteral("-") : QString::fromStdString(issue.targetId))
+            .arg(traceSummaries.isEmpty() ? QStringLiteral("No matching trace refs.") : traceSummaries.join("<br/>")));
+    workspaceTabs_->setCurrentIndex(1);
+    navigatorFeedbackValue_->setText(
+        QString("Correction entry opened for <b>%1</b>. Manual topology editing itself is still tracked separately in #77.")
+            .arg(QString::fromStdString(issue.message)));
+    refreshImportIssueSelection();
+}
+
 void MainWindow::refreshWorkspaceChrome() {
     if (!currentWorkspace_.has_value()) {
         rootStack_->setCurrentWidget(navigatorPage_);
@@ -893,6 +1471,7 @@ void MainWindow::refreshWorkspaceChrome() {
 
 void MainWindow::createNewWorkspace() {
     stopSimulation();
+    resetImportWorkflow();
 
     currentWorkspace_ = WorkspaceSession{
         .projectId = "new-workspace",
@@ -906,12 +1485,14 @@ void MainWindow::createNewWorkspace() {
     workspaceTabs_->setCurrentIndex(0);
     navigatorFeedbackValue_->setText(
         "A new workspace shell has been created. Layout review is now the active gate.");
+    refreshImportWorkflow();
     refreshWorkspaceChrome();
     refreshRuntimePanel();
 }
 
 void MainWindow::beginImportWorkspace() {
     stopSimulation();
+    resetImportWorkflow();
 
     currentWorkspace_ = WorkspaceSession{
         .projectId = "import-workspace",
@@ -925,6 +1506,7 @@ void MainWindow::beginImportWorkspace() {
     workspaceTabs_->setCurrentIndex(1);
     navigatorFeedbackValue_->setText(
         "Import entry moved the workspace into LayoutNeedsReview. Run stays blocked until review clears.");
+    refreshImportWorkflow();
     refreshWorkspaceChrome();
     refreshRuntimePanel();
 }
@@ -946,6 +1528,7 @@ void MainWindow::openSelectedRecentProject() {
     }
 
     stopSimulation();
+    resetImportWorkflow();
 
     currentWorkspace_ = WorkspaceSession{
         .projectId = entry.projectId,
@@ -965,15 +1548,18 @@ void MainWindow::openSelectedRecentProject() {
     navigatorFeedbackValue_->setText(
         QString("Restored <b>%1</b> through the Project Navigator. Top-level tabs now reflect the restored workspace gate.")
             .arg(entry.displayName));
+    refreshImportWorkflow();
     refreshWorkspaceChrome();
     refreshRuntimePanel();
 }
 
 void MainWindow::closeWorkspace() {
     stopSimulation();
+    resetImportWorkflow();
     currentWorkspace_.reset();
     navigatorFeedbackValue_->setText(
         "Workspace closed. Recent/open/import entry points are available again from NoProject.");
+    refreshImportWorkflow();
     refreshWorkspaceChrome();
     refreshRuntimePanel();
 }

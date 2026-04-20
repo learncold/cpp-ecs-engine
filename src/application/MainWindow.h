@@ -3,8 +3,12 @@
 #include <QMainWindow>
 #include <QString>
 
+#include <filesystem>
 #include <optional>
 #include <vector>
+
+#include "domain/DxfImportService.h"
+#include "domain/ImportResult.h"
 
 namespace safecrowd::domain {
 class SafeCrowdDomain;
@@ -62,7 +66,16 @@ private:
     void populateSampleRecentProjects();
     void rebuildRecentProjectsList();
     void refreshNavigator();
+    void resetImportWorkflow();
+    void refreshImportWorkflow();
+    void refreshImportIssueSelection();
     void refreshWorkspaceChrome();
+    void browseImportFile();
+    void importSelectedFile();
+    void reimportSelectedFile();
+    void approveImportReview();
+    void rejectImportReview();
+    void openLayoutCorrectionEntry();
     void startSimulation();
     void pauseSimulation();
     void stopSimulation();
@@ -97,6 +110,21 @@ private:
     QLabel* currentScenarioCountValue_{nullptr};
     QLabel* currentArtifactCountValue_{nullptr};
     QPushButton* closeWorkspaceButton_{nullptr};
+    QLabel* importSourceValue_{nullptr};
+    QLabel* importSummaryValue_{nullptr};
+    QLabel* importReviewStatusValue_{nullptr};
+    QLabel* importCountsValue_{nullptr};
+    QLabel* importAuthoringGateValue_{nullptr};
+    QLabel* importIssueDetailValue_{nullptr};
+    QLabel* layoutCorrectionTargetValue_{nullptr};
+    QListWidget* blockingIssuesList_{nullptr};
+    QListWidget* warningIssuesList_{nullptr};
+    QPushButton* browseImportButton_{nullptr};
+    QPushButton* importSelectedFileButton_{nullptr};
+    QPushButton* reimportButton_{nullptr};
+    QPushButton* approveImportButton_{nullptr};
+    QPushButton* rejectImportButton_{nullptr};
+    QPushButton* openLayoutCorrectionButton_{nullptr};
     QPushButton* startButton_{nullptr};
     QPushButton* pauseButton_{nullptr};
     QPushButton* stopButton_{nullptr};
@@ -110,6 +138,9 @@ private:
     QTimer* tickTimer_{nullptr};
     std::vector<RecentProjectEntry> recentProjects_{};
     std::optional<WorkspaceSession> currentWorkspace_{};
+    std::filesystem::path importSourcePath_{};
+    std::optional<safecrowd::domain::ImportResult> currentImportResult_{};
+    safecrowd::domain::DxfImportService importService_{};
 };
 
 }  // namespace safecrowd::application
