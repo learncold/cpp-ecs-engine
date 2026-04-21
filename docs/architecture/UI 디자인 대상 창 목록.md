@@ -1,385 +1,337 @@
 # SafeCrowd UI 디자인 대상 창 목록
 
-이 문서는 다음 UML을 기준으로 실제 UI 디자인이 필요한 창, 화면, 패널, 다이얼로그를 정리한다.
+이 문서는 현재 앱 구현 방향에 맞춰 UI 화면과 재사용 구조를 정리한다.
 
-- `uml/application-authoring-workspace.puml`
-- `uml/application-analysis-workspace.puml`
-- `uml/application-workspace-state-model.puml`
+현재 기준은 다음 흐름이다.
 
-`ProjectRepository`, `ResultRepository`, `ImportOrchestrator`, `ScenarioBatchRunner`, `SimulationSession`, `ResultAggregator`, `AlternativeRecommendationService`, `EngineRuntime`, `IRenderBridge` 같은 항목은 구현 컴포넌트이며 UI 디자인 대상이 아니다.
+1. 앱 실행
+2. Project Navigator 진입
+3. New Project 또는 저장된 프로젝트 선택
+4. DXF import
+5. Layout Review Workspace 진입
+6. 이후 scenario authoring, run, analysis 화면을 같은 workspace shell 안에서 확장
 
-## 1. 메인 애플리케이션 창
+`domain`의 import, validation, simulation 객체는 UI 디자인 대상이 아니다. UI는 `src/application/`에서 Qt Widgets로 구현하고, `domain` 결과를 화면에 표시한다.
 
-### 1.1 Main Workspace Window
-- 앱의 기본 창이다.
-- 프로젝트 상태, 작성(authoring), 실행(run), 분석(analysis) 흐름을 한 화면 구조 안에서 전환하거나 배치한다.
-- 상태 모델의 `NoProject`, `LayoutNeedsReview`, `LayoutReady`, `ScenarioDraftInvalid`, `ScenarioReady`, `BatchRunning`, `BatchPaused`, `AggregationPending`, `ResultsAvailable`, `ComparisonReady`, `RecommendationReady` 상태에 따라 패널 활성/비활성이 달라져야 한다.
+## 1. 앱 시작 화면
 
-필요한 디자인 요소:
-- 상단 메뉴 또는 툴바
-- 현재 프로젝트명과 저장 상태
-- 현재 workspace 상태 표시
-- 주요 작업 영역 전환
-- 닫기/저장/열기 같은 프로젝트 명령
-- 실행 가능 여부와 blocker 상태 표시
+### 1.1 Project Navigator
 
-## 2. 프로젝트 시작/관리 창
+앱을 처음 켰을 때 진입하는 화면이다. 예시 프로젝트 목록을 두지 않고, 실제 저장된 프로젝트 목록을 보여준다.
 
-### 2.1 Project Navigator
-- 새 프로젝트, 기존 프로젝트 열기, 저장, 최근 프로젝트 접근의 진입점이다.
-- `Project Save/Open`은 별도 창 이름이 아니라 저장/열기 처리를 담당하는 내부 흐름으로 본다.
+현재 구현 책임:
 
-필요한 디자인 요소:
-- 새 프로젝트 생성
-- 프로젝트 열기
-- 프로젝트 저장
-- 다른 이름으로 저장이 필요하다면 저장 위치 선택
-- 최근 프로젝트 목록
-- 프로젝트 닫기
-- 프로젝트 상태 표시
+- 최근 저장 프로젝트 목록 표시
+- 새 프로젝트 생성 진입
+- 저장된 프로젝트 클릭 시 Layout Review Workspace로 진입
+- 프로젝트 목록이 없을 때 빈 상태 표시
 
-### 2.2 Project Open Dialog
-- 앱 전용 프로젝트 선택 창을 만들 경우 디자인 대상이다.
-- OS 파일 다이얼로그만 사용할 경우 별도 상세 UI 디자인은 생략 가능하다.
+필요한 UI 요소:
 
-필요한 디자인 요소:
-- 프로젝트 파일 선택
-- 최근 프로젝트 바로 열기
-- 열 수 없는 프로젝트 오류 표시
-- pending review 프로젝트와 approved 프로젝트 상태 구분
+- `SafeCrowd` 제목
+- 저장된 프로젝트 리스트
+- 프로젝트명
+- 마지막 저장 시각
+- `+ New Project` 버튼
+- `Open Folder` 버튼
 
-### 2.3 Project Save Dialog
-- 앱 전용 저장 위치 선택 또는 프로젝트 메타데이터 입력이 필요할 경우 디자인 대상이다.
-- 단순 파일 저장만 OS 파일 다이얼로그로 처리한다면 별도 화면 디자인은 최소화할 수 있다.
+후속 설계 대상:
 
-필요한 디자인 요소:
-- 저장 위치 선택
-- 프로젝트 이름 입력
-- 덮어쓰기 확인
-- 저장 실패 오류 표시
+- 열 수 없는 프로젝트 표시
+- 프로젝트 삭제 또는 목록에서 제거
+- 프로젝트 검색/정렬
+- 프로젝트 상태 표시: review 필요, blocker 있음, ready 등
 
-## 3. Authoring Workspace 창과 패널
+### 1.2 New Project 화면
 
-### 3.1 Authoring Workspace
-- 레이아웃 import, 검토, 보정, 시나리오 작성이 이루어지는 작업 화면이다.
-- `LayoutNeedsReview`, `LayoutReady`, `ScenarioDraftInvalid`, `ScenarioReady` 상태를 주로 다룬다.
+새 프로젝트를 만들기 위한 입력 화면이다. 이 화면에서 시뮬레이션 설정까지 받지 않고, 프로젝트 생성과 layout import에 필요한 최소 정보만 받는다.
 
-필요한 디자인 요소:
-- 프로젝트 네비게이터 영역
-- import 흐름 진입
-- layout canvas
-- inspector
-- issue review
-- scenario library
-- scenario editor
-- readiness 표시
-- variation diff 표시
+현재 구현 책임:
 
-### 3.2 Import Workflow UI
-- 외부 레이아웃 파일을 선택하고 import 또는 reimport를 수행하는 화면 또는 다이얼로그다.
+- 프로젝트명 입력
+- Layout DXF 파일 선택
+- 프로젝트 저장 폴더 선택
+- `Done` 클릭 시 DXF import 실행
+- import 결과로 Layout Review Workspace 진입
+- `Cancel` 클릭 시 Project Navigator 복귀
 
-필요한 디자인 요소:
-- 파일 선택
-- import 옵션
-- reimport 옵션
-- 변환 규칙 선택
-- import 실행
+필요한 UI 요소:
+
+- `New Project` 제목
+- Project Name 입력 필드
+- Layout 파일 선택 버튼
+- 선택된 DXF 경로 표시
+- Folder 선택 버튼
+- 선택된 저장 폴더 경로 표시
+- `Cancel`
+- `Done`
+
+후속 설계 대상:
+
+- 입력값 validation 메시지
+- DXF가 아닌 파일 선택 방지 강화
+- 같은 폴더에 기존 프로젝트가 있을 때 덮어쓰기 확인
 - import 진행 상태
-- import 실패/성공 결과 표시
+- import 실패 상세 메시지
 
-### 3.3 Issue Review Panel
-- import 오류, 경고, blocker를 검토하는 패널이다.
-- blocker가 남아 있으면 실행이 비활성화되어야 한다.
+## 2. 재사용 Main Workspace 구조
 
-필요한 디자인 요소:
-- 오류/경고 목록
-- blocker 여부
-- 승인/무시/수정 필요 상태
-- 문제 위치로 이동
-- layout review 승인 상태
-- 남은 blocker 수
+### 2.1 Workspace Shell
 
-### 3.4 Layout Canvas
-- import된 공간 구조와 topology를 보고 수정하는 주 작업 화면이다.
+프로젝트가 열린 뒤 사용하는 공통 작업 화면 구조다. Layout Review뿐 아니라 향후 scenario authoring, run, analysis도 이 구조를 재사용한다.
 
-필요한 디자인 요소:
-- 공간/노드/연결/출구/제어구역 표시
-- 선택, 확대/축소, 이동
-- 오류 위치 하이라이트
-- topology 수정
-- live/analysis viewport와 구분되는 authoring 전용 표시
+현재 구현 책임:
 
-### 3.5 Inspector Panel
-- Layout Canvas에서 선택한 요소의 속성을 표시하고 편집하는 패널이다.
-- 현재 UML에서는 `Layout Canvas + Inspector`로 묶여 있지만 실제 UI 디자인에서는 별도 패널로 다루는 것이 좋다.
+- 상단 프로젝트 메뉴
+- 좌측 상태/이슈 패널
+- 중앙 canvas
+- 우측 review/inspector 패널
+- 하단 상태/요약 패널
 
-필요한 디자인 요소:
-- 선택 요소 속성
-- 이름/유형/연결/측정 구역 등 편집 필드
-- 유효성 오류 표시
-- 변경 저장 또는 적용
+기본 레이아웃:
 
-### 3.6 Scenario Library
-- baseline, alternative, recommended draft를 구분해서 보여주는 시나리오 목록이다.
+- Top Bar
+- Left Panel
+- Center Canvas
+- Right Panel
+- Bottom Panel
 
-필요한 디자인 요소:
-- 시나리오 패밀리 목록
-- baseline 표시
-- alternative 목록
-- recommended draft 목록
-- run-ready 상태
-- scenario lineage 표시
-- 시나리오 열기/복제/삭제
+상단바 현재 동작:
 
-### 3.7 Scenario Template Picker
-- 새 시나리오를 빠르게 만들기 위한 템플릿 선택 화면 또는 다이얼로그다.
+- `Project` 버튼
+- `Project > Save Project` 드롭다운 액션
+- `Tool` 버튼 자리
 
-필요한 디자인 요소:
-- 템플릿 카드
-- intended use
-- risk axis
-- 필요한 layout feature
-- prerequisite 충족/미충족 표시
-- 적용 불가 사유
-- 템플릿 적용
+저장 동작:
 
-### 3.8 Scenario Editor Tabs
-- 선택한 시나리오의 입력값을 편집하는 탭형 화면이다.
+- 프로젝트 폴더에 `safecrowd-project.json` 저장
+- 프로젝트 폴더에 `layout.dxf` 복사
+- 앱 데이터 경로에 최근 프로젝트 인덱스 저장
+- 다음 앱 실행 시 Project Navigator 목록에 표시
 
-필요한 디자인 요소:
-- Population 탭
-- Environment 탭
-- Control 탭
-- Execution 탭
-- 필수 입력 표시
-- invalid edit 상태 표시
-- draft 저장
+후속 설계 대상:
 
-### 3.9 Readiness Panel
-- 현재 layout과 scenario가 실행 가능한지 보여주는 패널이다.
+- 저장 상태 표시: saved, unsaved, failed
+- 최근 저장 시각 표시
+- Project 메뉴 항목 확장: Save As, Close Project, Back to Navigator
+- Tool 메뉴의 실제 도구 구성
 
-필요한 디자인 요소:
-- 필수 입력 누락
-- blocker 목록
-- layout 승인 여부
-- scenario validation 결과
-- Run 버튼 활성 조건 설명
-- 누락 항목으로 이동
+## 3. Layout Review Workspace
 
-### 3.10 Variation Diff List
-- baseline 대비 alternative 또는 recommended draft의 변경점을 보여주는 패널이다.
+### 3.1 Layout Review 화면
 
-필요한 디자인 요소:
-- 변경된 입력 목록
-- control event 차이
-- route cost assumption 차이
-- inflow setting 차이
-- visibility condition 차이
-- template origin metadata
-- baseline으로부터의 변경 추적
+DXF import 직후 진입하는 첫 workspace 화면이다. import 모듈이 파악한 layout geometry와 blocking issue를 검토한다.
 
-## 4. Run/Analysis Workspace 창과 패널
+현재 구현 책임:
 
-### 4.1 Analysis Workspace
-- 실행, 재생, 결과 확인, 비교, 추천, 내보내기를 수행하는 작업 화면이다.
-- `BatchRunning`, `BatchPaused`, `AggregationPending`, `ResultsAvailable`, `ComparisonReady`, `RecommendationReady` 상태를 주로 다룬다.
+- DXF import 결과 표시
+- 중앙 canvas에 import 결과 기반 2D preview 렌더링
+- 좌측 패널에 blocking issue 목록 표시
+- 우측 패널에 issue count 표시
+- 하단 패널에 현재 review/project context 표시
 
-필요한 디자인 요소:
-- run control
-- batch progress
-- live viewport
-- heatmap selector
-- run results
-- variation summary
-- comparison
-- recommendation
+필요한 UI 요소:
+
+- Workspace Shell 상단바
+- 좌측 `Blocking` 목록
+- 중앙 Layout Preview
+- 우측 issue summary
+- 하단 review 상태 영역
+
+현재 중앙 preview 표시 대상:
+
+- walkable area / zone polygon
+- obstacle polygon
+- wall segment
+- opening segment
+- layout connection
+- barrier polyline
+
+현재 좌측 Blocking 목록 표시 대상:
+
+- issue code
+- severity
+- message
+- source id
+- target id
+
+후속 설계 대상:
+
+- blocking item 클릭 시 canvas 위치 이동
+- 해당 geometry highlight
+- warning/info issue 탭
+- issue 해결/무시/승인 상태
+- Layout approval action
+- pan/zoom 가능한 2D CAD형 viewport
+- 선택 요소 inspector
+
+### 3.2 Layout Canvas
+
+Layout Review의 중앙 작업 영역이다. 현재는 import 결과를 QPainter로 렌더링하는 미리보기다.
+
+후속 설계 대상:
+
+- 마우스 드래그 pan
+- wheel zoom
+- fit to view
+- layer visibility
+- element selection
+- geometry hover highlight
+- import issue 위치 표시
+- DXF layer별 색상/스타일 반영
+
+### 3.3 Blocking / Issue Panel
+
+Layout Review의 좌측 패널이다. import와 validation 결과 중 simulation을 막는 항목을 우선 표시한다.
+
+후속 설계 대상:
+
+- blocker, warning, info 필터
+- issue group by source layer/entity
+- issue count badge
+- issue 상세 drawer
+- repair suggestion
+
+## 4. 이후 확장 대상 화면
+
+현재 구현은 Project Navigator, New Project, Layout Review까지를 우선 대상으로 한다. 다음 화면들은 Workspace Shell 안에서 단계적으로 추가한다.
+
+### 4.1 Scenario Authoring
+
+layout review 이후 scenario를 작성하는 화면이다.
+
+필요한 UI 요소:
+
+- Scenario Library
+- Scenario Template Picker
+- Scenario Editor
+- Population 설정
+- Environment 설정
+- Control 설정
+- Execution 설정
+- Readiness Panel
+
+### 4.2 Run Workspace
+
+valid scenario를 실행하는 화면이다.
+
+필요한 UI 요소:
+
+- Run / Pause / Resume / Stop
+- Batch Progress
+- Live Viewport
+- Simulation status
+- 실행 불가 사유 표시
+
+### 4.3 Analysis Workspace
+
+실행 결과를 검토하고 비교하는 화면이다.
+
+필요한 UI 요소:
+
+- Run Results
+- Variation Summary
+- Heatmap Selector
+- Comparison View
+- Recommendation Drawer
+- Export Dialog
+
+## 5. 상태별 화면 흐름
+
+### 5.1 No Project
+
+표시 화면:
+
+- Project Navigator
+
+가능한 액션:
+
+- New Project
+- 저장된 프로젝트 열기
+- 폴더에서 프로젝트 열기
+
+### 5.2 New Project Draft
+
+표시 화면:
+
+- New Project
+
+가능한 액션:
+
+- 프로젝트명 입력
+- DXF 선택
+- 저장 폴더 선택
+- Cancel
+- Done
+
+### 5.3 Layout Needs Review
+
+표시 화면:
+
+- Layout Review Workspace
+
+가능한 액션:
+
+- blocking issue 확인
+- layout preview 확인
+- Project > Save Project
+
+제한:
+
+- blocker가 남아 있으면 simulation run은 비활성화한다.
+
+### 5.4 Layout Ready
+
+후속 구현 상태다.
+
+표시 화면:
+
+- Scenario Authoring Workspace
+
+가능한 액션:
+
+- scenario 생성
+- scenario 편집
+- run readiness 확인
+
+### 5.5 Scenario Ready
+
+후속 구현 상태다.
+
+표시 화면:
+
+- Run Workspace
+
+가능한 액션:
+
+- simulation 실행
+- batch 실행
+
+### 5.6 Results Available
+
+후속 구현 상태다.
+
+표시 화면:
+
+- Analysis Workspace
+
+가능한 액션:
+
+- 결과 확인
+- 대안 비교
+- 추천 검토
 - export
 
-### 4.2 Run Control
-- batch 실행을 시작, 일시정지, 재개, 정지하는 제어 영역이다.
+## 6. 현재 우선순위
 
-필요한 디자인 요소:
-- Run
-- Pause
-- Resume
-- Stop
-- 실행 불가 상태 표시
-- 승인된 layout과 valid scenario 조건 표시
-- 현재 실행 상태
+1. Project Navigator 실제 목록 동작
+2. New Project 입력과 DXF import 연결
+3. Workspace Shell 재사용 구조 유지
+4. Layout Review에서 실제 import 결과 렌더링
+5. Blocking issue 목록과 canvas 연동
+6. Project 저장/로드 안정화
+7. Layout Canvas pan/zoom/selection 추가
+8. Scenario Authoring 확장
+9. Run Workspace 확장
+10. Analysis Workspace 확장
 
-### 4.3 Batch Progress
-- batch 또는 variation 실행 진행률을 보여주는 패널이다.
-
-필요한 디자인 요소:
-- 현재 run 번호
-- 현재 variation
-- 전체 진행률
-- 남은 작업량
-- 실패한 run 표시
-- aggregation pending 상태 표시
-
-### 4.4 Live Viewport
-- 실행 중 runtime playback을 보여주는 viewport다.
-- 비교, 추천, 집계 계산을 이 화면에서 직접 추론하지 않아야 한다.
-
-필요한 디자인 요소:
-- 시뮬레이션 재생 화면
-- frame snapshot 표시
-- playback 상태
-- live overlay 표시
-- 확대/축소/이동
-- 실행 중 상호작용 제한
-
-### 4.5 Heatmap Selector
-- live overlay와 persisted heatmap layer를 선택하는 컨트롤이다.
-
-필요한 디자인 요소:
-- live overlay 선택
-- persisted layer 선택
-- 데이터 출처 표시
-- 레이어 표시/숨김
-- 색상 범례
-- intensity 범위
-
-### 4.6 Run Results Panel
-- 단일 실행 결과 요약을 보여주는 패널이다.
-- `ResultsAvailable` 이후 열 수 있다.
-
-필요한 디자인 요소:
-- run summary
-- 주요 위험 지표
-- 시간/구간별 결과
-- 관련 artifact 상태
-- Variation Summary로 이동
-
-### 4.7 Variation Summary
-- 반복 실행 aggregate 결과를 보여주는 패널이다.
-- `ResultsAvailable` 이후 열 수 있다.
-
-필요한 디자인 요소:
-- variation별 집계
-- 평균/최악/분포 지표
-- 반복 실행 신뢰도
-- baseline comparison 열기
-- persisted summary 상태
-
-### 4.8 Comparison View
-- baseline과 alternatives를 비교하는 화면이다.
-- `ComparisonReady` 이후 활성화된다.
-
-필요한 디자인 요소:
-- baseline 선택
-- alternative 선택
-- 비교 지표 표
-- 차이 시각화
-- cumulative artifact 표시
-- recommendation drawer 열기
-- export 진입
-
-### 4.9 Recommendation Drawer
-- 추천 근거를 검토하고 추천안을 scenarioize하는 drawer 또는 side panel이다.
-- `RecommendationReady` 이후 활성화된다.
-
-필요한 디자인 요소:
-- 추천 후보 목록
-- evidence 표시
-- 추천 근거 artifact 연결
-- scenarioize 버튼
-- 추천 적용/닫기
-- 적용 시 draft 생성 흐름
-
-### 4.10 Export Dialog
-- canonical artifact bundle을 내보내는 다이얼로그다.
-- 필요한 persisted artifact가 준비된 뒤 활성화된다.
-
-필요한 디자인 요소:
-- 내보낼 artifact 선택
-- canonical bundle 구성 확인
-- 저장 위치 선택
-- 파일 형식 선택
-- export 진행 상태
-- export 성공/실패 표시
-
-## 5. 상태별 UI 활성 규칙
-
-### 5.1 NoProject
-- 프로젝트가 열려 있지 않은 상태다.
-- Project Navigator, Project Open Dialog, 새 프로젝트 생성 흐름이 중심이다.
-- authoring, run, analysis 패널은 비활성 또는 빈 상태를 보여준다.
-
-### 5.2 LayoutNeedsReview
-- import된 layout에 검토가 필요하거나 blocker가 남아 있는 상태다.
-- Issue Review Panel과 Layout Canvas가 중심이다.
-- Run Control은 비활성화되어야 한다.
-
-### 5.3 LayoutReady
-- layout이 승인되었지만 실행 가능한 scenario가 아직 선택되지 않은 상태다.
-- Scenario Library와 Scenario Template Picker 진입이 중심이다.
-
-### 5.4 ScenarioDraftInvalid
-- scenario draft가 있으나 필수 입력이 부족하거나 invalid edit가 있는 상태다.
-- Scenario Editor Tabs와 Readiness Panel이 중심이다.
-- Run Control은 비활성화되어야 한다.
-
-### 5.5 ScenarioReady
-- 승인된 layout과 valid scenario가 모두 준비된 상태다.
-- Run Control의 Run이 활성화된다.
-
-### 5.6 BatchRunning
-- batch 실행 중인 상태다.
-- Run Control, Batch Progress, Live Viewport, Heatmap Selector가 중심이다.
-- 편집성 authoring 동작은 제한해야 한다.
-
-### 5.7 BatchPaused
-- 실행이 일시정지된 상태다.
-- Resume과 Stop이 중심 액션이다.
-
-### 5.8 AggregationPending
-- live playback은 끝났지만 결과 artifact 집계가 끝나지 않은 상태다.
-- Batch Progress 또는 결과 준비 상태 표시가 필요하다.
-- Run Results, Variation Summary, Comparison, Recommendation은 준비된 artifact 수준에 따라 제한된다.
-
-### 5.9 ResultsAvailable
-- RunResult와 VariationSummary가 저장된 상태다.
-- Run Results Panel과 Variation Summary를 열 수 있다.
-- Comparison은 baseline과 alternative summary가 모두 있을 때만 활성화된다.
-
-### 5.10 ComparisonReady
-- baseline과 alternative 비교가 가능한 상태다.
-- Comparison View가 활성화된다.
-- Recommendation은 ScenarioComparison과 CumulativeArtifact가 준비된 뒤 활성화된다.
-
-### 5.11 RecommendationReady
-- recommendation 검토와 scenarioize가 가능한 상태다.
-- Recommendation Drawer와 Export Dialog가 활성화될 수 있다.
-
-## 6. 최종 디자인 대상 요약
-
-우선 디자인해야 하는 UI 창과 화면은 다음과 같다.
-
-1. Main Workspace Window
-2. Project Navigator
-3. Project Open Dialog
-4. Project Save Dialog
-5. Authoring Workspace
-6. Import Workflow UI
-7. Issue Review Panel
-8. Layout Canvas
-9. Inspector Panel
-10. Scenario Library
-11. Scenario Template Picker
-12. Scenario Editor Tabs
-13. Readiness Panel
-14. Variation Diff List
-15. Analysis Workspace
-16. Run Control
-17. Batch Progress
-18. Live Viewport
-19. Heatmap Selector
-20. Run Results Panel
-21. Variation Summary
-22. Comparison View
-23. Recommendation Drawer
-24. Export Dialog
-
-이 중 `Project Open Dialog`와 `Project Save Dialog`는 OS 파일 다이얼로그만 사용할 경우 독립 UI 디자인 범위를 줄일 수 있다. 반대로 프로젝트 메타데이터, 최근 프로젝트, pending review 상태, 저장 정책을 앱 안에서 보여줘야 한다면 별도 디자인 대상에 포함한다.

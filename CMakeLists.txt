@@ -160,9 +160,27 @@ endif()
 
 if (SAFECROWD_BUILD_APP)
     add_executable(safecrowd_app
+        src/application/LayoutPreviewWidget.h
+        src/application/LayoutReviewWidget.h
         src/application/MainWindow.h
+        src/application/NewProjectRequest.h
+        src/application/NewProjectWidget.h
+        src/application/ProjectListWidget.h
+        src/application/ProjectMetadata.h
+        src/application/ProjectNavigatorActions.h
+        src/application/ProjectNavigatorWidget.h
+        src/application/ProjectPersistence.h
+        src/application/WorkspaceShell.h
+        src/application/LayoutPreviewWidget.cpp
+        src/application/LayoutReviewWidget.cpp
         src/application/main.cpp
         src/application/MainWindow.cpp
+        src/application/NewProjectWidget.cpp
+        src/application/ProjectListWidget.cpp
+        src/application/ProjectNavigatorActions.cpp
+        src/application/ProjectNavigatorWidget.cpp
+        src/application/ProjectPersistence.cpp
+        src/application/WorkspaceShell.cpp
     )
 
     target_include_directories(safecrowd_app
