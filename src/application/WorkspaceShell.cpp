@@ -61,7 +61,7 @@ WorkspaceShell::WorkspaceShell(QWidget* parent)
     bodyLayout->setSpacing(0);
 
     auto* navigationPanel = createPanel(this);
-    navigationPanel->setFixedWidth(194);
+    navigationPanel->setFixedWidth(260);
     navigationLayout_ = new QVBoxLayout(navigationPanel);
     navigationLayout_->setContentsMargins(14, 14, 14, 14);
     navigationLayout_->setSpacing(10);
@@ -105,6 +105,12 @@ void WorkspaceShell::setTools(const QStringList& tools) {
         auto* button = createTopBarButton(tool);
         if (tool == "Project") {
             auto* menu = new QMenu(button);
+            openProjectAction_ = menu->addAction("Open Project");
+            connect(openProjectAction_, &QAction::triggered, this, [this]() {
+                if (openProjectHandler_) {
+                    openProjectHandler_();
+                }
+            });
             saveProjectAction_ = menu->addAction("Save Project");
             connect(saveProjectAction_, &QAction::triggered, this, [this]() {
                 if (saveProjectHandler_) {
@@ -125,6 +131,7 @@ void WorkspaceShell::clearTopBar() {
         delete item;
     }
 
+    openProjectAction_ = nullptr;
     saveProjectAction_ = nullptr;
 }
 
@@ -140,13 +147,16 @@ QPushButton* WorkspaceShell::createTopBarButton(const QString& text) {
         " border-right: 1px solid #222222;"
         " color: #000000;"
         "}"
-        "QPushButton:hover { background: #f4f4f4; }"
-        "QPushButton::menu-indicator { image: none; width: 0; }");
+        "QPushButton:hover { background: #f4f4f4; }");
     return button;
 }
 
 void WorkspaceShell::setSaveProjectHandler(std::function<void()> handler) {
     saveProjectHandler_ = std::move(handler);
+}
+
+void WorkspaceShell::setOpenProjectHandler(std::function<void()> handler) {
+    openProjectHandler_ = std::move(handler);
 }
 
 void WorkspaceShell::setNavigationPanel(QWidget* panel) {

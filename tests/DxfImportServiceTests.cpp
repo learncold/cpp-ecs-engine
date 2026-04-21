@@ -706,3 +706,20 @@ SC_TEST(DxfImportServiceDoesNotInferConnectionsAcrossWallSeam) {
 
     std::filesystem::remove(sourcePath);
 }
+
+SC_TEST(DxfImportServiceReportsBlockingIssuesForReviewDemoFixture) {
+    const auto sourcePath = std::filesystem::path(__FILE__).parent_path() / "dxf" / "blocking_review_demo.dxf";
+
+    safecrowd::domain::DxfImportService importer;
+    safecrowd::domain::ImportRequest request;
+    request.sourcePath = sourcePath;
+    request.requestedFormat = safecrowd::domain::ImportedFileFormat::Dxf;
+
+    const auto result = importer.importFile(request);
+
+    SC_EXPECT_TRUE(result.layout.has_value());
+    SC_EXPECT_TRUE(safecrowd::domain::hasBlockingImportIssue(result.issues));
+    SC_EXPECT_TRUE(containsIssueCode(result.issues, safecrowd::domain::ImportIssueCode::MissingExit));
+    SC_EXPECT_TRUE(containsIssueCode(result.issues, safecrowd::domain::ImportIssueCode::DisconnectedWalkableArea));
+    SC_EXPECT_EQ(result.reviewStatus, safecrowd::domain::ImportReviewStatus::Rejected);
+}

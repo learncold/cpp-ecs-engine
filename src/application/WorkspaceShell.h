@@ -21,6 +21,7 @@ public:
     void setCanvas(QWidget* canvas);
     void setBottomPanel(QWidget* panel);
     void setSaveProjectHandler(std::function<void()> handler);
+    void setOpenProjectHandler(std::function<void()> handler);
 
 private:
     void clearTopBar();
@@ -31,7 +32,9 @@ private:
     QBoxLayout* canvasLayout_{nullptr};
     QBoxLayout* reviewLayout_{nullptr};
     QBoxLayout* bottomLayout_{nullptr};
+    QAction* openProjectAction_{nullptr};
     QAction* saveProjectAction_{nullptr};
+    std::function<void()> openProjectHandler_{};
     std::function<void()> saveProjectHandler_{};
 };
 

@@ -58,7 +58,15 @@ void MainWindow::createProject(const NewProjectRequest& request) {
         .folderPath = request.folderPath,
         .layoutPath = request.layoutPath,
     };
-    showLayoutReview(metadata);
+
+    QString errorMessage;
+    if (!ProjectPersistence::saveProject(metadata, &errorMessage)) {
+        QMessageBox::warning(this, "New Project", errorMessage);
+        return;
+    }
+
+    const auto savedMetadata = ProjectPersistence::loadProject(metadata.folderPath);
+    showLayoutReview(savedMetadata.isValid() ? savedMetadata : metadata);
 }
 
 void MainWindow::openProject(const ProjectMetadata& metadata) {
@@ -99,9 +107,18 @@ void MainWindow::showLayoutReview(const ProjectMetadata& metadata) {
     };
     auto importResult = importer.importFile(importRequest);
 
-    setCentralWidget(new LayoutReviewWidget(metadata.name, importResult, [this]() {
-        saveCurrentProject();
-    }, this));
+    setCentralWidget(new LayoutReviewWidget(
+        metadata.name,
+        importResult,
+        [this]() {
+            saveCurrentProject();
+        },
+        [this]() {
+            hasCurrentProject_ = false;
+            currentProject_ = {};
+            showProjectNavigator();
+        },
+        this));
 }
 
 }  // namespace safecrowd::application
