@@ -13,6 +13,7 @@
 ## 시작점
 
 - [architecture/프로젝트 구조.md](architecture/프로젝트 구조.md)
+- [architecture/UI 디자인 대상 창 목록.md](architecture/UI 디자인 대상 창 목록.md)
 - [process/GitHub Project.md](process/GitHub Project.md)
 - [product/개요서.md](product/개요서.md)
 - [product/사용자 시나리오.md](product/사용자 시나리오.md)

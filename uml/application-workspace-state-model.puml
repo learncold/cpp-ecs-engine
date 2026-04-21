@@ -41,7 +41,7 @@ ComparisonReady --> RecommendationReady : ScenarioComparison + CumulativeArtifac
 ComparisonReady --> ResultsAvailable : alternative deselected
 ComparisonReady --> ScenarioReady : scenario family changed
 
-RecommendationReady --> ScenarioReady : scenarioize recommendation / edit draft
+RecommendationReady --> ScenarioReady : apply recommendation / edit draft
 RecommendationReady --> ComparisonReady : dismiss recommendation
 RecommendationReady --> NoProject : close project
 
