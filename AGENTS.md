@@ -64,6 +64,7 @@
 - When a new task clearly belongs under an existing Epic, add it under that Epic as a native GitHub `sub-issue`.
 - After linking the task under its Epic, make sure the relationship is visible from the Project view via `Parent issue` / `Sub-issues progress`.
 - If the work falls under the existing docs/policy-only exception, it may proceed without opening a separate issue.
+- Changes limited to `src/application/` may proceed without opening a separate issue. A `CMakeLists.txt` update needed only to wire application sources into `safecrowd_app` may be included in this exception.
 - Issue types currently supported:
   - `Epic` for larger parent work
   - `Implementation Task` for `Engine` / `Domain` / `Application` / `Build` work
@@ -81,7 +82,8 @@
 - PR bodies should follow `.github/PULL_REQUEST_TEMPLATE.md`.
 - `main` handling:
   - code/build changes follow the normal `branch -> PR -> merge` flow
-  - docs/policy-only changes limited to `docs/`, `uml/`, `CONTRIBUTING.md`, PR/issue templates, or PR policy workflow files may be pushed directly to `main` by maintainers
+  - docs/policy-only changes limited to `docs/`, `uml/`, `AGENTS.md`, `CONTRIBUTING.md`, PR/issue templates, or PR policy workflow files may be pushed directly to `main` by maintainers
+  - application-only changes limited to `src/application/` and app target wiring in `CMakeLists.txt` may be pushed directly to `main` by maintainers without a separate issue
   - squash merge remains the intended merge mode for PR-based changes
   - PR checks should stay aligned with `.github/workflows/ci.yml`
 

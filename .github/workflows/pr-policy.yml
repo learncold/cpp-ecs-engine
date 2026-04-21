@@ -57,8 +57,6 @@ jobs:
             const areaSection = section("## Area");
             const verificationSection = section("## Verification");
             const selectedAreas = [...areaSection.matchAll(/- \[[xX]\] (.+)/g)].map((match) => match[1].trim());
-            const noIssuePattern = /\b(?:none|n\/a|no separate issue)\b/i;
-
             const changedFiles = await github.paginate(github.rest.pulls.listFiles, {
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -69,6 +67,7 @@ jobs:
             const docsPolicyOnlyPatterns = [
               /^docs\//,
               /^uml\//,
+              /^AGENTS\.md$/,
               /^\.github\/ISSUE_TEMPLATE\//,
               /^\.github\/PULL_REQUEST_TEMPLATE\.md$/,
               /^\.github\/workflows\/pr-policy\.yml$/,
@@ -80,13 +79,23 @@ jobs:
               changedFiles.every((file) =>
                 docsPolicyOnlyPatterns.some((pattern) => pattern.test(file.filename))
               );
+            const applicationOnlyPatterns = [
+              /^src\/application\//,
+              /^CMakeLists\.txt$/,
+            ];
+            const isApplicationOnlyPr =
+              changedFiles.length > 0 &&
+              changedFiles.every((file) =>
+                applicationOnlyPatterns.some((pattern) => pattern.test(file.filename))
+              );
             const issuePattern = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?)\s+#\d+\b/i;
             const hasIssueReference = issuePattern.test(relatedIssueSection);
-            const usesDocsOnlyException = noIssuePattern.test(relatedIssueSection);
+            const usesDocsOnlyException = /\bnone\s*\(docs\/policy-only PR\)/i.test(relatedIssueSection);
+            const usesApplicationOnlyException = /\bnone\s*\(application-only PR\)/i.test(relatedIssueSection);
 
             if (!hasIssueReference) {
-              if (!(usesDocsOnlyException && isDocsPolicyOnlyPr)) {
-                errors.push("`## Related Issue` must include an issue reference such as `Closes #12`, unless changed files are limited to the docs/policy paths and the section says `None (docs/policy-only PR)`.");
+              if (!((usesDocsOnlyException && isDocsPolicyOnlyPr) || (usesApplicationOnlyException && isApplicationOnlyPr))) {
+                errors.push("`## Related Issue` must include an issue reference such as `Closes #12`, unless changed files are limited to docs/policy paths with `None (docs/policy-only PR)` or application-only paths with `None (application-only PR)`.");
               }
             }
 
