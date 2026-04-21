@@ -19,6 +19,7 @@
 - [product/위험 정의.md](product/위험 정의.md)
 - [product/고급 위험 모델.md](product/고급 위험 모델.md)
 - [product/Product Backlog.md](product/Product Backlog.md)
+- [product/Sprint 시연 계획.md](<product/Sprint 시연 계획.md>)
 
 ## 유지 규칙
 
