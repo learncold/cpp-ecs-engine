@@ -59,7 +59,7 @@ FacilityLayout2D demoFacility() {
     roomConnection.fromZoneId = mainRoom.id;
     roomConnection.toZoneId = sideRoom.id;
     roomConnection.effectiveWidth = 3.0;
-    roomConnection.centerSpan = LineSegment2D{{10.0, 4.0}, {10.0, 6.0}};
+    roomConnection.centerSpan = LineSegment2D{{10.0, 3.5}, {10.0, 6.5}};
     layout.connections.push_back(roomConnection);
 
     Connection2D exitConnection;

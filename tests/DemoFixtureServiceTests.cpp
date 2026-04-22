@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cmath>
 #include <string>
 
 #include "TestSupport.h"
@@ -32,6 +33,12 @@ bool containsConnectionId(
     return std::any_of(connections.begin(), connections.end(), [&](const auto& connection) {
         return connection.id == id;
     });
+}
+
+double spanLength(const safecrowd::domain::LineSegment2D& span) {
+    const auto dx = span.end.x - span.start.x;
+    const auto dy = span.end.y - span.start.y;
+    return std::sqrt(dx * dx + dy * dy);
 }
 
 }  // namespace
@@ -77,6 +84,9 @@ SC_TEST(DemoLayoutsProvidesRuntimeFacilityLayout) {
     SC_EXPECT_TRUE(containsZoneId(layout.zones, safecrowd::domain::DemoLayouts::Sprint1FacilityIds::ExitZoneId));
     SC_EXPECT_TRUE(containsConnectionId(layout.connections, safecrowd::domain::DemoLayouts::Sprint1FacilityIds::OpeningConnectionId));
     SC_EXPECT_TRUE(containsConnectionId(layout.connections, safecrowd::domain::DemoLayouts::Sprint1FacilityIds::ExitConnectionId));
+    for (const auto& connection : layout.connections) {
+        SC_EXPECT_NEAR(connection.effectiveWidth, spanLength(connection.centerSpan), 1e-9);
+    }
 
     safecrowd::domain::ImportValidationService validator;
     const auto issues = validator.validate(layout);

@@ -8,11 +8,29 @@
 #include "application/NewProjectWidget.h"
 #include "application/ProjectPersistence.h"
 #include "application/ProjectNavigatorWidget.h"
+#include "domain/DemoLayouts.h"
 #include "domain/DxfImportService.h"
+#include "domain/ImportIssue.h"
 #include "domain/ImportOrchestrator.h"
+#include "domain/ImportValidationService.h"
 #include "domain/SafeCrowdDomain.h"
 
 namespace safecrowd::application {
+namespace {
+
+safecrowd::domain::ImportResult makeDemoImportResult() {
+    safecrowd::domain::ImportResult result;
+    result.layout = safecrowd::domain::DemoLayouts::demoFacility();
+
+    safecrowd::domain::ImportValidationService validator;
+    result.issues = validator.validate(*result.layout);
+    result.reviewStatus = safecrowd::domain::hasBlockingImportIssue(result.issues)
+        ? safecrowd::domain::ImportReviewStatus::Pending
+        : safecrowd::domain::ImportReviewStatus::NotRequired;
+    return result;
+}
+
+}  // namespace
 
 MainWindow::MainWindow(safecrowd::domain::SafeCrowdDomain& domain, QWidget* parent)
     : QMainWindow(parent),
@@ -76,6 +94,11 @@ void MainWindow::saveCurrentProject() {
         return;
     }
 
+    if (currentProject_.isBuiltInDemo()) {
+        QMessageBox::information(this, "Save Project", "Built-in demo projects do not need to be saved.");
+        return;
+    }
+
     QString errorMessage;
     if (!ProjectPersistence::saveProject(currentProject_, &errorMessage)) {
         QMessageBox::warning(this, "Save Project", errorMessage);
@@ -90,14 +113,18 @@ void MainWindow::showLayoutReview(const ProjectMetadata& metadata) {
     currentProject_ = metadata;
     hasCurrentProject_ = true;
 
-    safecrowd::domain::DxfImportService importer;
-    const safecrowd::domain::ImportRequest importRequest{
-        .sourcePath = std::filesystem::path(metadata.layoutPath.toStdWString()),
-        .requestedFormat = safecrowd::domain::ImportedFileFormat::Dxf,
-        .preserveRawModel = true,
-        .runValidation = true,
-    };
-    auto importResult = importer.importFile(importRequest);
+    auto importResult = metadata.isBuiltInDemo()
+        ? makeDemoImportResult()
+        : [&metadata]() {
+            safecrowd::domain::DxfImportService importer;
+            const safecrowd::domain::ImportRequest importRequest{
+                .sourcePath = std::filesystem::path(metadata.layoutPath.toStdWString()),
+                .requestedFormat = safecrowd::domain::ImportedFileFormat::Dxf,
+                .preserveRawModel = true,
+                .runValidation = true,
+            };
+            return importer.importFile(importRequest);
+        }();
 
     setCentralWidget(new LayoutReviewWidget(metadata.name, importResult, [this]() {
         saveCurrentProject();
