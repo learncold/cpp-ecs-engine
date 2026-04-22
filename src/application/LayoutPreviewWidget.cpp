@@ -154,9 +154,6 @@ QPolygonF polylinePath(const safecrowd::domain::Polyline2D& polyline, const Layo
     for (const auto& point : polyline.vertices) {
         path.append(transform.map(point));
     }
-    if (polyline.closed && path.size() > 2) {
-        path.append(path.front());
-    }
     return path;
 }
 
@@ -228,10 +225,15 @@ void LayoutPreviewWidget::paintEvent(QPaintEvent* event) {
         }
 
         painter.setPen(QPen(QColor(70, 70, 70), 3));
+        painter.setBrush(Qt::NoBrush);
         for (const auto& barrier : importResult_.layout->barriers) {
             const auto path = polylinePath(barrier.geometry, transform);
             if (path.size() > 1) {
-                painter.drawPolyline(path);
+                if (barrier.geometry.closed && path.size() > 2) {
+                    painter.drawPolygon(path);
+                } else {
+                    painter.drawPolyline(path);
+                }
             }
         }
     }
