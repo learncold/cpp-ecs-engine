@@ -154,6 +154,9 @@ QPolygonF polylinePath(const safecrowd::domain::Polyline2D& polyline, const Layo
     for (const auto& point : polyline.vertices) {
         path.append(transform.map(point));
     }
+    if (polyline.closed && path.size() > 2) {
+        path.append(path.front());
+    }
     return path;
 }
 
