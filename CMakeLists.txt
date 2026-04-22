@@ -76,6 +76,8 @@ configure_project_target(ecs_engine)
 add_library(safecrowd_domain STATIC
     src/domain/SafeCrowdDomain.h
     src/domain/SafeCrowdDomain.cpp
+    src/domain/DemoLayouts.h
+    src/domain/DemoLayouts.cpp
     src/domain/Geometry2D.h
     src/domain/PopulationSpec.h
     src/domain/ScenarioAuthoring.h

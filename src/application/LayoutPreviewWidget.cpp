@@ -167,6 +167,20 @@ void drawLine(QPainter& painter, const safecrowd::domain::LineSegment2D& line, c
     painter.drawLine(transform.map(line.start), transform.map(line.end));
 }
 
+void drawPolyline(QPainter& painter, const safecrowd::domain::Polyline2D& polyline, const LayoutTransform& transform) {
+    const auto path = polylinePath(polyline, transform);
+    if (path.size() <= 1) {
+        return;
+    }
+
+    if (polyline.closed && path.size() > 2) {
+        painter.drawPolygon(path);
+        return;
+    }
+
+    painter.drawPolyline(path);
+}
+
 bool stringListContains(const std::vector<std::string>& values, const QString& target) {
     return std::any_of(values.begin(), values.end(), [&](const std::string& value) {
         return QString::fromStdString(value) == target;
@@ -380,11 +394,9 @@ void LayoutPreviewWidget::paintEvent(QPaintEvent* event) {
         }
 
         painter.setPen(QPen(QColor(70, 70, 70), 3));
+        painter.setBrush(Qt::NoBrush);
         for (const auto& barrier : importResult_.layout->barriers) {
-            const auto path = polylinePath(barrier.geometry, transform);
-            if (path.size() > 1) {
-                painter.drawPolyline(path);
-            }
+            drawPolyline(painter, barrier.geometry, transform);
         }
     }
 
@@ -405,10 +417,7 @@ void LayoutPreviewWidget::paintEvent(QPaintEvent* event) {
             }
             for (const auto& barrier : importResult_.layout->barriers) {
                 if (QString::fromStdString(barrier.id) == focusedTargetId_ || traceMatches(barrier.provenance, focusedTargetId_)) {
-                    const auto path = polylinePath(barrier.geometry, transform);
-                    if (path.size() > 1) {
-                        painter.drawPolyline(path);
-                    }
+                    drawPolyline(painter, barrier.geometry, transform);
                 }
             }
         }

@@ -115,6 +115,7 @@ bool copyLayoutIntoProject(ProjectMetadata& metadata, QString* errorMessage) {
 
 QList<ProjectMetadata> ProjectPersistence::loadRecentProjects() {
     QList<ProjectMetadata> projects;
+    projects.push_back(makeBuiltInDemoProject());
 
     const auto document = readJsonDocument(recentProjectsPath());
     if (!document.isObject()) {
@@ -123,6 +124,9 @@ QList<ProjectMetadata> ProjectPersistence::loadRecentProjects() {
 
     for (const auto& value : document.object().value("projects").toArray()) {
         const auto indexed = fromJson(value.toObject());
+        if (indexed.isBuiltInDemo()) {
+            continue;
+        }
         const auto loaded = loadProject(indexed.folderPath);
         if (loaded.isValid()) {
             projects.push_back(loaded);
@@ -142,6 +146,13 @@ ProjectMetadata ProjectPersistence::loadProject(const QString& folderPath) {
 }
 
 bool ProjectPersistence::saveProject(ProjectMetadata metadata, QString* errorMessage) {
+    if (metadata.isBuiltInDemo()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = "Built-in demo projects do not need to be saved.";
+        }
+        return false;
+    }
+
     if (!metadata.isValid()) {
         if (errorMessage != nullptr) {
             *errorMessage = "Project name, folder, and layout path are required.";
