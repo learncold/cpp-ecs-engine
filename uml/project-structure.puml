@@ -57,6 +57,8 @@ App --> EngineRuntime : viewport only\n(optional)
 EngineRuntime --> RuntimeCore
 EngineRuntime --> EngineWorld
 RuntimeCore --> EngineWorld : uses facade
+RuntimeCore --> EngineSystem : schedules registered systems
+EngineSystem --> EngineWorld : update(world, step)
 EngineWorld --> EcsCore : delegates
 
 note right of EngineWorld

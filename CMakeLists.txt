@@ -162,6 +162,7 @@ endif()
 
 if (SAFECROWD_BUILD_APP)
     add_executable(safecrowd_app
+        src/application/IssueCardWidget.h
         src/application/LayoutPreviewWidget.h
         src/application/LayoutReviewWidget.h
         src/application/MainWindow.h
@@ -173,6 +174,7 @@ if (SAFECROWD_BUILD_APP)
         src/application/ProjectNavigatorWidget.h
         src/application/ProjectPersistence.h
         src/application/WorkspaceShell.h
+        src/application/IssueCardWidget.cpp
         src/application/LayoutPreviewWidget.cpp
         src/application/LayoutReviewWidget.cpp
         src/application/main.cpp

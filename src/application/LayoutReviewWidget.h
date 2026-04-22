@@ -15,6 +15,7 @@ public:
         const QString& projectName,
         const safecrowd::domain::ImportResult& importResult,
         std::function<void()> saveProjectHandler,
+        std::function<void()> openProjectHandler,
         QWidget* parent = nullptr);
 };
 
