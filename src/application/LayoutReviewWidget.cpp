@@ -11,18 +11,12 @@
 
 #include "application/IssueCardWidget.h"
 #include "application/LayoutPreviewWidget.h"
+#include "application/UiStyle.h"
 #include "application/WorkspaceShell.h"
 #include "domain/ImportIssue.h"
 
 namespace safecrowd::application {
 namespace {
-
-QFont makeFont(int pointSize) {
-    QFont font;
-    font.setPointSize(pointSize);
-    font.setWeight(QFont::Normal);
-    return font;
-}
 
 QString issueTitle(const safecrowd::domain::ImportIssue& issue) {
     return QString::fromUtf8(safecrowd::domain::toString(issue.code));
@@ -61,13 +55,13 @@ QWidget* createIssueList(
     scrollArea->setWidgetResizable(true);
     scrollArea->setFrameShape(QFrame::NoFrame);
     scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    scrollArea->setStyleSheet("QScrollArea { background: transparent; }");
+    ui::polishScrollArea(scrollArea);
 
     auto* scrollContent = new QWidget(scrollArea);
     scrollContent->setStyleSheet("QWidget { background: transparent; }");
     auto* issueLayout = new QVBoxLayout(scrollContent);
     issueLayout->setContentsMargins(0, 0, 4, 0);
-    issueLayout->setSpacing(8);
+    issueLayout->setSpacing(10);
 
     int issueCount = 0;
     for (const auto& issue : importResult.issues) {
@@ -81,9 +75,9 @@ QWidget* createIssueList(
 
     if (issueCount == 0) {
         auto* emptyLabel = new QLabel(emptyMessage, scrollContent);
-        emptyLabel->setFont(makeFont(11));
+        emptyLabel->setFont(ui::font(ui::FontRole::Body));
         emptyLabel->setWordWrap(true);
-        emptyLabel->setStyleSheet("QLabel { color: #555555; }");
+        emptyLabel->setStyleSheet(ui::mutedTextStyleSheet());
         issueLayout->addWidget(emptyLabel);
     }
 
@@ -96,20 +90,9 @@ QPushButton* createIssueFilterButton(const QString& label, int count, bool selec
     auto* button = new QPushButton(QString("%1  %2").arg(label).arg(count), parent);
     button->setCheckable(true);
     button->setChecked(selected);
-    button->setMinimumHeight(30);
-    button->setStyleSheet(
-        "QPushButton {"
-        " background: #ffffff;"
-        " border: 1px solid #777777;"
-        " padding: 4px 8px;"
-        " text-align: left;"
-        "}"
-        "QPushButton:checked {"
-        " background: #eeeeee;"
-        " border-left: 4px solid #333333;"
-        " font-weight: 600;"
-        "}"
-        "QPushButton:hover { background: #f5f5f5; }");
+    button->setMinimumHeight(40);
+    button->setFont(ui::font(ui::FontRole::Caption));
+    button->setStyleSheet(ui::tagStyleSheet(selected));
     return button;
 }
 
@@ -120,10 +103,10 @@ QWidget* createNavigationPanel(
     auto* panel = new QWidget(parent);
     auto* layout = new QVBoxLayout(panel);
     layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(10);
+    layout->setSpacing(12);
 
     auto* title = new QLabel("Issues", panel);
-    title->setFont(makeFont(20));
+    title->setFont(ui::font(ui::FontRole::Title));
     layout->addWidget(title);
 
     const auto blockingCount = std::count_if(importResult.issues.begin(), importResult.issues.end(), [](const auto& issue) {
@@ -138,7 +121,7 @@ QWidget* createNavigationPanel(
 
     auto* filterLayout = new QVBoxLayout();
     filterLayout->setContentsMargins(0, 0, 0, 0);
-    filterLayout->setSpacing(6);
+    filterLayout->setSpacing(8);
 
     auto* listHost = new QWidget(panel);
     auto* listHostLayout = new QVBoxLayout(listHost);
@@ -166,6 +149,9 @@ QWidget* createNavigationPanel(
         blockingButton->setChecked(selected == blockingButton);
         warningButton->setChecked(selected == warningButton);
         infoButton->setChecked(selected == infoButton);
+        blockingButton->setStyleSheet(ui::tagStyleSheet(selected == blockingButton));
+        warningButton->setStyleSheet(ui::tagStyleSheet(selected == warningButton));
+        infoButton->setStyleSheet(ui::tagStyleSheet(selected == infoButton));
     };
 
     QObject::connect(blockingButton, &QPushButton::clicked, panel, [=]() {
@@ -210,9 +196,7 @@ QFrame* createPanelSection(QWidget* parent) {
     auto* section = new QFrame(parent);
     section->setFrameShape(QFrame::StyledPanel);
     section->setLineWidth(1);
-    section->setStyleSheet(
-        "QFrame { border: 1px solid #777777; background: #ffffff; }"
-        "QLabel { border: 0; background: transparent; }");
+    section->setStyleSheet(ui::panelStyleSheet());
     return section;
 }
 
@@ -220,7 +204,7 @@ QWidget* createReviewPanel(const safecrowd::domain::ImportResult& importResult, 
     auto* panel = new QWidget(parent);
     auto* layout = new QVBoxLayout(panel);
     layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(10);
+    layout->setSpacing(12);
 
     const auto blockingCount = std::count_if(importResult.issues.begin(), importResult.issues.end(), [](const auto& issue) {
         return issue.blocksSimulation();
@@ -228,19 +212,23 @@ QWidget* createReviewPanel(const safecrowd::domain::ImportResult& importResult, 
 
     auto* approvalSection = createPanelSection(panel);
     auto* approvalLayout = new QVBoxLayout(approvalSection);
-    approvalLayout->setContentsMargins(8, 8, 8, 8);
-    approvalLayout->setSpacing(8);
+    approvalLayout->setContentsMargins(16, 16, 16, 16);
+    approvalLayout->setSpacing(10);
+
+    auto* approvalHeader = new QLabel("Approval", approvalSection);
+    approvalHeader->setFont(ui::font(ui::FontRole::SectionTitle));
+    approvalLayout->addWidget(approvalHeader);
 
     auto* approveButton = new QPushButton("Approve Layout", approvalSection);
     approveButton->setEnabled(blockingCount == 0);
-    approveButton->setStyleSheet(
-        "QPushButton { background: #ffffff; border: 1px solid #555555; padding: 6px; }"
-        "QPushButton:disabled { color: #888888; border-color: #aaaaaa; }");
+    approveButton->setFont(ui::font(ui::FontRole::Body));
+    approveButton->setStyleSheet(ui::primaryButtonStyleSheet());
     approvalLayout->addWidget(approveButton);
 
     auto* approvalStatus = new QLabel(blockingCount == 0 ? "Ready for approval" : "Resolve blocking issues first", approvalSection);
-    approvalStatus->setFont(makeFont(10));
+    approvalStatus->setFont(ui::font(ui::FontRole::Body));
     approvalStatus->setWordWrap(true);
+    approvalStatus->setStyleSheet(ui::mutedTextStyleSheet());
     approvalLayout->addWidget(approvalStatus);
     layout->addWidget(approvalSection);
 
@@ -250,21 +238,22 @@ QWidget* createReviewPanel(const safecrowd::domain::ImportResult& importResult, 
 
     auto* inspectorSection = createPanelSection(panel);
     auto* inspectorLayout = new QVBoxLayout(inspectorSection);
-    inspectorLayout->setContentsMargins(8, 8, 8, 8);
-    inspectorLayout->setSpacing(8);
+    inspectorLayout->setContentsMargins(16, 16, 16, 16);
+    inspectorLayout->setSpacing(10);
 
     auto* inspectorHeader = new QLabel("Inspector", inspectorSection);
-    inspectorHeader->setFont(makeFont(16));
+    inspectorHeader->setFont(ui::font(ui::FontRole::SectionTitle));
     inspectorLayout->addWidget(inspectorHeader);
 
     *inspectorTitle = new QLabel("No issue selected", inspectorSection);
-    (*inspectorTitle)->setFont(makeFont(12));
+    (*inspectorTitle)->setFont(ui::font(ui::FontRole::Body));
     (*inspectorTitle)->setWordWrap(true);
     inspectorLayout->addWidget(*inspectorTitle);
 
     *inspectorDetail = new QLabel("Select an issue from the left panel.", inspectorSection);
-    (*inspectorDetail)->setFont(makeFont(10));
+    (*inspectorDetail)->setFont(ui::font(ui::FontRole::Body));
     (*inspectorDetail)->setWordWrap(true);
+    (*inspectorDetail)->setStyleSheet(ui::mutedTextStyleSheet());
     inspectorLayout->addWidget(*inspectorDetail);
     layout->addWidget(inspectorSection);
 
@@ -276,10 +265,12 @@ QWidget* createBottomPanel(const QString& projectName, QWidget* parent) {
     auto* panel = new QWidget(parent);
     auto* layout = new QVBoxLayout(panel);
     layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
 
     auto* label = new QLabel(projectName.isEmpty() ? "Layout Review" : QString("Layout Review - %1").arg(projectName), panel);
-    label->setFont(makeFont(14));
+    label->setFont(ui::font(ui::FontRole::Title));
     layout->addWidget(label, 0, Qt::AlignLeft | Qt::AlignTop);
+
     layout->addStretch(1);
     return panel;
 }

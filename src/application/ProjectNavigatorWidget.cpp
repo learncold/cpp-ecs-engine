@@ -8,6 +8,7 @@
 
 #include "application/ProjectListWidget.h"
 #include "application/ProjectNavigatorActions.h"
+#include "application/UiStyle.h"
 
 namespace safecrowd::application {
 
@@ -15,23 +16,21 @@ ProjectNavigatorWidget::ProjectNavigatorWidget(const QList<ProjectMetadata>& pro
     : QWidget(parent) {
     setObjectName("ProjectNavigatorWidget");
     setAutoFillBackground(true);
-    setStyleSheet("#ProjectNavigatorWidget { background: #ffffff; }");
+    setStyleSheet("#ProjectNavigatorWidget { background: #f4f7fb; }");
 
     auto* rootLayout = new QVBoxLayout(this);
-    rootLayout->setContentsMargins(36, 32, 36, 40);
-    rootLayout->setSpacing(54);
+    rootLayout->setContentsMargins(48, 40, 48, 48);
+    rootLayout->setSpacing(28);
 
     auto* title = new QLabel("SafeCrowd", this);
-    QFont titleFont;
-    titleFont.setPointSize(38);
-    titleFont.setWeight(QFont::Normal);
-    title->setFont(titleFont);
+    title->setFont(ui::font(ui::FontRole::Hero));
     title->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    title->setStyleSheet("QLabel { color: #16202b; }");
     rootLayout->addWidget(title);
 
     auto* contentLayout = new QHBoxLayout();
     contentLayout->setContentsMargins(0, 0, 0, 0);
-    contentLayout->setSpacing(82);
+    contentLayout->setSpacing(24);
 
     projectList_ = new ProjectListWidget(projects, this);
     actions_ = new ProjectNavigatorActions(this);

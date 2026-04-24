@@ -13,6 +13,10 @@
 namespace safecrowd::application {
 namespace {
 
+QRectF previewViewport(const QRect& widgetRect) {
+    return QRectF(widgetRect).adjusted(20, 20, -20, -20);
+}
+
 struct Bounds2D {
     double minX{std::numeric_limits<double>::max()};
     double minY{std::numeric_limits<double>::max()};
@@ -277,7 +281,7 @@ void LayoutPreviewWidget::focusIssueTarget(const QString& targetId) {
     includeMatchingGeometryBounds(importResult_, targetId, targetBounds);
     const auto worldBounds = collectBounds(importResult_);
     if (targetBounds.valid() && worldBounds.has_value()) {
-        const QRectF viewport = rect().adjusted(width() / 12, height() / 12, -width() / 12, -height() / 12);
+        const QRectF viewport = previewViewport(rect());
         const auto targetWidth = std::max(targetBounds.maxX - targetBounds.minX, 1.0);
         const auto targetHeight = std::max(targetBounds.maxY - targetBounds.minY, 1.0);
         const auto targetZoom = 0.55 * std::min(viewport.width() / targetWidth, viewport.height() / targetHeight)
@@ -344,21 +348,29 @@ void LayoutPreviewWidget::paintEvent(QPaintEvent* event) {
 
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
-    painter.fillRect(rect(), Qt::white);
+    painter.fillRect(rect(), QColor(250, 252, 255));
 
     const auto bounds = collectBounds(importResult_);
     if (!bounds.has_value()) {
         painter.setPen(QPen(QColor(80, 80, 80), 1));
-        painter.setFont(QFont("Arial", 14));
+        painter.setFont(QFont("Segoe UI", 14, QFont::DemiBold));
         painter.drawText(rect(), Qt::AlignCenter, "No layout geometry imported");
         return;
     }
 
-    const QRectF viewport = rect().adjusted(width() / 12, height() / 12, -width() / 12, -height() / 12);
+    const QRectF viewport = previewViewport(rect());
     const LayoutTransform transform(*bounds, viewport, zoom_, panOffset_);
 
+    painter.setPen(QPen(QColor(238, 243, 248), 1));
+    for (int x = static_cast<int>(viewport.left()); x < static_cast<int>(viewport.right()); x += 32) {
+        painter.drawLine(QPointF(x, viewport.top()), QPointF(x, viewport.bottom()));
+    }
+    for (int y = static_cast<int>(viewport.top()); y < static_cast<int>(viewport.bottom()); y += 32) {
+        painter.drawLine(QPointF(viewport.left(), y), QPointF(viewport.right(), y));
+    }
+
     painter.setPen(Qt::NoPen);
-    painter.setBrush(QColor(235, 235, 235));
+    painter.setBrush(QColor(231, 238, 246));
     if (importResult_.layout.has_value()) {
         for (const auto& zone : importResult_.layout->zones) {
             painter.drawPath(polygonPath(zone.area, transform));
@@ -370,30 +382,30 @@ void LayoutPreviewWidget::paintEvent(QPaintEvent* event) {
     }
 
     if (importResult_.canonicalGeometry.has_value()) {
-        painter.setBrush(QColor(230, 160, 70, 150));
-        painter.setPen(QPen(QColor(180, 118, 38), 1));
+        painter.setBrush(QColor(222, 145, 70, 120));
+        painter.setPen(QPen(QColor(177, 110, 39), 1.5));
         for (const auto& obstacle : importResult_.canonicalGeometry->obstacles) {
             painter.drawPath(polygonPath(obstacle.footprint, transform));
         }
 
-        painter.setPen(QPen(QColor(70, 70, 70), 3));
+        painter.setPen(QPen(QColor(82, 92, 105), 2.5));
         for (const auto& wall : importResult_.canonicalGeometry->walls) {
             drawLine(painter, wall.segment, transform);
         }
 
-        painter.setPen(QPen(QColor(58, 174, 74), 3, Qt::DashLine));
+        painter.setPen(QPen(QColor(66, 156, 96), 2.5, Qt::DashLine));
         for (const auto& opening : importResult_.canonicalGeometry->openings) {
             drawLine(painter, opening.span, transform);
         }
     }
 
     if (importResult_.layout.has_value()) {
-        painter.setPen(QPen(QColor(62, 150, 210), 2));
+        painter.setPen(QPen(QColor(56, 122, 186), 2.5));
         for (const auto& connection : importResult_.layout->connections) {
             drawLine(painter, connection.centerSpan, transform);
         }
 
-        painter.setPen(QPen(QColor(70, 70, 70), 3));
+        painter.setPen(QPen(QColor(82, 92, 105), 2.5));
         painter.setBrush(Qt::NoBrush);
         for (const auto& barrier : importResult_.layout->barriers) {
             drawPolyline(painter, barrier.geometry, transform);
@@ -401,8 +413,8 @@ void LayoutPreviewWidget::paintEvent(QPaintEvent* event) {
     }
 
     if (!focusedTargetId_.isEmpty()) {
-        painter.setBrush(QColor(255, 217, 64, 90));
-        painter.setPen(QPen(QColor(210, 55, 55), 4));
+        painter.setBrush(QColor(255, 219, 102, 96));
+        painter.setPen(QPen(QColor(194, 74, 44), 3.5));
 
         if (importResult_.layout.has_value()) {
             for (const auto& zone : importResult_.layout->zones) {
@@ -450,9 +462,10 @@ void LayoutPreviewWidget::paintEvent(QPaintEvent* event) {
         }
     }
 
-    painter.setPen(QPen(QColor(80, 80, 80), 1));
-    painter.setFont(QFont("Arial", 10));
-    painter.drawText(rect().adjusted(8, 8, -8, -8), Qt::AlignTop | Qt::AlignRight, QString("Zoom %1%").arg(static_cast<int>(zoom_ * 100.0)));
+    painter.setPen(QPen(QColor(115, 128, 140), 1));
+    painter.setFont(QFont("Segoe UI", 9, QFont::Medium));
+    painter.drawText(viewport.adjusted(0, -10, 0, 0), Qt::AlignTop | Qt::AlignRight, QString("Zoom %1%").arg(static_cast<int>(zoom_ * 100.0)));
+    painter.drawText(viewport.adjusted(0, -10, 0, 0), Qt::AlignTop | Qt::AlignLeft, "Layout Preview");
 }
 
 void LayoutPreviewWidget::wheelEvent(QWheelEvent* event) {

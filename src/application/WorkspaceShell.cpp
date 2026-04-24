@@ -8,21 +8,16 @@
 #include <QSizePolicy>
 #include <QVBoxLayout>
 
+#include "application/UiStyle.h"
+
 namespace safecrowd::application {
 namespace {
-
-QFont makeWorkspaceFont(int pointSize) {
-    QFont font;
-    font.setPointSize(pointSize);
-    font.setWeight(QFont::Normal);
-    return font;
-}
 
 QFrame* createPanel(QWidget* parent) {
     auto* frame = new QFrame(parent);
     frame->setFrameShape(QFrame::StyledPanel);
     frame->setLineWidth(1);
-    frame->setStyleSheet("QFrame { border: 1px solid #222222; background: #ffffff; }");
+    frame->setStyleSheet(ui::panelStyleSheet());
     return frame;
 }
 
@@ -34,45 +29,76 @@ void replaceSingleWidget(QBoxLayout* layout, QWidget* widget) {
     layout->addWidget(widget);
 }
 
+QPushButton* createFlatTopBarButton(QWidget* parent, const QString& text) {
+    auto* button = new QPushButton(text, parent);
+    button->setFont(ui::font(ui::FontRole::Body));
+    button->setMinimumHeight(32);
+    button->setMinimumWidth(92);
+    button->setCursor(Qt::PointingHandCursor);
+    button->setStyleSheet(
+        "QPushButton {"
+        " background: transparent;"
+        " border: 0;"
+        " border-radius: 0;"
+        " color: #16202b;"
+        " padding: 4px 10px;"
+        " text-align: left;"
+        "}"
+        "QPushButton:hover {"
+        " background: #eef3f8;"
+        "}"
+        "QPushButton::menu-indicator {"
+        " subcontrol-origin: padding;"
+        " subcontrol-position: center right;"
+        " }");
+    return button;
+}
+
 }  // namespace
 
 WorkspaceShell::WorkspaceShell(QWidget* parent)
     : QWidget(parent) {
     setObjectName("WorkspaceShell");
-    setStyleSheet("#WorkspaceShell { background: #ffffff; }");
+    setStyleSheet("#WorkspaceShell { background: #f4f7fb; }");
 
     auto* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
 
     auto* topBar = new QFrame(this);
-    topBar->setFixedHeight(54);
+    topBar->setFixedHeight(48);
     topBar->setFrameShape(QFrame::StyledPanel);
     topBar->setLineWidth(1);
-    topBar->setStyleSheet("QFrame { border: 1px solid #222222; background: #ffffff; }");
+    topBar->setStyleSheet(
+        "QFrame {"
+        " background: #ffffff;"
+        " border: 0;"
+        " border-bottom: 1px solid #d7e0ea;"
+        "}"
+    );
 
     topBarLayout_ = new QHBoxLayout(topBar);
-    topBarLayout_->setContentsMargins(0, 0, 0, 0);
-    topBarLayout_->setSpacing(0);
+    topBarLayout_->setContentsMargins(16, 8, 16, 8);
+    topBarLayout_->setSpacing(4);
     rootLayout->addWidget(topBar);
 
     auto* bodyLayout = new QHBoxLayout();
-    bodyLayout->setContentsMargins(0, 0, 0, 0);
-    bodyLayout->setSpacing(0);
+    bodyLayout->setContentsMargins(18, 18, 18, 18);
+    bodyLayout->setSpacing(18);
 
     auto* navigationPanel = createPanel(this);
     navigationPanel->setFixedWidth(260);
     navigationLayout_ = new QVBoxLayout(navigationPanel);
-    navigationLayout_->setContentsMargins(14, 14, 14, 14);
-    navigationLayout_->setSpacing(10);
+    navigationLayout_->setContentsMargins(18, 18, 18, 18);
+    navigationLayout_->setSpacing(12);
     bodyLayout->addWidget(navigationPanel);
 
     auto* centerStack = new QWidget(this);
     auto* centerLayout = new QVBoxLayout(centerStack);
     centerLayout->setContentsMargins(0, 0, 0, 0);
-    centerLayout->setSpacing(0);
+    centerLayout->setSpacing(18);
 
-    auto* canvasPanel = createPanel(centerStack);
+    auto* canvasPanel = new QWidget(centerStack);
     canvasPanel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     canvasLayout_ = new QVBoxLayout(canvasPanel);
     canvasLayout_->setContentsMargins(0, 0, 0, 0);
@@ -80,19 +106,19 @@ WorkspaceShell::WorkspaceShell(QWidget* parent)
     centerLayout->addWidget(canvasPanel, 1);
 
     auto* bottomPanel = createPanel(centerStack);
-    bottomPanel->setFixedHeight(154);
+    bottomPanel->setFixedHeight(92);
     bottomLayout_ = new QVBoxLayout(bottomPanel);
-    bottomLayout_->setContentsMargins(14, 14, 14, 14);
+    bottomLayout_->setContentsMargins(18, 18, 18, 18);
     bottomLayout_->setSpacing(0);
     centerLayout->addWidget(bottomPanel, 0);
 
     bodyLayout->addWidget(centerStack, 1);
 
     auto* reviewPanel = createPanel(this);
-    reviewPanel->setFixedWidth(230);
+    reviewPanel->setFixedWidth(280);
     reviewLayout_ = new QVBoxLayout(reviewPanel);
-    reviewLayout_->setContentsMargins(14, 14, 14, 14);
-    reviewLayout_->setSpacing(10);
+    reviewLayout_->setContentsMargins(18, 18, 18, 18);
+    reviewLayout_->setSpacing(12);
     bodyLayout->addWidget(reviewPanel);
 
     rootLayout->addLayout(bodyLayout, 1);
@@ -136,19 +162,7 @@ void WorkspaceShell::clearTopBar() {
 }
 
 QPushButton* WorkspaceShell::createTopBarButton(const QString& text) {
-    auto* button = new QPushButton(text, this);
-    button->setFont(makeWorkspaceFont(20));
-    button->setFixedSize(166, 54);
-    button->setCursor(Qt::PointingHandCursor);
-    button->setStyleSheet(
-        "QPushButton {"
-        " background: #ffffff;"
-        " border: 0;"
-        " border-right: 1px solid #222222;"
-        " color: #000000;"
-        "}"
-        "QPushButton:hover { background: #f4f4f4; }");
-    return button;
+    return createFlatTopBarButton(this, text);
 }
 
 void WorkspaceShell::setSaveProjectHandler(std::function<void()> handler) {

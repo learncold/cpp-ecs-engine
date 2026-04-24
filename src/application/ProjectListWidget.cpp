@@ -8,15 +8,10 @@
 #include <QSizePolicy>
 #include <QVBoxLayout>
 
+#include "application/UiStyle.h"
+
 namespace safecrowd::application {
 namespace {
-
-QFont makeListFont() {
-    QFont font;
-    font.setPointSize(20);
-    font.setWeight(QFont::Normal);
-    return font;
-}
 
 QString displaySavedAt(const QString& savedAt) {
     const auto dateTime = QDateTime::fromString(savedAt, Qt::ISODate);
@@ -34,16 +29,21 @@ ProjectListWidget::ProjectListWidget(const QList<ProjectMetadata>& projects, QWi
     setFrameShape(QFrame::StyledPanel);
     setLineWidth(1);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    setStyleSheet("#ProjectListWidget { border: 1px solid #767676; background: #ffffff; }");
+    setStyleSheet("#ProjectListWidget { border: 1px solid #d7e0ea; border-radius: 20px; background: #ffffff; }");
 
     auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(54, 36, 20, 36);
-    layout->setSpacing(16);
+    layout->setContentsMargins(24, 24, 24, 24);
+    layout->setSpacing(8);
+
+    auto* title = new QLabel("Recent Projects", this);
+    title->setFont(ui::font(ui::FontRole::Title));
+    layout->addWidget(title);
+    layout->addSpacing(10);
 
     if (projects.empty()) {
         auto* emptyLabel = new QLabel("No saved projects", this);
-        emptyLabel->setFont(makeListFont());
-        emptyLabel->setStyleSheet("QLabel { color: #555555; }");
+        emptyLabel->setFont(ui::font(ui::FontRole::Body));
+        emptyLabel->setStyleSheet(ui::mutedTextStyleSheet());
         layout->addWidget(emptyLabel);
     } else {
         for (const auto& project : projects) {
@@ -60,31 +60,26 @@ void ProjectListWidget::setOpenProjectHandler(std::function<void(const ProjectMe
 
 void ProjectListWidget::addProjectRow(const ProjectMetadata& project) {
     auto* row = new QPushButton(this);
-    row->setMinimumHeight(54);
+    row->setMinimumHeight(72);
     row->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     row->setCursor(Qt::PointingHandCursor);
-    row->setStyleSheet(
-        "QPushButton {"
-        " border: 0;"
-        " background: transparent;"
-        " text-align: left;"
-        "}"
-        "QPushButton:hover { background: #f5f5f5; }");
+    row->setStyleSheet(ui::ghostRowStyleSheet());
 
     auto* layout = new QHBoxLayout(row);
     layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(24);
+    layout->setSpacing(16);
 
     auto* nameLabel = new QLabel(project.name, row);
-    nameLabel->setFont(makeListFont());
+    nameLabel->setFont(ui::font(ui::FontRole::Body));
     nameLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     nameLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
 
     auto* dateLabel = new QLabel(displaySavedAt(project.savedAt), row);
-    dateLabel->setFont(makeListFont());
+    dateLabel->setFont(ui::font(ui::FontRole::Caption));
     dateLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     dateLabel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
     dateLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
+    dateLabel->setStyleSheet(ui::subtleTextStyleSheet());
 
     layout->addWidget(nameLabel, 1);
     layout->addWidget(dateLabel, 0);

@@ -93,6 +93,24 @@
 - Update docs when structure, build rules, or repository workflow changes.
 - When changing contribution workflow files, keep `CONTRIBUTING.md` and `.github/` files aligned.
 
+## UI Design Guidelines
+- Prefer a calm, minimal desktop UI: light neutral surfaces, restrained accent color, and clear visual hierarchy over heavy borders or high-contrast chrome.
+- Centralize reusable Qt widget styling in shared application-layer helpers instead of scattering large inline `setStyleSheet()` blocks across many widgets.
+- Reuse a small set of design tokens consistently:
+  - spacing around 8 / 12 / 16 / 24 / 32 px
+  - rounded corners around 12-20 px for cards/panels
+  - one primary accent color with muted supporting grays
+- Use typography roles consistently:
+  - large page title
+  - section title
+  - body text
+  - caption/meta text
+- Primary actions should be visually emphasized; secondary actions should stay quieter but still consistent in size, radius, and padding.
+- Prefer card/panel composition with generous padding instead of drawing many separator lines.
+- Keep dense review/workspace screens readable by separating navigation, canvas, and inspector panels with spacing and surface contrast rather than thick borders.
+- Avoid introducing custom UI styling in `domain` or `engine`; all presentation decisions remain in `src/application/`.
+- When adding a new screen or widget, align it with the existing shared UI tokens before introducing a new color, radius, or button treatment.
+
 ## Docs
 - After any changes to the project, ensure the documents remain consistent.
 - Architecture notes: `docs/architecture/프로젝트 구조.md`

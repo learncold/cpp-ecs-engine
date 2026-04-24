@@ -4,17 +4,11 @@
 #include <QMouseEvent>
 #include <QVBoxLayout>
 
+#include "application/UiStyle.h"
 #include "domain/ImportIssue.h"
 
 namespace safecrowd::application {
 namespace {
-
-QFont makeIssueFont(int pointSize) {
-    QFont font;
-    font.setPointSize(pointSize);
-    font.setWeight(QFont::Normal);
-    return font;
-}
 
 QString issueTitle(const safecrowd::domain::ImportIssue& issue) {
     return QString::fromUtf8(safecrowd::domain::toString(issue.code));
@@ -41,44 +35,40 @@ IssueCardWidget::IssueCardWidget(
       selectIssueHandler_(std::move(selectIssueHandler)) {
     setFrameShape(QFrame::StyledPanel);
     setLineWidth(1);
-    setStyleSheet(
-        "IssueCardWidget {"
-        " border: 1px solid #888888;"
-        " background: #ffffff;"
-        "}"
-        "IssueCardWidget:hover {"
-        " background: #f5f5f5;"
-        "}"
-        "QLabel { border: 0; background: transparent; }");
+    setStyleSheet(ui::cardStyleSheet());
+    setCursor(Qt::PointingHandCursor);
 
     auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(10, 8, 10, 9);
-    layout->setSpacing(6);
+    layout->setContentsMargins(14, 12, 14, 12);
+    layout->setSpacing(8);
 
     auto* title = new QLabel(issueTitle(issue_), this);
-    title->setFont(makeIssueFont(10));
+    title->setFont(ui::font(ui::FontRole::Body));
     title->setWordWrap(true);
     layout->addWidget(title);
 
     auto* severity = new QLabel(QString::fromUtf8(safecrowd::domain::toString(issue_.severity)), this);
-    severity->setFont(makeIssueFont(8));
-    severity->setStyleSheet("QLabel { color: #a33a24; }");
+    severity->setFont(ui::font(ui::FontRole::Caption));
+    const auto severityColor = issue_.blocksSimulation()
+        ? QColor("#b54708")
+        : (issue_.severity == safecrowd::domain::ImportIssueSeverity::Warning ? QColor("#c27100") : QColor("#1f5fae"));
+    severity->setStyleSheet(ui::severityTextStyleSheet(severityColor));
     layout->addWidget(severity);
 
     if (!issue_.message.empty()) {
         auto* message = new QLabel(QString::fromStdString(issue_.message), this);
-        message->setFont(makeIssueFont(9));
+        message->setFont(ui::font(ui::FontRole::Body));
         message->setWordWrap(true);
-        message->setStyleSheet("QLabel { color: #333333; }");
+        message->setStyleSheet(ui::mutedTextStyleSheet());
         layout->addWidget(message);
     }
 
     const auto targetText = compactTarget(issue_);
     if (!targetText.isEmpty()) {
         auto* target = new QLabel(targetText, this);
-        target->setFont(makeIssueFont(8));
+        target->setFont(ui::font(ui::FontRole::Caption));
         target->setWordWrap(true);
-        target->setStyleSheet("QLabel { color: #555555; }");
+        target->setStyleSheet(ui::subtleTextStyleSheet());
         layout->addWidget(target);
     }
 }

@@ -173,6 +173,7 @@ if (SAFECROWD_BUILD_APP)
         src/application/ProjectNavigatorActions.h
         src/application/ProjectNavigatorWidget.h
         src/application/ProjectPersistence.h
+        src/application/UiStyle.h
         src/application/WorkspaceShell.h
         src/application/IssueCardWidget.cpp
         src/application/LayoutPreviewWidget.cpp
@@ -184,6 +185,7 @@ if (SAFECROWD_BUILD_APP)
         src/application/ProjectNavigatorActions.cpp
         src/application/ProjectNavigatorWidget.cpp
         src/application/ProjectPersistence.cpp
+        src/application/UiStyle.cpp
         src/application/WorkspaceShell.cpp
     )
 
