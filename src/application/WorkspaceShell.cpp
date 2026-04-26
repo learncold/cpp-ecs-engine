@@ -96,7 +96,7 @@ WorkspaceShell::WorkspaceShell(QWidget* parent)
     auto* centerStack = new QWidget(this);
     auto* centerLayout = new QVBoxLayout(centerStack);
     centerLayout->setContentsMargins(0, 0, 0, 0);
-    centerLayout->setSpacing(18);
+    centerLayout->setSpacing(0);
 
     auto* canvasPanel = new QWidget(centerStack);
     canvasPanel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -104,13 +104,6 @@ WorkspaceShell::WorkspaceShell(QWidget* parent)
     canvasLayout_->setContentsMargins(0, 0, 0, 0);
     canvasLayout_->setSpacing(0);
     centerLayout->addWidget(canvasPanel, 1);
-
-    auto* bottomPanel = createPanel(centerStack);
-    bottomPanel->setFixedHeight(92);
-    bottomLayout_ = new QVBoxLayout(bottomPanel);
-    bottomLayout_->setContentsMargins(18, 18, 18, 18);
-    bottomLayout_->setSpacing(0);
-    centerLayout->addWidget(bottomPanel, 0);
 
     bodyLayout->addWidget(centerStack, 1);
 
@@ -183,10 +176,6 @@ void WorkspaceShell::setReviewPanel(QWidget* panel) {
 
 void WorkspaceShell::setCanvas(QWidget* canvas) {
     replaceSingleWidget(canvasLayout_, canvas);
-}
-
-void WorkspaceShell::setBottomPanel(QWidget* panel) {
-    replaceSingleWidget(bottomLayout_, panel);
 }
 
 }  // namespace safecrowd::application

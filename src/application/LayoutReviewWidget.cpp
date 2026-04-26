@@ -188,7 +188,6 @@ QWidget* createNavigationPanel(
         selectIssueHandler,
         listHost));
 
-    layout->addStretch(1);
     return panel;
 }
 
@@ -210,75 +209,45 @@ QWidget* createReviewPanel(const safecrowd::domain::ImportResult& importResult, 
         return issue.blocksSimulation();
     });
 
-    auto* approvalSection = createPanelSection(panel);
-    auto* approvalLayout = new QVBoxLayout(approvalSection);
-    approvalLayout->setContentsMargins(16, 16, 16, 16);
-    approvalLayout->setSpacing(10);
+    auto* inspectorHeader = new QLabel("Inspector", panel);
+    inspectorHeader->setFont(ui::font(ui::FontRole::Title));
+    layout->addWidget(inspectorHeader);
 
-    auto* approvalHeader = new QLabel("Approval", approvalSection);
-    approvalHeader->setFont(ui::font(ui::FontRole::SectionTitle));
-    approvalLayout->addWidget(approvalHeader);
+    *inspectorTitle = new QLabel("No issue selected", panel);
+    (*inspectorTitle)->setFont(ui::font(ui::FontRole::Body));
+    (*inspectorTitle)->setWordWrap(true);
+    layout->addWidget(*inspectorTitle);
 
-    auto* approveButton = new QPushButton("Approve Layout", approvalSection);
-    approveButton->setEnabled(blockingCount == 0);
-    approveButton->setFont(ui::font(ui::FontRole::Body));
-    approveButton->setStyleSheet(ui::primaryButtonStyleSheet());
-    approvalLayout->addWidget(approveButton);
+    *inspectorDetail = new QLabel("Select an issue from the left panel.", panel);
+    (*inspectorDetail)->setFont(ui::font(ui::FontRole::Body));
+    (*inspectorDetail)->setWordWrap(true);
+    (*inspectorDetail)->setStyleSheet(ui::mutedTextStyleSheet());
+    layout->addWidget(*inspectorDetail);
 
-    auto* approvalStatus = new QLabel(blockingCount == 0 ? "Ready for approval" : "Resolve blocking issues first", approvalSection);
+    layout->addStretch(1);
+
+    auto* approvalStatus = new QLabel(blockingCount == 0 ? "Ready for approval" : "Resolve blocking issues first", panel);
     approvalStatus->setFont(ui::font(ui::FontRole::Body));
     approvalStatus->setWordWrap(true);
     approvalStatus->setStyleSheet(ui::mutedTextStyleSheet());
-    approvalLayout->addWidget(approvalStatus);
-    layout->addWidget(approvalSection);
+    layout->addWidget(approvalStatus);
+
+    auto* approveButton = new QPushButton("Approve Layout", panel);
+    approveButton->setEnabled(blockingCount == 0);
+    approveButton->setFont(ui::font(ui::FontRole::Body));
+    approveButton->setStyleSheet(ui::primaryButtonStyleSheet());
+    layout->addWidget(approveButton);
 
     QObject::connect(approveButton, &QPushButton::clicked, panel, [approvalStatus]() {
         approvalStatus->setText("Layout approved");
     });
-
-    auto* inspectorSection = createPanelSection(panel);
-    auto* inspectorLayout = new QVBoxLayout(inspectorSection);
-    inspectorLayout->setContentsMargins(16, 16, 16, 16);
-    inspectorLayout->setSpacing(10);
-
-    auto* inspectorHeader = new QLabel("Inspector", inspectorSection);
-    inspectorHeader->setFont(ui::font(ui::FontRole::SectionTitle));
-    inspectorLayout->addWidget(inspectorHeader);
-
-    *inspectorTitle = new QLabel("No issue selected", inspectorSection);
-    (*inspectorTitle)->setFont(ui::font(ui::FontRole::Body));
-    (*inspectorTitle)->setWordWrap(true);
-    inspectorLayout->addWidget(*inspectorTitle);
-
-    *inspectorDetail = new QLabel("Select an issue from the left panel.", inspectorSection);
-    (*inspectorDetail)->setFont(ui::font(ui::FontRole::Body));
-    (*inspectorDetail)->setWordWrap(true);
-    (*inspectorDetail)->setStyleSheet(ui::mutedTextStyleSheet());
-    inspectorLayout->addWidget(*inspectorDetail);
-    layout->addWidget(inspectorSection);
-
-    layout->addStretch(1);
-    return panel;
-}
-
-QWidget* createBottomPanel(const QString& projectName, QWidget* parent) {
-    auto* panel = new QWidget(parent);
-    auto* layout = new QVBoxLayout(panel);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(0);
-
-    auto* label = new QLabel(projectName.isEmpty() ? "Layout Review" : QString("Layout Review - %1").arg(projectName), panel);
-    label->setFont(ui::font(ui::FontRole::Title));
-    layout->addWidget(label, 0, Qt::AlignLeft | Qt::AlignTop);
-
-    layout->addStretch(1);
     return panel;
 }
 
 }  // namespace
 
 LayoutReviewWidget::LayoutReviewWidget(
-    const QString& projectName,
+    const QString& /*projectName*/,
     const safecrowd::domain::ImportResult& importResult,
     std::function<void()> saveProjectHandler,
     std::function<void()> openProjectHandler,
@@ -309,7 +278,6 @@ LayoutReviewWidget::LayoutReviewWidget(
     }, shell));
     shell->setCanvas(preview);
     shell->setReviewPanel(reviewPanel);
-    shell->setBottomPanel(createBottomPanel(projectName, shell));
     layout->addWidget(shell);
 }
 
