@@ -9,6 +9,8 @@
 #include "domain/ImportResult.h"
 
 class QFrame;
+class QCheckBox;
+class QDoubleSpinBox;
 class QKeyEvent;
 class QMouseEvent;
 class QToolButton;
@@ -73,12 +75,14 @@ private:
     void clearSelection();
     void createBarrier(const QPointF& startWorld, const QPointF& endWorld);
     void createConnection(const QPointF& startWorld, const QPointF& endWorld);
+    void createDoorAt(const QString& barrierId, const QPointF& position);
     void createZone(const QPointF& startWorld, const QPointF& endWorld, safecrowd::domain::ZoneKind kind);
     void deleteConnection(const QString& connectionId);
     void deleteBarrier(const QString& barrierId);
     void emitCurrentSelection();
     void notifyLayoutEdited();
     void repositionToolbars();
+    void refreshPropertyPanel();
     void selectBarrier(const QString& barrierId);
     void selectConnection(const QString& connectionId);
     void selectZone(const QString& zoneId);
@@ -101,8 +105,16 @@ private:
     bool panning_{false};
     bool spacePressed_{false};
     ToolMode toolMode_{ToolMode::Select};
+    bool roomAutoWallsEnabled_{true};
+    bool doorCreatesLeaf_{true};
+    double doorWidth_{1.2};
+    QFrame* toolbarCorner_{nullptr};
     QFrame* topToolbar_{nullptr};
+    QFrame* propertyPanel_{nullptr};
     QFrame* sideToolbar_{nullptr};
+    QCheckBox* roomAutoWallsCheckBox_{nullptr};
+    QDoubleSpinBox* doorWidthSpinBox_{nullptr};
+    QCheckBox* doorLeafCheckBox_{nullptr};
     QToolButton* selectToolButton_{nullptr};
     QToolButton* roomToolButton_{nullptr};
     QToolButton* corridorToolButton_{nullptr};

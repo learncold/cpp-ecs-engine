@@ -6,6 +6,8 @@
 #include <optional>
 
 #include <QCoreApplication>
+#include <QCheckBox>
+#include <QDoubleSpinBox>
 #include <QEvent>
 #include <QFrame>
 #include <QHBoxLayout>
@@ -26,12 +28,19 @@ namespace {
 constexpr double kConnectionWidth = 1.2;
 constexpr double kConnectionHitTolerance = 10.0;
 constexpr double kDraftMinimumSize = 0.2;
+constexpr double kGeometryEpsilon = 1e-4;
+constexpr double kMinimumDoorWidth = 0.9;
 constexpr int kTopToolbarHeight = 44;
+constexpr int kPropertyPanelHeight = 42;
 constexpr int kSideToolbarWidth = 44;
 constexpr int kToolbarButtonSize = 44;
 
 QRectF previewViewport(const QRect& widgetRect) {
-    return QRectF(widgetRect).adjusted(kSideToolbarWidth + 16, kTopToolbarHeight + 16, -16, -16);
+    return QRectF(widgetRect).adjusted(
+        kSideToolbarWidth + 16,
+        kTopToolbarHeight + kPropertyPanelHeight + 16,
+        -16,
+        -16);
 }
 
 struct Bounds2D {
@@ -542,6 +551,20 @@ std::vector<std::size_t> zonesNearPoint(const safecrowd::domain::FacilityLayout2
     return matches;
 }
 
+std::vector<std::size_t> zonesContainingPoint(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const QPointF& point,
+    double tolerance = 0.15) {
+    std::vector<std::size_t> matches;
+    for (std::size_t index = 0; index < layout.zones.size(); ++index) {
+        const auto& zone = layout.zones[index];
+        if (pointInPolygon(zone.area, point) || distanceToPolygonBoundary(zone.area, point) <= tolerance) {
+            matches.push_back(index);
+        }
+    }
+    return matches;
+}
+
 QString barrierTitle(const safecrowd::domain::Barrier2D& barrier) {
     return QString("Wall %1").arg(QString::fromStdString(barrier.id));
 }
@@ -558,6 +581,354 @@ QRectF rectFromWorldPoints(const QPointF& startWorld, const QPointF& endWorld) {
     const auto top = std::max(startWorld.y(), endWorld.y());
     const auto bottom = std::min(startWorld.y(), endWorld.y());
     return QRectF(QPointF(left, bottom), QPointF(right, top));
+}
+
+void appendBarrierSegment(
+    safecrowd::domain::FacilityLayout2D& layout,
+    const safecrowd::domain::Point2D& start,
+    const safecrowd::domain::Point2D& end) {
+    layout.barriers.push_back({
+        .id = nextBarrierId(layout).toStdString(),
+        .geometry = safecrowd::domain::Polyline2D{
+            .vertices = {start, end},
+            .closed = false,
+        },
+        .blocksMovement = true,
+    });
+}
+
+QPainterPath worldPolygonPath(const safecrowd::domain::Polygon2D& polygon) {
+    QPainterPath path;
+    if (polygon.outline.empty()) {
+        return path;
+    }
+
+    path.moveTo(QPointF(polygon.outline.front().x, -polygon.outline.front().y));
+    for (std::size_t i = 1; i < polygon.outline.size(); ++i) {
+        path.lineTo(QPointF(polygon.outline[i].x, -polygon.outline[i].y));
+    }
+    path.closeSubpath();
+
+    for (const auto& hole : polygon.holes) {
+        if (hole.empty()) {
+            continue;
+        }
+        path.moveTo(QPointF(hole.front().x, -hole.front().y));
+        for (std::size_t i = 1; i < hole.size(); ++i) {
+            path.lineTo(QPointF(hole[i].x, -hole[i].y));
+        }
+        path.closeSubpath();
+    }
+
+    return path;
+}
+
+double polygonArea(const QPolygonF& polygon) {
+    if (polygon.size() < 3) {
+        return 0.0;
+    }
+
+    double area = 0.0;
+    for (int i = 0; i < polygon.size(); ++i) {
+        const QPointF& a = polygon[i];
+        const QPointF& b = polygon[(i + 1) % polygon.size()];
+        area += (a.x() * b.y()) - (b.x() * a.y());
+    }
+
+    return std::abs(area) * 0.5;
+}
+
+std::vector<safecrowd::domain::Polygon2D> polygonsFromFillPath(const QPainterPath& path) {
+    std::vector<safecrowd::domain::Polygon2D> polygons;
+
+    for (const auto& fillPolygon : path.toFillPolygons()) {
+        QPolygonF normalized = fillPolygon;
+        if (normalized.size() >= 2 && normalized.front() == normalized.back()) {
+            normalized.removeLast();
+        }
+        if (normalized.size() < 3 || polygonArea(normalized) < kDraftMinimumSize) {
+            continue;
+        }
+
+        safecrowd::domain::Polygon2D polygon;
+        polygon.outline.reserve(static_cast<std::size_t>(normalized.size()));
+        for (const auto& point : normalized) {
+            polygon.outline.push_back({
+                .x = point.x(),
+                .y = -point.y(),
+            });
+        }
+        polygons.push_back(std::move(polygon));
+    }
+
+    return polygons;
+}
+
+bool nearlyEqual(double a, double b, double epsilon = kGeometryEpsilon) {
+    return std::abs(a - b) <= epsilon;
+}
+
+std::vector<std::pair<double, double>> subtractInterval(
+    const std::vector<std::pair<double, double>>& source,
+    double overlapStart,
+    double overlapEnd) {
+    std::vector<std::pair<double, double>> next;
+    const auto clippedStart = std::min(overlapStart, overlapEnd);
+    const auto clippedEnd = std::max(overlapStart, overlapEnd);
+
+    for (const auto& interval : source) {
+        const auto start = interval.first;
+        const auto end = interval.second;
+        if (clippedEnd <= start + kGeometryEpsilon || clippedStart >= end - kGeometryEpsilon) {
+            next.push_back(interval);
+            continue;
+        }
+        if (clippedStart > start + kGeometryEpsilon) {
+            next.emplace_back(start, clippedStart);
+        }
+        if (clippedEnd < end - kGeometryEpsilon) {
+            next.emplace_back(clippedEnd, end);
+        }
+    }
+
+    return next;
+}
+
+std::vector<std::pair<safecrowd::domain::Point2D, safecrowd::domain::Point2D>> subtractBarrierOverlaps(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const safecrowd::domain::Point2D& start,
+    const safecrowd::domain::Point2D& end) {
+    const bool vertical = nearlyEqual(start.x, end.x);
+    const bool horizontal = nearlyEqual(start.y, end.y);
+    if (!vertical && !horizontal) {
+        return {{start, end}};
+    }
+
+    const auto axisStart = vertical ? std::min(start.y, end.y) : std::min(start.x, end.x);
+    const auto axisEnd = vertical ? std::max(start.y, end.y) : std::max(start.x, end.x);
+    std::vector<std::pair<double, double>> remaining{{axisStart, axisEnd}};
+
+    for (const auto& barrier : layout.barriers) {
+        if (barrier.geometry.vertices.size() != 2) {
+            continue;
+        }
+
+        const auto& a = barrier.geometry.vertices[0];
+        const auto& b = barrier.geometry.vertices[1];
+        const bool barrierVertical = nearlyEqual(a.x, b.x);
+        const bool barrierHorizontal = nearlyEqual(a.y, b.y);
+        if (vertical && barrierVertical && nearlyEqual(a.x, start.x)) {
+            remaining = subtractInterval(remaining, std::min(a.y, b.y), std::max(a.y, b.y));
+        } else if (horizontal && barrierHorizontal && nearlyEqual(a.y, start.y)) {
+            remaining = subtractInterval(remaining, std::min(a.x, b.x), std::max(a.x, b.x));
+        }
+
+        if (remaining.empty()) {
+            break;
+        }
+    }
+
+    std::vector<std::pair<safecrowd::domain::Point2D, safecrowd::domain::Point2D>> segments;
+    for (const auto& interval : remaining) {
+        if (interval.second - interval.first <= kGeometryEpsilon) {
+            continue;
+        }
+
+        if (vertical) {
+            segments.push_back({
+                {.x = start.x, .y = interval.first},
+                {.x = start.x, .y = interval.second},
+            });
+        } else {
+            segments.push_back({
+                {.x = interval.first, .y = start.y},
+                {.x = interval.second, .y = start.y},
+            });
+        }
+    }
+
+    return segments;
+}
+
+void appendAutoWallsForPolygon(
+    safecrowd::domain::FacilityLayout2D& layout,
+    const safecrowd::domain::Polygon2D& polygon) {
+    if (polygon.outline.size() < 2) {
+        return;
+    }
+
+    for (std::size_t i = 0; i < polygon.outline.size(); ++i) {
+        const auto& start = polygon.outline[i];
+        const auto& end = polygon.outline[(i + 1) % polygon.outline.size()];
+        for (const auto& segment : subtractBarrierOverlaps(layout, start, end)) {
+            appendBarrierSegment(layout, segment.first, segment.second);
+        }
+    }
+}
+
+bool pointNearSegmentWorld(
+    const QPointF& point,
+    const safecrowd::domain::Point2D& start,
+    const safecrowd::domain::Point2D& end,
+    double tolerance = 0.2) {
+    return distanceToLineSegmentWorld(point, start, end) <= tolerance;
+}
+
+std::optional<QPointF> projectOntoSegment(
+    const QPointF& point,
+    const safecrowd::domain::Point2D& start,
+    const safecrowd::domain::Point2D& end) {
+    const QPointF a(start.x, start.y);
+    const QPointF b(end.x, end.y);
+    const auto dx = b.x() - a.x();
+    const auto dy = b.y() - a.y();
+    const auto lengthSquared = (dx * dx) + (dy * dy);
+    if (lengthSquared <= kGeometryEpsilon) {
+        return std::nullopt;
+    }
+
+    const auto t = std::clamp(
+        ((point.x() - a.x()) * dx + (point.y() - a.y()) * dy) / lengthSquared,
+        0.0,
+        1.0);
+    return QPointF(a.x() + (t * dx), a.y() + (t * dy));
+}
+
+std::vector<std::size_t> uniqueZoneMerge(
+    const std::vector<std::size_t>& first,
+    const std::vector<std::size_t>& second) {
+    std::vector<std::size_t> merged = first;
+    for (const auto index : second) {
+        if (std::find(merged.begin(), merged.end(), index) == merged.end()) {
+            merged.push_back(index);
+        }
+    }
+    return merged;
+}
+
+std::vector<std::size_t> zonesTouchingSegment(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const safecrowd::domain::Point2D& start,
+    const safecrowd::domain::Point2D& end) {
+    const QPointF midpoint((start.x + end.x) * 0.5, (start.y + end.y) * 0.5);
+    std::vector<std::size_t> matches;
+    for (std::size_t index = 0; index < layout.zones.size(); ++index) {
+        const auto& zone = layout.zones[index];
+        if (pointNearSegmentWorld(midpoint, start, end, 0.25)
+            && distanceToPolygonBoundary(zone.area, midpoint) <= 0.25) {
+            matches.push_back(index);
+        }
+    }
+    return matches;
+}
+
+struct DoorNeighbors {
+    std::vector<std::size_t> firstSide{};
+    std::vector<std::size_t> secondSide{};
+    QPointF firstSample{};
+    QPointF secondSample{};
+};
+
+DoorNeighbors doorNeighborsAcrossSegment(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const safecrowd::domain::Point2D& start,
+    const safecrowd::domain::Point2D& end) {
+    const QPointF midpoint((start.x + end.x) * 0.5, (start.y + end.y) * 0.5);
+    const auto dx = end.x - start.x;
+    const auto dy = end.y - start.y;
+    const auto length = std::hypot(dx, dy);
+    if (length <= kGeometryEpsilon) {
+        return {};
+    }
+
+    const QPointF normal(-dy / length, dx / length);
+    constexpr double kSampleOffset = 0.18;
+    const QPointF sampleA = midpoint + normal * kSampleOffset;
+    const QPointF sampleB = midpoint - normal * kSampleOffset;
+
+    DoorNeighbors neighbors;
+    neighbors.firstSample = sampleA;
+    neighbors.secondSample = sampleB;
+    neighbors.firstSide = zonesContainingPoint(layout, sampleA);
+    neighbors.secondSide = zonesContainingPoint(layout, sampleB);
+
+    if (neighbors.firstSide.empty() && neighbors.secondSide.empty()) {
+        const auto fallback = zonesTouchingSegment(layout, start, end);
+        if (!fallback.empty()) {
+            neighbors.firstSide = fallback;
+        }
+    }
+
+    return neighbors;
+}
+
+std::optional<std::size_t> choosePrimaryZone(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const std::vector<std::size_t>& candidates,
+    std::optional<std::size_t> preferredOther = std::nullopt) {
+    for (const auto index : candidates) {
+        if (preferredOther.has_value() && index == *preferredOther) {
+            continue;
+        }
+        if (layout.zones[index].kind != safecrowd::domain::ZoneKind::Exit) {
+            return index;
+        }
+    }
+    for (const auto index : candidates) {
+        if (!preferredOther.has_value() || index != *preferredOther) {
+            return index;
+        }
+    }
+    return std::nullopt;
+}
+
+QString createExitZoneAtDoor(
+    safecrowd::domain::FacilityLayout2D& layout,
+    const safecrowd::domain::Point2D& gapStart,
+    const safecrowd::domain::Point2D& gapEnd,
+    const QPointF& outsideDirection) {
+    const auto zoneId = nextZoneId(layout);
+    const auto zoneNumber = static_cast<int>(layout.zones.size()) + 1;
+    const auto width = std::hypot(gapEnd.x - gapStart.x, gapEnd.y - gapStart.y);
+    const auto depth = std::max(0.75, width * 0.6);
+
+    const QPointF a(gapStart.x, gapStart.y);
+    const QPointF b(gapEnd.x, gapEnd.y);
+    const QPointF offset = outsideDirection * depth;
+
+    layout.zones.push_back({
+        .id = zoneId.toStdString(),
+        .kind = safecrowd::domain::ZoneKind::Exit,
+        .label = QString("Exit %1").arg(zoneNumber).toStdString(),
+        .area = safecrowd::domain::Polygon2D{
+            .outline = {
+                {.x = a.x(), .y = a.y()},
+                {.x = b.x(), .y = b.y()},
+                {.x = b.x() + offset.x(), .y = b.y() + offset.y()},
+                {.x = a.x() + offset.x(), .y = a.y() + offset.y()},
+            },
+        },
+        .defaultCapacity = 20u,
+    });
+
+    return zoneId;
+}
+
+void replaceBarrierWithSegments(
+    safecrowd::domain::FacilityLayout2D& layout,
+    std::size_t barrierIndex,
+    const std::vector<std::pair<safecrowd::domain::Point2D, safecrowd::domain::Point2D>>& segments) {
+    if (barrierIndex >= layout.barriers.size()) {
+        return;
+    }
+
+    layout.barriers.erase(layout.barriers.begin() + static_cast<std::ptrdiff_t>(barrierIndex));
+    for (const auto& segment : segments) {
+        if (std::hypot(segment.second.x - segment.first.x, segment.second.y - segment.first.y) <= kGeometryEpsilon) {
+            continue;
+        }
+        appendBarrierSegment(layout, segment.first, segment.second);
+    }
 }
 
 QIcon makeToolIcon(const QString& glyph, const QColor& color, bool filled = false) {
@@ -748,8 +1119,14 @@ void LayoutPreviewWidget::setImportResult(safecrowd::domain::ImportResult import
 
     if (!importResult_.layout.has_value()) {
         clearSelection();
+        if (toolbarCorner_ != nullptr) {
+            toolbarCorner_->hide();
+        }
         if (topToolbar_ != nullptr) {
             topToolbar_->hide();
+        }
+        if (propertyPanel_ != nullptr) {
+            propertyPanel_->hide();
         }
         if (sideToolbar_ != nullptr) {
             sideToolbar_->hide();
@@ -767,13 +1144,20 @@ void LayoutPreviewWidget::setImportResult(safecrowd::domain::ImportResult import
         selectedBarrierId_.clear();
     }
 
+    if (toolbarCorner_ != nullptr) {
+        toolbarCorner_->setVisible(true);
+    }
     if (topToolbar_ != nullptr) {
         topToolbar_->setVisible(true);
+    }
+    if (propertyPanel_ != nullptr) {
+        propertyPanel_->setVisible(true);
     }
     if (sideToolbar_ != nullptr) {
         sideToolbar_->setVisible(true);
     }
 
+    refreshPropertyPanel();
     update();
 }
 
@@ -873,6 +1257,12 @@ void LayoutPreviewWidget::mousePressEvent(QMouseEvent* event) {
             return;
         }
 
+        if (toolMode_ == ToolMode::DrawDoor) {
+            applyToolAt(event->position());
+            event->accept();
+            return;
+        }
+
         if (toolMode_ != ToolMode::Select && toolMode_ != ToolMode::Delete) {
             const LayoutTransform transform(*bounds, previewViewport(rect()), zoom_, panOffset_);
             const auto world = transform.unmap(event->position());
@@ -922,7 +1312,6 @@ void LayoutPreviewWidget::mouseReleaseEvent(QMouseEvent* event) {
             createBarrier(draftStartWorld_, draftCurrentWorld_);
             break;
         case ToolMode::DrawDoor:
-            createConnection(draftStartWorld_, draftCurrentWorld_);
             break;
         case ToolMode::Select:
         case ToolMode::Delete:
@@ -1161,8 +1550,15 @@ void LayoutPreviewWidget::applyToolAt(const QPointF& position) {
     case ToolMode::DrawCorridor:
     case ToolMode::DrawExit:
     case ToolMode::DrawWall:
-    case ToolMode::DrawDoor:
         return;
+    case ToolMode::DrawDoor: {
+        if (!barrierId.has_value()) {
+            return;
+        }
+        const auto world = transform.unmap(position);
+        createDoorAt(*barrierId, QPointF(world.x, world.y));
+        return;
+    }
     }
 }
 
@@ -1186,8 +1582,6 @@ void LayoutPreviewWidget::createZone(const QPointF& startWorld, const QPointF& e
         return;
     }
 
-    const auto zoneId = nextZoneId(layout);
-    const auto zoneNumber = static_cast<int>(layout.zones.size()) + 1;
     QString zoneLabel = "Room";
     if (kind == safecrowd::domain::ZoneKind::Corridor) {
         zoneLabel = "Corridor";
@@ -1195,25 +1589,57 @@ void LayoutPreviewWidget::createZone(const QPointF& startWorld, const QPointF& e
         zoneLabel = "Exit";
     }
 
-    layout.zones.push_back({
-        .id = zoneId.toStdString(),
-        .kind = kind,
-        .label = QString("%1 %2").arg(zoneLabel).arg(zoneNumber).toStdString(),
-        .area = safecrowd::domain::Polygon2D{
-            .outline = {
-                {.x = rectangle.left(), .y = rectangle.top()},
-                {.x = rectangle.right(), .y = rectangle.top()},
-                {.x = rectangle.right(), .y = rectangle.bottom()},
-                {.x = rectangle.left(), .y = rectangle.bottom()},
-            },
+    std::vector<safecrowd::domain::Polygon2D> polygonsToCreate;
+    const safecrowd::domain::Polygon2D rectanglePolygon{
+        .outline = {
+            {.x = rectangle.left(), .y = rectangle.top()},
+            {.x = rectangle.right(), .y = rectangle.top()},
+            {.x = rectangle.right(), .y = rectangle.bottom()},
+            {.x = rectangle.left(), .y = rectangle.bottom()},
         },
-        .defaultCapacity = kind == safecrowd::domain::ZoneKind::Exit ? 20u : 0u,
-    });
+    };
 
-    selectedZoneId_ = zoneId;
+    if (kind == safecrowd::domain::ZoneKind::Room) {
+        QPainterPath candidatePath = worldPolygonPath(rectanglePolygon);
+        QPainterPath occupiedRooms;
+        for (const auto& zone : layout.zones) {
+            if (zone.kind != safecrowd::domain::ZoneKind::Room) {
+                continue;
+            }
+            occupiedRooms = occupiedRooms.united(worldPolygonPath(zone.area));
+        }
+        polygonsToCreate = polygonsFromFillPath(candidatePath.subtracted(occupiedRooms).simplified());
+    } else {
+        polygonsToCreate.push_back(rectanglePolygon);
+    }
+
+    if (polygonsToCreate.empty()) {
+        return;
+    }
+
+    QString lastZoneId;
+    for (const auto& polygon : polygonsToCreate) {
+        const auto zoneId = nextZoneId(layout);
+        const auto zoneNumber = static_cast<int>(layout.zones.size()) + 1;
+        layout.zones.push_back({
+            .id = zoneId.toStdString(),
+            .kind = kind,
+            .label = QString("%1 %2").arg(zoneLabel).arg(zoneNumber).toStdString(),
+            .area = polygon,
+            .defaultCapacity = kind == safecrowd::domain::ZoneKind::Exit ? 20u : 0u,
+        });
+
+        if (kind == safecrowd::domain::ZoneKind::Room && roomAutoWallsEnabled_) {
+            appendAutoWallsForPolygon(layout, polygon);
+        }
+
+        lastZoneId = zoneId;
+    }
+
+    selectedZoneId_ = lastZoneId;
     selectedConnectionId_.clear();
     selectedBarrierId_.clear();
-    focusedTargetId_ = zoneId;
+    focusedTargetId_ = lastZoneId;
     notifyLayoutEdited();
     emitCurrentSelection();
     update();
@@ -1309,6 +1735,151 @@ void LayoutPreviewWidget::createConnection(const QPointF& startWorld, const QPoi
     update();
 }
 
+void LayoutPreviewWidget::createDoorAt(const QString& barrierId, const QPointF& position) {
+    if (!importResult_.layout.has_value() || barrierId.isEmpty()) {
+        return;
+    }
+
+    auto& layout = *importResult_.layout;
+    const auto barrierIt = std::find_if(layout.barriers.begin(), layout.barriers.end(), [&](const auto& barrier) {
+        return QString::fromStdString(barrier.id) == barrierId && barrier.geometry.vertices.size() == 2;
+    });
+    if (barrierIt == layout.barriers.end()) {
+        return;
+    }
+
+    const auto barrierIndex = static_cast<std::size_t>(std::distance(layout.barriers.begin(), barrierIt));
+    const auto& barrierStart = barrierIt->geometry.vertices[0];
+    const auto& barrierEnd = barrierIt->geometry.vertices[1];
+    const auto projected = projectOntoSegment(position, barrierStart, barrierEnd);
+    if (!projected.has_value()) {
+        return;
+    }
+
+    const auto segmentLength = std::hypot(barrierEnd.x - barrierStart.x, barrierEnd.y - barrierStart.y);
+    const auto openingWidth = std::clamp(doorWidth_, kMinimumDoorWidth, segmentLength - kGeometryEpsilon);
+    if (segmentLength <= openingWidth + kGeometryEpsilon) {
+        return;
+    }
+
+    const bool vertical = nearlyEqual(barrierStart.x, barrierEnd.x);
+    const bool horizontal = nearlyEqual(barrierStart.y, barrierEnd.y);
+    if (!vertical && !horizontal) {
+        return;
+    }
+
+    safecrowd::domain::Point2D gapStart{};
+    safecrowd::domain::Point2D gapEnd{};
+    if (vertical) {
+        const auto minY = std::min(barrierStart.y, barrierEnd.y);
+        const auto maxY = std::max(barrierStart.y, barrierEnd.y);
+        const auto centerY = std::clamp(projected->y(), minY + openingWidth * 0.5, maxY - openingWidth * 0.5);
+        gapStart = {.x = barrierStart.x, .y = centerY - openingWidth * 0.5};
+        gapEnd = {.x = barrierStart.x, .y = centerY + openingWidth * 0.5};
+    } else {
+        const auto minX = std::min(barrierStart.x, barrierEnd.x);
+        const auto maxX = std::max(barrierStart.x, barrierEnd.x);
+        const auto centerX = std::clamp(projected->x(), minX + openingWidth * 0.5, maxX - openingWidth * 0.5);
+        gapStart = {.x = centerX - openingWidth * 0.5, .y = barrierStart.y};
+        gapEnd = {.x = centerX + openingWidth * 0.5, .y = barrierStart.y};
+    }
+
+    const auto neighbors = doorNeighborsAcrossSegment(layout, gapStart, gapEnd);
+    const auto firstZone = choosePrimaryZone(layout, neighbors.firstSide);
+    const auto secondZone = choosePrimaryZone(layout, neighbors.secondSide, firstZone);
+
+    QString fromZoneId;
+    QString toZoneId;
+    safecrowd::domain::ConnectionKind connectionKind =
+        doorCreatesLeaf_ ? safecrowd::domain::ConnectionKind::Doorway : safecrowd::domain::ConnectionKind::Opening;
+
+    if (firstZone.has_value() && secondZone.has_value()) {
+        fromZoneId = QString::fromStdString(layout.zones[*firstZone].id);
+        toZoneId = QString::fromStdString(layout.zones[*secondZone].id);
+        if (layout.zones[*firstZone].kind == safecrowd::domain::ZoneKind::Exit
+            || layout.zones[*secondZone].kind == safecrowd::domain::ZoneKind::Exit) {
+            connectionKind = safecrowd::domain::ConnectionKind::Exit;
+        }
+    } else {
+        const auto interiorZone = firstZone.has_value() ? firstZone : secondZone;
+        if (!interiorZone.has_value()) {
+            return;
+        }
+
+        const bool useFirstOutside = !firstZone.has_value();
+        const QPointF outsideSample = useFirstOutside ? neighbors.firstSample : neighbors.secondSample;
+        const QPointF insideSample = useFirstOutside ? neighbors.secondSample : neighbors.firstSample;
+        QPointF outsideDirection = outsideSample - insideSample;
+        const auto directionLength = std::hypot(outsideDirection.x(), outsideDirection.y());
+        if (directionLength <= kGeometryEpsilon) {
+            return;
+        }
+        outsideDirection /= directionLength;
+
+        fromZoneId = QString::fromStdString(layout.zones[*interiorZone].id);
+        toZoneId = createExitZoneAtDoor(layout, gapStart, gapEnd, outsideDirection);
+        connectionKind = safecrowd::domain::ConnectionKind::Exit;
+    }
+
+    if (fromZoneId.isEmpty() || toZoneId.isEmpty() || fromZoneId == toZoneId || hasConnectionPair(layout, fromZoneId, toZoneId)) {
+        return;
+    }
+
+    std::vector<std::pair<safecrowd::domain::Point2D, safecrowd::domain::Point2D>> remainingSegments;
+    if (vertical) {
+        const auto lowerStart = std::min(barrierStart.y, barrierEnd.y);
+        const auto lowerEnd = std::max(barrierStart.y, barrierEnd.y);
+        if (gapStart.y - lowerStart > kGeometryEpsilon) {
+            remainingSegments.push_back({
+                {.x = barrierStart.x, .y = lowerStart},
+                {.x = barrierStart.x, .y = gapStart.y},
+            });
+        }
+        if (lowerEnd - gapEnd.y > kGeometryEpsilon) {
+            remainingSegments.push_back({
+                {.x = barrierStart.x, .y = gapEnd.y},
+                {.x = barrierStart.x, .y = lowerEnd},
+            });
+        }
+    } else {
+        const auto lowerStart = std::min(barrierStart.x, barrierEnd.x);
+        const auto lowerEnd = std::max(barrierStart.x, barrierEnd.x);
+        if (gapStart.x - lowerStart > kGeometryEpsilon) {
+            remainingSegments.push_back({
+                {.x = lowerStart, .y = barrierStart.y},
+                {.x = gapStart.x, .y = barrierStart.y},
+            });
+        }
+        if (lowerEnd - gapEnd.x > kGeometryEpsilon) {
+            remainingSegments.push_back({
+                {.x = gapEnd.x, .y = barrierStart.y},
+                {.x = lowerEnd, .y = barrierStart.y},
+            });
+        }
+    }
+
+    replaceBarrierWithSegments(layout, barrierIndex, remainingSegments);
+
+    const auto connectionId = nextConnectionId(layout);
+    layout.connections.push_back({
+        .id = connectionId.toStdString(),
+        .kind = connectionKind,
+        .fromZoneId = fromZoneId.toStdString(),
+        .toZoneId = toZoneId.toStdString(),
+        .effectiveWidth = openingWidth,
+        .directionality = safecrowd::domain::TravelDirection::Bidirectional,
+        .centerSpan = {.start = gapStart, .end = gapEnd},
+    });
+
+    selectedConnectionId_ = connectionId;
+    selectedZoneId_.clear();
+    selectedBarrierId_.clear();
+    focusedTargetId_ = connectionId;
+    notifyLayoutEdited();
+    emitCurrentSelection();
+    update();
+}
+
 void LayoutPreviewWidget::deleteConnection(const QString& connectionId) {
     if (!importResult_.layout.has_value() || connectionId.isEmpty()) {
         return;
@@ -1364,12 +1935,24 @@ void LayoutPreviewWidget::notifyLayoutEdited() {
 }
 
 void LayoutPreviewWidget::repositionToolbars() {
+    if (toolbarCorner_ != nullptr) {
+        toolbarCorner_->setGeometry(0, 0, kSideToolbarWidth, kTopToolbarHeight + kPropertyPanelHeight);
+        toolbarCorner_->raise();
+    }
     if (topToolbar_ != nullptr) {
         topToolbar_->setGeometry(kSideToolbarWidth, 0, width() - kSideToolbarWidth, kTopToolbarHeight);
         topToolbar_->raise();
     }
+    if (propertyPanel_ != nullptr) {
+        propertyPanel_->setGeometry(kSideToolbarWidth, kTopToolbarHeight, width() - kSideToolbarWidth, kPropertyPanelHeight);
+        propertyPanel_->raise();
+    }
     if (sideToolbar_ != nullptr) {
-        sideToolbar_->setGeometry(0, kTopToolbarHeight, kSideToolbarWidth, std::max(0, height() - kTopToolbarHeight));
+        sideToolbar_->setGeometry(
+            0,
+            kTopToolbarHeight + kPropertyPanelHeight,
+            kSideToolbarWidth,
+            std::max(0, height() - kTopToolbarHeight - kPropertyPanelHeight));
         sideToolbar_->raise();
     }
 }
@@ -1425,6 +2008,7 @@ void LayoutPreviewWidget::setToolMode(ToolMode mode) {
         deleteToolButton_->setChecked(toolMode_ == ToolMode::Delete);
     }
 
+    refreshPropertyPanel();
     update();
 }
 
@@ -1434,6 +2018,9 @@ void LayoutPreviewWidget::setupToolbars() {
         "QToolButton { background: transparent; border: 0; border-radius: 0px; }"
         "QToolButton:hover { background: #eef3f8; }"
         "QToolButton:checked { background: #dce9f9; }";
+
+    toolbarCorner_ = new QFrame(this);
+    toolbarCorner_->setStyleSheet(frameStyle);
 
     topToolbar_ = new QFrame(this);
     topToolbar_->setStyleSheet(frameStyle);
@@ -1446,6 +2033,34 @@ void LayoutPreviewWidget::setupToolbars() {
     auto* sideLayout = new QVBoxLayout(sideToolbar_);
     sideLayout->setContentsMargins(0, 0, 0, 0);
     sideLayout->setSpacing(0);
+
+    propertyPanel_ = new QFrame(this);
+    propertyPanel_->setStyleSheet(
+        "QFrame { background: rgba(255, 255, 255, 245); border: 1px solid #d7e0ea; border-radius: 0px; }"
+        "QDoubleSpinBox { min-height: 24px; padding: 0 8px; border: 1px solid #c9d5e2; border-radius: 0px; background: #ffffff; color: #16202b; }"
+        "QCheckBox { color: #16202b; spacing: 8px; }"
+        "QCheckBox::indicator { width: 16px; height: 16px; }");
+    auto* propertyLayout = new QHBoxLayout(propertyPanel_);
+    propertyLayout->setContentsMargins(12, 0, 16, 0);
+    propertyLayout->setSpacing(14);
+
+    roomAutoWallsCheckBox_ = new QCheckBox("Auto-create surrounding walls", propertyPanel_);
+    roomAutoWallsCheckBox_->setChecked(roomAutoWallsEnabled_);
+    propertyLayout->addWidget(roomAutoWallsCheckBox_);
+
+    doorWidthSpinBox_ = new QDoubleSpinBox(propertyPanel_);
+    doorWidthSpinBox_->setDecimals(2);
+    doorWidthSpinBox_->setSingleStep(0.1);
+    doorWidthSpinBox_->setRange(kMinimumDoorWidth, 20.0);
+    doorWidthSpinBox_->setValue(doorWidth_);
+    doorWidthSpinBox_->setSuffix(" m");
+    doorWidthSpinBox_->setToolTip("Door/opening width");
+    propertyLayout->addWidget(doorWidthSpinBox_);
+
+    doorLeafCheckBox_ = new QCheckBox("Install door leaf", propertyPanel_);
+    doorLeafCheckBox_->setChecked(doorCreatesLeaf_);
+    propertyLayout->addWidget(doorLeafCheckBox_);
+    propertyLayout->addStretch(1);
 
     const auto makeButton = [&](QFrame* host, QBoxLayout* layout, const QIcon& icon, const QString& tooltip) {
         auto* button = new QToolButton(host);
@@ -1479,11 +2094,35 @@ void LayoutPreviewWidget::setupToolbars() {
     connect(exitToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::DrawExit); });
     connect(wallToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::DrawWall); });
     connect(doorToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::DrawDoor); });
+    connect(roomAutoWallsCheckBox_, &QCheckBox::toggled, this, [this](bool checked) {
+        roomAutoWallsEnabled_ = checked;
+    });
+    connect(doorWidthSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double value) {
+        doorWidth_ = value;
+    });
+    connect(doorLeafCheckBox_, &QCheckBox::toggled, this, [this](bool checked) {
+        doorCreatesLeaf_ = checked;
+    });
 
     const auto visible = importResult_.layout.has_value();
+    toolbarCorner_->setVisible(visible);
     topToolbar_->setVisible(visible);
+    propertyPanel_->setVisible(visible);
     sideToolbar_->setVisible(visible);
     setToolMode(ToolMode::Select);
+}
+
+void LayoutPreviewWidget::refreshPropertyPanel() {
+    if (propertyPanel_ == nullptr || roomAutoWallsCheckBox_ == nullptr || doorWidthSpinBox_ == nullptr || doorLeafCheckBox_ == nullptr) {
+        return;
+    }
+
+    const bool showRoomWallsOption = toolMode_ == ToolMode::DrawRoom;
+    const bool showDoorOptions = toolMode_ == ToolMode::DrawDoor;
+    roomAutoWallsCheckBox_->setVisible(showRoomWallsOption);
+    doorWidthSpinBox_->setVisible(showDoorOptions);
+    doorLeafCheckBox_->setVisible(showDoorOptions);
+    propertyPanel_->setVisible(importResult_.layout.has_value() && (showRoomWallsOption || showDoorOptions));
 }
 
 PreviewSelection LayoutPreviewWidget::currentSelection() const {
