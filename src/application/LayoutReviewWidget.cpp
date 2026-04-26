@@ -2,23 +2,28 @@
 
 #include <algorithm>
 
-#include <QFont>
 #include <QFrame>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
+#include <QShortcut>
 #include <QScrollArea>
+#include <QStringList>
+#include <QKeySequence>
+#include <QStyle>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 #include "application/IssueCardWidget.h"
-#include "application/LayoutPreviewWidget.h"
 #include "application/UiStyle.h"
 #include "application/WorkspaceShell.h"
 #include "domain/ImportIssue.h"
+#include "domain/ImportValidationService.h"
 
 namespace safecrowd::application {
 namespace {
 
-QString issueTitle(const safecrowd::domain::ImportIssue& issue) {
+QString issueCodeText(const safecrowd::domain::ImportIssue& issue) {
     return QString::fromUtf8(safecrowd::domain::toString(issue.code));
 }
 
@@ -43,6 +48,19 @@ QString issueTarget(const safecrowd::domain::ImportIssue& issue) {
         return QString::fromStdString(issue.targetId);
     }
     return QString::fromStdString(issue.sourceId);
+}
+
+bool isLiveValidationIssue(safecrowd::domain::ImportIssueCode code) {
+    using safecrowd::domain::ImportIssueCode;
+
+    switch (code) {
+    case ImportIssueCode::MissingExit:
+    case ImportIssueCode::DisconnectedWalkableArea:
+    case ImportIssueCode::WidthBelowMinimum:
+        return true;
+    default:
+        return false;
+    }
 }
 
 QWidget* createIssueList(
@@ -96,18 +114,202 @@ QPushButton* createIssueFilterButton(const QString& label, int count, bool selec
     return button;
 }
 
+QWidget* createNavigationRail(
+    bool showIssues,
+    std::function<void(bool)> switchViewHandler,
+    QWidget* parent) {
+    auto* activityBar = new QFrame(parent);
+    activityBar->setFixedWidth(56);
+    activityBar->setStyleSheet(
+        "QFrame {"
+        " background: #eef3f8;"
+        " border: 0;"
+        " border-right: 1px solid #d7e0ea;"
+        " border-radius: 0px;"
+        "}"
+    );
+    auto* activityLayout = new QVBoxLayout(activityBar);
+    activityLayout->setContentsMargins(0, 0, 0, 0);
+    activityLayout->setSpacing(0);
+
+    const auto makeActivityButton = [&](const QIcon& icon, const QString& tooltip, bool checked, auto&& handler) {
+        auto* button = new QToolButton(activityBar);
+        button->setIcon(icon);
+        button->setIconSize(QSize(22, 22));
+        button->setCheckable(true);
+        button->setChecked(checked);
+        button->setToolTip(tooltip);
+        button->setCursor(Qt::PointingHandCursor);
+        button->setFixedSize(56, 56);
+        button->setStyleSheet(
+            "QToolButton {"
+            " background: transparent;"
+            " border: 0;"
+            " border-left: 3px solid transparent;"
+            " border-radius: 0px;"
+            " padding: 0px;"
+            "}"
+            "QToolButton:hover {"
+            " background: #e3ebf4;"
+            "}"
+            "QToolButton:checked {"
+            " background: #ffffff;"
+            " border-left-color: #1f5fae;"
+            "}"
+        );
+        QObject::connect(button, &QToolButton::clicked, activityBar, handler);
+        activityLayout->addWidget(button);
+        return button;
+    };
+
+    auto* issuesButton = makeActivityButton(
+        activityBar->style()->standardIcon(QStyle::SP_MessageBoxWarning),
+        "Issues",
+        showIssues,
+        [switchViewHandler]() {
+            switchViewHandler(true);
+        });
+    auto* layoutButton = makeActivityButton(
+        activityBar->style()->standardIcon(QStyle::SP_DirIcon),
+        "Layout",
+        !showIssues,
+        [switchViewHandler]() {
+            switchViewHandler(false);
+        });
+    (void)issuesButton;
+    (void)layoutButton;
+    activityLayout->addStretch(1);
+    return activityBar;
+}
+
 QWidget* createNavigationPanel(
     const safecrowd::domain::ImportResult& importResult,
+    bool showIssues,
     std::function<void(const safecrowd::domain::ImportIssue&)> selectIssueHandler,
+    std::function<void(const QString&)> selectLayoutElementHandler,
     QWidget* parent) {
-    auto* panel = new QWidget(parent);
-    auto* layout = new QVBoxLayout(panel);
+    auto* content = new QWidget(parent);
+    auto* layout = new QVBoxLayout(content);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(12);
 
-    auto* title = new QLabel("Issues", panel);
+    auto* title = new QLabel(showIssues ? "Issues" : "Layout", content);
     title->setFont(ui::font(ui::FontRole::Title));
     layout->addWidget(title);
+
+    if (!showIssues) {
+        auto* scrollArea = new QScrollArea(content);
+        scrollArea->setWidgetResizable(true);
+        scrollArea->setFrameShape(QFrame::NoFrame);
+        scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        ui::polishScrollArea(scrollArea);
+
+        auto* scrollContent = new QWidget(scrollArea);
+        scrollContent->setStyleSheet("QWidget { background: transparent; }");
+        auto* sectionsLayout = new QVBoxLayout(scrollContent);
+        sectionsLayout->setContentsMargins(0, 0, 4, 0);
+        sectionsLayout->setSpacing(14);
+
+        const auto addSection = [&](const QString& header, auto predicate) {
+            if (!importResult.layout.has_value()) {
+                return;
+            }
+
+            QList<QPushButton*> buttons;
+            for (const auto& zone : importResult.layout->zones) {
+                if (!predicate(zone)) {
+                    continue;
+                }
+
+                auto* button = new QPushButton(
+                    zone.label.empty()
+                        ? QString::fromStdString(zone.id)
+                        : QString("%1  •  %2").arg(QString::fromStdString(zone.label), QString::fromStdString(zone.id)),
+                    scrollContent);
+                button->setFont(ui::font(ui::FontRole::Body));
+                button->setCursor(Qt::PointingHandCursor);
+                button->setStyleSheet(ui::ghostRowStyleSheet());
+                QObject::connect(button, &QPushButton::clicked, scrollContent, [selectLayoutElementHandler, zone]() {
+                    selectLayoutElementHandler(QString::fromStdString(zone.id));
+                });
+                buttons.push_back(button);
+            }
+
+            if (buttons.isEmpty()) {
+                return;
+            }
+
+            auto* sectionHeader = new QLabel(header, scrollContent);
+            sectionHeader->setFont(ui::font(ui::FontRole::SectionTitle));
+            sectionHeader->setStyleSheet(ui::subtleTextStyleSheet());
+            sectionsLayout->addWidget(sectionHeader);
+            for (auto* button : buttons) {
+                sectionsLayout->addWidget(button);
+            }
+        };
+
+        addSection("Rooms", [](const auto& zone) {
+            return zone.kind == safecrowd::domain::ZoneKind::Room || zone.kind == safecrowd::domain::ZoneKind::Unknown;
+        });
+        addSection("Corridors", [](const auto& zone) {
+            return zone.kind == safecrowd::domain::ZoneKind::Corridor || zone.kind == safecrowd::domain::ZoneKind::Intersection;
+        });
+        addSection("Exits", [](const auto& zone) {
+            return zone.kind == safecrowd::domain::ZoneKind::Exit || zone.kind == safecrowd::domain::ZoneKind::Stair;
+        });
+
+        if (importResult.layout.has_value() && !importResult.layout->connections.empty()) {
+            auto* sectionHeader = new QLabel("Connections", scrollContent);
+            sectionHeader->setFont(ui::font(ui::FontRole::SectionTitle));
+            sectionHeader->setStyleSheet(ui::subtleTextStyleSheet());
+            sectionsLayout->addWidget(sectionHeader);
+
+            for (const auto& connection : importResult.layout->connections) {
+                auto* button = new QPushButton(
+                    QString("%1  →  %2")
+                        .arg(QString::fromStdString(connection.fromZoneId), QString::fromStdString(connection.toZoneId)),
+                    scrollContent);
+                button->setFont(ui::font(ui::FontRole::Body));
+                button->setCursor(Qt::PointingHandCursor);
+                button->setStyleSheet(ui::ghostRowStyleSheet());
+                QObject::connect(button, &QPushButton::clicked, scrollContent, [selectLayoutElementHandler, connection]() {
+                    selectLayoutElementHandler(QString::fromStdString(connection.id));
+                });
+                sectionsLayout->addWidget(button);
+            }
+        }
+
+        if (importResult.layout.has_value() && !importResult.layout->barriers.empty()) {
+            auto* sectionHeader = new QLabel("Walls", scrollContent);
+            sectionHeader->setFont(ui::font(ui::FontRole::SectionTitle));
+            sectionHeader->setStyleSheet(ui::subtleTextStyleSheet());
+            sectionsLayout->addWidget(sectionHeader);
+
+            for (const auto& barrier : importResult.layout->barriers) {
+                auto* button = new QPushButton(QString::fromStdString(barrier.id), scrollContent);
+                button->setFont(ui::font(ui::FontRole::Body));
+                button->setCursor(Qt::PointingHandCursor);
+                button->setStyleSheet(ui::ghostRowStyleSheet());
+                QObject::connect(button, &QPushButton::clicked, scrollContent, [selectLayoutElementHandler, barrier]() {
+                    selectLayoutElementHandler(QString::fromStdString(barrier.id));
+                });
+                sectionsLayout->addWidget(button);
+            }
+        }
+
+        if (sectionsLayout->isEmpty()) {
+            auto* emptyLabel = new QLabel("No recognized layout elements", scrollContent);
+            emptyLabel->setFont(ui::font(ui::FontRole::Body));
+            emptyLabel->setWordWrap(true);
+            emptyLabel->setStyleSheet(ui::mutedTextStyleSheet());
+            sectionsLayout->addWidget(emptyLabel);
+        }
+
+        sectionsLayout->addStretch(1);
+        scrollArea->setWidget(scrollContent);
+        layout->addWidget(scrollArea, 1);
+        return content;
+    }
 
     const auto blockingCount = std::count_if(importResult.issues.begin(), importResult.issues.end(), [](const auto& issue) {
         return issue.blocksSimulation();
@@ -123,7 +325,7 @@ QWidget* createNavigationPanel(
     filterLayout->setContentsMargins(0, 0, 0, 0);
     filterLayout->setSpacing(8);
 
-    auto* listHost = new QWidget(panel);
+    auto* listHost = new QWidget(content);
     auto* listHostLayout = new QVBoxLayout(listHost);
     listHostLayout->setContentsMargins(0, 0, 0, 0);
     listHostLayout->setSpacing(0);
@@ -136,9 +338,9 @@ QWidget* createNavigationPanel(
         listHostLayout->addWidget(list);
     };
 
-    auto* blockingButton = createIssueFilterButton("Blocking", blockingCount, true, panel);
-    auto* warningButton = createIssueFilterButton("Warnings", warningCount, false, panel);
-    auto* infoButton = createIssueFilterButton("Info", infoCount, false, panel);
+    auto* blockingButton = createIssueFilterButton("Blocking", blockingCount, true, content);
+    auto* warningButton = createIssueFilterButton("Warnings", warningCount, false, content);
+    auto* infoButton = createIssueFilterButton("Info", infoCount, false, content);
     filterLayout->addWidget(blockingButton);
     filterLayout->addWidget(warningButton);
     filterLayout->addWidget(infoButton);
@@ -154,7 +356,7 @@ QWidget* createNavigationPanel(
         infoButton->setStyleSheet(ui::tagStyleSheet(selected == infoButton));
     };
 
-    QObject::connect(blockingButton, &QPushButton::clicked, panel, [=]() {
+    QObject::connect(blockingButton, &QPushButton::clicked, content, [=]() {
         setSelected(blockingButton);
         showList(createIssueList(
             importResult,
@@ -163,7 +365,7 @@ QWidget* createNavigationPanel(
             selectIssueHandler,
             listHost));
     });
-    QObject::connect(warningButton, &QPushButton::clicked, panel, [=]() {
+    QObject::connect(warningButton, &QPushButton::clicked, content, [=]() {
         setSelected(warningButton);
         showList(createIssueList(
             importResult,
@@ -172,7 +374,7 @@ QWidget* createNavigationPanel(
             selectIssueHandler,
             listHost));
     });
-    QObject::connect(infoButton, &QPushButton::clicked, panel, [=]() {
+    QObject::connect(infoButton, &QPushButton::clicked, content, [=]() {
         setSelected(infoButton);
         showList(createIssueList(
             importResult,
@@ -181,6 +383,7 @@ QWidget* createNavigationPanel(
             selectIssueHandler,
             listHost));
     });
+
     showList(createIssueList(
         importResult,
         [](const safecrowd::domain::ImportIssue& issue) { return issue.blocksSimulation(); },
@@ -188,37 +391,30 @@ QWidget* createNavigationPanel(
         selectIssueHandler,
         listHost));
 
-    return panel;
+    return content;
 }
 
-QFrame* createPanelSection(QWidget* parent) {
-    auto* section = new QFrame(parent);
-    section->setFrameShape(QFrame::StyledPanel);
-    section->setLineWidth(1);
-    section->setStyleSheet(ui::panelStyleSheet());
-    return section;
-}
-
-QWidget* createReviewPanel(const safecrowd::domain::ImportResult& importResult, QLabel** inspectorTitle, QLabel** inspectorDetail, QWidget* parent) {
+QWidget* createReviewPanel(
+    QLabel** inspectorTitle,
+    QLabel** inspectorDetail,
+    QLabel** approvalStatus,
+    QPushButton** approveButton,
+    QWidget* parent) {
     auto* panel = new QWidget(parent);
     auto* layout = new QVBoxLayout(panel);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(12);
 
-    const auto blockingCount = std::count_if(importResult.issues.begin(), importResult.issues.end(), [](const auto& issue) {
-        return issue.blocksSimulation();
-    });
-
     auto* inspectorHeader = new QLabel("Inspector", panel);
     inspectorHeader->setFont(ui::font(ui::FontRole::Title));
     layout->addWidget(inspectorHeader);
 
-    *inspectorTitle = new QLabel("No issue selected", panel);
+    *inspectorTitle = new QLabel("No selection", panel);
     (*inspectorTitle)->setFont(ui::font(ui::FontRole::Body));
     (*inspectorTitle)->setWordWrap(true);
     layout->addWidget(*inspectorTitle);
 
-    *inspectorDetail = new QLabel("Select an issue from the left panel.", panel);
+    *inspectorDetail = new QLabel("Use the top and left toolbars to draw rooms, corridors, exits, walls, and doors.", panel);
     (*inspectorDetail)->setFont(ui::font(ui::FontRole::Body));
     (*inspectorDetail)->setWordWrap(true);
     (*inspectorDetail)->setStyleSheet(ui::mutedTextStyleSheet());
@@ -226,59 +422,249 @@ QWidget* createReviewPanel(const safecrowd::domain::ImportResult& importResult, 
 
     layout->addStretch(1);
 
-    auto* approvalStatus = new QLabel(blockingCount == 0 ? "Ready for approval" : "Resolve blocking issues first", panel);
-    approvalStatus->setFont(ui::font(ui::FontRole::Body));
-    approvalStatus->setWordWrap(true);
-    approvalStatus->setStyleSheet(ui::mutedTextStyleSheet());
-    layout->addWidget(approvalStatus);
+    *approvalStatus = new QLabel("Resolve blocking issues first", panel);
+    (*approvalStatus)->setFont(ui::font(ui::FontRole::Body));
+    (*approvalStatus)->setWordWrap(true);
+    (*approvalStatus)->setStyleSheet(ui::mutedTextStyleSheet());
+    layout->addWidget(*approvalStatus);
 
-    auto* approveButton = new QPushButton("Approve Layout", panel);
-    approveButton->setEnabled(blockingCount == 0);
-    approveButton->setFont(ui::font(ui::FontRole::Body));
-    approveButton->setStyleSheet(ui::primaryButtonStyleSheet());
-    layout->addWidget(approveButton);
+    *approveButton = new QPushButton("Approve Layout", panel);
+    (*approveButton)->setFont(ui::font(ui::FontRole::Body));
+    (*approveButton)->setStyleSheet(ui::primaryButtonStyleSheet());
+    layout->addWidget(*approveButton);
 
-    QObject::connect(approveButton, &QPushButton::clicked, panel, [approvalStatus]() {
-        approvalStatus->setText("Layout approved");
-    });
     return panel;
 }
 
 }  // namespace
 
 LayoutReviewWidget::LayoutReviewWidget(
-    const QString& /*projectName*/,
+    const QString& projectName,
     const safecrowd::domain::ImportResult& importResult,
     std::function<void()> saveProjectHandler,
     std::function<void()> openProjectHandler,
     QWidget* parent)
-    : QWidget(parent) {
+    : QWidget(parent),
+      projectName_(projectName),
+      importResult_(importResult) {
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
-    auto* shell = new WorkspaceShell(this);
-    auto* preview = new LayoutPreviewWidget(importResult, shell);
-    QLabel* inspectorTitle = nullptr;
-    QLabel* inspectorDetail = nullptr;
-    auto* reviewPanel = createReviewPanel(importResult, &inspectorTitle, &inspectorDetail, shell);
+    shell_ = new WorkspaceShell(this);
+    preview_ = new LayoutPreviewWidget(importResult_, shell_);
+    preview_->setSelectionChangedHandler([this](const PreviewSelection& selection) {
+        handlePreviewSelectionChanged(selection);
+    });
+    preview_->setLayoutEditedHandler([this](const safecrowd::domain::FacilityLayout2D& layoutValue) {
+        handleLayoutEdited(layoutValue);
+    });
 
-    shell->setTools({"Project", "Tool"});
-    shell->setSaveProjectHandler(std::move(saveProjectHandler));
-    shell->setOpenProjectHandler(std::move(openProjectHandler));
-    shell->setNavigationPanel(createNavigationPanel(importResult, [preview, inspectorTitle, inspectorDetail](const safecrowd::domain::ImportIssue& issue) {
-        const auto target = issueTarget(issue);
-        preview->focusIssueTarget(target);
-        if (inspectorTitle != nullptr) {
-            inspectorTitle->setText(issueTitle(issue));
+    auto* reviewPanel = createReviewPanel(
+        &inspectorTitleLabel_,
+        &inspectorDetailLabel_,
+        &approvalStatusLabel_,
+        &approveButton_,
+        shell_);
+
+    shell_->setTools({"Project", "Tool"});
+    shell_->setSaveProjectHandler(std::move(saveProjectHandler));
+    shell_->setOpenProjectHandler(std::move(openProjectHandler));
+    shell_->setCanvas(preview_);
+    shell_->setReviewPanel(reviewPanel);
+
+    connect(approveButton_, &QPushButton::clicked, this, [this]() {
+        if (safecrowd::domain::hasBlockingImportIssue(importResult_.issues)) {
+            return;
         }
-        if (inspectorDetail != nullptr) {
-            inspectorDetail->setText(issueDetail(issue));
+        importResult_.reviewStatus = safecrowd::domain::ImportReviewStatus::Approved;
+        refreshApprovalState();
+    });
+
+    auto* undoShortcut = new QShortcut(QKeySequence::Undo, this);
+    connect(undoShortcut, &QShortcut::activated, this, [this]() {
+        undoLastEdit();
+    });
+
+    applyImportResultState();
+
+    layout->addWidget(shell_);
+}
+
+const safecrowd::domain::ImportResult& LayoutReviewWidget::currentImportResult() const noexcept {
+    return importResult_;
+}
+
+bool LayoutReviewWidget::undoLastEdit() {
+    if (undoHistory_.empty()) {
+        return false;
+    }
+
+    importResult_.layout = undoHistory_.back();
+    undoHistory_.pop_back();
+    importResult_.reviewStatus = safecrowd::domain::ImportReviewStatus::Pending;
+    applyImportResultState();
+    return true;
+}
+
+void LayoutReviewWidget::handleIssueSelected(const safecrowd::domain::ImportIssue& issue) {
+    selectedIssueTargetId_ = issueTarget(issue);
+    selectedIssueCode_ = issueCodeText(issue);
+
+    if (preview_ != nullptr) {
+        preview_->focusIssueTarget(selectedIssueTargetId_);
+    }
+
+    showIssueInspector(issue);
+}
+
+void LayoutReviewWidget::handleLayoutElementSelected(const QString& elementId) {
+    selectedIssueTargetId_.clear();
+    selectedIssueCode_.clear();
+
+    if (preview_ != nullptr) {
+        preview_->focusElement(elementId);
+    }
+}
+
+void LayoutReviewWidget::handleLayoutEdited(const safecrowd::domain::FacilityLayout2D& layout) {
+    if (importResult_.layout.has_value()) {
+        undoHistory_.push_back(*importResult_.layout);
+    }
+    importResult_.layout = layout;
+    importResult_.reviewStatus = safecrowd::domain::ImportReviewStatus::Pending;
+    applyImportResultState();
+}
+
+void LayoutReviewWidget::handlePreviewSelectionChanged(const PreviewSelection& selection) {
+    lastSelection_ = selection;
+    selectedIssueTargetId_.clear();
+    selectedIssueCode_.clear();
+    showSelectionInspector(selection);
+}
+
+void LayoutReviewWidget::refreshApprovalState() {
+    const auto hasBlocking = safecrowd::domain::hasBlockingImportIssue(importResult_.issues);
+
+    if (approveButton_ != nullptr) {
+        approveButton_->setEnabled(!hasBlocking);
+    }
+
+    if (approvalStatusLabel_ == nullptr) {
+        return;
+    }
+
+    if (hasBlocking) {
+        approvalStatusLabel_->setText("Resolve blocking issues first");
+        return;
+    }
+
+    if (importResult_.reviewStatus == safecrowd::domain::ImportReviewStatus::Approved) {
+        approvalStatusLabel_->setText("Layout approved");
+        return;
+    }
+
+    approvalStatusLabel_->setText("Ready for approval");
+}
+
+void LayoutReviewWidget::refreshNavigationPanel() {
+    if (shell_ == nullptr) {
+        return;
+    }
+
+    shell_->setNavigationRail(createNavigationRail(
+        navigationView_ == NavigationView::Issues,
+        [this](bool showIssues) {
+            navigationView_ = showIssues ? NavigationView::Issues : NavigationView::Layout;
+            refreshNavigationPanel();
+        },
+        shell_));
+    shell_->setNavigationPanel(createNavigationPanel(
+        importResult_,
+        navigationView_ == NavigationView::Issues,
+        [this](const auto& issue) {
+            handleIssueSelected(issue);
+        },
+        [this](const QString& elementId) {
+            handleLayoutElementSelected(elementId);
+        },
+        shell_));
+}
+
+void LayoutReviewWidget::restoreInspectorState() {
+    if (!selectedIssueCode_.isEmpty()) {
+        const auto it = std::find_if(importResult_.issues.begin(), importResult_.issues.end(), [&](const auto& issue) {
+            return issueCodeText(issue) == selectedIssueCode_ && issueTarget(issue) == selectedIssueTargetId_;
+        });
+        if (it != importResult_.issues.end()) {
+            showIssueInspector(*it);
+            return;
         }
-    }, shell));
-    shell->setCanvas(preview);
-    shell->setReviewPanel(reviewPanel);
-    layout->addWidget(shell);
+    }
+
+    showSelectionInspector(lastSelection_);
+}
+
+void LayoutReviewWidget::showDefaultInspector() {
+    if (inspectorTitleLabel_ != nullptr) {
+        inspectorTitleLabel_->setText("No selection");
+    }
+    if (inspectorDetailLabel_ != nullptr) {
+        inspectorDetailLabel_->setText("Use the top and left toolbars to draw rooms, corridors, exits, walls, and doors.");
+    }
+}
+
+void LayoutReviewWidget::showIssueInspector(const safecrowd::domain::ImportIssue& issue) {
+    if (inspectorTitleLabel_ != nullptr) {
+        inspectorTitleLabel_->setText(issueCodeText(issue));
+    }
+    if (inspectorDetailLabel_ != nullptr) {
+        inspectorDetailLabel_->setText(issueDetail(issue));
+    }
+}
+
+void LayoutReviewWidget::showSelectionInspector(const PreviewSelection& selection) {
+    if (selection.empty()) {
+        showDefaultInspector();
+        return;
+    }
+
+    if (inspectorTitleLabel_ != nullptr) {
+        inspectorTitleLabel_->setText(selection.title);
+    }
+    if (inspectorDetailLabel_ != nullptr) {
+        inspectorDetailLabel_->setText(selection.detail);
+    }
+}
+
+void LayoutReviewWidget::updateValidatedIssues() {
+    std::vector<safecrowd::domain::ImportIssue> preservedIssues;
+    preservedIssues.reserve(importResult_.issues.size());
+    for (const auto& issue : importResult_.issues) {
+        if (!isLiveValidationIssue(issue.code)) {
+            preservedIssues.push_back(issue);
+        }
+    }
+
+    if (importResult_.layout.has_value()) {
+        safecrowd::domain::ImportValidationService validator;
+        auto issues = validator.validate(*importResult_.layout);
+        preservedIssues.insert(preservedIssues.end(), issues.begin(), issues.end());
+    }
+
+    importResult_.issues = std::move(preservedIssues);
+}
+
+void LayoutReviewWidget::applyImportResultState() {
+    updateValidatedIssues();
+
+    if (preview_ != nullptr) {
+        preview_->setImportResult(importResult_);
+    }
+
+    refreshNavigationPanel();
+    refreshApprovalState();
+    restoreInspectorState();
 }
 
 }  // namespace safecrowd::application

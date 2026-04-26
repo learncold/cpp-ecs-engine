@@ -18,6 +18,14 @@
 namespace safecrowd::application {
 namespace {
 
+void applySavedReviewState(const ProjectMetadata& metadata, safecrowd::domain::ImportResult* importResult) {
+    if (metadata.isBuiltInDemo() || importResult == nullptr) {
+        return;
+    }
+
+    ProjectPersistence::loadProjectReview(metadata, importResult);
+}
+
 safecrowd::domain::ImportResult makeDemoImportResult() {
     safecrowd::domain::ImportResult result;
     result.layout = safecrowd::domain::DemoLayouts::demoFacility();
@@ -113,6 +121,13 @@ void MainWindow::saveCurrentProject() {
         return;
     }
 
+    if (auto* reviewWidget = dynamic_cast<LayoutReviewWidget*>(centralWidget())) {
+        if (!ProjectPersistence::saveProjectReview(currentProject_, reviewWidget->currentImportResult(), &errorMessage)) {
+            QMessageBox::warning(this, "Save Project", errorMessage);
+            return;
+        }
+    }
+
     currentProject_ = ProjectPersistence::loadProject(currentProject_.folderPath);
     QMessageBox::information(this, "Save Project", "Project saved.");
 }
@@ -133,6 +148,8 @@ void MainWindow::showLayoutReview(const ProjectMetadata& metadata) {
             };
             return importer.importFile(importRequest);
         }();
+
+    applySavedReviewState(metadata, &importResult);
 
     setCentralWidget(new LayoutReviewWidget(
         metadata.name,

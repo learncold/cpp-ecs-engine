@@ -83,15 +83,28 @@ WorkspaceShell::WorkspaceShell(QWidget* parent)
     rootLayout->addWidget(topBar);
 
     auto* bodyLayout = new QHBoxLayout();
-    bodyLayout->setContentsMargins(18, 18, 18, 18);
-    bodyLayout->setSpacing(18);
+    bodyLayout->setContentsMargins(0, 0, 0, 0);
+    bodyLayout->setSpacing(0);
 
-    auto* navigationPanel = createPanel(this);
+    auto* leftCluster = new QWidget(this);
+    auto* leftClusterLayout = new QHBoxLayout(leftCluster);
+    leftClusterLayout->setContentsMargins(0, 0, 0, 0);
+    leftClusterLayout->setSpacing(0);
+
+    auto* navigationRail = new QWidget(leftCluster);
+    navigationRail->setFixedWidth(56);
+    navigationRailLayout_ = new QVBoxLayout(navigationRail);
+    navigationRailLayout_->setContentsMargins(0, 0, 0, 0);
+    navigationRailLayout_->setSpacing(0);
+    leftClusterLayout->addWidget(navigationRail);
+
+    auto* navigationPanel = createPanel(leftCluster);
     navigationPanel->setFixedWidth(260);
     navigationLayout_ = new QVBoxLayout(navigationPanel);
     navigationLayout_->setContentsMargins(18, 18, 18, 18);
     navigationLayout_->setSpacing(12);
-    bodyLayout->addWidget(navigationPanel);
+    leftClusterLayout->addWidget(navigationPanel);
+    bodyLayout->addWidget(leftCluster);
 
     auto* centerStack = new QWidget(this);
     auto* centerLayout = new QVBoxLayout(centerStack);
@@ -164,6 +177,10 @@ void WorkspaceShell::setSaveProjectHandler(std::function<void()> handler) {
 
 void WorkspaceShell::setOpenProjectHandler(std::function<void()> handler) {
     openProjectHandler_ = std::move(handler);
+}
+
+void WorkspaceShell::setNavigationRail(QWidget* rail) {
+    replaceSingleWidget(navigationRailLayout_, rail);
 }
 
 void WorkspaceShell::setNavigationPanel(QWidget* panel) {

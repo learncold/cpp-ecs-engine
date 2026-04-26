@@ -1,5 +1,7 @@
 #include "application/ProjectPersistence.h"
 
+#include <algorithm>
+
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -9,14 +11,21 @@
 #include <QJsonObject>
 #include <QStandardPaths>
 
+#include "domain/ImportValidationService.h"
+
 namespace safecrowd::application {
 namespace {
 
 constexpr auto kProjectFileName = "safecrowd-project.json";
 constexpr auto kLayoutFileName = "layout.dxf";
+constexpr auto kReviewFileName = "layout-review.json";
 
 QString projectFilePath(const QString& folderPath) {
     return QDir(folderPath).filePath(kProjectFileName);
+}
+
+QString reviewFilePath(const QString& folderPath) {
+    return QDir(folderPath).filePath(kReviewFileName);
 }
 
 QString recentProjectsPath() {
@@ -111,6 +120,299 @@ bool copyLayoutIntoProject(ProjectMetadata& metadata, QString* errorMessage) {
     return true;
 }
 
+QJsonArray pointArray(const safecrowd::domain::Point2D& point) {
+    return QJsonArray{point.x, point.y};
+}
+
+safecrowd::domain::Point2D pointFromJson(const QJsonValue& value) {
+    const auto array = value.toArray();
+    return {
+        .x = array.size() > 0 ? array.at(0).toDouble() : 0.0,
+        .y = array.size() > 1 ? array.at(1).toDouble() : 0.0,
+    };
+}
+
+QJsonArray ringToJson(const std::vector<safecrowd::domain::Point2D>& ring) {
+    QJsonArray array;
+    for (const auto& point : ring) {
+        array.append(pointArray(point));
+    }
+    return array;
+}
+
+std::vector<safecrowd::domain::Point2D> ringFromJson(const QJsonArray& array) {
+    std::vector<safecrowd::domain::Point2D> ring;
+    ring.reserve(array.size());
+    for (const auto& value : array) {
+        ring.push_back(pointFromJson(value));
+    }
+    return ring;
+}
+
+QJsonObject polygonToJson(const safecrowd::domain::Polygon2D& polygon) {
+    QJsonObject object;
+    object["outline"] = ringToJson(polygon.outline);
+
+    QJsonArray holes;
+    for (const auto& hole : polygon.holes) {
+        holes.append(ringToJson(hole));
+    }
+    object["holes"] = holes;
+    return object;
+}
+
+safecrowd::domain::Polygon2D polygonFromJson(const QJsonObject& object) {
+    safecrowd::domain::Polygon2D polygon;
+    polygon.outline = ringFromJson(object.value("outline").toArray());
+    for (const auto& holeValue : object.value("holes").toArray()) {
+        polygon.holes.push_back(ringFromJson(holeValue.toArray()));
+    }
+    return polygon;
+}
+
+QJsonObject lineToJson(const safecrowd::domain::LineSegment2D& line) {
+    QJsonObject object;
+    object["start"] = pointArray(line.start);
+    object["end"] = pointArray(line.end);
+    return object;
+}
+
+safecrowd::domain::LineSegment2D lineFromJson(const QJsonObject& object) {
+    return {
+        .start = pointFromJson(object.value("start")),
+        .end = pointFromJson(object.value("end")),
+    };
+}
+
+QJsonObject polylineToJson(const safecrowd::domain::Polyline2D& polyline) {
+    QJsonObject object;
+    object["vertices"] = ringToJson(polyline.vertices);
+    object["closed"] = polyline.closed;
+    return object;
+}
+
+safecrowd::domain::Polyline2D polylineFromJson(const QJsonObject& object) {
+    return {
+        .vertices = ringFromJson(object.value("vertices").toArray()),
+        .closed = object.value("closed").toBool(false),
+    };
+}
+
+QJsonArray stringArray(const std::vector<std::string>& values) {
+    QJsonArray array;
+    for (const auto& value : values) {
+        array.append(QString::fromStdString(value));
+    }
+    return array;
+}
+
+std::vector<std::string> stringVectorFromJson(const QJsonArray& array) {
+    std::vector<std::string> values;
+    values.reserve(array.size());
+    for (const auto& value : array) {
+        values.push_back(value.toString().toStdString());
+    }
+    return values;
+}
+
+QJsonObject provenanceToJson(const safecrowd::domain::ElementProvenance& provenance) {
+    QJsonObject object;
+    object["sourceIds"] = stringArray(provenance.sourceIds);
+    object["canonicalIds"] = stringArray(provenance.canonicalIds);
+    return object;
+}
+
+safecrowd::domain::ElementProvenance provenanceFromJson(const QJsonObject& object) {
+    return {
+        .sourceIds = stringVectorFromJson(object.value("sourceIds").toArray()),
+        .canonicalIds = stringVectorFromJson(object.value("canonicalIds").toArray()),
+    };
+}
+
+QJsonObject zoneToJson(const safecrowd::domain::Zone2D& zone) {
+    QJsonObject object;
+    object["id"] = QString::fromStdString(zone.id);
+    object["kind"] = static_cast<int>(zone.kind);
+    object["label"] = QString::fromStdString(zone.label);
+    object["area"] = polygonToJson(zone.area);
+    object["defaultCapacity"] = static_cast<qint64>(zone.defaultCapacity);
+    object["isStair"] = zone.isStair;
+    object["isRamp"] = zone.isRamp;
+    object["provenance"] = provenanceToJson(zone.provenance);
+    return object;
+}
+
+safecrowd::domain::Zone2D zoneFromJson(const QJsonObject& object) {
+    return {
+        .id = object.value("id").toString().toStdString(),
+        .kind = static_cast<safecrowd::domain::ZoneKind>(object.value("kind").toInt()),
+        .label = object.value("label").toString().toStdString(),
+        .area = polygonFromJson(object.value("area").toObject()),
+        .defaultCapacity = static_cast<std::size_t>(object.value("defaultCapacity").toInteger()),
+        .isStair = object.value("isStair").toBool(false),
+        .isRamp = object.value("isRamp").toBool(false),
+        .provenance = provenanceFromJson(object.value("provenance").toObject()),
+    };
+}
+
+QJsonObject connectionToJson(const safecrowd::domain::Connection2D& connection) {
+    QJsonObject object;
+    object["id"] = QString::fromStdString(connection.id);
+    object["kind"] = static_cast<int>(connection.kind);
+    object["fromZoneId"] = QString::fromStdString(connection.fromZoneId);
+    object["toZoneId"] = QString::fromStdString(connection.toZoneId);
+    object["effectiveWidth"] = connection.effectiveWidth;
+    object["directionality"] = static_cast<int>(connection.directionality);
+    object["isStair"] = connection.isStair;
+    object["isRamp"] = connection.isRamp;
+    object["centerSpan"] = lineToJson(connection.centerSpan);
+    object["provenance"] = provenanceToJson(connection.provenance);
+    return object;
+}
+
+safecrowd::domain::Connection2D connectionFromJson(const QJsonObject& object) {
+    return {
+        .id = object.value("id").toString().toStdString(),
+        .kind = static_cast<safecrowd::domain::ConnectionKind>(object.value("kind").toInt()),
+        .fromZoneId = object.value("fromZoneId").toString().toStdString(),
+        .toZoneId = object.value("toZoneId").toString().toStdString(),
+        .effectiveWidth = object.value("effectiveWidth").toDouble(),
+        .directionality = static_cast<safecrowd::domain::TravelDirection>(object.value("directionality").toInt()),
+        .isStair = object.value("isStair").toBool(false),
+        .isRamp = object.value("isRamp").toBool(false),
+        .centerSpan = lineFromJson(object.value("centerSpan").toObject()),
+        .provenance = provenanceFromJson(object.value("provenance").toObject()),
+    };
+}
+
+QJsonObject barrierToJson(const safecrowd::domain::Barrier2D& barrier) {
+    QJsonObject object;
+    object["id"] = QString::fromStdString(barrier.id);
+    object["geometry"] = polylineToJson(barrier.geometry);
+    object["blocksMovement"] = barrier.blocksMovement;
+    object["provenance"] = provenanceToJson(barrier.provenance);
+    return object;
+}
+
+safecrowd::domain::Barrier2D barrierFromJson(const QJsonObject& object) {
+    return {
+        .id = object.value("id").toString().toStdString(),
+        .geometry = polylineFromJson(object.value("geometry").toObject()),
+        .blocksMovement = object.value("blocksMovement").toBool(true),
+        .provenance = provenanceFromJson(object.value("provenance").toObject()),
+    };
+}
+
+QJsonObject controlToJson(const safecrowd::domain::ControlPoint2D& control) {
+    QJsonObject object;
+    object["id"] = QString::fromStdString(control.id);
+    object["kind"] = static_cast<int>(control.kind);
+    object["targetId"] = QString::fromStdString(control.targetId);
+    object["defaultOpen"] = control.defaultOpen;
+    object["provenance"] = provenanceToJson(control.provenance);
+    return object;
+}
+
+safecrowd::domain::ControlPoint2D controlFromJson(const QJsonObject& object) {
+    return {
+        .id = object.value("id").toString().toStdString(),
+        .kind = static_cast<safecrowd::domain::ControlKind>(object.value("kind").toInt()),
+        .targetId = object.value("targetId").toString().toStdString(),
+        .defaultOpen = object.value("defaultOpen").toBool(true),
+        .provenance = provenanceFromJson(object.value("provenance").toObject()),
+    };
+}
+
+QJsonObject layoutToJson(const safecrowd::domain::FacilityLayout2D& layout) {
+    QJsonObject object;
+    object["id"] = QString::fromStdString(layout.id);
+    object["name"] = QString::fromStdString(layout.name);
+    object["levelId"] = QString::fromStdString(layout.levelId);
+
+    QJsonArray zones;
+    for (const auto& zone : layout.zones) {
+        zones.append(zoneToJson(zone));
+    }
+    object["zones"] = zones;
+
+    QJsonArray connections;
+    for (const auto& connection : layout.connections) {
+        connections.append(connectionToJson(connection));
+    }
+    object["connections"] = connections;
+
+    QJsonArray barriers;
+    for (const auto& barrier : layout.barriers) {
+        barriers.append(barrierToJson(barrier));
+    }
+    object["barriers"] = barriers;
+
+    QJsonArray controls;
+    for (const auto& control : layout.controls) {
+        controls.append(controlToJson(control));
+    }
+    object["controls"] = controls;
+
+    return object;
+}
+
+safecrowd::domain::FacilityLayout2D layoutFromJson(const QJsonObject& object) {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.id = object.value("id").toString().toStdString();
+    layout.name = object.value("name").toString().toStdString();
+    layout.levelId = object.value("levelId").toString().toStdString();
+
+    for (const auto& value : object.value("zones").toArray()) {
+        layout.zones.push_back(zoneFromJson(value.toObject()));
+    }
+    for (const auto& value : object.value("connections").toArray()) {
+        layout.connections.push_back(connectionFromJson(value.toObject()));
+    }
+    for (const auto& value : object.value("barriers").toArray()) {
+        layout.barriers.push_back(barrierFromJson(value.toObject()));
+    }
+    for (const auto& value : object.value("controls").toArray()) {
+        layout.controls.push_back(controlFromJson(value.toObject()));
+    }
+
+    return layout;
+}
+
+bool isLiveValidationIssue(safecrowd::domain::ImportIssueCode code) {
+    using safecrowd::domain::ImportIssueCode;
+
+    switch (code) {
+    case ImportIssueCode::MissingExit:
+    case ImportIssueCode::DisconnectedWalkableArea:
+    case ImportIssueCode::WidthBelowMinimum:
+        return true;
+    default:
+        return false;
+    }
+}
+
+void updateLiveValidationIssues(safecrowd::domain::ImportResult* importResult) {
+    if (importResult == nullptr) {
+        return;
+    }
+
+    std::vector<safecrowd::domain::ImportIssue> issues;
+    issues.reserve(importResult->issues.size());
+    for (const auto& issue : importResult->issues) {
+        if (!isLiveValidationIssue(issue.code)) {
+            issues.push_back(issue);
+        }
+    }
+
+    if (importResult->layout.has_value()) {
+        safecrowd::domain::ImportValidationService validator;
+        auto validatedIssues = validator.validate(*importResult->layout);
+        issues.insert(issues.end(), validatedIssues.begin(), validatedIssues.end());
+    }
+
+    importResult->issues = std::move(issues);
+}
+
 }  // namespace
 
 QList<ProjectMetadata> ProjectPersistence::loadRecentProjects() {
@@ -143,6 +445,33 @@ ProjectMetadata ProjectPersistence::loadProject(const QString& folderPath) {
     }
 
     return fromJson(document.object());
+}
+
+bool ProjectPersistence::loadProjectReview(const ProjectMetadata& metadata, safecrowd::domain::ImportResult* importResult) {
+    if (metadata.isBuiltInDemo() || importResult == nullptr) {
+        return false;
+    }
+
+    const auto document = readJsonDocument(reviewFilePath(metadata.folderPath));
+    if (!document.isObject()) {
+        return false;
+    }
+
+    const auto root = document.object();
+    if (!root.contains("layout") || !root.value("layout").isObject()) {
+        return false;
+    }
+
+    importResult->layout = layoutFromJson(root.value("layout").toObject());
+    importResult->reviewStatus = static_cast<safecrowd::domain::ImportReviewStatus>(root.value("reviewStatus").toInt());
+    updateLiveValidationIssues(importResult);
+
+    if (safecrowd::domain::hasBlockingImportIssue(importResult->issues)
+        && importResult->reviewStatus == safecrowd::domain::ImportReviewStatus::Approved) {
+        importResult->reviewStatus = safecrowd::domain::ImportReviewStatus::Pending;
+    }
+
+    return true;
 }
 
 bool ProjectPersistence::saveProject(ProjectMetadata metadata, QString* errorMessage) {
@@ -179,6 +508,30 @@ bool ProjectPersistence::saveProject(ProjectMetadata metadata, QString* errorMes
 
     upsertRecentProject(metadata);
     return true;
+}
+
+bool ProjectPersistence::saveProjectReview(
+    const ProjectMetadata& metadata,
+    const safecrowd::domain::ImportResult& importResult,
+    QString* errorMessage) {
+    if (metadata.isBuiltInDemo()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = "Built-in demo projects do not need to be saved.";
+        }
+        return false;
+    }
+
+    if (!importResult.layout.has_value()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = "No editable layout is loaded for this project.";
+        }
+        return false;
+    }
+
+    QJsonObject root;
+    root["reviewStatus"] = static_cast<int>(importResult.reviewStatus);
+    root["layout"] = layoutToJson(*importResult.layout);
+    return writeJsonDocument(reviewFilePath(metadata.folderPath), QJsonDocument(root), errorMessage);
 }
 
 }  // namespace safecrowd::application

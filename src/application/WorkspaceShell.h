@@ -16,6 +16,7 @@ public:
     explicit WorkspaceShell(QWidget* parent = nullptr);
 
     void setTools(const QStringList& tools);
+    void setNavigationRail(QWidget* rail);
     void setNavigationPanel(QWidget* panel);
     void setReviewPanel(QWidget* panel);
     void setCanvas(QWidget* canvas);
@@ -27,6 +28,7 @@ private:
     QPushButton* createTopBarButton(const QString& text);
 
     QBoxLayout* topBarLayout_{nullptr};
+    QBoxLayout* navigationRailLayout_{nullptr};
     QBoxLayout* navigationLayout_{nullptr};
     QBoxLayout* canvasLayout_{nullptr};
     QBoxLayout* reviewLayout_{nullptr};

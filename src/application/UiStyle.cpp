@@ -94,7 +94,7 @@ QString panelStyleSheet() {
         "QFrame {"
         " background: %1;"
         " border: 1px solid %2;"
-        " border-radius: 16px;"
+        " border-radius: 0px;"
         "}"
         "QLabel {"
         " background: transparent;"
