@@ -8,6 +8,7 @@
 #include "application/NewProjectWidget.h"
 #include "application/ProjectPersistence.h"
 #include "application/ProjectNavigatorWidget.h"
+#include "application/ScenarioAuthoringWidget.h"
 #include "domain/DemoLayouts.h"
 #include "domain/DxfImportService.h"
 #include "domain/ImportIssue.h"
@@ -154,6 +155,29 @@ void MainWindow::showLayoutReview(const ProjectMetadata& metadata) {
     setCentralWidget(new LayoutReviewWidget(
         metadata.name,
         importResult,
+        [this]() {
+            saveCurrentProject();
+        },
+        [this]() {
+            hasCurrentProject_ = false;
+            currentProject_ = {};
+            showProjectNavigator();
+        },
+        [this](const safecrowd::domain::ImportResult& approvedImportResult) {
+            showScenarioAuthoring(approvedImportResult);
+        },
+        this));
+}
+
+void MainWindow::showScenarioAuthoring(const safecrowd::domain::ImportResult& importResult) {
+    if (!importResult.layout.has_value()) {
+        QMessageBox::warning(this, "Scenario Authoring", "An approved layout is required before creating a scenario.");
+        return;
+    }
+
+    setCentralWidget(new ScenarioAuthoringWidget(
+        currentProject_.name,
+        *importResult.layout,
         [this]() {
             saveCurrentProject();
         },

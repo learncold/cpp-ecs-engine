@@ -443,10 +443,12 @@ LayoutReviewWidget::LayoutReviewWidget(
     const safecrowd::domain::ImportResult& importResult,
     std::function<void()> saveProjectHandler,
     std::function<void()> openProjectHandler,
+    std::function<void(const safecrowd::domain::ImportResult&)> approvalHandler,
     QWidget* parent)
     : QWidget(parent),
       projectName_(projectName),
-      importResult_(importResult) {
+      importResult_(importResult),
+      approvalHandler_(std::move(approvalHandler)) {
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
@@ -479,6 +481,9 @@ LayoutReviewWidget::LayoutReviewWidget(
         }
         importResult_.reviewStatus = safecrowd::domain::ImportReviewStatus::Approved;
         refreshApprovalState();
+        if (approvalHandler_) {
+            approvalHandler_(importResult_);
+        }
     });
 
     auto* undoShortcut = new QShortcut(QKeySequence::Undo, this);

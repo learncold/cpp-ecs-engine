@@ -9,7 +9,8 @@
 3. New Project 또는 저장된 프로젝트 선택
 4. DXF import
 5. Layout Review Workspace 진입
-6. 이후 scenario authoring, run, analysis 화면을 같은 workspace shell 안에서 확장
+6. Layout 승인 후 Scenario Authoring Workspace 진입
+7. 이후 run, analysis 화면을 같은 workspace shell 안에서 확장
 
 `domain`의 import, validation, simulation 객체는 UI 디자인 대상이 아니다. UI는 `src/application/`에서 Qt Widgets로 구현하고, `domain` 결과를 화면에 표시한다.
 
@@ -78,7 +79,7 @@
 
 ### 2.1 Workspace Shell
 
-프로젝트가 열린 뒤 사용하는 공통 작업 화면 구조다. Layout Review뿐 아니라 향후 scenario authoring, run, analysis도 이 구조를 재사용한다.
+프로젝트가 열린 뒤 사용하는 공통 작업 화면 구조다. Layout Review뿐 아니라 scenario authoring, 향후 run, analysis도 이 구조를 재사용한다.
 
 현재 구현 책임:
 
@@ -192,26 +193,50 @@ Layout Review의 좌측 패널이다. import와 validation 결과 중 simulation
 - issue 상세 drawer
 - repair suggestion
 
-## 4. 이후 확장 대상 화면
-
-현재 구현은 Project Navigator, New Project, Layout Review까지를 우선 대상으로 한다. 다음 화면들은 Workspace Shell 안에서 단계적으로 추가한다.
+## 4. Scenario Authoring Workspace
 
 ### 4.1 Scenario Authoring
 
 layout review 이후 scenario를 작성하는 화면이다.
 
-필요한 UI 요소:
+현재 구현 책임:
+
+- Layout Review에서 blocker가 사라진 뒤 `Approve Layout` 클릭 시 진입
+- Workspace Shell 재사용
+- 좌측 패널 기본 탭으로 `Layout` 표시
+- 좌측 `Crowd` 탭에서 보행자 배치와 보행자 그룹 요약 표시
+- 중앙 Scenario Editor에서 먼저 필수 입력만 수집
+- `Create Scenario` 이후 중앙 canvas에 승인된 layout 렌더링
+- Population, start zone, destination 기본값 편집
+- 우측 Scenario panel에서 draft summary와 run readiness 표시
+
+현재 UI 요소:
+
+- 좌측 Layout 요약 및 zone 목록
+- 좌측 Crowd 배치/그룹 요약
+- Scenario name
+- Start zone
+- Destination
+- Population
+- Create Scenario
+- 승인 layout canvas
+- Readiness Panel
+
+후속 설계 대상:
 
 - Scenario Library
 - Scenario Template Picker
-- Scenario Editor
-- Population 설정
-- Environment 설정
-- Control 설정
-- Execution 설정
-- Readiness Panel
+- Environment 상세 설정
+- Control 이벤트 상세 편집
+- 보행자/보행자 그룹 배치 도구
+- Scenario 저장/로드
+- Run Workspace와 실제 실행 연결
 
-### 4.2 Run Workspace
+## 5. 이후 확장 대상 화면
+
+다음 화면들은 Workspace Shell 안에서 단계적으로 추가한다.
+
+### 5.1 Run Workspace
 
 valid scenario를 실행하는 화면이다.
 
@@ -223,7 +248,7 @@ valid scenario를 실행하는 화면이다.
 - Simulation status
 - 실행 불가 사유 표시
 
-### 4.3 Analysis Workspace
+### 5.2 Analysis Workspace
 
 실행 결과를 검토하고 비교하는 화면이다.
 
@@ -236,9 +261,9 @@ valid scenario를 실행하는 화면이다.
 - Recommendation Drawer
 - Export Dialog
 
-## 5. 상태별 화면 흐름
+## 6. 상태별 화면 흐름
 
-### 5.1 No Project
+### 6.1 No Project
 
 표시 화면:
 
@@ -250,7 +275,7 @@ valid scenario를 실행하는 화면이다.
 - 저장된 프로젝트 열기
 - 폴더에서 프로젝트 열기
 
-### 5.2 New Project Draft
+### 6.2 New Project Draft
 
 표시 화면:
 
@@ -264,7 +289,7 @@ valid scenario를 실행하는 화면이다.
 - Cancel
 - Done
 
-### 5.3 Layout Needs Review
+### 6.3 Layout Needs Review
 
 표시 화면:
 
@@ -280,9 +305,9 @@ valid scenario를 실행하는 화면이다.
 
 - blocker가 남아 있으면 simulation run은 비활성화한다.
 
-### 5.4 Layout Ready
+### 6.4 Layout Ready
 
-후속 구현 상태다.
+현재 구현 상태다.
 
 표시 화면:
 
@@ -294,7 +319,7 @@ valid scenario를 실행하는 화면이다.
 - scenario 편집
 - run readiness 확인
 
-### 5.5 Scenario Ready
+### 6.5 Scenario Ready
 
 후속 구현 상태다.
 
@@ -307,7 +332,7 @@ valid scenario를 실행하는 화면이다.
 - simulation 실행
 - batch 실행
 
-### 5.6 Results Available
+### 6.6 Results Available
 
 후속 구현 상태다.
 
@@ -322,7 +347,7 @@ valid scenario를 실행하는 화면이다.
 - 추천 검토
 - export
 
-## 6. 현재 우선순위
+## 7. 현재 우선순위
 
 1. Project Navigator 실제 목록 동작
 2. New Project 입력과 DXF import 연결
@@ -331,7 +356,6 @@ valid scenario를 실행하는 화면이다.
 5. Blocking issue 목록과 canvas 연동
 6. Project 저장/로드 안정화
 7. Layout Canvas pan/zoom/selection 추가
-8. Scenario Authoring 확장
+8. Scenario Authoring 저장/실행 연결
 9. Run Workspace 확장
 10. Analysis Workspace 확장
-

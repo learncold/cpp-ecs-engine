@@ -3,6 +3,7 @@
 #include <QMainWindow>
 
 #include "application/ProjectMetadata.h"
+#include "domain/ImportResult.h"
 
 namespace safecrowd::domain {
 class SafeCrowdDomain;
@@ -25,6 +26,7 @@ private:
     void openProject(const ProjectMetadata& metadata);
     void saveCurrentProject();
     void showLayoutReview(const ProjectMetadata& metadata);
+    void showScenarioAuthoring(const safecrowd::domain::ImportResult& importResult);
 
     safecrowd::domain::SafeCrowdDomain& domain_;
     ProjectMetadata currentProject_{};
