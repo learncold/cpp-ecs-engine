@@ -13,6 +13,7 @@ struct InitialPlacement2D {
     std::string zoneId{};
     Polygon2D area{};
     std::size_t targetAgentCount{0};
+    Point2D initialVelocity{};
 };
 
 struct PopulationSpec {

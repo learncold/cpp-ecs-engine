@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 
 #include <QCoreApplication>
 #include <QEvent>
@@ -23,6 +24,11 @@ constexpr int kTopToolbarHeight = 44;
 constexpr int kPropertyPanelHeight = 42;
 constexpr int kToolbarButtonSize = 44;
 constexpr double kViewportPadding = 24.0;
+constexpr double kDefaultInitialSpeed = 1.2;
+constexpr double kOccupantMarkerRadius = 5.0;
+constexpr double kOccupantWorldRadius = 0.25;
+constexpr double kVelocityIndicatorSeconds = 0.75;
+constexpr double kGeometryEpsilon = 1e-9;
 
 bool pointInRing(const std::vector<safecrowd::domain::Point2D>& ring, const safecrowd::domain::Point2D& point) {
     if (ring.size() < 3) {
@@ -40,6 +46,93 @@ bool pointInRing(const std::vector<safecrowd::domain::Point2D>& ring, const safe
         }
     }
     return inside;
+}
+
+double cross(
+    const safecrowd::domain::Point2D& a,
+    const safecrowd::domain::Point2D& b,
+    const safecrowd::domain::Point2D& c) {
+    return ((b.x - a.x) * (c.y - a.y)) - ((b.y - a.y) * (c.x - a.x));
+}
+
+bool pointOnSegment(
+    const safecrowd::domain::Point2D& point,
+    const safecrowd::domain::Point2D& start,
+    const safecrowd::domain::Point2D& end) {
+    return std::fabs(cross(start, end, point)) <= kGeometryEpsilon
+        && point.x >= std::min(start.x, end.x) - kGeometryEpsilon
+        && point.x <= std::max(start.x, end.x) + kGeometryEpsilon
+        && point.y >= std::min(start.y, end.y) - kGeometryEpsilon
+        && point.y <= std::max(start.y, end.y) + kGeometryEpsilon;
+}
+
+bool segmentsIntersect(
+    const safecrowd::domain::Point2D& firstStart,
+    const safecrowd::domain::Point2D& firstEnd,
+    const safecrowd::domain::Point2D& secondStart,
+    const safecrowd::domain::Point2D& secondEnd) {
+    const auto d1 = cross(firstStart, firstEnd, secondStart);
+    const auto d2 = cross(firstStart, firstEnd, secondEnd);
+    const auto d3 = cross(secondStart, secondEnd, firstStart);
+    const auto d4 = cross(secondStart, secondEnd, firstEnd);
+
+    if (((d1 > 0.0 && d2 < 0.0) || (d1 < 0.0 && d2 > 0.0))
+        && ((d3 > 0.0 && d4 < 0.0) || (d3 < 0.0 && d4 > 0.0))) {
+        return true;
+    }
+
+    return pointOnSegment(secondStart, firstStart, firstEnd)
+        || pointOnSegment(secondEnd, firstStart, firstEnd)
+        || pointOnSegment(firstStart, secondStart, secondEnd)
+        || pointOnSegment(firstEnd, secondStart, secondEnd);
+}
+
+double distancePointToSegment(
+    const safecrowd::domain::Point2D& point,
+    const safecrowd::domain::Point2D& start,
+    const safecrowd::domain::Point2D& end) {
+    const auto dx = end.x - start.x;
+    const auto dy = end.y - start.y;
+    const auto lengthSquared = (dx * dx) + (dy * dy);
+    if (lengthSquared <= kGeometryEpsilon) {
+        return std::hypot(point.x - start.x, point.y - start.y);
+    }
+
+    const auto t = std::clamp(
+        (((point.x - start.x) * dx) + ((point.y - start.y) * dy)) / lengthSquared,
+        0.0,
+        1.0);
+    return std::hypot(point.x - (start.x + (dx * t)), point.y - (start.y + (dy * t)));
+}
+
+safecrowd::domain::Point2D polygonCenter(const safecrowd::domain::Polygon2D& polygon) {
+    if (polygon.outline.empty()) {
+        return {};
+    }
+
+    double x = 0.0;
+    double y = 0.0;
+    for (const auto& point : polygon.outline) {
+        x += point.x;
+        y += point.y;
+    }
+    const auto count = static_cast<double>(polygon.outline.size());
+    return {.x = x / count, .y = y / count};
+}
+
+safecrowd::domain::Point2D placementCenter(const std::vector<safecrowd::domain::Point2D>& area) {
+    if (area.empty()) {
+        return {};
+    }
+
+    double x = 0.0;
+    double y = 0.0;
+    for (const auto& point : area) {
+        x += point.x;
+        y += point.y;
+    }
+    const auto count = static_cast<double>(area.size());
+    return {.x = x / count, .y = y / count};
 }
 
 QIcon makeToolIcon(const QString& type, const QColor& color) {
@@ -188,8 +281,12 @@ void ScenarioCanvasWidget::mouseReleaseEvent(QMouseEvent* event) {
         return;
     }
 
+    const auto start = dragStart_;
+    const auto end = event->position();
     dragging_ = false;
-    addGroupPlacement(dragStart_, event->position());
+    dragStart_ = {};
+    dragCurrent_ = {};
+    addGroupPlacement(start, end);
     update();
     event->accept();
 }
@@ -222,27 +319,26 @@ void ScenarioCanvasWidget::paintEvent(QPaintEvent* event) {
             if (placement.area.empty()) {
                 continue;
             }
+            const auto origin = transform.map(placement.area.front());
+            const auto tip = transform.map({
+                .x = placement.area.front().x + (placement.velocity.x * kVelocityIndicatorSeconds),
+                .y = placement.area.front().y + (placement.velocity.y * kVelocityIndicatorSeconds),
+            });
+            painter.setPen(QPen(QColor("#0f4c8f"), 1.4, Qt::SolidLine, Qt::RoundCap));
+            painter.drawLine(origin, tip);
+            painter.setPen(Qt::NoPen);
             painter.setBrush(QColor("#1f5fae"));
-            painter.drawEllipse(transform.map(placement.area.front()), 5.0, 5.0);
+            painter.drawEllipse(origin, kOccupantMarkerRadius, kOccupantMarkerRadius);
             continue;
         }
 
         if (placement.area.size() >= 4) {
-            QPainterPath path;
-            path.moveTo(transform.map(placement.area.front()));
-            for (std::size_t index = 1; index < placement.area.size(); ++index) {
-                path.lineTo(transform.map(placement.area[index]));
-            }
-            path.closeSubpath();
-            painter.setPen(QPen(QColor("#1f5fae"), 1.8));
-            painter.setBrush(QColor(31, 95, 174, 54));
-            painter.drawPath(path);
-
             painter.setBrush(QColor("#1f5fae"));
             const int markerCount = std::min(20, std::max(1, placement.occupantCount));
             const QRectF rect(
                 transform.map(placement.area[0]),
                 transform.map(placement.area[2]));
+            painter.setPen(QPen(QColor("#0f4c8f"), 1.2, Qt::SolidLine, Qt::RoundCap));
             for (int index = 0; index < markerCount; ++index) {
                 const int columns = std::max(1, static_cast<int>(std::ceil(std::sqrt(markerCount))));
                 const int row = index / columns;
@@ -250,8 +346,20 @@ void ScenarioCanvasWidget::paintEvent(QPaintEvent* event) {
                 const QPointF point(
                     rect.normalized().left() + (column + 0.5) * rect.normalized().width() / columns,
                     rect.normalized().top() + (row + 0.5) * rect.normalized().height() / columns);
-                painter.drawEllipse(point, 3.2, 3.2);
+                const safecrowd::domain::Point2D worldPoint{
+                    .x = placement.area[0].x + (column + 0.5) * (placement.area[2].x - placement.area[0].x) / columns,
+                    .y = placement.area[0].y + (row + 0.5) * (placement.area[2].y - placement.area[0].y) / columns,
+                };
+                const auto tip = transform.map({
+                    .x = worldPoint.x + (placement.velocity.x * kVelocityIndicatorSeconds),
+                    .y = worldPoint.y + (placement.velocity.y * kVelocityIndicatorSeconds),
+                });
+                painter.drawLine(point, tip);
+                painter.setPen(Qt::NoPen);
+                painter.drawEllipse(point, kOccupantMarkerRadius, kOccupantMarkerRadius);
+                painter.setPen(QPen(QColor("#0f4c8f"), 1.2, Qt::SolidLine, Qt::RoundCap));
             }
+            painter.setPen(Qt::NoPen);
         }
     }
 
@@ -315,6 +423,124 @@ QString ScenarioCanvasWidget::zoneAt(const safecrowd::domain::Point2D& point) co
     return {};
 }
 
+bool ScenarioCanvasWidget::placementPointBlocked(const safecrowd::domain::Point2D& point) const {
+    for (const auto& barrier : layout_.barriers) {
+        if (!barrier.blocksMovement || barrier.geometry.vertices.size() < 2) {
+            continue;
+        }
+
+        const auto& vertices = barrier.geometry.vertices;
+        for (std::size_t index = 1; index < vertices.size(); ++index) {
+            if (distancePointToSegment(point, vertices[index - 1], vertices[index]) < kOccupantWorldRadius) {
+                return true;
+            }
+        }
+        if (barrier.geometry.closed) {
+            if (pointInRing(vertices, point)) {
+                return true;
+            }
+            if (distancePointToSegment(point, vertices.back(), vertices.front()) < kOccupantWorldRadius) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool ScenarioCanvasWidget::placementAreaBlocked(
+    const std::vector<safecrowd::domain::Point2D>& area,
+    int occupantCount) const {
+    if (area.empty()) {
+        return true;
+    }
+
+    for (const auto& point : area) {
+        if (placementPointBlocked(point)) {
+            return true;
+        }
+    }
+
+    if (area.size() >= 4) {
+        for (const auto& barrier : layout_.barriers) {
+            if (!barrier.blocksMovement || barrier.geometry.vertices.size() < 2) {
+                continue;
+            }
+
+            const auto& vertices = barrier.geometry.vertices;
+            const auto barrierSegmentCount = vertices.size() - 1 + (barrier.geometry.closed ? 1 : 0);
+            for (std::size_t areaIndex = 0; areaIndex < area.size(); ++areaIndex) {
+                const auto& areaStart = area[areaIndex];
+                const auto& areaEnd = area[(areaIndex + 1) % area.size()];
+                for (std::size_t barrierIndex = 0; barrierIndex < barrierSegmentCount; ++barrierIndex) {
+                    const auto& barrierStart = vertices[barrierIndex];
+                    const auto& barrierEnd = vertices[(barrierIndex + 1) % vertices.size()];
+                    if (segmentsIntersect(areaStart, areaEnd, barrierStart, barrierEnd)) {
+                        return true;
+                    }
+                }
+            }
+
+            if (barrier.geometry.closed) {
+                for (const auto& point : area) {
+                    if (pointInRing(vertices, point)) {
+                        return true;
+                    }
+                }
+                for (const auto& vertex : vertices) {
+                    if (pointInRing(area, vertex)) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        const int markerCount = std::min(20, std::max(1, occupantCount));
+        const int columns = std::max(1, static_cast<int>(std::ceil(std::sqrt(markerCount))));
+        for (int index = 0; index < markerCount; ++index) {
+            const int row = index / columns;
+            const int column = index % columns;
+            const safecrowd::domain::Point2D marker{
+                .x = area[0].x + (column + 0.5) * (area[2].x - area[0].x) / columns,
+                .y = area[0].y + (row + 0.5) * (area[2].y - area[0].y) / columns,
+            };
+            if (placementPointBlocked(marker)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+safecrowd::domain::Point2D ScenarioCanvasWidget::defaultVelocityFrom(const safecrowd::domain::Point2D& point) const {
+    std::optional<safecrowd::domain::Point2D> target;
+    for (const auto& zone : layout_.zones) {
+        if (zone.kind == safecrowd::domain::ZoneKind::Exit) {
+            target = polygonCenter(zone.area);
+            break;
+        }
+    }
+    if (!target.has_value() && !layout_.zones.empty()) {
+        target = polygonCenter(layout_.zones.back().area);
+    }
+    if (!target.has_value()) {
+        return {};
+    }
+
+    const auto dx = target->x - point.x;
+    const auto dy = target->y - point.y;
+    const auto length = std::hypot(dx, dy);
+    if (length <= 1e-9) {
+        return {};
+    }
+
+    return {
+        .x = (dx / length) * kDefaultInitialSpeed,
+        .y = (dy / length) * kDefaultInitialSpeed,
+    };
+}
+
 QString ScenarioCanvasWidget::nextPlacementId(ScenarioCrowdPlacementKind kind) const {
     const auto prefix = kind == ScenarioCrowdPlacementKind::Individual ? "individual" : "group";
     return QString("%1-%2").arg(prefix).arg(static_cast<int>(placements_.size()) + 1);
@@ -335,15 +561,21 @@ void ScenarioCanvasWidget::addGroupPlacement(const QPointF& start, const QPointF
         return;
     }
 
+    const std::vector<safecrowd::domain::Point2D> area = {topLeft, topRight, bottomRight, bottomLeft};
     const auto id = nextPlacementId(ScenarioCrowdPlacementKind::Group);
     const auto count = groupCountSpinBox_ == nullptr ? 25 : groupCountSpinBox_->value();
+    if (placementAreaBlocked(area, count)) {
+        return;
+    }
+
     placements_.push_back({
         .id = id,
         .name = QString("Group %1").arg(id.section('-', -1)),
         .kind = ScenarioCrowdPlacementKind::Group,
         .zoneId = zoneId,
-        .area = {topLeft, topRight, bottomRight, bottomLeft},
+        .area = area,
         .occupantCount = count,
+        .velocity = defaultVelocityFrom(placementCenter(area)),
     });
     emitPlacementsChanged();
     update();
@@ -352,7 +584,7 @@ void ScenarioCanvasWidget::addGroupPlacement(const QPointF& start, const QPointF
 void ScenarioCanvasWidget::addIndividualPlacement(const QPointF& position) {
     const auto point = unmapPoint(position);
     const auto zoneId = zoneAt(point);
-    if (zoneId.isEmpty()) {
+    if (zoneId.isEmpty() || placementPointBlocked(point)) {
         return;
     }
 
@@ -364,6 +596,7 @@ void ScenarioCanvasWidget::addIndividualPlacement(const QPointF& position) {
         .zoneId = zoneId,
         .area = {point},
         .occupantCount = 1,
+        .velocity = defaultVelocityFrom(point),
     });
     emitPlacementsChanged();
     update();

@@ -98,15 +98,6 @@ LayoutNavigationPanelWidget::LayoutNavigationPanelWidget(
         return;
     }
 
-    auto* summary = createLabel(
-        QString("%1 zones\n%2 connections\n%3 walls")
-            .arg(static_cast<int>(facilityLayout->zones.size()))
-            .arg(static_cast<int>(facilityLayout->connections.size()))
-            .arg(static_cast<int>(facilityLayout->barriers.size())),
-        this);
-    summary->setStyleSheet(ui::mutedTextStyleSheet());
-    layout->addWidget(summary);
-
     auto* scrollArea = new QScrollArea(this);
     scrollArea->setWidgetResizable(true);
     scrollArea->setFrameShape(QFrame::NoFrame);

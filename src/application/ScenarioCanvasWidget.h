@@ -35,6 +35,7 @@ struct ScenarioCrowdPlacement {
     QString zoneId{};
     std::vector<safecrowd::domain::Point2D> area{};
     int occupantCount{1};
+    safecrowd::domain::Point2D velocity{};
 };
 
 class ScenarioCanvasWidget : public QWidget {
@@ -71,6 +72,9 @@ private:
     QRectF previewViewport() const;
     safecrowd::domain::Point2D unmapPoint(const QPointF& point) const;
     QString zoneAt(const safecrowd::domain::Point2D& point) const;
+    bool placementAreaBlocked(const std::vector<safecrowd::domain::Point2D>& area, int occupantCount) const;
+    bool placementPointBlocked(const safecrowd::domain::Point2D& point) const;
+    safecrowd::domain::Point2D defaultVelocityFrom(const safecrowd::domain::Point2D& point) const;
     QString nextPlacementId(ScenarioCrowdPlacementKind kind) const;
     void addGroupPlacement(const QPointF& start, const QPointF& end);
     void addIndividualPlacement(const QPointF& position);

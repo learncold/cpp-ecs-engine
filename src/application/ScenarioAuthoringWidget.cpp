@@ -11,6 +11,7 @@
 #include <QPainter>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSizePolicy>
 #include <QStyle>
 #include <QTimer>
 #include <QToolButton>
@@ -142,42 +143,39 @@ QWidget* createCrowdPanel(
         return content;
     }
 
-    int individualCount = 0;
-    int groupCount = 0;
-    int occupantCount = 0;
-    for (const auto& placement : scenario->crowdPlacements) {
-        occupantCount += placement.occupantCount;
-        if (placement.kind == ScenarioCrowdPlacementKind::Individual) {
-            ++individualCount;
-        } else {
-            ++groupCount;
-        }
-    }
-
-    auto* summary = createLabel(
-        QString("%1 individual\n%2 group\n%3 people")
-            .arg(individualCount)
-            .arg(groupCount)
-            .arg(occupantCount),
-        content);
-    summary->setStyleSheet(ui::mutedTextStyleSheet());
-    layout->addWidget(summary);
-
     auto* sectionHeader = createLabel("Placements", content, ui::FontRole::SectionTitle);
     sectionHeader->setStyleSheet(ui::subtleTextStyleSheet());
     layout->addWidget(sectionHeader);
 
+    auto* scrollArea = new QScrollArea(content);
+    scrollArea->setWidgetResizable(true);
+    scrollArea->setFrameShape(QFrame::NoFrame);
+    scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    ui::polishScrollArea(scrollArea);
+
+    auto* scrollContent = new QWidget(scrollArea);
+    scrollContent->setStyleSheet("QWidget { background: transparent; }");
+    auto* rowsLayout = new QVBoxLayout(scrollContent);
+    rowsLayout->setContentsMargins(0, 0, 14, 0);
+    rowsLayout->setSpacing(8);
+
     for (const auto& placement : scenario->crowdPlacements) {
         const auto kind = placement.kind == ScenarioCrowdPlacementKind::Individual ? "Individual" : "Group";
-        auto* row = new QPushButton(QString("%1  -  %2  -  %3 people")
+        auto* row = new QPushButton(QString("%1  -  %2  -  %3 people\nvelocity (%4, %5)")
                                         .arg(kind, placement.zoneId)
-                                        .arg(placement.occupantCount),
-                                    content);
+                                        .arg(placement.occupantCount)
+                                        .arg(placement.velocity.x, 0, 'f', 2)
+                                        .arg(placement.velocity.y, 0, 'f', 2),
+                                    scrollContent);
         row->setFont(ui::font(ui::FontRole::Body));
+        row->setMinimumHeight(56);
+        row->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         row->setStyleSheet(ui::ghostRowStyleSheet());
-        layout->addWidget(row);
+        rowsLayout->addWidget(row);
     }
-    layout->addStretch(1);
+    rowsLayout->addStretch(1);
+    scrollArea->setWidget(scrollContent);
+    layout->addWidget(scrollArea, 1);
     return content;
 }
 
@@ -484,6 +482,7 @@ void ScenarioAuthoringWidget::updateCurrentScenarioPlacements(const std::vector<
         initialPlacement.zoneId = placement.zoneId.toStdString();
         initialPlacement.area.outline = placement.area;
         initialPlacement.targetAgentCount = static_cast<std::size_t>(placement.occupantCount);
+        initialPlacement.initialVelocity = placement.velocity;
         scenario->draft.population.initialPlacements.push_back(std::move(initialPlacement));
     }
 
