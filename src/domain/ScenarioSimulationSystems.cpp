@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 #include "engine/EngineWorld.h"
 
@@ -30,6 +31,33 @@ double distanceBetween(const Point2D& lhs, const Point2D& rhs) {
 }
 
 }  // namespace
+
+ScenarioAgentSpawnSystem::ScenarioAgentSpawnSystem(std::vector<ScenarioAgentSeed> seeds, double timeLimitSeconds)
+    : seeds_(std::move(seeds)),
+      timeLimitSeconds_(std::max(0.0, timeLimitSeconds)) {
+}
+
+void ScenarioAgentSpawnSystem::configure(engine::EngineWorld& world) {
+    world.resources().set(ScenarioSimulationClockResource{
+        .elapsedSeconds = 0.0,
+        .timeLimitSeconds = timeLimitSeconds_ > 0.0 ? timeLimitSeconds_ : 60.0,
+        .complete = false,
+    });
+
+    for (const auto& seed : seeds_) {
+        world.commands().spawnEntity(
+            seed.position,
+            seed.agent,
+            seed.velocity,
+            seed.route,
+            seed.status);
+    }
+}
+
+void ScenarioAgentSpawnSystem::update(engine::EngineWorld& world, const engine::EngineStepContext& step) {
+    (void)world;
+    (void)step;
+}
 
 std::vector<engine::Entity> scenarioNearbyAgents(
     engine::WorldQuery& query,
@@ -80,6 +108,29 @@ void ScenarioSpatialIndexSystem::update(engine::EngineWorld& world, const engine
     }
 
     resources.set(std::move(index));
+}
+
+ScenarioClockSystem::ScenarioClockSystem(double fixedDeltaSeconds)
+    : fixedDeltaSeconds_(std::max(0.0, fixedDeltaSeconds)) {
+}
+
+void ScenarioClockSystem::update(engine::EngineWorld& world, const engine::EngineStepContext& step) {
+    (void)step;
+
+    auto& resources = world.resources();
+    if (!resources.contains<ScenarioSimulationClockResource>()) {
+        resources.set(ScenarioSimulationClockResource{});
+    }
+
+    auto& clock = resources.get<ScenarioSimulationClockResource>();
+    if (clock.complete) {
+        return;
+    }
+
+    const auto remaining = std::max(0.0, clock.timeLimitSeconds - clock.elapsedSeconds);
+    const auto delta = std::min(fixedDeltaSeconds_, remaining);
+    clock.elapsedSeconds += delta;
+    clock.complete = clock.elapsedSeconds >= clock.timeLimitSeconds;
 }
 
 void ScenarioFrameSyncSystem::update(engine::EngineWorld& world, const engine::EngineStepContext& step) {

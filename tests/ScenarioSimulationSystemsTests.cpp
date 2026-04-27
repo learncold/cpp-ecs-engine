@@ -34,6 +34,45 @@ public:
 
 }  // namespace
 
+SC_TEST(ScenarioAgentSpawnSystem_ConfiguresClockAndSpawnsAgentSeeds) {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    seeds.push_back({
+        .position = {.value = {.x = 2.0, .y = 3.0}},
+        .agent = {.radius = 0.3f, .maxSpeed = 1.2f},
+        .velocity = {.value = {.x = 0.2, .y = 0.1}},
+        .route = {},
+        .status = {},
+    });
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 2,
+    });
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 15.0));
+    runtime.addSystem(
+        std::make_unique<safecrowd::domain::ScenarioFrameSyncSystem>(),
+        {.phase = safecrowd::engine::UpdatePhase::RenderSync,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(1.0 / 30.0);
+
+    const auto entities = runtime.world().query().view<
+        safecrowd::domain::Position,
+        safecrowd::domain::Agent,
+        safecrowd::domain::Velocity,
+        safecrowd::domain::EvacuationRoute,
+        safecrowd::domain::EvacuationStatus>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{1});
+    const auto& clock = runtime.world().resources().get<safecrowd::domain::ScenarioSimulationClockResource>();
+    SC_EXPECT_NEAR(clock.timeLimitSeconds, 15.0, 1e-9);
+    const auto& frame = runtime.world().resources().get<safecrowd::domain::ScenarioSimulationFrameResource>().frame;
+    SC_EXPECT_EQ(frame.totalAgentCount, std::size_t{1});
+    SC_EXPECT_EQ(frame.agents.size(), std::size_t{1});
+    SC_EXPECT_NEAR(frame.agents.front().position.x, 2.0, 1e-9);
+}
+
 SC_TEST(ScenarioSpatialIndexSystem_BuildsNearbyAgentResource) {
     safecrowd::engine::EngineRuntime runtime({
         .fixedDeltaTime = 1.0 / 30.0,
@@ -58,6 +97,31 @@ SC_TEST(ScenarioSpatialIndexSystem_BuildsNearbyAgentResource) {
         {.x = 1.0, .y = 1.0},
         0.4);
     SC_EXPECT_EQ(nearby.size(), std::size_t{1});
+}
+
+SC_TEST(ScenarioClockSystem_AdvancesClockResourceOnFixedSteps) {
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 0.25,
+        .maxCatchUpSteps = 4,
+        .baseSeed = 11,
+    });
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(
+        std::vector<safecrowd::domain::ScenarioAgentSeed>{},
+        0.5));
+    runtime.addSystem(
+        std::make_unique<safecrowd::domain::ScenarioClockSystem>(0.25),
+        {.phase = safecrowd::engine::UpdatePhase::FixedSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::FixedStep});
+
+    runtime.play();
+    runtime.stepFrame(0.25);
+    auto& clock = runtime.world().resources().get<safecrowd::domain::ScenarioSimulationClockResource>();
+    SC_EXPECT_NEAR(clock.elapsedSeconds, 0.25, 1e-9);
+    SC_EXPECT_TRUE(!clock.complete);
+
+    runtime.stepFrame(0.25);
+    SC_EXPECT_NEAR(clock.elapsedSeconds, 0.5, 1e-9);
+    SC_EXPECT_TRUE(clock.complete);
 }
 
 SC_TEST(ScenarioFrameSyncSystem_PublishesSimulationFrameResource) {
