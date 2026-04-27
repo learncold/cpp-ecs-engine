@@ -49,6 +49,7 @@ private:
     void advanceRoutesForCurrentZones();
     void initializeAgents();
     void rebuildFrame();
+    void replanBlockedRouteSegments();
     void resolveAgentOverlaps();
     RoutePlan routePlan(const Point2D& start, const std::string& startZoneId) const;
     std::optional<std::vector<std::string>> zoneRouteToExit(const std::string& startZoneId) const;

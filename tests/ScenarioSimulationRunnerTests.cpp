@@ -1,11 +1,40 @@
 #include "TestSupport.h"
 
 #include <cmath>
-
 #include "domain/DemoLayouts.h"
 #include "domain/ScenarioSimulationRunner.h"
 
 namespace {
+
+safecrowd::domain::FacilityLayout2D blockedDoorLayout() {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.zones.push_back({
+        .id = "left",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Left",
+        .area = {.outline = {{0.0, 0.0}, {1.0, 0.0}, {1.0, 1.0}, {0.0, 1.0}}},
+    });
+    layout.zones.push_back({
+        .id = "exit",
+        .kind = safecrowd::domain::ZoneKind::Exit,
+        .label = "Exit",
+        .area = {.outline = {{1.0, 0.0}, {2.0, 0.0}, {2.0, 1.0}, {1.0, 1.0}}},
+    });
+    layout.connections.push_back({
+        .id = "conn-left-exit",
+        .kind = safecrowd::domain::ConnectionKind::Exit,
+        .fromZoneId = "left",
+        .toZoneId = "exit",
+        .effectiveWidth = 1.0,
+        .centerSpan = {{1.0, 0.4}, {1.0, 0.6}},
+    });
+    layout.barriers.push_back({
+        .id = "blocking-wall",
+        .geometry = {.vertices = {{1.0, 0.0}, {1.0, 1.0}}},
+        .blocksMovement = true,
+    });
+    return layout;
+}
 
 safecrowd::domain::InitialPlacement2D groupPlacement() {
     safecrowd::domain::InitialPlacement2D placement;
@@ -101,6 +130,34 @@ SC_TEST(ScenarioSimulationRunnerSeparatesOverlappingAgents) {
     SC_EXPECT_TRUE(std::hypot(dx, dy) >= 0.49);
 }
 
+SC_TEST(ScenarioSimulationRunnerAvoidanceDoesNotReverseSharedRouteDirection) {
+    safecrowd::domain::InitialPlacement2D first;
+    first.id = "agent-1";
+    first.zoneId = safecrowd::domain::DemoLayouts::Sprint1FacilityIds::MainRoomZoneId;
+    first.targetAgentCount = 1;
+    first.initialVelocity = {.x = 1.5, .y = 0.0};
+    first.area.outline = {{.x = 2.0, .y = 5.0}};
+
+    safecrowd::domain::InitialPlacement2D second = first;
+    second.id = "agent-2";
+    second.area.outline = {{.x = 2.18, .y = 5.0}};
+
+    safecrowd::domain::ScenarioDraft scenario;
+    scenario.execution.timeLimitSeconds = 10.0;
+    scenario.population.initialPlacements.push_back(first);
+    scenario.population.initialPlacements.push_back(second);
+
+    safecrowd::domain::ScenarioSimulationRunner runner(safecrowd::domain::DemoLayouts::demoFacility(), scenario);
+    for (int i = 0; i < 6; ++i) {
+        runner.step(0.1);
+    }
+
+    SC_EXPECT_EQ(runner.frame().agents.size(), static_cast<std::size_t>(2));
+    for (const auto& agent : runner.frame().agents) {
+        SC_EXPECT_TRUE(agent.velocity.x >= -1e-6);
+    }
+}
+
 SC_TEST(ScenarioSimulationRunnerAdvancesDoorWaypointAfterAgentEntersNextZone) {
     safecrowd::domain::InitialPlacement2D placement;
     placement.id = "agent-1";
@@ -119,4 +176,44 @@ SC_TEST(ScenarioSimulationRunnerAdvancesDoorWaypointAfterAgentEntersNextZone) {
     SC_EXPECT_EQ(runner.frame().agents.size(), static_cast<std::size_t>(1));
     SC_EXPECT_TRUE(runner.frame().agents.front().position.x > 12.4);
     SC_EXPECT_TRUE(runner.frame().agents.front().velocity.x > 0.0);
+}
+
+SC_TEST(ScenarioSimulationRunnerBlocksMovementAcrossBarrierSegments) {
+    safecrowd::domain::InitialPlacement2D placement;
+    placement.id = "agent-1";
+    placement.zoneId = "left";
+    placement.targetAgentCount = 1;
+    placement.initialVelocity = {.x = 2.0, .y = 0.0};
+    placement.area.outline = {{.x = 0.5, .y = 0.5}};
+
+    safecrowd::domain::ScenarioDraft scenario;
+    scenario.execution.timeLimitSeconds = 5.0;
+    scenario.population.initialPlacements.push_back(placement);
+
+    safecrowd::domain::ScenarioSimulationRunner runner(blockedDoorLayout(), scenario);
+    runner.step(1.0);
+
+    SC_EXPECT_EQ(runner.frame().agents.size(), static_cast<std::size_t>(1));
+    SC_EXPECT_TRUE(runner.frame().agents.front().position.x < 1.0);
+}
+
+SC_TEST(ScenarioSimulationRunnerRoutesAroundClosedObstructions) {
+    safecrowd::domain::InitialPlacement2D placement;
+    placement.id = "agent-1";
+    placement.zoneId = safecrowd::domain::DemoLayouts::Sprint1FacilityIds::MainRoomZoneId;
+    placement.targetAgentCount = 1;
+    placement.initialVelocity = {.x = 3.0, .y = 0.0};
+    placement.area.outline = {{.x = 2.0, .y = 4.2}};
+
+    safecrowd::domain::ScenarioDraft scenario;
+    scenario.execution.timeLimitSeconds = 40.0;
+    scenario.population.initialPlacements.push_back(placement);
+
+    safecrowd::domain::ScenarioSimulationRunner runner(safecrowd::domain::DemoLayouts::demoFacility(), scenario);
+    for (int i = 0; i < 160 && !runner.complete(); ++i) {
+        runner.step(0.25);
+    }
+
+    SC_EXPECT_EQ(runner.frame().totalAgentCount, static_cast<std::size_t>(1));
+    SC_EXPECT_EQ(runner.frame().evacuatedAgentCount, static_cast<std::size_t>(1));
 }
