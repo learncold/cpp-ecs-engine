@@ -35,14 +35,9 @@ private:
         std::string destinationZoneId{};
     };
 
-    void advanceRouteWaypoint(EvacuationRoute& route, const Point2D& reachedPoint) const;
-    void advanceRoutesForWaypointProgress(double deltaSeconds, const std::vector<engine::Entity>& entities);
-    void advanceRoutesForCurrentZones(const std::vector<engine::Entity>& entities);
     std::vector<ScenarioAgentSeed> createAgentSeeds() const;
     void initializeRuntime();
     void syncFrameFromRuntime();
-    void replanBlockedRouteSegments(const std::vector<engine::Entity>& entities);
-    void resolveAgentOverlaps(const std::vector<engine::Entity>& entities);
     RoutePlan routePlan(const Point2D& start, const std::string& startZoneId) const;
     std::optional<std::vector<std::string>> zoneRouteToExit(const std::string& startZoneId) const;
     std::string zoneAt(const Point2D& point) const;

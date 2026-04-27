@@ -20,6 +20,10 @@ struct ScenarioSimulationFrameResource {
     SimulationFrame frame{};
 };
 
+struct ScenarioSimulationStepResource {
+    double deltaSeconds{0.0};
+};
+
 struct ScenarioAgentSpatialIndexResource {
     double cellSize{1.0};
     std::unordered_map<long long, std::vector<engine::Entity>> cells{};
