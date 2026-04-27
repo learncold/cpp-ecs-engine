@@ -81,6 +81,8 @@ add_library(safecrowd_domain STATIC
     src/domain/Geometry2D.h
     src/domain/PopulationSpec.h
     src/domain/ScenarioAuthoring.h
+    src/domain/ScenarioSimulationRunner.h
+    src/domain/ScenarioSimulationRunner.cpp
     src/domain/ProjectRepository.h
     src/domain/ScenarioTemplateCatalog.h
     src/domain/RawImportModel.h
@@ -143,6 +145,7 @@ if (BUILD_TESTING)
         tests/EngineIntegrationTests.cpp
         tests/ResourceStoreTests.cpp
         tests/DeterministicRngTests.cpp
+        tests/ScenarioSimulationRunnerTests.cpp
     )
 
     target_include_directories(safecrowd_tests
@@ -177,6 +180,8 @@ if (SAFECROWD_BUILD_APP)
         src/application/ProjectPersistence.h
         src/application/ScenarioAuthoringWidget.h
         src/application/ScenarioCanvasWidget.h
+        src/application/ScenarioRunWidget.h
+        src/application/SimulationCanvasWidget.h
         src/application/UiStyle.h
         src/application/WorkspaceShell.h
         src/application/IssueCardWidget.cpp
@@ -193,6 +198,8 @@ if (SAFECROWD_BUILD_APP)
         src/application/ProjectPersistence.cpp
         src/application/ScenarioAuthoringWidget.cpp
         src/application/ScenarioCanvasWidget.cpp
+        src/application/ScenarioRunWidget.cpp
+        src/application/SimulationCanvasWidget.cpp
         src/application/UiStyle.cpp
         src/application/WorkspaceShell.cpp
     )

@@ -1,0 +1,53 @@
+#pragma once
+
+#include <functional>
+
+#include <QString>
+#include <QWidget>
+
+#include "domain/FacilityLayout2D.h"
+#include "domain/ScenarioAuthoring.h"
+#include "domain/ScenarioSimulationRunner.h"
+
+class QLabel;
+class QPushButton;
+class QTimer;
+
+namespace safecrowd::application {
+
+class SimulationCanvasWidget;
+class WorkspaceShell;
+
+class ScenarioRunWidget : public QWidget {
+public:
+    explicit ScenarioRunWidget(
+        const QString& projectName,
+        const safecrowd::domain::FacilityLayout2D& layout,
+        const safecrowd::domain::ScenarioDraft& scenario,
+        std::function<void()> saveProjectHandler,
+        std::function<void()> openProjectHandler,
+        QWidget* parent = nullptr);
+
+private:
+    QWidget* createRunPanel();
+    void refreshStatus();
+    void resetRun();
+    void togglePaused();
+
+    QString projectName_{};
+    safecrowd::domain::FacilityLayout2D layout_{};
+    safecrowd::domain::ScenarioDraft scenario_{};
+    safecrowd::domain::ScenarioSimulationRunner runner_{};
+    WorkspaceShell* shell_{nullptr};
+    SimulationCanvasWidget* canvas_{nullptr};
+    QTimer* timer_{nullptr};
+    QLabel* scenarioLabel_{nullptr};
+    QLabel* statusLabel_{nullptr};
+    QLabel* elapsedLabel_{nullptr};
+    QLabel* agentCountLabel_{nullptr};
+    QPushButton* pauseButton_{nullptr};
+    QPushButton* resetButton_{nullptr};
+    bool paused_{false};
+};
+
+}  // namespace safecrowd::application
