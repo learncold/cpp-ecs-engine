@@ -303,7 +303,11 @@ const Zone2D* findZone(const FacilityLayout2D& layout, const std::string& zoneId
     return it == layout.zones.end() ? nullptr : &(*it);
 }
 
-bool routePassageCrossed(const FacilityLayout2D& layout, const EvacuationRoute& route, const Point2D& position) {
+bool routePassageCrossed(
+    const FacilityLayout2D& layout,
+    const EvacuationRoute& route,
+    const Point2D& position,
+    double agentRadius) {
     if (route.nextWaypointIndex >= route.waypointPassages.size()
         || route.nextWaypointIndex >= route.waypointFromZoneIds.size()
         || route.nextWaypointIndex >= route.waypointZoneIds.size()) {
@@ -332,7 +336,7 @@ bool routePassageCrossed(const FacilityLayout2D& layout, const EvacuationRoute& 
         return false;
     }
 
-    return dot(position - midpoint(passage), normal) > kPortalCrossingEpsilon;
+    return dot(position - midpoint(passage), normal) > -std::max(kPortalCrossingEpsilon, agentRadius * 0.35);
 }
 
 const Connection2D* findConnectionBetween(const FacilityLayout2D& layout, const std::string& from, const std::string& to) {
@@ -1054,9 +1058,10 @@ void ScenarioSimulationRunner::advanceRoutesForWaypointProgress(double deltaSeco
         }
 
         const auto& position = core_.getComponent<Position>(entity);
+        const auto& agent = core_.getComponent<Agent>(entity);
         auto& route = core_.getComponent<EvacuationRoute>(entity);
         while (route.nextWaypointIndex < route.waypoints.size()) {
-            if (routePassageCrossed(layout_, route, position.value)) {
+            if (routePassageCrossed(layout_, route, position.value, agent.radius)) {
                 advanceRouteWaypoint(route, position.value);
                 continue;
             }
@@ -1116,10 +1121,21 @@ void ScenarioSimulationRunner::advanceRoutesForCurrentZones() {
         const auto& position = core_.getComponent<Position>(entity);
         auto& route = core_.getComponent<EvacuationRoute>(entity);
         const auto currentZoneId = zoneAt(position.value);
-        while (!currentZoneId.empty()
-               && route.nextWaypointIndex < route.waypointZoneIds.size()
-               && route.waypointZoneIds[route.nextWaypointIndex] == currentZoneId) {
-            advanceRouteWaypoint(route, position.value);
+        while (!currentZoneId.empty() && route.nextWaypointIndex < route.waypointZoneIds.size()) {
+            auto matchedIndex = route.waypointZoneIds.size();
+            for (auto index = route.nextWaypointIndex; index < route.waypointZoneIds.size(); ++index) {
+                if (route.waypointZoneIds[index] == currentZoneId) {
+                    matchedIndex = index;
+                    break;
+                }
+            }
+            if (matchedIndex == route.waypointZoneIds.size()) {
+                break;
+            }
+
+            while (route.nextWaypointIndex <= matchedIndex && route.nextWaypointIndex < route.waypoints.size()) {
+                advanceRouteWaypoint(route, position.value);
+            }
         }
     }
 }

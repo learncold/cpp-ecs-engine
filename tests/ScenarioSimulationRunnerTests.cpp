@@ -288,6 +288,25 @@ SC_TEST(ScenarioSimulationRunnerAdvancesWideDoorPassageAfterCrossingNearEndpoint
     SC_EXPECT_TRUE(runner.frame().agents.front().velocity.x > 0.0);
 }
 
+SC_TEST(ScenarioSimulationRunnerSkipsPassedDoorwaysWhenAgentIsAlreadyInLaterZone) {
+    safecrowd::domain::InitialPlacement2D placement;
+    placement.id = "agent-pushed-ahead";
+    placement.zoneId = "room";
+    placement.targetAgentCount = 1;
+    placement.initialVelocity = {.x = 2.0, .y = 0.0};
+    placement.area.outline = {{.x = 4.4, .y = 3.25}};
+
+    safecrowd::domain::ScenarioDraft scenario;
+    scenario.execution.timeLimitSeconds = 5.0;
+    scenario.population.initialPlacements.push_back(placement);
+
+    safecrowd::domain::ScenarioSimulationRunner runner(wideDoorToCorridorLayout(), scenario);
+    runner.step(0.1);
+
+    SC_EXPECT_EQ(runner.frame().agents.size(), static_cast<std::size_t>(1));
+    SC_EXPECT_TRUE(runner.frame().agents.front().velocity.x > 0.0);
+}
+
 SC_TEST(ScenarioSimulationRunnerBlocksMovementAcrossBarrierSegments) {
     safecrowd::domain::InitialPlacement2D placement;
     placement.id = "agent-1";
