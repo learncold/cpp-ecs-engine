@@ -81,8 +81,11 @@ add_library(safecrowd_domain STATIC
     src/domain/Geometry2D.h
     src/domain/PopulationSpec.h
     src/domain/ScenarioAuthoring.h
+    src/domain/ScenarioSimulationFrame.h
     src/domain/ScenarioSimulationRunner.h
     src/domain/ScenarioSimulationRunner.cpp
+    src/domain/ScenarioSimulationSystems.h
+    src/domain/ScenarioSimulationSystems.cpp
     src/domain/ProjectRepository.h
     src/domain/ScenarioTemplateCatalog.h
     src/domain/RawImportModel.h
@@ -134,6 +137,7 @@ if (BUILD_TESTING)
         tests/SafeCrowdDomainTests.cpp
         tests/CompressionSystemTests.cpp
         tests/SnapshotTests.cpp
+        tests/ScenarioSimulationSystemsTests.cpp
         tests/EcsCoreTests.cpp
         tests/ImportContractsTests.cpp
         tests/DxfImportServiceTests.cpp

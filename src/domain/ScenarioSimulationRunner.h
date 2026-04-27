@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -8,24 +7,10 @@
 #include "domain/AgentComponents.h"
 #include "domain/FacilityLayout2D.h"
 #include "domain/ScenarioAuthoring.h"
+#include "domain/ScenarioSimulationFrame.h"
 #include "engine/EcsCore.h"
 
 namespace safecrowd::domain {
-
-struct SimulationAgentFrame {
-    std::uint64_t id{0};
-    Point2D position{};
-    Point2D velocity{};
-    double radius{0.25};
-};
-
-struct SimulationFrame {
-    double elapsedSeconds{0.0};
-    bool complete{false};
-    std::size_t totalAgentCount{0};
-    std::size_t evacuatedAgentCount{0};
-    std::vector<SimulationAgentFrame> agents{};
-};
 
 class ScenarioSimulationRunner {
 public:
