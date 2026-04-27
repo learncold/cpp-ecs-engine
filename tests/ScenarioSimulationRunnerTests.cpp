@@ -61,6 +61,45 @@ safecrowd::domain::FacilityLayout2D wideDoorLayout() {
     return layout;
 }
 
+safecrowd::domain::FacilityLayout2D wideDoorToCorridorLayout() {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.zones.push_back({
+        .id = "room",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Room",
+        .area = {.outline = {{0.0, 0.0}, {4.0, 0.0}, {4.0, 4.0}, {0.0, 4.0}}},
+    });
+    layout.zones.push_back({
+        .id = "corridor",
+        .kind = safecrowd::domain::ZoneKind::Corridor,
+        .label = "Corridor",
+        .area = {.outline = {{4.0, 0.0}, {8.0, 0.0}, {8.0, 4.0}, {4.0, 4.0}}},
+    });
+    layout.zones.push_back({
+        .id = "exit",
+        .kind = safecrowd::domain::ZoneKind::Exit,
+        .label = "Exit",
+        .area = {.outline = {{8.0, 1.0}, {10.0, 1.0}, {10.0, 3.0}, {8.0, 3.0}}},
+    });
+    layout.connections.push_back({
+        .id = "wide-door",
+        .kind = safecrowd::domain::ConnectionKind::Doorway,
+        .fromZoneId = "room",
+        .toZoneId = "corridor",
+        .effectiveWidth = 3.0,
+        .centerSpan = {{4.0, 0.5}, {4.0, 3.5}},
+    });
+    layout.connections.push_back({
+        .id = "exit-door",
+        .kind = safecrowd::domain::ConnectionKind::Exit,
+        .fromZoneId = "corridor",
+        .toZoneId = "exit",
+        .effectiveWidth = 2.0,
+        .centerSpan = {{8.0, 1.0}, {8.0, 3.0}},
+    });
+    return layout;
+}
+
 safecrowd::domain::InitialPlacement2D groupPlacement() {
     safecrowd::domain::InitialPlacement2D placement;
     placement.id = "group-1";
@@ -228,6 +267,25 @@ SC_TEST(ScenarioSimulationRunnerUsesDoorSpanInsteadOfOnlyCenterPoint) {
         SC_EXPECT_TRUE(agent.velocity.x > 0.0);
         SC_EXPECT_TRUE(std::fabs(agent.velocity.y) < 0.05);
     }
+}
+
+SC_TEST(ScenarioSimulationRunnerAdvancesWideDoorPassageAfterCrossingNearEndpoint) {
+    safecrowd::domain::InitialPlacement2D placement;
+    placement.id = "agent-near-endpoint";
+    placement.zoneId = "room";
+    placement.targetAgentCount = 1;
+    placement.initialVelocity = {.x = 2.0, .y = 0.0};
+    placement.area.outline = {{.x = 4.08, .y = 3.25}};
+
+    safecrowd::domain::ScenarioDraft scenario;
+    scenario.execution.timeLimitSeconds = 5.0;
+    scenario.population.initialPlacements.push_back(placement);
+
+    safecrowd::domain::ScenarioSimulationRunner runner(wideDoorToCorridorLayout(), scenario);
+    runner.step(0.1);
+
+    SC_EXPECT_EQ(runner.frame().agents.size(), static_cast<std::size_t>(1));
+    SC_EXPECT_TRUE(runner.frame().agents.front().velocity.x > 0.0);
 }
 
 SC_TEST(ScenarioSimulationRunnerBlocksMovementAcrossBarrierSegments) {

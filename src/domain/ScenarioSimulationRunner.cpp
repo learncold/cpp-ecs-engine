@@ -29,6 +29,7 @@ constexpr double kCandidateClearance = kDefaultAgentRadius + kBarrierAvoidanceBu
 constexpr double kWaypointCrossingEpsilon = 0.08;
 constexpr double kWaypointProgressEpsilon = 0.02;
 constexpr double kWaypointStallSeconds = 0.75;
+constexpr double kPortalCrossingEpsilon = 0.02;
 
 struct Bounds {
     double minX{0.0};
@@ -300,6 +301,38 @@ const Zone2D* findZone(const FacilityLayout2D& layout, const std::string& zoneId
         return zone.id == zoneId;
     });
     return it == layout.zones.end() ? nullptr : &(*it);
+}
+
+bool routePassageCrossed(const FacilityLayout2D& layout, const EvacuationRoute& route, const Point2D& position) {
+    if (route.nextWaypointIndex >= route.waypointPassages.size()
+        || route.nextWaypointIndex >= route.waypointFromZoneIds.size()
+        || route.nextWaypointIndex >= route.waypointZoneIds.size()) {
+        return false;
+    }
+
+    const auto& passage = route.waypointPassages[route.nextWaypointIndex];
+    if (lengthSquaredOf(passage) <= 1e-9) {
+        return false;
+    }
+
+    const auto& fromZoneId = route.waypointFromZoneIds[route.nextWaypointIndex];
+    const auto& toZoneId = route.waypointZoneIds[route.nextWaypointIndex];
+    if (fromZoneId.empty() || toZoneId.empty()) {
+        return false;
+    }
+
+    const auto* fromZone = findZone(layout, fromZoneId);
+    const auto* toZone = findZone(layout, toZoneId);
+    if (fromZone == nullptr || toZone == nullptr) {
+        return false;
+    }
+
+    const auto normal = normalizedOr(polygonCenter(toZone->area) - polygonCenter(fromZone->area), {});
+    if (lengthOf(normal) <= 1e-9) {
+        return false;
+    }
+
+    return dot(position - midpoint(passage), normal) > kPortalCrossingEpsilon;
 }
 
 const Connection2D* findConnectionBetween(const FacilityLayout2D& layout, const std::string& from, const std::string& to) {
@@ -978,6 +1011,7 @@ void ScenarioSimulationRunner::initializeAgents() {
             auto evacuationRoute = EvacuationRoute{
                 .waypoints = route.waypoints,
                 .waypointPassages = route.waypointPassages,
+                .waypointFromZoneIds = route.waypointFromZoneIds,
                 .waypointZoneIds = route.waypointZoneIds,
                 .nextWaypointIndex = 0,
                 .currentSegmentStart = position,
@@ -1022,6 +1056,11 @@ void ScenarioSimulationRunner::advanceRoutesForWaypointProgress(double deltaSeco
         const auto& position = core_.getComponent<Position>(entity);
         auto& route = core_.getComponent<EvacuationRoute>(entity);
         while (route.nextWaypointIndex < route.waypoints.size()) {
+            if (routePassageCrossed(layout_, route, position.value)) {
+                advanceRouteWaypoint(route, position.value);
+                continue;
+            }
+
             const auto target = routeWaypointTarget(route, position.value);
             const auto segment = target - route.currentSegmentStart;
             const auto segmentLengthSquared = dot(segment, segment);
@@ -1142,8 +1181,12 @@ void ScenarioSimulationRunner::replanBlockedRouteSegments() {
         const auto originalTargetPassage = route.nextWaypointIndex < route.waypointPassages.size()
             ? route.waypointPassages[route.nextWaypointIndex]
             : pointPassage(target);
+        const auto originalFromZoneId = route.nextWaypointIndex < route.waypointFromZoneIds.size()
+            ? route.waypointFromZoneIds[route.nextWaypointIndex]
+            : std::string{};
         route.waypoints.erase(route.waypoints.begin() + static_cast<std::ptrdiff_t>(route.nextWaypointIndex));
         route.waypointPassages.erase(route.waypointPassages.begin() + static_cast<std::ptrdiff_t>(route.nextWaypointIndex));
+        route.waypointFromZoneIds.erase(route.waypointFromZoneIds.begin() + static_cast<std::ptrdiff_t>(route.nextWaypointIndex));
         route.waypointZoneIds.erase(route.waypointZoneIds.begin() + static_cast<std::ptrdiff_t>(route.nextWaypointIndex));
 
         std::vector<LineSegment2D> replacementPassages;
@@ -1155,6 +1198,8 @@ void ScenarioSimulationRunner::replanBlockedRouteSegments() {
 
         std::vector<std::string> replacementZoneIds(replacement.size(), std::string{});
         replacementZoneIds.back() = originalTargetZoneId;
+        std::vector<std::string> replacementFromZoneIds(replacement.size(), std::string{});
+        replacementFromZoneIds.back() = originalFromZoneId;
         route.waypoints.insert(
             route.waypoints.begin() + static_cast<std::ptrdiff_t>(route.nextWaypointIndex),
             replacement.begin(),
@@ -1163,6 +1208,10 @@ void ScenarioSimulationRunner::replanBlockedRouteSegments() {
             route.waypointPassages.begin() + static_cast<std::ptrdiff_t>(route.nextWaypointIndex),
             replacementPassages.begin(),
             replacementPassages.end());
+        route.waypointFromZoneIds.insert(
+            route.waypointFromZoneIds.begin() + static_cast<std::ptrdiff_t>(route.nextWaypointIndex),
+            replacementFromZoneIds.begin(),
+            replacementFromZoneIds.end());
         route.waypointZoneIds.insert(
             route.waypointZoneIds.begin() + static_cast<std::ptrdiff_t>(route.nextWaypointIndex),
             replacementZoneIds.begin(),
@@ -1218,11 +1267,13 @@ ScenarioSimulationRunner::RoutePlan ScenarioSimulationRunner::routePlan(const Po
     Point2D segmentStart = start;
     auto appendSegment = [&](const std::vector<Point2D>& segment,
                              const LineSegment2D& finalPassage,
+                             const std::string& finalFromZoneId,
                              const std::string& finalZoneId) {
         for (std::size_t waypointIndex = 0; waypointIndex < segment.size(); ++waypointIndex) {
             plan.waypoints.push_back(segment[waypointIndex]);
             plan.waypointPassages.push_back(
                 waypointIndex + 1 == segment.size() ? finalPassage : pointPassage(segment[waypointIndex]));
+            plan.waypointFromZoneIds.push_back(waypointIndex + 1 == segment.size() ? finalFromZoneId : std::string{});
             plan.waypointZoneIds.push_back(waypointIndex + 1 == segment.size() ? finalZoneId : std::string{});
         }
     };
@@ -1232,7 +1283,7 @@ ScenarioSimulationRunner::RoutePlan ScenarioSimulationRunner::routePlan(const Po
             const auto passage = passageWithClearance(*connection, kCandidateClearance);
             const auto target = closestPointOnSegment(segmentStart, passage.start, passage.end);
             const auto segment = buildPath(layout_, segmentStart, target, kCandidateClearance);
-            appendSegment(segment, passage, (*zoneRoute)[index]);
+            appendSegment(segment, passage, (*zoneRoute)[index - 1], (*zoneRoute)[index]);
             segmentStart = target;
         }
     }
@@ -1240,13 +1291,14 @@ ScenarioSimulationRunner::RoutePlan ScenarioSimulationRunner::routePlan(const Po
         const auto exitCenter = polygonCenter(exitZone->area);
         if (distanceBetween(segmentStart, exitCenter) > kArrivalEpsilon) {
             const auto segment = buildPath(layout_, segmentStart, exitCenter, kCandidateClearance);
-            appendSegment(segment, pointPassage(exitCenter), exitZone->id);
+            appendSegment(segment, pointPassage(exitCenter), std::string{}, exitZone->id);
         }
     }
 
     if (!plan.waypoints.empty() && distanceBetween(start, plan.waypoints.front()) <= kArrivalEpsilon) {
         plan.waypoints.erase(plan.waypoints.begin());
         plan.waypointPassages.erase(plan.waypointPassages.begin());
+        plan.waypointFromZoneIds.erase(plan.waypointFromZoneIds.begin());
         plan.waypointZoneIds.erase(plan.waypointZoneIds.begin());
     }
     return plan;

@@ -24,6 +24,7 @@ struct Velocity {
 struct EvacuationRoute {
     std::vector<Point2D> waypoints{};
     std::vector<LineSegment2D> waypointPassages{};
+    std::vector<std::string> waypointFromZoneIds{};
     std::vector<std::string> waypointZoneIds{};
     std::size_t nextWaypointIndex{0};
     Point2D currentSegmentStart{};
