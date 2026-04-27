@@ -59,6 +59,7 @@ private:
     void refreshNavigationPanel();
     void refreshRightPanel();
     void refreshScenarioSwitcher();
+    void runFirstStagedBaselineScenario();
     void setRightPanelMode(RightPanelMode mode);
     void stageCurrentScenario();
     void updateCurrentScenarioPlacements(const std::vector<ScenarioCrowdPlacement>& placements);
@@ -69,9 +70,12 @@ private:
     QWidget* createTopBarTogglePanel();
     ScenarioState* currentScenario();
     const ScenarioState* currentScenario() const;
+    const ScenarioState* firstStagedBaselineScenario() const;
 
     QString projectName_{};
     safecrowd::domain::FacilityLayout2D layout_{};
+    std::function<void()> saveProjectHandler_{};
+    std::function<void()> openProjectHandler_{};
     std::vector<ScenarioState> scenarios_{};
     int currentScenarioIndex_{-1};
     NavigationView navigationView_{NavigationView::Layout};

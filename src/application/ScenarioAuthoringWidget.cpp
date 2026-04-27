@@ -19,6 +19,7 @@
 
 #include "application/LayoutNavigationPanelWidget.h"
 #include "application/ScenarioCanvasWidget.h"
+#include "application/ScenarioRunWidget.h"
 #include "application/UiStyle.h"
 #include "application/WorkspaceShell.h"
 
@@ -220,15 +221,17 @@ ScenarioAuthoringWidget::ScenarioAuthoringWidget(
     QWidget* parent)
     : QWidget(parent),
       projectName_(projectName),
-      layout_(layout) {
+      layout_(layout),
+      saveProjectHandler_(std::move(saveProjectHandler)),
+      openProjectHandler_(std::move(openProjectHandler)) {
     auto* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
 
     shell_ = new WorkspaceShell(this);
     shell_->setTools({"Project"});
-    shell_->setSaveProjectHandler(std::move(saveProjectHandler));
-    shell_->setOpenProjectHandler(std::move(openProjectHandler));
+    shell_->setSaveProjectHandler(saveProjectHandler_);
+    shell_->setOpenProjectHandler(openProjectHandler_);
     shell_->setTopBarTrailingWidget(createTopBarTogglePanel());
     refreshRightPanel();
     rootLayout->addWidget(shell_);
@@ -450,6 +453,34 @@ void ScenarioAuthoringWidget::refreshScenarioSwitcher() {
     scenarioSwitcher_->blockSignals(false);
 }
 
+void ScenarioAuthoringWidget::runFirstStagedBaselineScenario() {
+    const auto* scenario = firstStagedBaselineScenario();
+    if (scenario == nullptr) {
+        if (stagedScenariosLabel_ != nullptr) {
+            stagedScenariosLabel_->setText(stagedScenariosLabel_->text()
+                + "\n\nNo staged baseline scenario is ready to run.");
+        }
+        return;
+    }
+
+    auto* rootLayout = qobject_cast<QVBoxLayout*>(layout());
+    if (rootLayout == nullptr || shell_ == nullptr) {
+        return;
+    }
+
+    auto* runWidget = new ScenarioRunWidget(
+        projectName_,
+        layout_,
+        scenario->draft,
+        saveProjectHandler_,
+        openProjectHandler_,
+        this);
+    rootLayout->replaceWidget(shell_, runWidget);
+    shell_->hide();
+    shell_->deleteLater();
+    shell_ = nullptr;
+}
+
 void ScenarioAuthoringWidget::setRightPanelMode(RightPanelMode mode) {
     rightPanelMode_ = mode;
     if (scenarioPanelButton_ != nullptr) {
@@ -585,13 +616,7 @@ QWidget* ScenarioAuthoringWidget::createRunPanel() {
     executeRunButton_->setEnabled(stagedCount > 0);
     layout->addWidget(executeRunButton_);
     connect(executeRunButton_, &QPushButton::clicked, this, [this]() {
-        if (stagedScenariosLabel_ != nullptr) {
-            const auto stagedCount = std::count_if(scenarios_.begin(), scenarios_.end(), [](const auto& scenario) {
-                return scenario.stagedForRun;
-            });
-            stagedScenariosLabel_->setText(stagedScenariosLabel_->text()
-                + QString("\n\nExecution queued: %1 scenario(s)").arg(static_cast<int>(stagedCount)));
-        }
+        runFirstStagedBaselineScenario();
     });
 
     return panel;
@@ -694,6 +719,13 @@ const ScenarioAuthoringWidget::ScenarioState* ScenarioAuthoringWidget::currentSc
         return nullptr;
     }
     return &scenarios_[currentScenarioIndex_];
+}
+
+const ScenarioAuthoringWidget::ScenarioState* ScenarioAuthoringWidget::firstStagedBaselineScenario() const {
+    const auto it = std::find_if(scenarios_.begin(), scenarios_.end(), [](const auto& scenario) {
+        return scenario.stagedForRun && scenario.draft.role == safecrowd::domain::ScenarioRole::Baseline;
+    });
+    return it == scenarios_.end() ? nullptr : &(*it);
 }
 
 }  // namespace safecrowd::application

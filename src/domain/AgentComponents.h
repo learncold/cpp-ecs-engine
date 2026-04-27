@@ -1,5 +1,9 @@
 #pragma once
 
+#include <cstddef>
+#include <string>
+#include <vector>
+
 #include "domain/Geometry2D.h"
 
 namespace safecrowd::domain {
@@ -15,6 +19,18 @@ struct Agent {
 
 struct Velocity {
     Point2D value;
+};
+
+struct EvacuationRoute {
+    std::vector<Point2D> waypoints{};
+    std::vector<std::string> waypointZoneIds{};
+    std::size_t nextWaypointIndex{0};
+    std::string destinationZoneId{};
+};
+
+struct EvacuationStatus {
+    bool evacuated{false};
+    double completionTimeSeconds{0.0};
 };
 
 }  // namespace safecrowd::domain
