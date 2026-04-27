@@ -36,6 +36,31 @@ safecrowd::domain::FacilityLayout2D blockedDoorLayout() {
     return layout;
 }
 
+safecrowd::domain::FacilityLayout2D wideDoorLayout() {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.zones.push_back({
+        .id = "room",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Room",
+        .area = {.outline = {{0.0, 0.0}, {4.0, 0.0}, {4.0, 4.0}, {0.0, 4.0}}},
+    });
+    layout.zones.push_back({
+        .id = "exit",
+        .kind = safecrowd::domain::ZoneKind::Exit,
+        .label = "Exit",
+        .area = {.outline = {{4.0, 0.0}, {8.0, 0.0}, {8.0, 4.0}, {4.0, 4.0}}},
+    });
+    layout.connections.push_back({
+        .id = "wide-door",
+        .kind = safecrowd::domain::ConnectionKind::Exit,
+        .fromZoneId = "room",
+        .toZoneId = "exit",
+        .effectiveWidth = 3.0,
+        .centerSpan = {{4.0, 0.5}, {4.0, 3.5}},
+    });
+    return layout;
+}
+
 safecrowd::domain::InitialPlacement2D groupPlacement() {
     safecrowd::domain::InitialPlacement2D placement;
     placement.id = "group-1";
@@ -176,6 +201,33 @@ SC_TEST(ScenarioSimulationRunnerAdvancesDoorWaypointAfterAgentEntersNextZone) {
     SC_EXPECT_EQ(runner.frame().agents.size(), static_cast<std::size_t>(1));
     SC_EXPECT_TRUE(runner.frame().agents.front().position.x > 12.4);
     SC_EXPECT_TRUE(runner.frame().agents.front().velocity.x > 0.0);
+}
+
+SC_TEST(ScenarioSimulationRunnerUsesDoorSpanInsteadOfOnlyCenterPoint) {
+    safecrowd::domain::InitialPlacement2D lower;
+    lower.id = "agent-lower";
+    lower.zoneId = "room";
+    lower.targetAgentCount = 1;
+    lower.initialVelocity = {.x = 2.0, .y = 0.0};
+    lower.area.outline = {{.x = 1.0, .y = 1.0}};
+
+    safecrowd::domain::InitialPlacement2D upper = lower;
+    upper.id = "agent-upper";
+    upper.area.outline = {{.x = 1.0, .y = 3.0}};
+
+    safecrowd::domain::ScenarioDraft scenario;
+    scenario.execution.timeLimitSeconds = 5.0;
+    scenario.population.initialPlacements.push_back(lower);
+    scenario.population.initialPlacements.push_back(upper);
+
+    safecrowd::domain::ScenarioSimulationRunner runner(wideDoorLayout(), scenario);
+    runner.step(0.25);
+
+    SC_EXPECT_EQ(runner.frame().agents.size(), static_cast<std::size_t>(2));
+    for (const auto& agent : runner.frame().agents) {
+        SC_EXPECT_TRUE(agent.velocity.x > 0.0);
+        SC_EXPECT_TRUE(std::fabs(agent.velocity.y) < 0.05);
+    }
 }
 
 SC_TEST(ScenarioSimulationRunnerBlocksMovementAcrossBarrierSegments) {

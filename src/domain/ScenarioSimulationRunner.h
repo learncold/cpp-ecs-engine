@@ -42,11 +42,12 @@ public:
 private:
     struct RoutePlan {
         std::vector<Point2D> waypoints{};
+        std::vector<LineSegment2D> waypointPassages{};
         std::vector<std::string> waypointZoneIds{};
         std::string destinationZoneId{};
     };
 
-    void advanceRouteWaypoint(EvacuationRoute& route) const;
+    void advanceRouteWaypoint(EvacuationRoute& route, const Point2D& reachedPoint) const;
     void advanceRoutesForWaypointProgress(double deltaSeconds);
     void advanceRoutesForCurrentZones();
     void initializeAgents();
