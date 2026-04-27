@@ -4,11 +4,15 @@
 #include <deque>
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <queue>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+
+#include "engine/TriggerPolicy.h"
+#include "engine/UpdatePhase.h"
 
 namespace safecrowd::domain {
 namespace {
@@ -384,22 +388,12 @@ double speedOf(const Point2D& velocity) {
     return speed > 0.0 ? speed : kDefaultAgentSpeed;
 }
 
-std::vector<engine::Entity> simulationEntities(engine::EcsCore& core) {
-    std::vector<engine::Entity> entities;
-    core.entityRegistry().eachAlive([&](engine::Entity entity, const engine::Signature&) {
-        if (core.hasComponent<Position>(entity)
-            && core.hasComponent<Agent>(entity)
-            && core.hasComponent<Velocity>(entity)
-            && core.hasComponent<EvacuationRoute>(entity)
-            && core.hasComponent<EvacuationStatus>(entity)) {
-            entities.push_back(entity);
-        }
-    });
-    return entities;
+std::vector<engine::Entity> simulationEntities(engine::WorldQuery& query) {
+    return query.view<Position, Agent, Velocity, EvacuationRoute, EvacuationStatus>();
 }
 
 AgentSpatialIndex buildAgentSpatialIndex(
-    engine::EcsCore& core,
+    engine::WorldQuery& query,
     const std::vector<engine::Entity>& entities,
     double cellSize) {
     AgentSpatialIndex index;
@@ -407,18 +401,18 @@ AgentSpatialIndex buildAgentSpatialIndex(
     index.cells.reserve(entities.size() * 2);
 
     for (const auto entity : entities) {
-        const auto& status = core.getComponent<EvacuationStatus>(entity);
+        const auto& status = query.get<EvacuationStatus>(entity);
         if (status.evacuated) {
             continue;
         }
-        const auto& position = core.getComponent<Position>(entity);
+        const auto& position = query.get<Position>(entity);
         index.cells[spatialKey(spatialCellFor(position.value, cellSize))].push_back(entity);
     }
     return index;
 }
 
 std::vector<engine::Entity> nearbyAgents(
-    engine::EcsCore& core,
+    engine::WorldQuery& query,
     const AgentSpatialIndex& index,
     const Point2D& point,
     double radius) {
@@ -432,7 +426,7 @@ std::vector<engine::Entity> nearbyAgents(
                 continue;
             }
             for (const auto entity : it->second) {
-                const auto& otherPosition = core.getComponent<Position>(entity);
+                const auto& otherPosition = query.get<Position>(entity);
                 if (distanceBetween(point, otherPosition.value) <= radius) {
                     candidates.push_back(entity);
                 }
@@ -448,13 +442,13 @@ Point2D deterministicFallbackDirection(engine::Entity entity) {
 }
 
 Point2D forwardPreservingAgentAvoidanceVelocity(
-    engine::EcsCore& core,
+    engine::WorldQuery& query,
     engine::Entity entity,
     const std::vector<engine::Entity>& candidates,
     const Point2D& desiredVelocity,
     double& speedScale) {
-    const auto& position = core.getComponent<Position>(entity);
-    const auto& agent = core.getComponent<Agent>(entity);
+    const auto& position = query.get<Position>(entity);
+    const auto& agent = query.get<Agent>(entity);
     const auto desiredSpeed = lengthOf(desiredVelocity);
     if (desiredSpeed <= 1e-9) {
         speedScale = 1.0;
@@ -470,12 +464,12 @@ Point2D forwardPreservingAgentAvoidanceVelocity(
         if (other == entity) {
             continue;
         }
-        const auto& otherStatus = core.getComponent<EvacuationStatus>(other);
+        const auto& otherStatus = query.get<EvacuationStatus>(other);
         if (otherStatus.evacuated) {
             continue;
         }
-        const auto& otherPosition = core.getComponent<Position>(other);
-        const auto& otherAgent = core.getComponent<Agent>(other);
+        const auto& otherPosition = query.get<Position>(other);
+        const auto& otherAgent = query.get<Agent>(other);
         const auto offsetToOther = otherPosition.value - position.value;
         const auto distance = lengthOf(offsetToOther);
         const auto desiredDistance = static_cast<double>(agent.radius + otherAgent.radius) + kPersonalSpaceBuffer;
@@ -955,24 +949,24 @@ ScenarioSimulationRunner::ScenarioSimulationRunner(FacilityLayout2D layout, Scen
 void ScenarioSimulationRunner::reset(FacilityLayout2D layout, ScenarioDraft scenario) {
     layout_ = std::move(layout);
     scenario_ = std::move(scenario);
-    core_ = engine::EcsCore{4096};
     frame_ = {};
     timeLimitSeconds_ = scenario_.execution.timeLimitSeconds > 0.0
         ? scenario_.execution.timeLimitSeconds
         : kDefaultTimeLimitSeconds;
-    initializeAgents();
+    initializeRuntime();
 }
 
 void ScenarioSimulationRunner::step(double deltaSeconds) {
-    if (frame_.complete || deltaSeconds <= 0.0) {
+    if (runtime_ == nullptr || frame_.complete || deltaSeconds <= 0.0) {
         return;
     }
 
     const auto remaining = std::max(0.0, timeLimitSeconds_ - frame_.elapsedSeconds);
     const auto clampedDelta = std::min(deltaSeconds, remaining);
 
-    const auto entities = simulationEntities(core_);
-    const auto neighborIndex = buildAgentSpatialIndex(core_, entities, 1.0);
+    auto& query = runtime_->world().query();
+    const auto entities = simulationEntities(query);
+    const auto neighborIndex = buildAgentSpatialIndex(query, entities, 1.0);
     std::vector<MovementPlan> plans;
     plans.reserve(entities.size());
     advanceRoutesForCurrentZones(entities);
@@ -980,11 +974,11 @@ void ScenarioSimulationRunner::step(double deltaSeconds) {
     replanBlockedRouteSegments(entities);
 
     for (const auto entity : entities) {
-        auto& position = core_.getComponent<Position>(entity);
-        const auto& agent = core_.getComponent<Agent>(entity);
-        auto& velocity = core_.getComponent<Velocity>(entity);
-        auto& route = core_.getComponent<EvacuationRoute>(entity);
-        auto& status = core_.getComponent<EvacuationStatus>(entity);
+        auto& position = query.get<Position>(entity);
+        const auto& agent = query.get<Agent>(entity);
+        auto& velocity = query.get<Velocity>(entity);
+        auto& route = query.get<EvacuationRoute>(entity);
+        auto& status = query.get<EvacuationStatus>(entity);
         if (status.evacuated) {
             continue;
         }
@@ -1015,11 +1009,11 @@ void ScenarioSimulationRunner::step(double deltaSeconds) {
         const auto desiredVelocity = routeDirection * static_cast<double>(agent.maxSpeed);
         double speedScale = 1.0;
         const auto neighborCandidates = nearbyAgents(
-            core_,
+            query,
             neighborIndex,
             position.value,
             static_cast<double>(agent.radius) + kDefaultAgentRadius + kPersonalSpaceBuffer);
-        const auto avoidanceVelocity = forwardPreservingAgentAvoidanceVelocity(core_, entity, neighborCandidates, desiredVelocity, speedScale);
+        const auto avoidanceVelocity = forwardPreservingAgentAvoidanceVelocity(query, entity, neighborCandidates, desiredVelocity, speedScale);
         const auto barrierVelocity = barrierSeparationVelocity(layout_, position, agent);
         auto finalVelocity = (desiredVelocity * speedScale) + avoidanceVelocity + barrierVelocity;
         if (dot(finalVelocity, routeDirection) < 0.0) {
@@ -1034,10 +1028,10 @@ void ScenarioSimulationRunner::step(double deltaSeconds) {
     }
 
     for (const auto& plan : plans) {
-        auto& position = core_.getComponent<Position>(plan.entity);
-        auto& velocity = core_.getComponent<Velocity>(plan.entity);
-        auto& route = core_.getComponent<EvacuationRoute>(plan.entity);
-        const auto& agent = core_.getComponent<Agent>(plan.entity);
+        auto& position = query.get<Position>(plan.entity);
+        auto& velocity = query.get<Velocity>(plan.entity);
+        auto& route = query.get<EvacuationRoute>(plan.entity);
+        const auto& agent = query.get<Agent>(plan.entity);
         if (route.nextWaypointIndex >= route.waypoints.size()) {
             continue;
         }
@@ -1054,10 +1048,24 @@ void ScenarioSimulationRunner::step(double deltaSeconds) {
     resolveAgentOverlaps(entities);
     advanceRoutesForCurrentZones(entities);
     advanceRoutesForWaypointProgress(clampedDelta, entities);
-    frame_.elapsedSeconds += clampedDelta;
-    rebuildFrame(entities);
-    frame_.complete = frame_.elapsedSeconds >= timeLimitSeconds_
-        || (frame_.totalAgentCount > 0 && frame_.evacuatedAgentCount >= frame_.totalAgentCount);
+
+    auto& clock = runtime_->world().resources().get<ScenarioSimulationClockResource>();
+    clock.elapsedSeconds += clampedDelta;
+    clock.complete = clock.elapsedSeconds >= timeLimitSeconds_;
+    if (!clock.complete) {
+        std::size_t totalAgentCount = 0;
+        std::size_t evacuatedAgentCount = 0;
+        for (const auto entity : entities) {
+            ++totalAgentCount;
+            const auto& status = query.get<EvacuationStatus>(entity);
+            if (status.evacuated) {
+                ++evacuatedAgentCount;
+            }
+        }
+        clock.complete = totalAgentCount > 0 && evacuatedAgentCount >= totalAgentCount;
+    }
+    runtime_->stepFrame(0.0);
+    syncFrameFromRuntime();
 }
 
 const SimulationFrame& ScenarioSimulationRunner::frame() const noexcept {
@@ -1072,18 +1080,16 @@ bool ScenarioSimulationRunner::complete() const noexcept {
     return frame_.complete;
 }
 
-void ScenarioSimulationRunner::initializeAgents() {
+std::vector<ScenarioAgentSeed> ScenarioSimulationRunner::createAgentSeeds() const {
+    std::vector<ScenarioAgentSeed> seeds;
     for (const auto& placement : scenario_.population.initialPlacements) {
         const auto count = placement.targetAgentCount;
+        seeds.reserve(seeds.size() + count);
         for (std::size_t index = 0; index < count; ++index) {
             const auto position = placementPoint(placement, index);
             const auto startZoneId = !placement.zoneId.empty() ? placement.zoneId : zoneAt(position);
             const auto route = routePlan(position, startZoneId);
             const auto speed = speedOf(placement.initialVelocity);
-            const auto entity = core_.createEntity();
-            core_.addComponent(entity, Position{.value = position});
-            core_.addComponent(entity, Agent{.radius = static_cast<float>(kDefaultAgentRadius), .maxSpeed = static_cast<float>(speed)});
-            core_.addComponent(entity, Velocity{.value = {}});
             auto evacuationRoute = EvacuationRoute{
                 .waypoints = route.waypoints,
                 .waypointPassages = route.waypointPassages,
@@ -1098,11 +1104,46 @@ void ScenarioSimulationRunner::initializeAgents() {
             evacuationRoute.previousDistanceToWaypoint = route.waypoints.empty()
                 ? 0.0
                 : distanceToRouteWaypoint(evacuationRoute, position);
-            core_.addComponent(entity, std::move(evacuationRoute));
-            core_.addComponent(entity, EvacuationStatus{});
+            seeds.push_back({
+                .position = {.value = position},
+                .agent = {.radius = static_cast<float>(kDefaultAgentRadius), .maxSpeed = static_cast<float>(speed)},
+                .velocity = {.value = {}},
+                .route = std::move(evacuationRoute),
+                .status = {},
+            });
         }
     }
-    rebuildFrame(simulationEntities(core_));
+    return seeds;
+}
+
+void ScenarioSimulationRunner::initializeRuntime() {
+    runtime_ = std::make_unique<engine::EngineRuntime>(engine::EngineConfig{
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 1,
+    });
+    runtime_->addSystem(std::make_unique<ScenarioAgentSpawnSystem>(createAgentSeeds(), timeLimitSeconds_));
+    runtime_->addSystem(
+        std::make_unique<ScenarioSpatialIndexSystem>(1.0),
+        {.phase = engine::UpdatePhase::PreSimulation,
+         .triggerPolicy = engine::TriggerPolicy::EveryFrame});
+    runtime_->addSystem(
+        std::make_unique<ScenarioFrameSyncSystem>(),
+        {.phase = engine::UpdatePhase::RenderSync,
+         .triggerPolicy = engine::TriggerPolicy::EveryFrame});
+    runtime_->play();
+    runtime_->stepFrame(0.0);
+    syncFrameFromRuntime();
+}
+
+void ScenarioSimulationRunner::syncFrameFromRuntime() {
+    if (runtime_ == nullptr) {
+        return;
+    }
+    auto& resources = runtime_->world().resources();
+    if (resources.contains<ScenarioSimulationFrameResource>()) {
+        frame_ = resources.get<ScenarioSimulationFrameResource>().frame;
+    }
 }
 
 void ScenarioSimulationRunner::advanceRouteWaypoint(EvacuationRoute& route, const Point2D& reachedPoint) const {
@@ -1124,15 +1165,16 @@ void ScenarioSimulationRunner::advanceRouteWaypoint(EvacuationRoute& route, cons
 void ScenarioSimulationRunner::advanceRoutesForWaypointProgress(
     double deltaSeconds,
     const std::vector<engine::Entity>& entities) {
+    auto& query = runtime_->world().query();
     for (const auto entity : entities) {
-        const auto& status = core_.getComponent<EvacuationStatus>(entity);
+        const auto& status = query.get<EvacuationStatus>(entity);
         if (status.evacuated) {
             continue;
         }
 
-        const auto& position = core_.getComponent<Position>(entity);
-        const auto& agent = core_.getComponent<Agent>(entity);
-        auto& route = core_.getComponent<EvacuationRoute>(entity);
+        const auto& position = query.get<Position>(entity);
+        const auto& agent = query.get<Agent>(entity);
+        auto& route = query.get<EvacuationRoute>(entity);
         while (route.nextWaypointIndex < route.waypoints.size()) {
             if (routePassageCrossed(layout_, route, position.value, agent.radius)) {
                 advanceRouteWaypoint(route, position.value);
@@ -1184,14 +1226,15 @@ void ScenarioSimulationRunner::advanceRoutesForWaypointProgress(
 }
 
 void ScenarioSimulationRunner::advanceRoutesForCurrentZones(const std::vector<engine::Entity>& entities) {
+    auto& query = runtime_->world().query();
     for (const auto entity : entities) {
-        const auto& status = core_.getComponent<EvacuationStatus>(entity);
+        const auto& status = query.get<EvacuationStatus>(entity);
         if (status.evacuated) {
             continue;
         }
 
-        const auto& position = core_.getComponent<Position>(entity);
-        auto& route = core_.getComponent<EvacuationRoute>(entity);
+        const auto& position = query.get<Position>(entity);
+        auto& route = query.get<EvacuationRoute>(entity);
         const auto currentZoneId = zoneAt(position.value);
         while (!currentZoneId.empty() && route.nextWaypointIndex < route.waypointZoneIds.size()) {
             auto matchedIndex = route.waypointZoneIds.size();
@@ -1212,40 +1255,17 @@ void ScenarioSimulationRunner::advanceRoutesForCurrentZones(const std::vector<en
     }
 }
 
-void ScenarioSimulationRunner::rebuildFrame(const std::vector<engine::Entity>& entities) {
-    frame_.agents.clear();
-    frame_.totalAgentCount = 0;
-    frame_.evacuatedAgentCount = 0;
-
-    for (const auto entity : entities) {
-        ++frame_.totalAgentCount;
-        const auto& status = core_.getComponent<EvacuationStatus>(entity);
-        if (status.evacuated) {
-            ++frame_.evacuatedAgentCount;
-            continue;
-        }
-        const auto& position = core_.getComponent<Position>(entity);
-        const auto& velocity = core_.getComponent<Velocity>(entity);
-        const auto& agent = core_.getComponent<Agent>(entity);
-        frame_.agents.push_back({
-            .id = entity.index,
-            .position = position.value,
-            .velocity = velocity.value,
-            .radius = agent.radius,
-        });
-    }
-}
-
 void ScenarioSimulationRunner::replanBlockedRouteSegments(const std::vector<engine::Entity>& entities) {
+    auto& query = runtime_->world().query();
     for (const auto entity : entities) {
-        const auto& status = core_.getComponent<EvacuationStatus>(entity);
+        const auto& status = query.get<EvacuationStatus>(entity);
         if (status.evacuated) {
             continue;
         }
 
-        const auto& position = core_.getComponent<Position>(entity);
-        const auto& agent = core_.getComponent<Agent>(entity);
-        auto& route = core_.getComponent<EvacuationRoute>(entity);
+        const auto& position = query.get<Position>(entity);
+        const auto& agent = query.get<Agent>(entity);
+        auto& route = query.get<EvacuationRoute>(entity);
         if (route.nextWaypointIndex >= route.waypoints.size()) {
             continue;
         }
@@ -1309,20 +1329,21 @@ void ScenarioSimulationRunner::replanBlockedRouteSegments(const std::vector<engi
 }
 
 void ScenarioSimulationRunner::resolveAgentOverlaps(const std::vector<engine::Entity>& entities) {
+    auto& query = runtime_->world().query();
     for (int iteration = 0; iteration < kOverlapRelaxationIterations; ++iteration) {
-        const auto spatialIndex = buildAgentSpatialIndex(core_, entities, 1.0);
+        const auto spatialIndex = buildAgentSpatialIndex(query, entities, 1.0);
         std::unordered_set<unsigned long long> checkedPairs;
         checkedPairs.reserve(entities.size() * 4);
         for (const auto first : entities) {
-            auto& firstStatus = core_.getComponent<EvacuationStatus>(first);
+            auto& firstStatus = query.get<EvacuationStatus>(first);
             if (firstStatus.evacuated) {
                 continue;
             }
 
-            auto& firstPosition = core_.getComponent<Position>(first);
-            const auto& firstAgent = core_.getComponent<Agent>(first);
+            auto& firstPosition = query.get<Position>(first);
+            const auto& firstAgent = query.get<Agent>(first);
             const auto candidates = nearbyAgents(
-                core_,
+                query,
                 spatialIndex,
                 firstPosition.value,
                 static_cast<double>(firstAgent.radius) + kDefaultAgentRadius);
@@ -1338,13 +1359,13 @@ void ScenarioSimulationRunner::resolveAgentOverlaps(const std::vector<engine::En
                     continue;
                 }
 
-                auto& secondStatus = core_.getComponent<EvacuationStatus>(second);
+                auto& secondStatus = query.get<EvacuationStatus>(second);
                 if (firstStatus.evacuated || secondStatus.evacuated) {
                     continue;
                 }
 
-                auto& secondPosition = core_.getComponent<Position>(second);
-                const auto& secondAgent = core_.getComponent<Agent>(second);
+                auto& secondPosition = query.get<Position>(second);
+                const auto& secondAgent = query.get<Agent>(second);
                 const auto delta = firstPosition.value - secondPosition.value;
                 const auto distance = lengthOf(delta);
                 const auto minimumDistance = static_cast<double>(firstAgent.radius + secondAgent.radius);

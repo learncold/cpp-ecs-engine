@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -8,7 +9,8 @@
 #include "domain/FacilityLayout2D.h"
 #include "domain/ScenarioAuthoring.h"
 #include "domain/ScenarioSimulationFrame.h"
-#include "engine/EcsCore.h"
+#include "domain/ScenarioSimulationSystems.h"
+#include "engine/EngineRuntime.h"
 
 namespace safecrowd::domain {
 
@@ -36,8 +38,9 @@ private:
     void advanceRouteWaypoint(EvacuationRoute& route, const Point2D& reachedPoint) const;
     void advanceRoutesForWaypointProgress(double deltaSeconds, const std::vector<engine::Entity>& entities);
     void advanceRoutesForCurrentZones(const std::vector<engine::Entity>& entities);
-    void initializeAgents();
-    void rebuildFrame(const std::vector<engine::Entity>& entities);
+    std::vector<ScenarioAgentSeed> createAgentSeeds() const;
+    void initializeRuntime();
+    void syncFrameFromRuntime();
     void replanBlockedRouteSegments(const std::vector<engine::Entity>& entities);
     void resolveAgentOverlaps(const std::vector<engine::Entity>& entities);
     RoutePlan routePlan(const Point2D& start, const std::string& startZoneId) const;
@@ -47,7 +50,7 @@ private:
 
     FacilityLayout2D layout_{};
     ScenarioDraft scenario_{};
-    engine::EcsCore core_{4096};
+    std::unique_ptr<engine::EngineRuntime> runtime_{};
     SimulationFrame frame_{};
     double timeLimitSeconds_{60.0};
 };
