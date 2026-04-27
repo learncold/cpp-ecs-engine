@@ -17,6 +17,7 @@ class QKeyEvent;
 class QMouseEvent;
 class QPaintEvent;
 class QResizeEvent;
+class QLabel;
 class QSpinBox;
 class QToolButton;
 class QWheelEvent;
@@ -95,6 +96,7 @@ private:
     QToolButton* selectToolButton_{nullptr};
     QToolButton* individualToolButton_{nullptr};
     QToolButton* groupToolButton_{nullptr};
+    QLabel* groupCountLabel_{nullptr};
     QSpinBox* groupCountSpinBox_{nullptr};
     std::function<void(const std::vector<ScenarioCrowdPlacement>&)> placementsChangedHandler_{};
 };

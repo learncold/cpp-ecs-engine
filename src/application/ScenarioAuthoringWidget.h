@@ -46,6 +46,7 @@ public:
         QString startText{};
         QString destinationText{};
         QString baseScenarioId{};
+        bool stagedForRun{false};
     };
 
 private:
@@ -59,6 +60,7 @@ private:
     void refreshRightPanel();
     void refreshScenarioSwitcher();
     void setRightPanelMode(RightPanelMode mode);
+    void stageCurrentScenario();
     void updateCurrentScenarioPlacements(const std::vector<ScenarioCrowdPlacement>& placements);
     void showEmptyCanvas();
     void showScenarioNameDialog(int sourceIndex);
@@ -81,11 +83,9 @@ private:
     QComboBox* scenarioSwitcher_{nullptr};
     QLabel* scenarioSummaryLabel_{nullptr};
     QLabel* changesLabel_{nullptr};
-    QLabel* readinessLabel_{nullptr};
     QLabel* stagedScenariosLabel_{nullptr};
     QPushButton* newScenarioButton_{nullptr};
-    QPushButton* addExitClosureButton_{nullptr};
-    QPushButton* addStagedReleaseButton_{nullptr};
+    QPushButton* stageScenarioButton_{nullptr};
     QPushButton* executeRunButton_{nullptr};
 };
 

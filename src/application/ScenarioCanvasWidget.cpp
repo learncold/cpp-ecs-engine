@@ -630,6 +630,9 @@ void ScenarioCanvasWidget::setToolMode(ToolMode mode) {
     if (groupToolButton_ != nullptr) {
         groupToolButton_->setChecked(mode == ToolMode::GroupPlacement);
     }
+    if (groupCountLabel_ != nullptr) {
+        groupCountLabel_->setVisible(mode == ToolMode::GroupPlacement);
+    }
     if (groupCountSpinBox_ != nullptr) {
         groupCountSpinBox_->setVisible(mode == ToolMode::GroupPlacement);
     }
@@ -673,9 +676,9 @@ void ScenarioCanvasWidget::setupToolbars() {
     groupToolButton_ = makeButton(makeToolIcon("group", QColor("#1f5fae")), "Add Occupant Group");
     topLayout->addStretch(1);
 
-    auto* countLabel = new QLabel("Group count", propertyPanel_);
-    countLabel->setStyleSheet("QLabel { color: #4f5d6b; background: transparent; border: 0; }");
-    propertyLayout->addWidget(countLabel);
+    groupCountLabel_ = new QLabel("Group count", propertyPanel_);
+    groupCountLabel_->setStyleSheet("QLabel { color: #4f5d6b; background: transparent; border: 0; }");
+    propertyLayout->addWidget(groupCountLabel_);
     groupCountSpinBox_ = new QSpinBox(propertyPanel_);
     groupCountSpinBox_->setRange(1, 5000);
     groupCountSpinBox_->setValue(25);

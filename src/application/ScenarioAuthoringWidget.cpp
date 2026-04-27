@@ -284,6 +284,7 @@ void ScenarioAuthoringWidget::createScenarioWithName(const QString& name, int so
         scenario.baseScenarioId = QString::fromStdString(scenarios_[sourceIndex].draft.scenarioId);
         scenario.draft.role = safecrowd::domain::ScenarioRole::Alternative;
         scenario.draft.variationDiffKeys = {"branch.duplicated"};
+        scenario.stagedForRun = false;
     } else {
         scenario.draft.role = safecrowd::domain::ScenarioRole::Baseline;
         scenario.draft.sourceTemplateId = "sprint1-baseline";
@@ -376,18 +377,12 @@ void ScenarioAuthoringWidget::refreshInspector() {
         }
     }
 
-    if (readinessLabel_ != nullptr) {
-        readinessLabel_->setText(hasScenario ? "Ready for scenario authoring" : "Create a scenario to continue");
-    }
-
-    if (addExitClosureButton_ != nullptr) {
-        addExitClosureButton_->setEnabled(hasScenario);
-    }
-    if (addStagedReleaseButton_ != nullptr) {
-        addStagedReleaseButton_->setEnabled(hasScenario);
-    }
     if (newScenarioButton_ != nullptr) {
         newScenarioButton_->setText(hasScenario ? "New Scenario from Current" : "New Scenario");
+    }
+    if (stageScenarioButton_ != nullptr) {
+        stageScenarioButton_->setEnabled(hasScenario);
+        stageScenarioButton_->setText(hasScenario && scenario->stagedForRun ? "Staged for Run" : "Stage Scenario");
     }
 }
 
@@ -419,10 +414,8 @@ void ScenarioAuthoringWidget::refreshRightPanel() {
     scenarioSwitcher_ = nullptr;
     scenarioSummaryLabel_ = nullptr;
     changesLabel_ = nullptr;
-    readinessLabel_ = nullptr;
     newScenarioButton_ = nullptr;
-    addExitClosureButton_ = nullptr;
-    addStagedReleaseButton_ = nullptr;
+    stageScenarioButton_ = nullptr;
     stagedScenariosLabel_ = nullptr;
     executeRunButton_ = nullptr;
 
@@ -466,6 +459,19 @@ void ScenarioAuthoringWidget::setRightPanelMode(RightPanelMode mode) {
         runPanelButton_->setChecked(mode == RightPanelMode::Run);
     }
     refreshRightPanel();
+}
+
+void ScenarioAuthoringWidget::stageCurrentScenario() {
+    auto* scenario = currentScenario();
+    if (scenario == nullptr) {
+        return;
+    }
+
+    scenario->stagedForRun = true;
+    refreshInspector();
+    if (rightPanelMode_ == RightPanelMode::Run) {
+        refreshRightPanel();
+    }
 }
 
 void ScenarioAuthoringWidget::updateCurrentScenarioPlacements(const std::vector<ScenarioCrowdPlacement>& placements) {
@@ -554,11 +560,17 @@ QWidget* ScenarioAuthoringWidget::createRunPanel() {
     stagedScenariosLabel_ = createLabel("", panel);
     stagedScenariosLabel_->setStyleSheet(ui::mutedTextStyleSheet());
     QStringList lines;
-    if (scenarios_.empty()) {
+    const auto stagedCount = std::count_if(scenarios_.begin(), scenarios_.end(), [](const auto& scenario) {
+        return scenario.stagedForRun;
+    });
+    if (stagedCount == 0) {
         lines << "No staged scenarios";
     } else {
         lines << "Staged scenarios";
         for (const auto& scenario : scenarios_) {
+            if (!scenario.stagedForRun) {
+                continue;
+            }
             const auto role = scenario.draft.role == safecrowd::domain::ScenarioRole::Baseline ? "Baseline" : "Alternative";
             lines << QString("- %1 (%2)").arg(QString::fromStdString(scenario.draft.name), role);
         }
@@ -570,12 +582,15 @@ QWidget* ScenarioAuthoringWidget::createRunPanel() {
     executeRunButton_ = new QPushButton("Run Staged Scenarios", panel);
     executeRunButton_->setFont(ui::font(ui::FontRole::Body));
     executeRunButton_->setStyleSheet(ui::primaryButtonStyleSheet());
-    executeRunButton_->setEnabled(!scenarios_.empty());
+    executeRunButton_->setEnabled(stagedCount > 0);
     layout->addWidget(executeRunButton_);
     connect(executeRunButton_, &QPushButton::clicked, this, [this]() {
         if (stagedScenariosLabel_ != nullptr) {
+            const auto stagedCount = std::count_if(scenarios_.begin(), scenarios_.end(), [](const auto& scenario) {
+                return scenario.stagedForRun;
+            });
             stagedScenariosLabel_->setText(stagedScenariosLabel_->text()
-                + QString("\n\nExecution queued: %1 scenario(s)").arg(static_cast<int>(scenarios_.size())));
+                + QString("\n\nExecution queued: %1 scenario(s)").arg(static_cast<int>(stagedCount)));
         }
     });
 
@@ -609,19 +624,10 @@ QWidget* ScenarioAuthoringWidget::createScenarioPanel() {
     inspectorLayout->addWidget(changesLabel_);
     inspectorLayout->addStretch(1);
 
-    readinessLabel_ = createLabel("", inspector);
-    readinessLabel_->setStyleSheet(ui::mutedTextStyleSheet());
-    inspectorLayout->addWidget(readinessLabel_);
-
-    addExitClosureButton_ = new QPushButton("Add exit closure", inspector);
-    addExitClosureButton_->setFont(ui::font(ui::FontRole::Body));
-    addExitClosureButton_->setStyleSheet(ui::secondaryButtonStyleSheet());
-    inspectorLayout->addWidget(addExitClosureButton_);
-
-    addStagedReleaseButton_ = new QPushButton("Add staged release", inspector);
-    addStagedReleaseButton_->setFont(ui::font(ui::FontRole::Body));
-    addStagedReleaseButton_->setStyleSheet(ui::secondaryButtonStyleSheet());
-    inspectorLayout->addWidget(addStagedReleaseButton_);
+    stageScenarioButton_ = new QPushButton("Stage Scenario", inspector);
+    stageScenarioButton_->setFont(ui::font(ui::FontRole::Body));
+    stageScenarioButton_->setStyleSheet(ui::primaryButtonStyleSheet());
+    inspectorLayout->addWidget(stageScenarioButton_);
 
     connect(scenarioSwitcher_, &QComboBox::currentIndexChanged, this, [this](int index) {
         if (index >= 0 && index < static_cast<int>(scenarios_.size()) && index != currentScenarioIndex_) {
@@ -634,13 +640,8 @@ QWidget* ScenarioAuthoringWidget::createScenarioPanel() {
     connect(newScenarioButton_, &QPushButton::clicked, this, [this]() {
         createScenarioFromCurrent();
     });
-    connect(addExitClosureButton_, &QPushButton::clicked, this, [this]() {
-        const auto* scenario = currentScenario();
-        addEventDraft("Exit closure", "At simulation start", scenario == nullptr ? QString{} : scenario->destinationText);
-    });
-    connect(addStagedReleaseButton_, &QPushButton::clicked, this, [this]() {
-        const auto* scenario = currentScenario();
-        addEventDraft("Staged release", "Every 9 simulated seconds", scenario == nullptr ? QString{} : scenario->startText);
+    connect(stageScenarioButton_, &QPushButton::clicked, this, [this]() {
+        stageCurrentScenario();
     });
 
     return inspector;
