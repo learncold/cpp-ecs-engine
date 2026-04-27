@@ -5,6 +5,8 @@
 #include <limits>
 #include <optional>
 
+#include "application/LayoutCanvasRendering.h"
+
 #include <QCoreApplication>
 #include <QCheckBox>
 #include <QDoubleSpinBox>
@@ -36,187 +38,46 @@ constexpr int kSideToolbarWidth = 44;
 constexpr int kToolbarButtonSize = 44;
 
 QRectF previewViewport(const QRect& widgetRect) {
-    return QRectF(widgetRect).adjusted(
-        kSideToolbarWidth + 16,
-        kTopToolbarHeight + kPropertyPanelHeight + 16,
-        -16,
-        -16);
+    return layoutCanvasViewport(widgetRect, kSideToolbarWidth + 16, kTopToolbarHeight + kPropertyPanelHeight + 16, 16, 16);
 }
 
-struct Bounds2D {
-    double minX{std::numeric_limits<double>::max()};
-    double minY{std::numeric_limits<double>::max()};
-    double maxX{std::numeric_limits<double>::lowest()};
-    double maxY{std::numeric_limits<double>::lowest()};
-
-    bool valid() const noexcept {
-        return minX <= maxX && minY <= maxY;
-    }
-};
+using Bounds2D = LayoutCanvasBounds;
+using LayoutTransform = LayoutCanvasTransform;
 
 void includePoint(Bounds2D& bounds, const safecrowd::domain::Point2D& point) {
-    bounds.minX = std::min(bounds.minX, point.x);
-    bounds.minY = std::min(bounds.minY, point.y);
-    bounds.maxX = std::max(bounds.maxX, point.x);
-    bounds.maxY = std::max(bounds.maxY, point.y);
+    includeLayoutCanvasPoint(bounds, point);
 }
 
 void includePolygon(Bounds2D& bounds, const safecrowd::domain::Polygon2D& polygon) {
-    for (const auto& point : polygon.outline) {
-        includePoint(bounds, point);
-    }
-    for (const auto& hole : polygon.holes) {
-        for (const auto& point : hole) {
-            includePoint(bounds, point);
-        }
-    }
+    includeLayoutCanvasPolygon(bounds, polygon);
 }
 
 void includePolyline(Bounds2D& bounds, const safecrowd::domain::Polyline2D& polyline) {
-    for (const auto& point : polyline.vertices) {
-        includePoint(bounds, point);
-    }
+    includeLayoutCanvasPolyline(bounds, polyline);
 }
 
 void includeLine(Bounds2D& bounds, const safecrowd::domain::LineSegment2D& line) {
-    includePoint(bounds, line.start);
-    includePoint(bounds, line.end);
+    includeLayoutCanvasLine(bounds, line);
 }
 
 std::optional<Bounds2D> collectBounds(const safecrowd::domain::ImportResult& importResult) {
-    Bounds2D bounds;
-
-    if (importResult.layout.has_value()) {
-        for (const auto& zone : importResult.layout->zones) {
-            includePolygon(bounds, zone.area);
-        }
-        for (const auto& barrier : importResult.layout->barriers) {
-            includePolyline(bounds, barrier.geometry);
-        }
-        for (const auto& connection : importResult.layout->connections) {
-            includeLine(bounds, connection.centerSpan);
-        }
-    }
-
-    if (importResult.canonicalGeometry.has_value()) {
-        for (const auto& walkable : importResult.canonicalGeometry->walkableAreas) {
-            includePolygon(bounds, walkable.polygon);
-        }
-        for (const auto& obstacle : importResult.canonicalGeometry->obstacles) {
-            includePolygon(bounds, obstacle.footprint);
-        }
-        for (const auto& wall : importResult.canonicalGeometry->walls) {
-            includeLine(bounds, wall.segment);
-        }
-        for (const auto& opening : importResult.canonicalGeometry->openings) {
-            includeLine(bounds, opening.span);
-        }
-    }
-
-    if (!bounds.valid()) {
-        return std::nullopt;
-    }
-
-    if (bounds.maxX == bounds.minX) {
-        bounds.maxX += 1.0;
-        bounds.minX -= 1.0;
-    }
-    if (bounds.maxY == bounds.minY) {
-        bounds.maxY += 1.0;
-        bounds.minY -= 1.0;
-    }
-
-    return bounds;
+    return collectLayoutCanvasBounds(importResult);
 }
 
-class LayoutTransform {
-public:
-    LayoutTransform(const Bounds2D& bounds, const QRectF& viewport, double zoom, QPointF panOffset)
-        : bounds_(bounds),
-          viewport_(viewport),
-          zoom_(zoom),
-          panOffset_(panOffset) {
-        const auto sx = viewport_.width() / (bounds_.maxX - bounds_.minX);
-        const auto sy = viewport_.height() / (bounds_.maxY - bounds_.minY);
-        scale_ = std::min(sx, sy) * zoom_;
-
-        const auto drawingWidth = (bounds_.maxX - bounds_.minX) * scale_;
-        const auto drawingHeight = (bounds_.maxY - bounds_.minY) * scale_;
-        offsetX_ = viewport_.left() + (viewport_.width() - drawingWidth) / 2.0 + panOffset_.x();
-        offsetY_ = viewport_.top() + (viewport_.height() - drawingHeight) / 2.0 + panOffset_.y();
-    }
-
-    QPointF map(const safecrowd::domain::Point2D& point) const {
-        return {
-            offsetX_ + ((point.x - bounds_.minX) * scale_),
-            offsetY_ + ((bounds_.maxY - point.y) * scale_),
-        };
-    }
-
-    safecrowd::domain::Point2D unmap(const QPointF& point) const {
-        return {
-            .x = bounds_.minX + ((point.x() - offsetX_) / scale_),
-            .y = bounds_.maxY - ((point.y() - offsetY_) / scale_),
-        };
-    }
-
-private:
-    Bounds2D bounds_{};
-    QRectF viewport_{};
-    double zoom_{1.0};
-    QPointF panOffset_{};
-    double scale_{1.0};
-    double offsetX_{0.0};
-    double offsetY_{0.0};
-};
-
 QPainterPath polygonPath(const safecrowd::domain::Polygon2D& polygon, const LayoutTransform& transform) {
-    QPainterPath path;
-
-    const auto addRing = [&](const std::vector<safecrowd::domain::Point2D>& ring) {
-        if (ring.empty()) {
-            return;
-        }
-
-        path.moveTo(transform.map(ring.front()));
-        for (std::size_t i = 1; i < ring.size(); ++i) {
-            path.lineTo(transform.map(ring[i]));
-        }
-        path.closeSubpath();
-    };
-
-    addRing(polygon.outline);
-    for (const auto& hole : polygon.holes) {
-        addRing(hole);
-    }
-
-    return path;
+    return layoutCanvasPolygonPath(polygon, transform);
 }
 
 QPolygonF polylinePath(const safecrowd::domain::Polyline2D& polyline, const LayoutTransform& transform) {
-    QPolygonF path;
-    for (const auto& point : polyline.vertices) {
-        path.append(transform.map(point));
-    }
-    return path;
+    return layoutCanvasPolylinePath(polyline, transform);
 }
 
 void drawLine(QPainter& painter, const safecrowd::domain::LineSegment2D& line, const LayoutTransform& transform) {
-    painter.drawLine(transform.map(line.start), transform.map(line.end));
+    drawLayoutCanvasLine(painter, line, transform);
 }
 
 void drawPolyline(QPainter& painter, const safecrowd::domain::Polyline2D& polyline, const LayoutTransform& transform) {
-    const auto path = polylinePath(polyline, transform);
-    if (path.size() <= 1) {
-        return;
-    }
-
-    if (polyline.closed && path.size() > 2) {
-        painter.drawPolygon(path);
-        return;
-    }
-
-    painter.drawPolyline(path);
+    drawLayoutCanvasPolyline(painter, polyline, transform);
 }
 
 bool stringListContains(const std::vector<std::string>& values, const QString& target) {
@@ -372,6 +233,8 @@ double distanceToSegment(const QPointF& point, const QPointF& start, const QPoin
     return std::hypot(point.x() - projection.x(), point.y() - projection.y());
 }
 
+bool nearlyEqual(double a, double b, double epsilon);
+
 bool containsZone(const safecrowd::domain::FacilityLayout2D& layout, const QString& zoneId) {
     return std::any_of(layout.zones.begin(), layout.zones.end(), [&](const auto& zone) {
         return QString::fromStdString(zone.id) == zoneId;
@@ -395,6 +258,48 @@ bool hasConnectionPair(const safecrowd::domain::FacilityLayout2D& layout, const 
         const auto from = QString::fromStdString(connection.fromZoneId);
         const auto to = QString::fromStdString(connection.toZoneId);
         return (from == fromZoneId && to == toZoneId) || (from == toZoneId && to == fromZoneId);
+    });
+}
+
+bool segmentsShareSpan(
+    const safecrowd::domain::LineSegment2D& first,
+    const safecrowd::domain::Point2D& secondStart,
+    const safecrowd::domain::Point2D& secondEnd) {
+    const bool firstVertical = nearlyEqual(first.start.x, first.end.x, kGeometryEpsilon);
+    const bool firstHorizontal = nearlyEqual(first.start.y, first.end.y, kGeometryEpsilon);
+    const bool secondVertical = nearlyEqual(secondStart.x, secondEnd.x, kGeometryEpsilon);
+    const bool secondHorizontal = nearlyEqual(secondStart.y, secondEnd.y, kGeometryEpsilon);
+
+    if (firstVertical && secondVertical && nearlyEqual(first.start.x, secondStart.x, kGeometryEpsilon)) {
+        const auto firstMin = std::min(first.start.y, first.end.y);
+        const auto firstMax = std::max(first.start.y, first.end.y);
+        const auto secondMin = std::min(secondStart.y, secondEnd.y);
+        const auto secondMax = std::max(secondStart.y, secondEnd.y);
+        return std::max(firstMin, secondMin) < std::min(firstMax, secondMax) - kGeometryEpsilon;
+    }
+
+    if (firstHorizontal && secondHorizontal && nearlyEqual(first.start.y, secondStart.y, kGeometryEpsilon)) {
+        const auto firstMin = std::min(first.start.x, first.end.x);
+        const auto firstMax = std::max(first.start.x, first.end.x);
+        const auto secondMin = std::min(secondStart.x, secondEnd.x);
+        const auto secondMax = std::max(secondStart.x, secondEnd.x);
+        return std::max(firstMin, secondMin) < std::min(firstMax, secondMax) - kGeometryEpsilon;
+    }
+
+    return false;
+}
+
+bool hasConnectionPairAtSpan(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const QString& fromZoneId,
+    const QString& toZoneId,
+    const safecrowd::domain::Point2D& spanStart,
+    const safecrowd::domain::Point2D& spanEnd) {
+    return std::any_of(layout.connections.begin(), layout.connections.end(), [&](const auto& connection) {
+        const auto from = QString::fromStdString(connection.fromZoneId);
+        const auto to = QString::fromStdString(connection.toZoneId);
+        const bool samePair = (from == fromZoneId && to == toZoneId) || (from == toZoneId && to == fromZoneId);
+        return samePair && segmentsShareSpan(connection.centerSpan, spanStart, spanEnd);
     });
 }
 
@@ -1095,22 +1000,21 @@ void LayoutPreviewWidget::focusIssueTarget(const QString& targetId) {
         const auto targetHeight = std::max(targetBounds.maxY - targetBounds.minY, 1.0);
         const auto targetZoom = 0.55 * std::min(viewport.width() / targetWidth, viewport.height() / targetHeight)
             / std::min(viewport.width() / (worldBounds->maxX - worldBounds->minX), viewport.height() / (worldBounds->maxY - worldBounds->minY));
-        zoom_ = std::clamp(targetZoom, 1.0, 30.0);
+        camera_.setZoom(std::clamp(targetZoom, 1.0, 30.0));
 
-        const LayoutTransform transform(*worldBounds, viewport, zoom_, {});
+        const LayoutTransform transform(*worldBounds, viewport, camera_.zoom(), {});
         const safecrowd::domain::Point2D center{
             .x = (targetBounds.minX + targetBounds.maxX) / 2.0,
             .y = (targetBounds.minY + targetBounds.maxY) / 2.0,
         };
-        panOffset_ = viewport.center() - transform.map(center);
+        camera_.setPanOffset(viewport.center() - transform.map(center));
     }
 
     update();
 }
 
 void LayoutPreviewWidget::resetView() {
-    zoom_ = 1.0;
-    panOffset_ = {};
+    camera_.reset();
     update();
 }
 
@@ -1172,28 +1076,13 @@ void LayoutPreviewWidget::setLayoutEditedHandler(std::function<void(const safecr
 bool LayoutPreviewWidget::eventFilter(QObject* watched, QEvent* event) {
     (void)watched;
 
-    if (event->type() == QEvent::KeyPress) {
-        auto* keyEvent = static_cast<QKeyEvent*>(event);
-        if (keyEvent->key() == Qt::Key_Space && !keyEvent->isAutoRepeat()) {
-            spacePressed_ = true;
-        }
-    } else if (event->type() == QEvent::KeyRelease) {
-        auto* keyEvent = static_cast<QKeyEvent*>(event);
-        if (keyEvent->key() == Qt::Key_Space && !keyEvent->isAutoRepeat()) {
-            spacePressed_ = false;
-            if (!panning_) {
-                panButton_ = Qt::NoButton;
-            }
-        }
-    }
+    camera_.handleGlobalKeyEvent(event);
 
     return QWidget::eventFilter(watched, event);
 }
 
 void LayoutPreviewWidget::keyPressEvent(QKeyEvent* event) {
-    if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {
-        spacePressed_ = true;
-        event->accept();
+    if (camera_.handleKeyPress(event)) {
         return;
     }
 
@@ -1201,9 +1090,7 @@ void LayoutPreviewWidget::keyPressEvent(QKeyEvent* event) {
 }
 
 void LayoutPreviewWidget::keyReleaseEvent(QKeyEvent* event) {
-    if (event->key() == Qt::Key_Space && !event->isAutoRepeat()) {
-        spacePressed_ = false;
-        event->accept();
+    if (camera_.handleKeyRelease(event)) {
         return;
     }
 
@@ -1216,7 +1103,7 @@ void LayoutPreviewWidget::mouseDoubleClickEvent(QMouseEvent* event) {
 }
 
 void LayoutPreviewWidget::mouseMoveEvent(QMouseEvent* event) {
-    if (!panning_ && !drafting_) {
+    if (!camera_.panning() && !drafting_) {
         QWidget::mouseMoveEvent(event);
         return;
     }
@@ -1224,7 +1111,7 @@ void LayoutPreviewWidget::mouseMoveEvent(QMouseEvent* event) {
     if (drafting_) {
         const auto bounds = collectBounds(importResult_);
         if (bounds.has_value()) {
-            const LayoutTransform transform(*bounds, previewViewport(rect()), zoom_, panOffset_);
+            const LayoutTransform transform(*bounds, previewViewport(rect()), camera_.zoom(), camera_.panOffset());
             const auto world = transform.unmap(event->position());
             draftCurrentWorld_ = QPointF(world.x, world.y);
             update();
@@ -1233,20 +1120,18 @@ void LayoutPreviewWidget::mouseMoveEvent(QMouseEvent* event) {
         }
     }
 
-    const auto currentPosition = event->position();
-    panOffset_ += currentPosition - lastMousePosition_;
-    lastMousePosition_ = currentPosition;
-    update();
+    if (camera_.updatePan(event)) {
+        update();
+        return;
+    }
+
+    QWidget::mouseMoveEvent(event);
 }
 
 void LayoutPreviewWidget::mousePressEvent(QMouseEvent* event) {
     setFocus(Qt::MouseFocusReason);
 
-    if (event->button() == Qt::MiddleButton || (event->button() == Qt::LeftButton && spacePressed_)) {
-        panning_ = true;
-        panButton_ = event->button();
-        lastMousePosition_ = event->position();
-        event->accept();
+    if (camera_.beginPan(event)) {
         return;
     }
 
@@ -1264,7 +1149,7 @@ void LayoutPreviewWidget::mousePressEvent(QMouseEvent* event) {
         }
 
         if (toolMode_ != ToolMode::Select && toolMode_ != ToolMode::Delete) {
-            const LayoutTransform transform(*bounds, previewViewport(rect()), zoom_, panOffset_);
+            const LayoutTransform transform(*bounds, previewViewport(rect()), camera_.zoom(), camera_.panOffset());
             const auto world = transform.unmap(event->position());
             drafting_ = true;
             draftStartWorld_ = QPointF(world.x, world.y);
@@ -1282,10 +1167,7 @@ void LayoutPreviewWidget::mousePressEvent(QMouseEvent* event) {
 }
 
 void LayoutPreviewWidget::mouseReleaseEvent(QMouseEvent* event) {
-    if (panning_ && event->button() == panButton_) {
-        panning_ = false;
-        panButton_ = Qt::NoButton;
-        event->accept();
+    if (camera_.finishPan(event)) {
         return;
     }
 
@@ -1293,7 +1175,7 @@ void LayoutPreviewWidget::mouseReleaseEvent(QMouseEvent* event) {
         drafting_ = false;
         const auto bounds = collectBounds(importResult_);
         if (bounds.has_value()) {
-            const LayoutTransform transform(*bounds, previewViewport(rect()), zoom_, panOffset_);
+            const LayoutTransform transform(*bounds, previewViewport(rect()), camera_.zoom(), camera_.panOffset());
             const auto world = transform.unmap(event->position());
             draftCurrentWorld_ = QPointF(world.x, world.y);
         }
@@ -1342,15 +1224,9 @@ void LayoutPreviewWidget::paintEvent(QPaintEvent* event) {
     }
 
     const QRectF viewport = previewViewport(rect());
-    const LayoutTransform transform(*bounds, viewport, zoom_, panOffset_);
+    const LayoutTransform transform(*bounds, viewport, camera_.zoom(), camera_.panOffset());
 
-    painter.setPen(QPen(QColor(238, 243, 248), 1));
-    for (int x = static_cast<int>(viewport.left()); x < static_cast<int>(viewport.right()); x += 32) {
-        painter.drawLine(QPointF(x, viewport.top()), QPointF(x, viewport.bottom()));
-    }
-    for (int y = static_cast<int>(viewport.top()); y < static_cast<int>(viewport.bottom()); y += 32) {
-        painter.drawLine(QPointF(viewport.left(), y), QPointF(viewport.right(), y));
-    }
+    drawLayoutCanvasGrid(painter, viewport);
 
     painter.setPen(Qt::NoPen);
     if (importResult_.layout.has_value()) {
@@ -1481,7 +1357,7 @@ void LayoutPreviewWidget::paintEvent(QPaintEvent* event) {
 
     painter.setPen(QPen(QColor(115, 128, 140), 1));
     painter.setFont(QFont("Segoe UI", 9, QFont::Medium));
-    painter.drawText(viewport.adjusted(0, -10, 0, 0), Qt::AlignTop | Qt::AlignRight, QString("Zoom %1%").arg(static_cast<int>(zoom_ * 100.0)));
+    painter.drawText(viewport.adjusted(0, -10, 0, 0), Qt::AlignTop | Qt::AlignRight, QString("Zoom %1%").arg(static_cast<int>(camera_.zoom() * 100.0)));
     painter.drawText(viewport.adjusted(0, -10, 0, 0), Qt::AlignTop | Qt::AlignLeft, "Layout Preview");
 
 }
@@ -1498,18 +1374,12 @@ void LayoutPreviewWidget::wheelEvent(QWheelEvent* event) {
         return;
     }
 
-    const QRectF viewport = previewViewport(rect());
-    const LayoutTransform currentTransform(*bounds, viewport, zoom_, panOffset_);
-    const auto anchorPoint = event->position();
-    const auto anchorWorld = currentTransform.unmap(anchorPoint);
+    if (camera_.zoomAt(event, *bounds, previewViewport(rect()))) {
+        update();
+        return;
+    }
 
-    const auto factor = event->angleDelta().y() > 0 ? 1.15 : (1.0 / 1.15);
-    zoom_ = std::clamp(zoom_ * factor, 0.1, 50.0);
-
-    const LayoutTransform updatedTransform(*bounds, viewport, zoom_, panOffset_);
-    panOffset_ += anchorPoint - updatedTransform.map(anchorWorld);
-    update();
-    event->accept();
+    QWidget::wheelEvent(event);
 }
 
 void LayoutPreviewWidget::applyToolAt(const QPointF& position) {
@@ -1522,7 +1392,7 @@ void LayoutPreviewWidget::applyToolAt(const QPointF& position) {
         return;
     }
 
-    const LayoutTransform transform(*bounds, previewViewport(rect()), zoom_, panOffset_);
+    const LayoutTransform transform(*bounds, previewViewport(rect()), camera_.zoom(), camera_.panOffset());
     const auto zoneId = hitTestZone(*importResult_.layout, position, transform);
     const auto connectionId = hitTestConnection(*importResult_.layout, position, transform);
     const auto barrierId = hitTestBarrier(*importResult_.layout, position, transform);
@@ -1821,7 +1691,10 @@ void LayoutPreviewWidget::createDoorAt(const QString& barrierId, const QPointF& 
         connectionKind = safecrowd::domain::ConnectionKind::Exit;
     }
 
-    if (fromZoneId.isEmpty() || toZoneId.isEmpty() || fromZoneId == toZoneId || hasConnectionPair(layout, fromZoneId, toZoneId)) {
+    if (fromZoneId.isEmpty()
+        || toZoneId.isEmpty()
+        || fromZoneId == toZoneId
+        || hasConnectionPairAtSpan(layout, fromZoneId, toZoneId, gapStart, gapEnd)) {
         return;
     }
 

@@ -17,10 +17,9 @@
 #include <QVBoxLayout>
 
 #include "application/LayoutNavigationPanelWidget.h"
-#include "application/LayoutPreviewWidget.h"
+#include "application/ScenarioCanvasWidget.h"
 #include "application/UiStyle.h"
 #include "application/WorkspaceShell.h"
-#include "domain/ImportResult.h"
 
 namespace safecrowd::application {
 namespace {
@@ -135,7 +134,7 @@ QWidget* createCrowdPanel(
     layout->setSpacing(12);
     layout->addWidget(createLabel("Crowd", content, ui::FontRole::Title));
 
-    if (scenario == nullptr || scenario->draft.population.initialPlacements.empty()) {
+    if (scenario == nullptr || scenario->crowdPlacements.empty()) {
         auto* empty = createLabel("No pedestrian placements yet", content);
         empty->setStyleSheet(ui::mutedTextStyleSheet());
         layout->addWidget(empty);
@@ -143,9 +142,23 @@ QWidget* createCrowdPanel(
         return content;
     }
 
-    const auto& placement = scenario->draft.population.initialPlacements.front();
+    int individualCount = 0;
+    int groupCount = 0;
+    int occupantCount = 0;
+    for (const auto& placement : scenario->crowdPlacements) {
+        occupantCount += placement.occupantCount;
+        if (placement.kind == ScenarioCrowdPlacementKind::Individual) {
+            ++individualCount;
+        } else {
+            ++groupCount;
+        }
+    }
+
     auto* summary = createLabel(
-        QString("1 placement\n%1 people\n1 group").arg(static_cast<int>(placement.targetAgentCount)),
+        QString("%1 individual\n%2 group\n%3 people")
+            .arg(individualCount)
+            .arg(groupCount)
+            .arg(occupantCount),
         content);
     summary->setStyleSheet(ui::mutedTextStyleSheet());
     layout->addWidget(summary);
@@ -154,13 +167,16 @@ QWidget* createCrowdPanel(
     sectionHeader->setStyleSheet(ui::subtleTextStyleSheet());
     layout->addWidget(sectionHeader);
 
-    auto* row = new QPushButton(QString("%1 people  -  %2")
-                                    .arg(static_cast<int>(placement.targetAgentCount))
-                                    .arg(QString::fromStdString(placement.zoneId)),
-                                content);
-    row->setFont(ui::font(ui::FontRole::Body));
-    row->setStyleSheet(ui::ghostRowStyleSheet());
-    layout->addWidget(row);
+    for (const auto& placement : scenario->crowdPlacements) {
+        const auto kind = placement.kind == ScenarioCrowdPlacementKind::Individual ? "Individual" : "Group";
+        auto* row = new QPushButton(QString("%1  -  %2  -  %3 people")
+                                        .arg(kind, placement.zoneId)
+                                        .arg(placement.occupantCount),
+                                    content);
+        row->setFont(ui::font(ui::FontRole::Body));
+        row->setStyleSheet(ui::ghostRowStyleSheet());
+        layout->addWidget(row);
+    }
     layout->addStretch(1);
     return content;
 }
@@ -278,15 +294,10 @@ void ScenarioAuthoringWidget::createScenarioWithName(const QString& name, int so
         scenario.draft.execution.repeatCount = 1;
         scenario.draft.execution.baseSeed = 1;
 
-        const auto* startZone = firstStartZone(layout_);
         const auto* destinationZone = firstDestinationZone(layout_);
+        const auto* startZone = firstStartZone(layout_);
         if (startZone != nullptr) {
             scenario.startText = zoneLabel(*startZone);
-            scenario.draft.population.initialPlacements.push_back({
-                .id = "placement-1",
-                .zoneId = startZone->id,
-                .targetAgentCount = 100,
-            });
         }
         if (destinationZone != nullptr) {
             scenario.destinationText = zoneLabel(*destinationZone);
@@ -320,11 +331,13 @@ void ScenarioAuthoringWidget::refreshCanvas() {
         return;
     }
 
-    safecrowd::domain::ImportResult result;
-    result.layout = layout_;
-    result.reviewStatus = safecrowd::domain::ImportReviewStatus::Approved;
-    preview_ = new LayoutPreviewWidget(result, shell_);
-    shell_->setCanvas(preview_);
+    auto* scenario = currentScenario();
+    canvas_ = new ScenarioCanvasWidget(layout_, shell_);
+    canvas_->setPlacements(scenario->crowdPlacements);
+    canvas_->setPlacementsChangedHandler([this](const std::vector<ScenarioCrowdPlacement>& placements) {
+        updateCurrentScenarioPlacements(placements);
+    });
+    shell_->setCanvas(canvas_);
 }
 
 void ScenarioAuthoringWidget::refreshInspector() {
@@ -335,9 +348,10 @@ void ScenarioAuthoringWidget::refreshInspector() {
         if (!hasScenario) {
             scenarioSummaryLabel_->setText("No scenario selected");
         } else {
-            const auto people = scenario->draft.population.initialPlacements.empty()
-                ? 0
-                : static_cast<int>(scenario->draft.population.initialPlacements.front().targetAgentCount);
+            int people = 0;
+            for (const auto& placement : scenario->crowdPlacements) {
+                people += placement.occupantCount;
+            }
             scenarioSummaryLabel_->setText(QString("Name: %1\nRole: %2\nPopulation: %3\nStart: %4\nDestination: %5\nEvents: %6")
                 .arg(
                     QString::fromStdString(scenario->draft.name),
@@ -454,6 +468,30 @@ void ScenarioAuthoringWidget::setRightPanelMode(RightPanelMode mode) {
         runPanelButton_->setChecked(mode == RightPanelMode::Run);
     }
     refreshRightPanel();
+}
+
+void ScenarioAuthoringWidget::updateCurrentScenarioPlacements(const std::vector<ScenarioCrowdPlacement>& placements) {
+    auto* scenario = currentScenario();
+    if (scenario == nullptr) {
+        return;
+    }
+
+    scenario->crowdPlacements = placements;
+    scenario->draft.population.initialPlacements.clear();
+    for (const auto& placement : scenario->crowdPlacements) {
+        safecrowd::domain::InitialPlacement2D initialPlacement;
+        initialPlacement.id = placement.id.toStdString();
+        initialPlacement.zoneId = placement.zoneId.toStdString();
+        initialPlacement.area.outline = placement.area;
+        initialPlacement.targetAgentCount = static_cast<std::size_t>(placement.occupantCount);
+        scenario->draft.population.initialPlacements.push_back(std::move(initialPlacement));
+    }
+
+    refreshNavigationPanel();
+    refreshInspector();
+    if (rightPanelMode_ == RightPanelMode::Run) {
+        refreshRightPanel();
+    }
 }
 
 void ScenarioAuthoringWidget::showEmptyCanvas() {

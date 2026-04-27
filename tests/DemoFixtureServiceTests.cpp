@@ -35,6 +35,14 @@ bool containsConnectionId(
     });
 }
 
+bool containsBarrierId(
+    const std::vector<safecrowd::domain::Barrier2D>& barriers,
+    const std::string& id) {
+    return std::any_of(barriers.begin(), barriers.end(), [&](const auto& barrier) {
+        return barrier.id == id;
+    });
+}
+
 double spanLength(const safecrowd::domain::LineSegment2D& span) {
     const auto dx = span.end.x - span.start.x;
     const auto dy = span.end.y - span.start.y;
@@ -62,9 +70,12 @@ SC_TEST(DemoFixtureServiceBuildsSprint1Fixture) {
     SC_EXPECT_TRUE(containsConnectionKind(layout.connections, safecrowd::domain::ConnectionKind::Opening));
     SC_EXPECT_TRUE(containsConnectionKind(layout.connections, safecrowd::domain::ConnectionKind::Doorway));
     SC_EXPECT_TRUE(containsConnectionKind(layout.connections, safecrowd::domain::ConnectionKind::Exit));
-    SC_EXPECT_EQ(layout.barriers.size(), std::size_t{10});
+    SC_EXPECT_EQ(layout.barriers.size(), std::size_t{14});
     SC_EXPECT_TRUE(std::any_of(layout.barriers.begin(), layout.barriers.end(), [](const auto& barrier) {
         return barrier.geometry.closed;
+    }));
+    SC_EXPECT_TRUE(std::all_of(layout.barriers.begin(), layout.barriers.end(), [](const auto& barrier) {
+        return barrier.geometry.closed || barrier.geometry.vertices.size() == std::size_t{2};
     }));
 
     SC_EXPECT_EQ(population.initialPlacements.size(), std::size_t{1});
@@ -83,7 +94,7 @@ SC_TEST(DemoLayoutsProvidesRuntimeFacilityLayout) {
     SC_EXPECT_EQ(layout.id, std::string(safecrowd::domain::DemoLayouts::Sprint1FacilityIds::LayoutId));
     SC_EXPECT_EQ(layout.zones.size(), std::size_t{4});
     SC_EXPECT_EQ(layout.connections.size(), std::size_t{3});
-    SC_EXPECT_EQ(layout.barriers.size(), std::size_t{10});
+    SC_EXPECT_EQ(layout.barriers.size(), std::size_t{14});
     SC_EXPECT_TRUE(containsZoneId(layout.zones, safecrowd::domain::DemoLayouts::Sprint1FacilityIds::MainRoomZoneId));
     SC_EXPECT_TRUE(containsZoneId(layout.zones, safecrowd::domain::DemoLayouts::Sprint1FacilityIds::SideRoomZoneId));
     SC_EXPECT_TRUE(containsZoneId(layout.zones, safecrowd::domain::DemoLayouts::Sprint1FacilityIds::ExitCorridorZoneId));
@@ -91,8 +102,14 @@ SC_TEST(DemoLayoutsProvidesRuntimeFacilityLayout) {
     SC_EXPECT_TRUE(containsConnectionId(layout.connections, safecrowd::domain::DemoLayouts::Sprint1FacilityIds::OpeningConnectionId));
     SC_EXPECT_TRUE(containsConnectionId(layout.connections, safecrowd::domain::DemoLayouts::Sprint1FacilityIds::DoorwayConnectionId));
     SC_EXPECT_TRUE(containsConnectionId(layout.connections, safecrowd::domain::DemoLayouts::Sprint1FacilityIds::ExitConnectionId));
+    SC_EXPECT_TRUE(containsBarrierId(layout.barriers, safecrowd::domain::DemoLayouts::Sprint1FacilityIds::MainRoomNorthWallId));
+    SC_EXPECT_TRUE(containsBarrierId(layout.barriers, safecrowd::domain::DemoLayouts::Sprint1FacilityIds::SideRoomNorthWallId));
+    SC_EXPECT_TRUE(containsBarrierId(layout.barriers, safecrowd::domain::DemoLayouts::Sprint1FacilityIds::CorridorNorthWallId));
     for (const auto& connection : layout.connections) {
         SC_EXPECT_NEAR(connection.effectiveWidth, spanLength(connection.centerSpan), 1e-9);
+    }
+    for (const auto& barrier : layout.barriers) {
+        SC_EXPECT_TRUE(barrier.geometry.closed || barrier.geometry.vertices.size() == std::size_t{2});
     }
 
     safecrowd::domain::ImportValidationService validator;

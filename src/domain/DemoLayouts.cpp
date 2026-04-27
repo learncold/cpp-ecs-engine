@@ -112,8 +112,12 @@ FacilityLayout2D demoFacility() {
     layout.connections.push_back(exitConnection);
 
     layout.barriers.push_back(makeBarrier(Sprint1FacilityIds::WestWallId, {{0.0, 0.0}, {0.0, 10.0}}));
-    layout.barriers.push_back(makeBarrier(Sprint1FacilityIds::NorthWallId, {{0.0, 10.0}, {20.0, 10.0}, {20.0, 8.0}, {24.0, 8.0}}));
-    layout.barriers.push_back(makeBarrier(Sprint1FacilityIds::SouthWallId, {{24.0, 4.0}, {20.0, 4.0}, {20.0, 0.0}, {0.0, 0.0}}));
+    layout.barriers.push_back(makeBarrier(Sprint1FacilityIds::MainRoomNorthWallId, {{0.0, 10.0}, {12.0, 10.0}}));
+    layout.barriers.push_back(makeBarrier(Sprint1FacilityIds::MainRoomSouthWallId, {{0.0, 0.0}, {12.0, 0.0}}));
+    layout.barriers.push_back(makeBarrier(Sprint1FacilityIds::SideRoomNorthWallId, {{12.0, 10.0}, {20.0, 10.0}}));
+    layout.barriers.push_back(makeBarrier(Sprint1FacilityIds::SideRoomSouthWallId, {{12.0, 0.0}, {20.0, 0.0}}));
+    layout.barriers.push_back(makeBarrier(Sprint1FacilityIds::CorridorNorthWallId, {{20.0, 8.0}, {24.0, 8.0}}));
+    layout.barriers.push_back(makeBarrier(Sprint1FacilityIds::CorridorSouthWallId, {{20.0, 4.0}, {24.0, 4.0}}));
     layout.barriers.push_back(makeBarrier(Sprint1FacilityIds::CorridorExitWallUpperId, {{24.0, 8.0}, {24.0, 7.0}}));
     layout.barriers.push_back(makeBarrier(Sprint1FacilityIds::CorridorExitWallLowerId, {{24.0, 5.0}, {24.0, 4.0}}));
     layout.barriers.push_back(makeBarrier(Sprint1FacilityIds::MainSideWallLowerId, {{12.0, 0.0}, {12.0, 3.5}}));

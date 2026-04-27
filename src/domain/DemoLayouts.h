@@ -15,8 +15,14 @@ struct Sprint1FacilityIds {
     static constexpr const char* ExitConnectionId = "conn-exit-1";
     static constexpr const char* BarrierId = "barrier-1";
     static constexpr const char* WestWallId = "barrier-wall-west";
-    static constexpr const char* NorthWallId = "barrier-wall-north";
-    static constexpr const char* SouthWallId = "barrier-wall-south";
+    static constexpr const char* MainRoomNorthWallId = "barrier-wall-main-north";
+    static constexpr const char* MainRoomSouthWallId = "barrier-wall-main-south";
+    static constexpr const char* SideRoomNorthWallId = "barrier-wall-side-north";
+    static constexpr const char* SideRoomSouthWallId = "barrier-wall-side-south";
+    static constexpr const char* CorridorNorthWallId = "barrier-wall-corridor-north";
+    static constexpr const char* CorridorSouthWallId = "barrier-wall-corridor-south";
+    static constexpr const char* NorthWallId = MainRoomNorthWallId;
+    static constexpr const char* SouthWallId = MainRoomSouthWallId;
     static constexpr const char* CorridorExitWallUpperId = "barrier-wall-corridor-exit-upper";
     static constexpr const char* CorridorExitWallLowerId = "barrier-wall-corridor-exit-lower";
     static constexpr const char* MainSideWallLowerId = "barrier-wall-main-side-lower";

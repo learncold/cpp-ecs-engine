@@ -6,6 +6,7 @@
 #include <QString>
 #include <QWidget>
 
+#include "application/ScenarioCanvasWidget.h"
 #include "domain/FacilityLayout2D.h"
 #include "domain/ScenarioAuthoring.h"
 
@@ -15,7 +16,6 @@ class QPushButton;
 
 namespace safecrowd::application {
 
-class LayoutPreviewWidget;
 class WorkspaceShell;
 
 class ScenarioAuthoringWidget : public QWidget {
@@ -42,6 +42,7 @@ public:
     struct ScenarioState {
         safecrowd::domain::ScenarioDraft draft{};
         std::vector<safecrowd::domain::OperationalEventDraft> events{};
+        std::vector<ScenarioCrowdPlacement> crowdPlacements{};
         QString startText{};
         QString destinationText{};
         QString baseScenarioId{};
@@ -58,6 +59,7 @@ private:
     void refreshRightPanel();
     void refreshScenarioSwitcher();
     void setRightPanelMode(RightPanelMode mode);
+    void updateCurrentScenarioPlacements(const std::vector<ScenarioCrowdPlacement>& placements);
     void showEmptyCanvas();
     void showScenarioNameDialog(int sourceIndex);
     QWidget* createRunPanel();
@@ -73,7 +75,7 @@ private:
     NavigationView navigationView_{NavigationView::Layout};
     RightPanelMode rightPanelMode_{RightPanelMode::Scenario};
     WorkspaceShell* shell_{nullptr};
-    LayoutPreviewWidget* preview_{nullptr};
+    ScenarioCanvasWidget* canvas_{nullptr};
     QPushButton* scenarioPanelButton_{nullptr};
     QPushButton* runPanelButton_{nullptr};
     QComboBox* scenarioSwitcher_{nullptr};

@@ -210,7 +210,8 @@ layout review 이후 scenario를 작성하는 화면이다.
 - `Run` 패널에서 실행 대상으로 staged 된 시나리오 목록 표시
 - `New Scenario from Current`로 현재 시나리오를 복제해 대안 시나리오 생성
 - 좌측 `Layout`, `Crowd`, `Events` 탭을 현재 시나리오 기준으로 표시
-- 중앙 canvas에 승인된 layout 렌더링
+- 중앙 canvas에 승인된 layout과 시나리오 전용 authoring toolbar 표시
+- select, individual occupant placement, rectangular group placement 지원
 - 우측 Scenario panel에서 현재 시나리오 요약, baseline 대비 변경 요약, readiness 표시
 
 현재 UI 요소:
@@ -225,6 +226,9 @@ layout review 이후 scenario를 작성하는 화면이다.
 - Run Staged Scenarios button
 - Scenario name 입력 팝업
 - 승인 layout canvas
+- Select tool
+- Add Individual Occupant tool
+- Add Occupant Group tool
 - Add exit closure
 - Add staged release
 - Readiness Panel

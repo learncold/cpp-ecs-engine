@@ -7,6 +7,7 @@
 
 #include "domain/FacilityLayout2D.h"
 #include "domain/ImportResult.h"
+#include "application/LayoutCanvasRendering.h"
 
 class QFrame;
 class QCheckBox;
@@ -97,13 +98,8 @@ private:
     QString selectedZoneId_{};
     QPointF draftStartWorld_{};
     QPointF draftCurrentWorld_{};
-    QPointF panOffset_{};
-    QPointF lastMousePosition_{};
-    double zoom_{1.0};
-    Qt::MouseButton panButton_{Qt::NoButton};
+    LayoutCanvasCamera camera_{};
     bool drafting_{false};
-    bool panning_{false};
-    bool spacePressed_{false};
     ToolMode toolMode_{ToolMode::Select};
     bool roomAutoWallsEnabled_{true};
     bool doorCreatesLeaf_{true};
