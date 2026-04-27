@@ -15,6 +15,7 @@
 #include <QVBoxLayout>
 
 #include "application/IssueCardWidget.h"
+#include "application/LayoutNavigationPanelWidget.h"
 #include "application/UiStyle.h"
 #include "application/WorkspaceShell.h"
 #include "domain/ImportIssue.h"
@@ -198,116 +199,14 @@ QWidget* createNavigationPanel(
     layout->addWidget(title);
 
     if (!showIssues) {
-        auto* scrollArea = new QScrollArea(content);
-        scrollArea->setWidgetResizable(true);
-        scrollArea->setFrameShape(QFrame::NoFrame);
-        scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-        ui::polishScrollArea(scrollArea);
-
-        auto* scrollContent = new QWidget(scrollArea);
-        scrollContent->setStyleSheet("QWidget { background: transparent; }");
-        auto* sectionsLayout = new QVBoxLayout(scrollContent);
-        sectionsLayout->setContentsMargins(0, 0, 4, 0);
-        sectionsLayout->setSpacing(14);
-
-        const auto addSection = [&](const QString& header, auto predicate) {
-            if (!importResult.layout.has_value()) {
-                return;
-            }
-
-            QList<QPushButton*> buttons;
-            for (const auto& zone : importResult.layout->zones) {
-                if (!predicate(zone)) {
-                    continue;
-                }
-
-                auto* button = new QPushButton(
-                    zone.label.empty()
-                        ? QString::fromStdString(zone.id)
-                        : QString("%1  •  %2").arg(QString::fromStdString(zone.label), QString::fromStdString(zone.id)),
-                    scrollContent);
-                button->setFont(ui::font(ui::FontRole::Body));
-                button->setCursor(Qt::PointingHandCursor);
-                button->setStyleSheet(ui::ghostRowStyleSheet());
-                QObject::connect(button, &QPushButton::clicked, scrollContent, [selectLayoutElementHandler, zone]() {
-                    selectLayoutElementHandler(QString::fromStdString(zone.id));
-                });
-                buttons.push_back(button);
-            }
-
-            if (buttons.isEmpty()) {
-                return;
-            }
-
-            auto* sectionHeader = new QLabel(header, scrollContent);
-            sectionHeader->setFont(ui::font(ui::FontRole::SectionTitle));
-            sectionHeader->setStyleSheet(ui::subtleTextStyleSheet());
-            sectionsLayout->addWidget(sectionHeader);
-            for (auto* button : buttons) {
-                sectionsLayout->addWidget(button);
-            }
-        };
-
-        addSection("Rooms", [](const auto& zone) {
-            return zone.kind == safecrowd::domain::ZoneKind::Room || zone.kind == safecrowd::domain::ZoneKind::Unknown;
-        });
-        addSection("Corridors", [](const auto& zone) {
-            return zone.kind == safecrowd::domain::ZoneKind::Corridor || zone.kind == safecrowd::domain::ZoneKind::Intersection;
-        });
-        addSection("Exits", [](const auto& zone) {
-            return zone.kind == safecrowd::domain::ZoneKind::Exit || zone.kind == safecrowd::domain::ZoneKind::Stair;
-        });
-
-        if (importResult.layout.has_value() && !importResult.layout->connections.empty()) {
-            auto* sectionHeader = new QLabel("Connections", scrollContent);
-            sectionHeader->setFont(ui::font(ui::FontRole::SectionTitle));
-            sectionHeader->setStyleSheet(ui::subtleTextStyleSheet());
-            sectionsLayout->addWidget(sectionHeader);
-
-            for (const auto& connection : importResult.layout->connections) {
-                auto* button = new QPushButton(
-                    QString("%1  →  %2")
-                        .arg(QString::fromStdString(connection.fromZoneId), QString::fromStdString(connection.toZoneId)),
-                    scrollContent);
-                button->setFont(ui::font(ui::FontRole::Body));
-                button->setCursor(Qt::PointingHandCursor);
-                button->setStyleSheet(ui::ghostRowStyleSheet());
-                QObject::connect(button, &QPushButton::clicked, scrollContent, [selectLayoutElementHandler, connection]() {
-                    selectLayoutElementHandler(QString::fromStdString(connection.id));
-                });
-                sectionsLayout->addWidget(button);
-            }
+        if (auto* titleItem = layout->takeAt(0)) {
+            delete titleItem->widget();
+            delete titleItem;
         }
-
-        if (importResult.layout.has_value() && !importResult.layout->barriers.empty()) {
-            auto* sectionHeader = new QLabel("Walls", scrollContent);
-            sectionHeader->setFont(ui::font(ui::FontRole::SectionTitle));
-            sectionHeader->setStyleSheet(ui::subtleTextStyleSheet());
-            sectionsLayout->addWidget(sectionHeader);
-
-            for (const auto& barrier : importResult.layout->barriers) {
-                auto* button = new QPushButton(QString::fromStdString(barrier.id), scrollContent);
-                button->setFont(ui::font(ui::FontRole::Body));
-                button->setCursor(Qt::PointingHandCursor);
-                button->setStyleSheet(ui::ghostRowStyleSheet());
-                QObject::connect(button, &QPushButton::clicked, scrollContent, [selectLayoutElementHandler, barrier]() {
-                    selectLayoutElementHandler(QString::fromStdString(barrier.id));
-                });
-                sectionsLayout->addWidget(button);
-            }
-        }
-
-        if (sectionsLayout->isEmpty()) {
-            auto* emptyLabel = new QLabel("No recognized layout elements", scrollContent);
-            emptyLabel->setFont(ui::font(ui::FontRole::Body));
-            emptyLabel->setWordWrap(true);
-            emptyLabel->setStyleSheet(ui::mutedTextStyleSheet());
-            sectionsLayout->addWidget(emptyLabel);
-        }
-
-        sectionsLayout->addStretch(1);
-        scrollArea->setWidget(scrollContent);
-        layout->addWidget(scrollArea, 1);
+        layout->addWidget(new LayoutNavigationPanelWidget(
+            importResult.layout.has_value() ? &(*importResult.layout) : nullptr,
+            std::move(selectLayoutElementHandler),
+            content));
         return content;
     }
 

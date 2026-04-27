@@ -203,23 +203,30 @@ layout review 이후 scenario를 작성하는 화면이다.
 
 - Layout Review에서 blocker가 사라진 뒤 `Approve Layout` 클릭 시 진입
 - Workspace Shell 재사용
-- 좌측 패널 기본 탭으로 `Layout` 표시
-- 좌측 `Crowd` 탭에서 보행자 배치와 보행자 그룹 요약 표시
-- 중앙 Scenario Editor에서 먼저 필수 입력만 수집
-- `Create Scenario` 이후 중앙 canvas에 승인된 layout 렌더링
-- Population, start zone, destination 기본값 편집
-- 우측 Scenario panel에서 draft summary와 run readiness 표시
+- 진입 시 시나리오가 없으면 시나리오 이름 입력 팝업 표시
+- 상단바 오른쪽 `Scenario` / `Run` 토글로 오른쪽 패널 내용 전환
+- 두 토글을 모두 해제하면 오른쪽 패널을 숨기고 중앙 canvas가 확장
+- `Scenario` 패널의 switcher로 현재 시나리오를 branch처럼 전환
+- `Run` 패널에서 실행 대상으로 staged 된 시나리오 목록 표시
+- `New Scenario from Current`로 현재 시나리오를 복제해 대안 시나리오 생성
+- 좌측 `Layout`, `Crowd`, `Events` 탭을 현재 시나리오 기준으로 표시
+- 중앙 canvas에 승인된 layout 렌더링
+- 우측 Scenario panel에서 현재 시나리오 요약, baseline 대비 변경 요약, readiness 표시
 
 현재 UI 요소:
 
 - 좌측 Layout 요약 및 zone 목록
 - 좌측 Crowd 배치/그룹 요약
-- Scenario name
-- Start zone
-- Destination
-- Population
-- Create Scenario
+- 좌측 Events 목록
+- Scenario switcher
+- New Scenario from Current
+- Top-right Scenario / Run panel toggles
+- Run staged scenario list
+- Run Staged Scenarios button
+- Scenario name 입력 팝업
 - 승인 layout canvas
+- Add exit closure
+- Add staged release
 - Readiness Panel
 
 후속 설계 대상:

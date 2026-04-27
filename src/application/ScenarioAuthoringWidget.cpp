@@ -1,19 +1,22 @@
 #include "application/ScenarioAuthoringWidget.h"
 
+#include <algorithm>
+
 #include <QComboBox>
 #include <QFrame>
-#include <QGridLayout>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPainter>
 #include <QPushButton>
 #include <QScrollArea>
-#include <QSpinBox>
-#include <QStringList>
 #include <QStyle>
+#include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
 
+#include "application/LayoutNavigationPanelWidget.h"
 #include "application/LayoutPreviewWidget.h"
 #include "application/UiStyle.h"
 #include "application/WorkspaceShell.h"
@@ -22,12 +25,6 @@
 namespace safecrowd::application {
 namespace {
 
-QString zoneLabel(const safecrowd::domain::Zone2D& zone) {
-    const auto id = QString::fromStdString(zone.id);
-    const auto label = QString::fromStdString(zone.label);
-    return label.isEmpty() ? id : QString("%1  -  %2").arg(label, id);
-}
-
 QLabel* createLabel(const QString& text, QWidget* parent, ui::FontRole role = ui::FontRole::Body) {
     auto* label = new QLabel(text, parent);
     label->setFont(ui::font(role));
@@ -35,25 +32,65 @@ QLabel* createLabel(const QString& text, QWidget* parent, ui::FontRole role = ui
     return label;
 }
 
-QFrame* createCard(QWidget* parent) {
-    auto* card = new QFrame(parent);
-    card->setStyleSheet(
-        "QFrame { background: #ffffff; border: 1px solid #d7e0ea; border-radius: 14px; }"
-        "QLabel { background: transparent; border: 0; }"
-        "QComboBox, QLineEdit, QSpinBox {"
-        " background: #ffffff;"
-        " border: 1px solid #c9d5e2;"
-        " border-radius: 10px;"
-        " padding: 8px 10px;"
-        " min-height: 24px;"
-        "}"
-        "QComboBox:focus, QLineEdit:focus, QSpinBox:focus { border-color: #1f5fae; }");
-    return card;
+QString zoneLabel(const safecrowd::domain::Zone2D& zone) {
+    const auto id = QString::fromStdString(zone.id);
+    const auto label = QString::fromStdString(zone.label);
+    return label.isEmpty() ? id : QString("%1  -  %2").arg(label, id);
+}
+
+const safecrowd::domain::Zone2D* firstStartZone(const safecrowd::domain::FacilityLayout2D& layout) {
+    const auto it = std::find_if(layout.zones.begin(), layout.zones.end(), [](const auto& zone) {
+        return zone.kind == safecrowd::domain::ZoneKind::Room || zone.kind == safecrowd::domain::ZoneKind::Unknown;
+    });
+    return it == layout.zones.end() ? nullptr : &(*it);
+}
+
+const safecrowd::domain::Zone2D* firstDestinationZone(const safecrowd::domain::FacilityLayout2D& layout) {
+    const auto exitIt = std::find_if(layout.zones.begin(), layout.zones.end(), [](const auto& zone) {
+        return zone.kind == safecrowd::domain::ZoneKind::Exit;
+    });
+    if (exitIt != layout.zones.end()) {
+        return &(*exitIt);
+    }
+    return layout.zones.empty() ? nullptr : &layout.zones.back();
+}
+
+QIcon makeCrowdIcon(const QColor& color) {
+    QPixmap pixmap(44, 44);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(color);
+    painter.drawEllipse(QPointF(22, 12), 5.5, 5.5);
+    painter.drawEllipse(QPointF(14, 18), 4.6, 4.6);
+    painter.drawEllipse(QPointF(30, 18), 4.6, 4.6);
+    painter.drawRoundedRect(QRectF(12, 24, 20, 8), 4, 4);
+    painter.drawRoundedRect(QRectF(6, 28, 16, 7), 3.5, 3.5);
+    painter.drawRoundedRect(QRectF(22, 28, 16, 7), 3.5, 3.5);
+    return QIcon(pixmap);
+}
+
+QIcon makeEventsIcon(const QColor& color) {
+    QPixmap pixmap(44, 44);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(QPen(color, 3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.drawLine(QPointF(13, 31), QPointF(22, 12));
+    painter.drawLine(QPointF(22, 12), QPointF(31, 31));
+    painter.drawLine(QPointF(16, 25), QPointF(28, 25));
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(color);
+    painter.drawEllipse(QPointF(22, 12), 4, 4);
+    painter.drawEllipse(QPointF(13, 31), 4, 4);
+    painter.drawEllipse(QPointF(31, 31), 4, 4);
+    return QIcon(pixmap);
 }
 
 QWidget* createNavigationRail(
-    bool showLayout,
-    std::function<void(bool)> switchViewHandler,
+    ScenarioAuthoringWidget::NavigationView currentView,
+    std::function<void(ScenarioAuthoringWidget::NavigationView)> switchViewHandler,
     QWidget* parent) {
     auto* activityBar = new QFrame(parent);
     activityBar->setFixedWidth(56);
@@ -67,135 +104,48 @@ QWidget* createNavigationRail(
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
-    const auto makeActivityButton = [&](const QIcon& icon, const QString& tooltip, bool checked, auto&& handler) {
+    const auto makeActivityButton = [&](const QIcon& icon, const QString& tooltip, ScenarioAuthoringWidget::NavigationView view) {
         auto* button = new QToolButton(activityBar);
         button->setIcon(icon);
         button->setIconSize(QSize(22, 22));
         button->setToolTip(tooltip);
         button->setCheckable(true);
-        button->setChecked(checked);
+        button->setChecked(currentView == view);
         button->setCursor(Qt::PointingHandCursor);
         button->setFixedSize(56, 56);
-        QObject::connect(button, &QToolButton::clicked, activityBar, handler);
+        QObject::connect(button, &QToolButton::clicked, activityBar, [switchViewHandler, view]() {
+            switchViewHandler(view);
+        });
         layout->addWidget(button);
-        return button;
     };
 
-    makeActivityButton(
-        activityBar->style()->standardIcon(QStyle::SP_DirIcon),
-        "Layout",
-        showLayout,
-        [switchViewHandler]() {
-            switchViewHandler(true);
-        });
-    makeActivityButton(
-        activityBar->style()->standardIcon(QStyle::SP_FileDialogDetailedView),
-        "Crowd",
-        !showLayout,
-        [switchViewHandler]() {
-            switchViewHandler(false);
-        });
+    makeActivityButton(activityBar->style()->standardIcon(QStyle::SP_DirIcon), "Layout", ScenarioAuthoringWidget::NavigationView::Layout);
+    makeActivityButton(makeCrowdIcon(QColor("#1f5fae")), "Crowd", ScenarioAuthoringWidget::NavigationView::Crowd);
+    makeActivityButton(makeEventsIcon(QColor("#1f5fae")), "Events", ScenarioAuthoringWidget::NavigationView::Events);
     layout->addStretch(1);
     return activityBar;
 }
 
-QWidget* createLayoutPanel(
-    const safecrowd::domain::FacilityLayout2D& facilityLayout,
-    QWidget* parent) {
-    auto* content = new QWidget(parent);
-    auto* layout = new QVBoxLayout(content);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(12);
-
-    auto* title = createLabel("Layout", content, ui::FontRole::Title);
-    layout->addWidget(title);
-
-    auto* summary = createLabel(
-        QString("%1 zones\n%2 connections\n%3 walls")
-            .arg(static_cast<int>(facilityLayout.zones.size()))
-            .arg(static_cast<int>(facilityLayout.connections.size()))
-            .arg(static_cast<int>(facilityLayout.barriers.size())),
-        content);
-    summary->setStyleSheet(ui::mutedTextStyleSheet());
-    layout->addWidget(summary);
-
-    auto* scrollArea = new QScrollArea(content);
-    scrollArea->setWidgetResizable(true);
-    scrollArea->setFrameShape(QFrame::NoFrame);
-    scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    ui::polishScrollArea(scrollArea);
-
-    auto* scrollContent = new QWidget(scrollArea);
-    auto* sectionsLayout = new QVBoxLayout(scrollContent);
-    sectionsLayout->setContentsMargins(0, 0, 4, 0);
-    sectionsLayout->setSpacing(10);
-
-    const auto addZoneSection = [&](const QString& header, auto predicate) {
-        bool hasRows = false;
-        for (const auto& zone : facilityLayout.zones) {
-            if (predicate(zone)) {
-                hasRows = true;
-                break;
-            }
-        }
-        if (!hasRows) {
-            return;
-        }
-
-        auto* sectionHeader = createLabel(header, scrollContent, ui::FontRole::SectionTitle);
-        sectionHeader->setStyleSheet(ui::subtleTextStyleSheet());
-        sectionsLayout->addWidget(sectionHeader);
-
-        for (const auto& zone : facilityLayout.zones) {
-            if (!predicate(zone)) {
-                continue;
-            }
-            auto* row = new QPushButton(zoneLabel(zone), scrollContent);
-            row->setFont(ui::font(ui::FontRole::Body));
-            row->setStyleSheet(ui::ghostRowStyleSheet());
-            sectionsLayout->addWidget(row);
-        }
-    };
-
-    addZoneSection("Rooms", [](const auto& zone) {
-        return zone.kind == safecrowd::domain::ZoneKind::Room || zone.kind == safecrowd::domain::ZoneKind::Unknown;
-    });
-    addZoneSection("Paths", [](const auto& zone) {
-        return zone.kind == safecrowd::domain::ZoneKind::Corridor
-            || zone.kind == safecrowd::domain::ZoneKind::Intersection
-            || zone.kind == safecrowd::domain::ZoneKind::Stair;
-    });
-    addZoneSection("Exits", [](const auto& zone) {
-        return zone.kind == safecrowd::domain::ZoneKind::Exit;
-    });
-
-    sectionsLayout->addStretch(1);
-    scrollArea->setWidget(scrollContent);
-    layout->addWidget(scrollArea, 1);
-    return content;
-}
-
 QWidget* createCrowdPanel(
-    const safecrowd::domain::ScenarioDraft& draft,
-    const std::vector<safecrowd::domain::OperationalEventDraft>& events,
+    const ScenarioAuthoringWidget::ScenarioState* scenario,
     QWidget* parent) {
     auto* content = new QWidget(parent);
     auto* layout = new QVBoxLayout(content);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(12);
-
     layout->addWidget(createLabel("Crowd", content, ui::FontRole::Title));
 
-    const auto placementCount = static_cast<int>(draft.population.initialPlacements.size());
-    const auto agentCount = draft.population.initialPlacements.empty()
-        ? 0
-        : static_cast<int>(draft.population.initialPlacements.front().targetAgentCount);
+    if (scenario == nullptr || scenario->draft.population.initialPlacements.empty()) {
+        auto* empty = createLabel("No pedestrian placements yet", content);
+        empty->setStyleSheet(ui::mutedTextStyleSheet());
+        layout->addWidget(empty);
+        layout->addStretch(1);
+        return content;
+    }
 
+    const auto& placement = scenario->draft.population.initialPlacements.front();
     auto* summary = createLabel(
-        QString("%1 placement\n%2 people\n%3 groups")
-            .arg(placementCount)
-            .arg(agentCount)
-            .arg(placementCount > 0 ? 1 : 0),
+        QString("1 placement\n%1 people\n1 group").arg(static_cast<int>(placement.targetAgentCount)),
         content);
     summary->setStyleSheet(ui::mutedTextStyleSheet());
     layout->addWidget(summary);
@@ -204,49 +154,46 @@ QWidget* createCrowdPanel(
     sectionHeader->setStyleSheet(ui::subtleTextStyleSheet());
     layout->addWidget(sectionHeader);
 
-    if (draft.population.initialPlacements.empty()) {
-        auto* empty = createLabel("No pedestrian placements yet", content);
-        empty->setStyleSheet(ui::mutedTextStyleSheet());
-        layout->addWidget(empty);
-    } else {
-        for (const auto& placement : draft.population.initialPlacements) {
-            auto* row = new QPushButton(
-                QString("%1 people  -  %2")
-                    .arg(static_cast<int>(placement.targetAgentCount))
-                    .arg(QString::fromStdString(placement.zoneId)),
-                content);
-            row->setFont(ui::font(ui::FontRole::Body));
-            row->setStyleSheet(ui::ghostRowStyleSheet());
-            layout->addWidget(row);
-        }
-    }
-
-    auto* eventHeader = createLabel("Scenario Events", content, ui::FontRole::SectionTitle);
-    eventHeader->setStyleSheet(ui::subtleTextStyleSheet());
-    layout->addWidget(eventHeader);
-
-    if (events.empty()) {
-        auto* empty = createLabel("No event markers yet", content);
-        empty->setStyleSheet(ui::mutedTextStyleSheet());
-        layout->addWidget(empty);
-    } else {
-        for (const auto& event : events) {
-            auto* row = new QPushButton(QString::fromStdString(event.name), content);
-            row->setFont(ui::font(ui::FontRole::Body));
-            row->setStyleSheet(ui::ghostRowStyleSheet());
-            layout->addWidget(row);
-        }
-    }
-
+    auto* row = new QPushButton(QString("%1 people  -  %2")
+                                    .arg(static_cast<int>(placement.targetAgentCount))
+                                    .arg(QString::fromStdString(placement.zoneId)),
+                                content);
+    row->setFont(ui::font(ui::FontRole::Body));
+    row->setStyleSheet(ui::ghostRowStyleSheet());
+    layout->addWidget(row);
     layout->addStretch(1);
     return content;
 }
 
-void addFieldRow(QGridLayout* layout, int row, const QString& label, QWidget* field, QWidget* parent) {
-    auto* fieldLabel = createLabel(label, parent, ui::FontRole::Caption);
-    fieldLabel->setStyleSheet(ui::subtleTextStyleSheet());
-    layout->addWidget(fieldLabel, row, 0);
-    layout->addWidget(field, row, 1);
+QWidget* createEventsPanel(
+    const ScenarioAuthoringWidget::ScenarioState* scenario,
+    QWidget* parent) {
+    auto* content = new QWidget(parent);
+    auto* layout = new QVBoxLayout(content);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(12);
+    layout->addWidget(createLabel("Events", content, ui::FontRole::Title));
+
+    if (scenario == nullptr || scenario->events.empty()) {
+        auto* empty = createLabel("No operational events yet", content);
+        empty->setStyleSheet(ui::mutedTextStyleSheet());
+        layout->addWidget(empty);
+        layout->addStretch(1);
+        return content;
+    }
+
+    for (const auto& event : scenario->events) {
+        auto* row = new QPushButton(
+            QString("%1\n%2")
+                .arg(QString::fromStdString(event.name), QString::fromStdString(event.targetSummary)),
+            content);
+        row->setFont(ui::font(ui::FontRole::Body));
+        row->setStyleSheet(ui::ghostRowStyleSheet());
+        layout->addWidget(row);
+    }
+
+    layout->addStretch(1);
+    return content;
 }
 
 }  // namespace
@@ -265,34 +212,171 @@ ScenarioAuthoringWidget::ScenarioAuthoringWidget(
     rootLayout->setSpacing(0);
 
     shell_ = new WorkspaceShell(this);
-    shell_->setTools({"Project", "Scenario", "Run"});
+    shell_->setTools({"Project"});
     shell_->setSaveProjectHandler(std::move(saveProjectHandler));
     shell_->setOpenProjectHandler(std::move(openProjectHandler));
-    refreshNavigationPanel();
-
-    auto* inspector = new QWidget(shell_);
-    auto* inspectorLayout = new QVBoxLayout(inspector);
-    inspectorLayout->setContentsMargins(0, 0, 0, 0);
-    inspectorLayout->setSpacing(12);
-    inspectorLayout->addWidget(createLabel("Scenario", inspector, ui::FontRole::Title));
-    draftSummaryLabel_ = createLabel("", inspector);
-    draftSummaryLabel_->setStyleSheet(ui::mutedTextStyleSheet());
-    inspectorLayout->addWidget(draftSummaryLabel_);
-    inspectorLayout->addStretch(1);
-    readinessLabel_ = createLabel("", inspector);
-    readinessLabel_->setStyleSheet(ui::mutedTextStyleSheet());
-    inspectorLayout->addWidget(readinessLabel_);
-
-    auto* runButton = new QPushButton("Run Ready", inspector);
-    runButton->setFont(ui::font(ui::FontRole::Body));
-    runButton->setStyleSheet(ui::primaryButtonStyleSheet());
-    inspectorLayout->addWidget(runButton);
-    shell_->setReviewPanel(inspector);
-
-    showInitialForm();
-    refreshDraftSummary();
-    refreshReadiness();
+    shell_->setTopBarTrailingWidget(createTopBarTogglePanel());
+    refreshRightPanel();
     rootLayout->addWidget(shell_);
+
+    refreshNavigationPanel();
+    showEmptyCanvas();
+    refreshInspector();
+    QTimer::singleShot(0, this, [this]() {
+        ensureInitialScenarioPrompt();
+    });
+}
+
+void ScenarioAuthoringWidget::addEventDraft(const QString& name, const QString& trigger, const QString& target) {
+    auto* scenario = currentScenario();
+    if (scenario == nullptr) {
+        return;
+    }
+
+    const auto exists = std::any_of(scenario->events.begin(), scenario->events.end(), [&](const auto& event) {
+        return QString::fromStdString(event.name) == name;
+    });
+    if (exists) {
+        return;
+    }
+
+    scenario->events.push_back({
+        .id = QString("event-%1").arg(static_cast<int>(scenario->events.size()) + 1).toStdString(),
+        .name = name.toStdString(),
+        .triggerSummary = trigger.toStdString(),
+        .targetSummary = target.toStdString(),
+    });
+    scenario->draft.control.events = scenario->events;
+    refreshNavigationPanel();
+    refreshInspector();
+    if (rightPanelMode_ == RightPanelMode::Run) {
+        refreshRightPanel();
+    }
+}
+
+void ScenarioAuthoringWidget::createScenarioFromCurrent() {
+    showScenarioNameDialog(currentScenarioIndex_);
+}
+
+void ScenarioAuthoringWidget::createScenarioWithName(const QString& name, int sourceIndex) {
+    const auto trimmedName = name.trimmed();
+    if (trimmedName.isEmpty()) {
+        return;
+    }
+
+    ScenarioState scenario;
+    if (sourceIndex >= 0 && sourceIndex < static_cast<int>(scenarios_.size())) {
+        scenario = scenarios_[sourceIndex];
+        scenario.baseScenarioId = QString::fromStdString(scenarios_[sourceIndex].draft.scenarioId);
+        scenario.draft.role = safecrowd::domain::ScenarioRole::Alternative;
+        scenario.draft.variationDiffKeys = {"branch.duplicated"};
+    } else {
+        scenario.draft.role = safecrowd::domain::ScenarioRole::Baseline;
+        scenario.draft.sourceTemplateId = "sprint1-baseline";
+        scenario.draft.execution.timeLimitSeconds = 600.0;
+        scenario.draft.execution.sampleIntervalSeconds = 1.0;
+        scenario.draft.execution.repeatCount = 1;
+        scenario.draft.execution.baseSeed = 1;
+
+        const auto* startZone = firstStartZone(layout_);
+        const auto* destinationZone = firstDestinationZone(layout_);
+        if (startZone != nullptr) {
+            scenario.startText = zoneLabel(*startZone);
+            scenario.draft.population.initialPlacements.push_back({
+                .id = "placement-1",
+                .zoneId = startZone->id,
+                .targetAgentCount = 100,
+            });
+        }
+        if (destinationZone != nullptr) {
+            scenario.destinationText = zoneLabel(*destinationZone);
+        }
+    }
+
+    scenario.draft.name = trimmedName.toStdString();
+    scenario.draft.scenarioId = QString("scenario-%1").arg(scenarios_.size() + 1).toStdString();
+    scenarios_.push_back(std::move(scenario));
+    currentScenarioIndex_ = static_cast<int>(scenarios_.size()) - 1;
+    refreshScenarioSwitcher();
+    refreshCanvas();
+    refreshNavigationPanel();
+    refreshInspector();
+    if (rightPanelMode_ == RightPanelMode::Run) {
+        refreshRightPanel();
+    }
+}
+
+void ScenarioAuthoringWidget::ensureInitialScenarioPrompt() {
+    if (!scenarios_.empty()) {
+        return;
+    }
+
+    showScenarioNameDialog(-1);
+}
+
+void ScenarioAuthoringWidget::refreshCanvas() {
+    if (shell_ == nullptr || currentScenario() == nullptr) {
+        showEmptyCanvas();
+        return;
+    }
+
+    safecrowd::domain::ImportResult result;
+    result.layout = layout_;
+    result.reviewStatus = safecrowd::domain::ImportReviewStatus::Approved;
+    preview_ = new LayoutPreviewWidget(result, shell_);
+    shell_->setCanvas(preview_);
+}
+
+void ScenarioAuthoringWidget::refreshInspector() {
+    const auto* scenario = currentScenario();
+    const bool hasScenario = scenario != nullptr;
+
+    if (scenarioSummaryLabel_ != nullptr) {
+        if (!hasScenario) {
+            scenarioSummaryLabel_->setText("No scenario selected");
+        } else {
+            const auto people = scenario->draft.population.initialPlacements.empty()
+                ? 0
+                : static_cast<int>(scenario->draft.population.initialPlacements.front().targetAgentCount);
+            scenarioSummaryLabel_->setText(QString("Name: %1\nRole: %2\nPopulation: %3\nStart: %4\nDestination: %5\nEvents: %6")
+                .arg(
+                    QString::fromStdString(scenario->draft.name),
+                    scenario->draft.role == safecrowd::domain::ScenarioRole::Baseline ? "Baseline" : "Alternative")
+                .arg(people)
+                .arg(scenario->startText, scenario->destinationText)
+                .arg(static_cast<int>(scenario->events.size())));
+        }
+    }
+
+    if (changesLabel_ != nullptr) {
+        if (!hasScenario || scenario->baseScenarioId.isEmpty()) {
+            changesLabel_->setText("Changes from baseline: none");
+        } else {
+            QStringList changes;
+            if (!scenario->events.empty()) {
+                changes << QString("Events: %1 configured").arg(static_cast<int>(scenario->events.size()));
+            }
+            if (changes.isEmpty()) {
+                changes << "No changed fields yet";
+            }
+            changesLabel_->setText(QString("Based on: %1\nChanged:\n- %2")
+                .arg(scenario->baseScenarioId, changes.join("\n- ")));
+        }
+    }
+
+    if (readinessLabel_ != nullptr) {
+        readinessLabel_->setText(hasScenario ? "Ready for scenario authoring" : "Create a scenario to continue");
+    }
+
+    if (addExitClosureButton_ != nullptr) {
+        addExitClosureButton_->setEnabled(hasScenario);
+    }
+    if (addStagedReleaseButton_ != nullptr) {
+        addStagedReleaseButton_->setEnabled(hasScenario);
+    }
+    if (newScenarioButton_ != nullptr) {
+        newScenarioButton_->setText(hasScenario ? "New Scenario from Current" : "New Scenario");
+    }
 }
 
 void ScenarioAuthoringWidget::refreshNavigationPanel() {
@@ -301,216 +385,277 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
     }
 
     shell_->setNavigationRail(createNavigationRail(
-        navigationView_ == NavigationView::Layout,
-        [this](bool showLayout) {
-            navigationView_ = showLayout ? NavigationView::Layout : NavigationView::Crowd;
+        navigationView_,
+        [this](NavigationView view) {
+            navigationView_ = view;
             refreshNavigationPanel();
         },
         shell_));
 
     if (navigationView_ == NavigationView::Layout) {
-        shell_->setNavigationPanel(createLayoutPanel(layout_, shell_));
+        shell_->setNavigationPanel(new LayoutNavigationPanelWidget(&layout_, {}, shell_));
         return;
     }
-
-    shell_->setNavigationPanel(createCrowdPanel(currentDraft(), events_, shell_));
+    if (navigationView_ == NavigationView::Crowd) {
+        shell_->setNavigationPanel(createCrowdPanel(currentScenario(), shell_));
+        return;
+    }
+    shell_->setNavigationPanel(createEventsPanel(currentScenario(), shell_));
 }
 
-void ScenarioAuthoringWidget::showInitialForm() {
+void ScenarioAuthoringWidget::refreshRightPanel() {
+    scenarioSwitcher_ = nullptr;
+    scenarioSummaryLabel_ = nullptr;
+    changesLabel_ = nullptr;
+    readinessLabel_ = nullptr;
+    newScenarioButton_ = nullptr;
+    addExitClosureButton_ = nullptr;
+    addStagedReleaseButton_ = nullptr;
+    stagedScenariosLabel_ = nullptr;
+    executeRunButton_ = nullptr;
+
     if (shell_ == nullptr) {
         return;
     }
 
-    auto* canvasScroll = new QScrollArea(shell_);
-    canvasScroll->setWidgetResizable(true);
-    canvasScroll->setFrameShape(QFrame::NoFrame);
-    ui::polishScrollArea(canvasScroll);
+    shell_->setReviewPanelVisible(rightPanelMode_ != RightPanelMode::None);
+    if (rightPanelMode_ == RightPanelMode::Scenario) {
+        shell_->setReviewPanel(createScenarioPanel());
+        refreshScenarioSwitcher();
+        refreshInspector();
+        return;
+    }
+    if (rightPanelMode_ == RightPanelMode::Run) {
+        shell_->setReviewPanel(createRunPanel());
+    }
+}
 
-    auto* canvas = new QWidget(canvasScroll);
+void ScenarioAuthoringWidget::refreshScenarioSwitcher() {
+    if (scenarioSwitcher_ == nullptr) {
+        return;
+    }
+
+    scenarioSwitcher_->blockSignals(true);
+    scenarioSwitcher_->clear();
+    for (const auto& scenario : scenarios_) {
+        const auto role = scenario.draft.role == safecrowd::domain::ScenarioRole::Baseline ? "Baseline" : "Alternative";
+        scenarioSwitcher_->addItem(QString("%1  (%2)").arg(QString::fromStdString(scenario.draft.name), role));
+    }
+    scenarioSwitcher_->setCurrentIndex(currentScenarioIndex_);
+    scenarioSwitcher_->blockSignals(false);
+}
+
+void ScenarioAuthoringWidget::setRightPanelMode(RightPanelMode mode) {
+    rightPanelMode_ = mode;
+    if (scenarioPanelButton_ != nullptr) {
+        scenarioPanelButton_->setChecked(mode == RightPanelMode::Scenario);
+    }
+    if (runPanelButton_ != nullptr) {
+        runPanelButton_->setChecked(mode == RightPanelMode::Run);
+    }
+    refreshRightPanel();
+}
+
+void ScenarioAuthoringWidget::showEmptyCanvas() {
+    auto* canvas = new QWidget(shell_);
     canvas->setStyleSheet("QWidget { background: #f4f7fb; }");
-    auto* canvasLayout = new QVBoxLayout(canvas);
-    canvasLayout->setContentsMargins(28, 24, 28, 28);
-    canvasLayout->setSpacing(16);
+    auto* layout = new QVBoxLayout(canvas);
+    layout->setContentsMargins(32, 32, 32, 32);
+    layout->setSpacing(12);
+    layout->addStretch(1);
 
-    auto* header = createLabel("Scenario Authoring", canvas, ui::FontRole::Title);
-    canvasLayout->addWidget(header);
+    auto* title = createLabel("Create a scenario", canvas, ui::FontRole::Title);
+    title->setAlignment(Qt::AlignCenter);
+    layout->addWidget(title);
+    auto* detail = createLabel("Name the first scenario to start authoring Layout, Crowd, and Events settings.", canvas);
+    detail->setAlignment(Qt::AlignCenter);
+    detail->setStyleSheet(ui::mutedTextStyleSheet());
+    layout->addWidget(detail);
 
-    auto* subtitle = createLabel(
-        QString("%1 layout is approved. Enter the required scenario inputs before placing scenario elements.")
-            .arg(projectName_),
-        canvas);
-    subtitle->setStyleSheet(ui::mutedTextStyleSheet());
-    canvasLayout->addWidget(subtitle);
-
-    auto* basicsCard = createCard(canvas);
-    auto* basicsLayout = new QGridLayout(basicsCard);
-    basicsLayout->setContentsMargins(18, 18, 18, 18);
-    basicsLayout->setHorizontalSpacing(16);
-    basicsLayout->setVerticalSpacing(12);
-
-    scenarioNameEdit_ = new QLineEdit("Baseline evacuation", basicsCard);
-    startZoneComboBox_ = new QComboBox(basicsCard);
-    destinationComboBox_ = new QComboBox(basicsCard);
-    for (const auto& zone : layout_.zones) {
-        const auto id = QString::fromStdString(zone.id);
-        startZoneComboBox_->addItem(zoneLabel(zone), id);
-        if (zone.kind == safecrowd::domain::ZoneKind::Exit) {
-            destinationComboBox_->addItem(zoneLabel(zone), id);
-        }
-    }
-    if (destinationComboBox_->count() == 0) {
-        for (const auto& zone : layout_.zones) {
-            destinationComboBox_->addItem(zoneLabel(zone), QString::fromStdString(zone.id));
-        }
-    }
-
-    occupantCountSpinBox_ = new QSpinBox(basicsCard);
-    occupantCountSpinBox_->setRange(1, 50000);
-    occupantCountSpinBox_->setValue(100);
-    occupantCountSpinBox_->setSuffix(" people");
-
-    addFieldRow(basicsLayout, 0, "Scenario name", scenarioNameEdit_, basicsCard);
-    addFieldRow(basicsLayout, 1, "Start zone", startZoneComboBox_, basicsCard);
-    addFieldRow(basicsLayout, 2, "Destination", destinationComboBox_, basicsCard);
-    addFieldRow(basicsLayout, 3, "Population", occupantCountSpinBox_, basicsCard);
-    canvasLayout->addWidget(basicsCard);
-
-    createScenarioButton_ = new QPushButton("Create Scenario", canvas);
-    createScenarioButton_->setFont(ui::font(ui::FontRole::Body));
-    createScenarioButton_->setStyleSheet(ui::primaryButtonStyleSheet());
-    canvasLayout->addWidget(createScenarioButton_, 0, Qt::AlignRight);
-    canvasLayout->addStretch(1);
-
-    canvasScroll->setWidget(canvas);
-    shell_->setCanvas(canvasScroll);
-
-    connect(createScenarioButton_, &QPushButton::clicked, this, [this]() {
-        showScenarioCanvas();
+    auto* button = new QPushButton("New Scenario", canvas);
+    button->setFont(ui::font(ui::FontRole::Body));
+    button->setStyleSheet(ui::primaryButtonStyleSheet());
+    layout->addWidget(button, 0, Qt::AlignCenter);
+    layout->addStretch(1);
+    connect(button, &QPushButton::clicked, this, [this]() {
+        showScenarioNameDialog(currentScenarioIndex_);
     });
-
-    const auto refresh = [this]() {
-        refreshDraftSummary();
-        refreshReadiness();
-        refreshNavigationPanel();
-    };
-    connect(scenarioNameEdit_, &QLineEdit::textChanged, this, refresh);
-    connect(startZoneComboBox_, &QComboBox::currentIndexChanged, this, refresh);
-    connect(destinationComboBox_, &QComboBox::currentIndexChanged, this, refresh);
-    connect(occupantCountSpinBox_, &QSpinBox::valueChanged, this, refresh);
+    shell_->setCanvas(canvas);
 }
 
-void ScenarioAuthoringWidget::showScenarioCanvas() {
-    if (shell_ == nullptr) {
+void ScenarioAuthoringWidget::showScenarioNameDialog(int sourceIndex) {
+    bool ok = false;
+    const auto defaultName = sourceIndex >= 0
+        ? QString("%1 alternative").arg(QString::fromStdString(scenarios_[sourceIndex].draft.name))
+        : QString("Baseline evacuation");
+    const auto name = QInputDialog::getText(
+        this,
+        "New Scenario",
+        "Scenario name",
+        QLineEdit::Normal,
+        defaultName,
+        &ok);
+    if (!ok || name.trimmed().isEmpty()) {
+        if (scenarios_.empty()) {
+            refreshInspector();
+            showEmptyCanvas();
+        }
         return;
     }
 
-    scenarioDraft_ = currentDraft();
-    selectedStartText_ = startZoneComboBox_ == nullptr ? QString{} : startZoneComboBox_->currentText();
-    selectedDestinationText_ = destinationComboBox_ == nullptr ? QString{} : destinationComboBox_->currentText();
-    refreshDraftSummary();
-    refreshReadiness();
-
-    safecrowd::domain::ImportResult result;
-    result.layout = layout_;
-    result.reviewStatus = safecrowd::domain::ImportReviewStatus::Approved;
-
-    preview_ = new LayoutPreviewWidget(result, shell_);
-    scenarioNameEdit_ = nullptr;
-    startZoneComboBox_ = nullptr;
-    destinationComboBox_ = nullptr;
-    occupantCountSpinBox_ = nullptr;
-    createScenarioButton_ = nullptr;
-    shell_->setCanvas(preview_);
-    navigationView_ = NavigationView::Crowd;
-    refreshNavigationPanel();
+    createScenarioWithName(name, sourceIndex);
 }
 
-void ScenarioAuthoringWidget::addEventDraft(const QString& name, const QString& trigger, const QString& target) {
-    events_.push_back({
-        .id = QString("event-%1").arg(static_cast<int>(events_.size()) + 1).toStdString(),
-        .name = name.toStdString(),
-        .triggerSummary = trigger.toStdString(),
-        .targetSummary = target.toStdString(),
-    });
-    refreshDraftSummary();
-    refreshReadiness();
-}
+QWidget* ScenarioAuthoringWidget::createRunPanel() {
+    auto* panel = new QWidget(shell_);
+    auto* layout = new QVBoxLayout(panel);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(12);
 
-void ScenarioAuthoringWidget::refreshDraftSummary() {
-    if (draftSummaryLabel_ == nullptr) {
-        return;
-    }
+    layout->addWidget(createLabel("Run", panel, ui::FontRole::Title));
 
-    const auto draft = currentDraft();
-    const auto startText = startZoneComboBox_ == nullptr ? selectedStartText_ : startZoneComboBox_->currentText();
-    const auto destinationText = destinationComboBox_ == nullptr ? selectedDestinationText_ : destinationComboBox_->currentText();
+    stagedScenariosLabel_ = createLabel("", panel);
+    stagedScenariosLabel_->setStyleSheet(ui::mutedTextStyleSheet());
     QStringList lines;
-    lines << QString("Name: %1").arg(QString::fromStdString(draft.name));
-    lines << QString("Population: %1").arg(
-        draft.population.initialPlacements.empty()
-            ? 0
-            : static_cast<int>(draft.population.initialPlacements.front().targetAgentCount));
-    lines << QString("Start: %1").arg(startText);
-    lines << QString("Destination: %1").arg(destinationText);
-    lines << QString("Events: %1").arg(static_cast<int>(events_.size()));
-    for (const auto& event : events_) {
-        lines << QString(" - %1 / %2").arg(QString::fromStdString(event.name), QString::fromStdString(event.triggerSummary));
+    if (scenarios_.empty()) {
+        lines << "No staged scenarios";
+    } else {
+        lines << "Staged scenarios";
+        for (const auto& scenario : scenarios_) {
+            const auto role = scenario.draft.role == safecrowd::domain::ScenarioRole::Baseline ? "Baseline" : "Alternative";
+            lines << QString("- %1 (%2)").arg(QString::fromStdString(scenario.draft.name), role);
+        }
     }
-    draftSummaryLabel_->setText(lines.join('\n'));
+    stagedScenariosLabel_->setText(lines.join('\n'));
+    layout->addWidget(stagedScenariosLabel_);
+    layout->addStretch(1);
+
+    executeRunButton_ = new QPushButton("Run Staged Scenarios", panel);
+    executeRunButton_->setFont(ui::font(ui::FontRole::Body));
+    executeRunButton_->setStyleSheet(ui::primaryButtonStyleSheet());
+    executeRunButton_->setEnabled(!scenarios_.empty());
+    layout->addWidget(executeRunButton_);
+    connect(executeRunButton_, &QPushButton::clicked, this, [this]() {
+        if (stagedScenariosLabel_ != nullptr) {
+            stagedScenariosLabel_->setText(stagedScenariosLabel_->text()
+                + QString("\n\nExecution queued: %1 scenario(s)").arg(static_cast<int>(scenarios_.size())));
+        }
+    });
+
+    return panel;
 }
 
-void ScenarioAuthoringWidget::refreshReadiness() {
-    if (readinessLabel_ == nullptr) {
-        return;
-    }
+QWidget* ScenarioAuthoringWidget::createScenarioPanel() {
+    auto* inspector = new QWidget(shell_);
+    auto* inspectorLayout = new QVBoxLayout(inspector);
+    inspectorLayout->setContentsMargins(0, 0, 0, 0);
+    inspectorLayout->setSpacing(12);
+    inspectorLayout->addWidget(createLabel("Scenario", inspector, ui::FontRole::Title));
 
-    QStringList missing;
-    if (scenarioNameEdit_ != nullptr && scenarioNameEdit_->text().trimmed().isEmpty()) {
-        missing << "scenario name";
-    }
-    if (startZoneComboBox_ != nullptr && startZoneComboBox_->currentData().toString().isEmpty()) {
-        missing << "start zone";
-    }
-    if (destinationComboBox_ != nullptr && destinationComboBox_->currentData().toString().isEmpty()) {
-        missing << "destination";
-    }
+    scenarioSwitcher_ = new QComboBox(inspector);
+    scenarioSwitcher_->setFont(ui::font(ui::FontRole::Body));
+    scenarioSwitcher_->setStyleSheet(
+        "QComboBox { background: #ffffff; border: 1px solid #c9d5e2; border-radius: 10px; padding: 8px 10px; min-height: 24px; }");
+    inspectorLayout->addWidget(scenarioSwitcher_);
 
-    if (missing.isEmpty()) {
-        readinessLabel_->setText("Ready for Sprint 1 run setup");
-        return;
-    }
+    newScenarioButton_ = new QPushButton("New Scenario from Current", inspector);
+    newScenarioButton_->setFont(ui::font(ui::FontRole::Body));
+    newScenarioButton_->setStyleSheet(ui::secondaryButtonStyleSheet());
+    inspectorLayout->addWidget(newScenarioButton_);
 
-    readinessLabel_->setText(QString("Missing required input: %1").arg(missing.join(", ")));
+    scenarioSummaryLabel_ = createLabel("", inspector);
+    scenarioSummaryLabel_->setStyleSheet(ui::mutedTextStyleSheet());
+    inspectorLayout->addWidget(scenarioSummaryLabel_);
+
+    changesLabel_ = createLabel("", inspector);
+    changesLabel_->setStyleSheet(ui::mutedTextStyleSheet());
+    inspectorLayout->addWidget(changesLabel_);
+    inspectorLayout->addStretch(1);
+
+    readinessLabel_ = createLabel("", inspector);
+    readinessLabel_->setStyleSheet(ui::mutedTextStyleSheet());
+    inspectorLayout->addWidget(readinessLabel_);
+
+    addExitClosureButton_ = new QPushButton("Add exit closure", inspector);
+    addExitClosureButton_->setFont(ui::font(ui::FontRole::Body));
+    addExitClosureButton_->setStyleSheet(ui::secondaryButtonStyleSheet());
+    inspectorLayout->addWidget(addExitClosureButton_);
+
+    addStagedReleaseButton_ = new QPushButton("Add staged release", inspector);
+    addStagedReleaseButton_->setFont(ui::font(ui::FontRole::Body));
+    addStagedReleaseButton_->setStyleSheet(ui::secondaryButtonStyleSheet());
+    inspectorLayout->addWidget(addStagedReleaseButton_);
+
+    connect(scenarioSwitcher_, &QComboBox::currentIndexChanged, this, [this](int index) {
+        if (index >= 0 && index < static_cast<int>(scenarios_.size()) && index != currentScenarioIndex_) {
+            currentScenarioIndex_ = index;
+            refreshCanvas();
+            refreshNavigationPanel();
+            refreshInspector();
+        }
+    });
+    connect(newScenarioButton_, &QPushButton::clicked, this, [this]() {
+        createScenarioFromCurrent();
+    });
+    connect(addExitClosureButton_, &QPushButton::clicked, this, [this]() {
+        const auto* scenario = currentScenario();
+        addEventDraft("Exit closure", "At simulation start", scenario == nullptr ? QString{} : scenario->destinationText);
+    });
+    connect(addStagedReleaseButton_, &QPushButton::clicked, this, [this]() {
+        const auto* scenario = currentScenario();
+        addEventDraft("Staged release", "Every 9 simulated seconds", scenario == nullptr ? QString{} : scenario->startText);
+    });
+
+    return inspector;
 }
 
-safecrowd::domain::ScenarioDraft ScenarioAuthoringWidget::currentDraft() const {
-    if (scenarioNameEdit_ == nullptr && !scenarioDraft_.name.empty()) {
-        return scenarioDraft_;
+QWidget* ScenarioAuthoringWidget::createTopBarTogglePanel() {
+    auto* panel = new QWidget(shell_);
+    auto* layout = new QHBoxLayout(panel);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(8);
+
+    const auto buttonStyle =
+        "QPushButton { background: #ffffff; border: 1px solid #c9d5e2; border-radius: 10px; color: #16202b; font-weight: 600; padding: 7px 14px; }"
+        "QPushButton:hover { background: #eef3f8; }"
+        "QPushButton:checked { background: #e6eef8; border-color: #1f5fae; color: #1f5fae; }";
+
+    scenarioPanelButton_ = new QPushButton("Scenario", panel);
+    scenarioPanelButton_->setCheckable(true);
+    scenarioPanelButton_->setChecked(rightPanelMode_ == RightPanelMode::Scenario);
+    scenarioPanelButton_->setFont(ui::font(ui::FontRole::Body));
+    scenarioPanelButton_->setStyleSheet(buttonStyle);
+    runPanelButton_ = new QPushButton("Run", panel);
+    runPanelButton_->setCheckable(true);
+    runPanelButton_->setChecked(rightPanelMode_ == RightPanelMode::Run);
+    runPanelButton_->setFont(ui::font(ui::FontRole::Body));
+    runPanelButton_->setStyleSheet(buttonStyle);
+
+    layout->addWidget(scenarioPanelButton_);
+    layout->addWidget(runPanelButton_);
+
+    connect(scenarioPanelButton_, &QPushButton::clicked, this, [this](bool checked) {
+        setRightPanelMode(checked ? RightPanelMode::Scenario : RightPanelMode::None);
+    });
+    connect(runPanelButton_, &QPushButton::clicked, this, [this](bool checked) {
+        setRightPanelMode(checked ? RightPanelMode::Run : RightPanelMode::None);
+    });
+
+    return panel;
+}
+
+ScenarioAuthoringWidget::ScenarioState* ScenarioAuthoringWidget::currentScenario() {
+    if (currentScenarioIndex_ < 0 || currentScenarioIndex_ >= static_cast<int>(scenarios_.size())) {
+        return nullptr;
     }
+    return &scenarios_[currentScenarioIndex_];
+}
 
-    safecrowd::domain::ScenarioDraft draft;
-    draft.scenarioId = "scenario-baseline";
-    draft.name = scenarioNameEdit_ == nullptr
-        ? "Baseline evacuation"
-        : scenarioNameEdit_->text().trimmed().toStdString();
-    draft.role = safecrowd::domain::ScenarioRole::Baseline;
-    draft.sourceTemplateId = "sprint1-baseline";
-    draft.execution.timeLimitSeconds = 600.0;
-    draft.execution.sampleIntervalSeconds = 1.0;
-    draft.execution.repeatCount = 1;
-    draft.execution.baseSeed = 1;
-
-    const auto startZoneId = startZoneComboBox_ == nullptr ? QString{} : startZoneComboBox_->currentData().toString();
-    if (!startZoneId.isEmpty()) {
-        draft.population.initialPlacements.push_back({
-            .id = "placement-1",
-            .zoneId = startZoneId.toStdString(),
-            .targetAgentCount = static_cast<std::size_t>(occupantCountSpinBox_ == nullptr ? 0 : occupantCountSpinBox_->value()),
-        });
+const ScenarioAuthoringWidget::ScenarioState* ScenarioAuthoringWidget::currentScenario() const {
+    if (currentScenarioIndex_ < 0 || currentScenarioIndex_ >= static_cast<int>(scenarios_.size())) {
+        return nullptr;
     }
-
-    draft.control.events = events_;
-    return draft;
+    return &scenarios_[currentScenarioIndex_];
 }
 
 }  // namespace safecrowd::application

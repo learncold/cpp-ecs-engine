@@ -77,9 +77,22 @@ WorkspaceShell::WorkspaceShell(QWidget* parent)
         "}"
     );
 
-    topBarLayout_ = new QHBoxLayout(topBar);
-    topBarLayout_->setContentsMargins(16, 8, 16, 8);
+    auto* topBarRootLayout = new QHBoxLayout(topBar);
+    topBarRootLayout->setContentsMargins(16, 8, 16, 8);
+    topBarRootLayout->setSpacing(4);
+
+    auto* topBarLeft = new QWidget(topBar);
+    topBarLayout_ = new QHBoxLayout(topBarLeft);
+    topBarLayout_->setContentsMargins(0, 0, 0, 0);
     topBarLayout_->setSpacing(4);
+    topBarRootLayout->addWidget(topBarLeft);
+    topBarRootLayout->addStretch(1);
+
+    auto* topBarTrailing = new QWidget(topBar);
+    topBarTrailingLayout_ = new QHBoxLayout(topBarTrailing);
+    topBarTrailingLayout_->setContentsMargins(0, 0, 0, 0);
+    topBarTrailingLayout_->setSpacing(8);
+    topBarRootLayout->addWidget(topBarTrailing);
     rootLayout->addWidget(topBar);
 
     auto* bodyLayout = new QHBoxLayout();
@@ -120,12 +133,12 @@ WorkspaceShell::WorkspaceShell(QWidget* parent)
 
     bodyLayout->addWidget(centerStack, 1);
 
-    auto* reviewPanel = createPanel(this);
-    reviewPanel->setFixedWidth(280);
-    reviewLayout_ = new QVBoxLayout(reviewPanel);
+    reviewPanel_ = createPanel(this);
+    reviewPanel_->setFixedWidth(280);
+    reviewLayout_ = new QVBoxLayout(reviewPanel_);
     reviewLayout_->setContentsMargins(18, 18, 18, 18);
     reviewLayout_->setSpacing(12);
-    bodyLayout->addWidget(reviewPanel);
+    bodyLayout->addWidget(reviewPanel_);
 
     rootLayout->addLayout(bodyLayout, 1);
 }
@@ -154,7 +167,6 @@ void WorkspaceShell::setTools(const QStringList& tools) {
         topBarLayout_->addWidget(button);
     }
 
-    topBarLayout_->addStretch(1);
 }
 
 void WorkspaceShell::clearTopBar() {
@@ -189,6 +201,16 @@ void WorkspaceShell::setNavigationPanel(QWidget* panel) {
 
 void WorkspaceShell::setReviewPanel(QWidget* panel) {
     replaceSingleWidget(reviewLayout_, panel);
+}
+
+void WorkspaceShell::setReviewPanelVisible(bool visible) {
+    if (reviewPanel_ != nullptr) {
+        reviewPanel_->setVisible(visible);
+    }
+}
+
+void WorkspaceShell::setTopBarTrailingWidget(QWidget* widget) {
+    replaceSingleWidget(topBarTrailingLayout_, widget);
 }
 
 void WorkspaceShell::setCanvas(QWidget* canvas) {
