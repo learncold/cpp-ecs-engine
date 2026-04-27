@@ -25,6 +25,9 @@ struct EvacuationRoute {
     std::vector<Point2D> waypoints{};
     std::vector<std::string> waypointZoneIds{};
     std::size_t nextWaypointIndex{0};
+    Point2D currentSegmentStart{};
+    double previousDistanceToWaypoint{0.0};
+    double stalledSeconds{0.0};
     std::string destinationZoneId{};
 };
 

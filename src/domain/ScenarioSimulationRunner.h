@@ -46,6 +46,8 @@ private:
         std::string destinationZoneId{};
     };
 
+    void advanceRouteWaypoint(EvacuationRoute& route) const;
+    void advanceRoutesForWaypointProgress(double deltaSeconds);
     void advanceRoutesForCurrentZones();
     void initializeAgents();
     void rebuildFrame();

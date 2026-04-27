@@ -26,6 +26,9 @@ constexpr int kOverlapRelaxationIterations = 4;
 constexpr double kGeometryEpsilon = 1e-9;
 constexpr double kPathClearance = 0.08;
 constexpr double kCandidateClearance = kDefaultAgentRadius + kBarrierAvoidanceBuffer;
+constexpr double kWaypointCrossingEpsilon = 0.08;
+constexpr double kWaypointProgressEpsilon = 0.02;
+constexpr double kWaypointStallSeconds = 0.75;
 
 struct Bounds {
     double minX{0.0};
@@ -822,6 +825,7 @@ void ScenarioSimulationRunner::step(double deltaSeconds) {
     std::vector<MovementPlan> plans;
     plans.reserve(entities.size());
     advanceRoutesForCurrentZones();
+    advanceRoutesForWaypointProgress(0.0);
     replanBlockedRouteSegments();
 
     for (const auto entity : entities) {
@@ -893,6 +897,7 @@ void ScenarioSimulationRunner::step(double deltaSeconds) {
 
     resolveAgentOverlaps();
     advanceRoutesForCurrentZones();
+    advanceRoutesForWaypointProgress(clampedDelta);
     frame_.elapsedSeconds += clampedDelta;
     rebuildFrame();
     frame_.complete = frame_.elapsedSeconds >= timeLimitSeconds_
@@ -927,12 +932,86 @@ void ScenarioSimulationRunner::initializeAgents() {
                 .waypoints = route.waypoints,
                 .waypointZoneIds = route.waypointZoneIds,
                 .nextWaypointIndex = 0,
+                .currentSegmentStart = position,
+                .previousDistanceToWaypoint = route.waypoints.empty() ? 0.0 : distanceBetween(position, route.waypoints.front()),
+                .stalledSeconds = 0.0,
                 .destinationZoneId = route.destinationZoneId,
             });
             core_.addComponent(entity, EvacuationStatus{});
         }
     }
     rebuildFrame();
+}
+
+void ScenarioSimulationRunner::advanceRouteWaypoint(EvacuationRoute& route) const {
+    if (route.nextWaypointIndex >= route.waypoints.size()) {
+        return;
+    }
+
+    route.currentSegmentStart = route.waypoints[route.nextWaypointIndex];
+    ++route.nextWaypointIndex;
+    if (route.nextWaypointIndex < route.waypoints.size()) {
+        route.previousDistanceToWaypoint =
+            distanceBetween(route.currentSegmentStart, route.waypoints[route.nextWaypointIndex]);
+    } else {
+        route.previousDistanceToWaypoint = 0.0;
+    }
+    route.stalledSeconds = 0.0;
+}
+
+void ScenarioSimulationRunner::advanceRoutesForWaypointProgress(double deltaSeconds) {
+    const auto entities = simulationEntities(core_);
+    for (const auto entity : entities) {
+        const auto& status = core_.getComponent<EvacuationStatus>(entity);
+        if (status.evacuated) {
+            continue;
+        }
+
+        const auto& position = core_.getComponent<Position>(entity);
+        auto& route = core_.getComponent<EvacuationRoute>(entity);
+        while (route.nextWaypointIndex < route.waypoints.size()) {
+            const auto target = route.waypoints[route.nextWaypointIndex];
+            const auto segment = target - route.currentSegmentStart;
+            const auto segmentLengthSquared = dot(segment, segment);
+            const auto distance = distanceBetween(position.value, target);
+
+            if (distance <= kArrivalEpsilon) {
+                advanceRouteWaypoint(route);
+                continue;
+            }
+
+            if (segmentLengthSquared > 1e-9) {
+                const auto projection = dot(position.value - route.currentSegmentStart, segment);
+                if (projection >= segmentLengthSquared - kWaypointCrossingEpsilon) {
+                    advanceRouteWaypoint(route);
+                    continue;
+                }
+            }
+
+            if (route.previousDistanceToWaypoint <= 0.0 || distance < route.previousDistanceToWaypoint - kWaypointProgressEpsilon) {
+                route.previousDistanceToWaypoint = distance;
+                route.stalledSeconds = 0.0;
+                break;
+            }
+
+            if (deltaSeconds > 0.0) {
+                route.stalledSeconds += deltaSeconds;
+            }
+
+            if (route.stalledSeconds >= kWaypointStallSeconds
+                && route.nextWaypointIndex + 1 < route.waypoints.size()
+                && segmentLengthSquared > 1e-9) {
+                const auto projection = dot(position.value - route.currentSegmentStart, segment);
+                if (projection > segmentLengthSquared * 0.45) {
+                    advanceRouteWaypoint(route);
+                    continue;
+                }
+            }
+
+            route.previousDistanceToWaypoint = std::min(route.previousDistanceToWaypoint, distance);
+            break;
+        }
+    }
 }
 
 void ScenarioSimulationRunner::advanceRoutesForCurrentZones() {
@@ -949,7 +1028,7 @@ void ScenarioSimulationRunner::advanceRoutesForCurrentZones() {
         while (!currentZoneId.empty()
                && route.nextWaypointIndex < route.waypointZoneIds.size()
                && route.waypointZoneIds[route.nextWaypointIndex] == currentZoneId) {
-            ++route.nextWaypointIndex;
+            advanceRouteWaypoint(route);
         }
     }
 }
@@ -1021,6 +1100,9 @@ void ScenarioSimulationRunner::replanBlockedRouteSegments() {
             route.waypointZoneIds.begin() + static_cast<std::ptrdiff_t>(route.nextWaypointIndex),
             replacementZoneIds.begin(),
             replacementZoneIds.end());
+        route.currentSegmentStart = position.value;
+        route.previousDistanceToWaypoint = distanceBetween(position.value, route.waypoints[route.nextWaypointIndex]);
+        route.stalledSeconds = 0.0;
     }
 }
 
