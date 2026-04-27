@@ -2,6 +2,7 @@
 
 #include <optional>
 
+#include <QPixmap>
 #include <QWidget>
 
 #include "application/LayoutCanvasRendering.h"
@@ -37,11 +38,18 @@ protected:
 private:
     std::optional<LayoutCanvasBounds> collectBounds() const;
     LayoutCanvasTransform currentTransform(const LayoutCanvasBounds& bounds) const;
+    void refreshLayoutCache(const LayoutCanvasBounds& bounds);
     QRectF previewViewport() const;
 
     safecrowd::domain::FacilityLayout2D layout_{};
     safecrowd::domain::SimulationFrame frame_{};
     LayoutCanvasCamera camera_{};
+    std::optional<LayoutCanvasBounds> layoutBounds_{};
+    QPixmap layoutCache_{};
+    QSize layoutCacheSize_{};
+    QPointF layoutCachePan_{};
+    double layoutCacheZoom_{0.0};
+    bool layoutCacheValid_{false};
 };
 
 }  // namespace safecrowd::application

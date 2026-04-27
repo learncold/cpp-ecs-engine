@@ -25,6 +25,7 @@ SimulationCanvasWidget::SimulationCanvasWidget(safecrowd::domain::FacilityLayout
     setFocusPolicy(Qt::StrongFocus);
     setMinimumSize(520, 360);
     setStyleSheet("QWidget { background: #f4f7fb; }");
+    layoutBounds_ = collectLayoutCanvasBounds(layout_);
     QCoreApplication::instance()->installEventFilter(this);
 }
 
@@ -62,6 +63,7 @@ void SimulationCanvasWidget::keyReleaseEvent(QKeyEvent* event) {
 void SimulationCanvasWidget::mouseDoubleClickEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton) {
         camera_.reset();
+        layoutCacheValid_ = false;
         update();
         event->accept();
         return;
@@ -71,6 +73,7 @@ void SimulationCanvasWidget::mouseDoubleClickEvent(QMouseEvent* event) {
 
 void SimulationCanvasWidget::mouseMoveEvent(QMouseEvent* event) {
     if (camera_.updatePan(event)) {
+        layoutCacheValid_ = false;
         update();
         return;
     }
@@ -100,20 +103,16 @@ void SimulationCanvasWidget::paintEvent(QPaintEvent* event) {
     painter.fillRect(rect(), QColor("#f4f7fb"));
 
     const auto bounds = collectBounds();
-    const auto viewport = previewViewport();
     if (!bounds.has_value()) {
         painter.setPen(QColor("#4f5d6b"));
         painter.drawText(rect(), Qt::AlignCenter, "No layout available");
         return;
     }
 
+    refreshLayoutCache(*bounds);
+    painter.drawPixmap(0, 0, layoutCache_);
+
     const auto transform = currentTransform(*bounds);
-    painter.setPen(QPen(QColor("#d7e0ea"), 1));
-    painter.setBrush(QColor("#ffffff"));
-    painter.drawRoundedRect(viewport.adjusted(-18, -18, 18, 18), 14, 14);
-
-    drawFacilityLayoutCanvas(painter, layout_, transform);
-
     for (const auto& agent : frame_.agents) {
         const auto origin = transform.map(agent.position);
         const auto tip = transform.map({
@@ -135,6 +134,7 @@ void SimulationCanvasWidget::wheelEvent(QWheelEvent* event) {
         return;
     }
     if (camera_.zoomAt(event, *bounds, previewViewport())) {
+        layoutCacheValid_ = false;
         update();
         return;
     }
@@ -142,11 +142,38 @@ void SimulationCanvasWidget::wheelEvent(QWheelEvent* event) {
 }
 
 std::optional<LayoutCanvasBounds> SimulationCanvasWidget::collectBounds() const {
-    return collectLayoutCanvasBounds(layout_);
+    return layoutBounds_;
 }
 
 LayoutCanvasTransform SimulationCanvasWidget::currentTransform(const LayoutCanvasBounds& bounds) const {
     return LayoutCanvasTransform(bounds, previewViewport(), camera_.zoom(), camera_.panOffset());
+}
+
+void SimulationCanvasWidget::refreshLayoutCache(const LayoutCanvasBounds& bounds) {
+    const auto currentSize = size();
+    if (layoutCacheValid_
+        && layoutCacheSize_ == currentSize
+        && layoutCacheZoom_ == camera_.zoom()
+        && layoutCachePan_ == camera_.panOffset()) {
+        return;
+    }
+
+    layoutCache_ = QPixmap(currentSize);
+    layoutCache_.fill(QColor("#f4f7fb"));
+    QPainter painter(&layoutCache_);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+
+    const auto viewport = previewViewport();
+    const auto transform = currentTransform(bounds);
+    painter.setPen(QPen(QColor("#d7e0ea"), 1));
+    painter.setBrush(QColor("#ffffff"));
+    painter.drawRoundedRect(viewport.adjusted(-18, -18, 18, 18), 14, 14);
+    drawFacilityLayoutCanvas(painter, layout_, transform);
+
+    layoutCacheSize_ = currentSize;
+    layoutCacheZoom_ = camera_.zoom();
+    layoutCachePan_ = camera_.panOffset();
+    layoutCacheValid_ = true;
 }
 
 QRectF SimulationCanvasWidget::previewViewport() const {
