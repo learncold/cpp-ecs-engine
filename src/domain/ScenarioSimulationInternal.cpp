@@ -285,6 +285,20 @@ const Zone2D* findZone(const FacilityLayout2D& layout, const std::string& zoneId
     return it == layout.zones.end() ? nullptr : &(*it);
 }
 
+Point2D passageNormalToward(const LineSegment2D& passage, const Zone2D& fromZone, const Zone2D& toZone) {
+    const auto passageDirection = passage.end - passage.start;
+    const auto firstNormal = normalizedOr(perpendicularLeft(passageDirection), {});
+    if (lengthOf(firstNormal) <= 1e-9) {
+        return normalizedOr(polygonCenter(toZone.area) - polygonCenter(fromZone.area), {});
+    }
+
+    const auto towardToZone = polygonCenter(toZone.area) - midpoint(passage);
+    if (dot(firstNormal, towardToZone) >= 0.0) {
+        return firstNormal;
+    }
+    return firstNormal * -1.0;
+}
+
 bool routePassageCrossed(
     const FacilityLayout2D& layout,
     const EvacuationRoute& route,
@@ -313,7 +327,7 @@ bool routePassageCrossed(
         return false;
     }
 
-    const auto normal = normalizedOr(polygonCenter(toZone->area) - polygonCenter(fromZone->area), {});
+    const auto normal = passageNormalToward(passage, *fromZone, *toZone);
     if (lengthOf(normal) <= 1e-9) {
         return false;
     }

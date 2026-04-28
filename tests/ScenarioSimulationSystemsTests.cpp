@@ -3,6 +3,7 @@
 #include <memory>
 
 #include "domain/AgentComponents.h"
+#include "domain/ScenarioSimulationInternal.h"
 #include "domain/ScenarioSimulationSystems.h"
 #include "engine/EngineRuntime.h"
 
@@ -190,6 +191,36 @@ SC_TEST(ScenarioSimulationMotionSystem_AdvancesAgentsFromStepResource) {
     SC_EXPECT_EQ(frame.agents.size(), std::size_t{1});
     SC_EXPECT_NEAR(frame.agents.front().position.x, 0.5, 1e-9);
     SC_EXPECT_NEAR(frame.agents.front().velocity.x, 1.0, 1e-9);
+}
+
+SC_TEST(ScenarioRoutePassageCrossed_UsesDoorPlaneNearEndpoint) {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.zones.push_back({
+        .id = "room",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Room",
+        .area = {.outline = {{0.0, 0.0}, {1.0, 0.0}, {1.0, 1.0}, {0.0, 1.0}}},
+    });
+    layout.zones.push_back({
+        .id = "corridor",
+        .kind = safecrowd::domain::ZoneKind::Corridor,
+        .label = "Corridor",
+        .area = {.outline = {{1.0, 0.2}, {2.0, 0.2}, {2.0, 4.0}, {1.0, 4.0}}},
+    });
+
+    safecrowd::domain::EvacuationRoute route;
+    route.waypoints = {{.x = 1.0, .y = 0.9}};
+    route.waypointPassages = {{{.x = 1.0, .y = 0.8}, {.x = 1.0, .y = 1.0}}};
+    route.waypointFromZoneIds = {"room"};
+    route.waypointZoneIds = {"corridor"};
+    route.nextWaypointIndex = 0;
+
+    const safecrowd::domain::Point2D crossedNearEndpoint{.x = 1.05, .y = 0.75};
+    SC_EXPECT_TRUE(safecrowd::domain::simulation_internal::routePassageCrossed(
+        layout,
+        route,
+        crossedNearEndpoint,
+        0.25));
 }
 
 SC_TEST(ScenarioFrameSyncSystem_PublishesSimulationFrameResource) {
