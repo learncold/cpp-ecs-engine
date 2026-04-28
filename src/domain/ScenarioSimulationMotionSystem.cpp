@@ -1,0 +1,409 @@
+#include "domain/ScenarioSimulationSystems.h"
+
+#include "domain/ScenarioSimulationInternal.h"
+
+#include <algorithm>
+#include <memory>
+#include <unordered_set>
+#include <utility>
+
+namespace safecrowd::domain {
+namespace {
+
+using namespace simulation_internal;
+
+class ScenarioSimulationMotionSystem final : public engine::EngineSystem {
+public:
+    explicit ScenarioSimulationMotionSystem(FacilityLayout2D layout)
+        : layout_(std::move(layout)) {
+    }
+
+    void update(engine::EngineWorld& world, const engine::EngineStepContext& step) override {
+        (void)step;
+
+        auto& resources = world.resources();
+        if (!resources.contains<ScenarioSimulationStepResource>()) {
+            return;
+        }
+
+        auto& clock = resources.get<ScenarioSimulationClockResource>();
+        if (clock.complete) {
+            return;
+        }
+
+        const auto clampedDelta = std::max(0.0, resources.get<ScenarioSimulationStepResource>().deltaSeconds);
+        if (clampedDelta <= 0.0) {
+            return;
+        }
+
+        auto& query = world.query();
+        const auto entities = simulationEntities(query);
+        const auto localNeighborIndex = resources.contains<ScenarioAgentSpatialIndexResource>()
+            ? AgentSpatialIndex{}
+            : buildAgentSpatialIndex(query, entities, 1.0);
+        std::vector<MovementPlan> plans;
+        plans.reserve(entities.size());
+
+        advanceRoutesForCurrentZones(query, entities);
+        advanceRoutesForWaypointProgress(query, 0.0, entities);
+        replanBlockedRouteSegments(query, entities);
+
+        for (const auto entity : entities) {
+            auto& position = query.get<Position>(entity);
+            const auto& agent = query.get<Agent>(entity);
+            auto& velocity = query.get<Velocity>(entity);
+            auto& route = query.get<EvacuationRoute>(entity);
+            auto& status = query.get<EvacuationStatus>(entity);
+            if (status.evacuated) {
+                continue;
+            }
+
+            const auto* destinationZone = findZone(layout_, route.destinationZoneId);
+            if (destinationZone != nullptr && pointInRing(destinationZone->area.outline, position.value)) {
+                status.evacuated = true;
+                status.completionTimeSeconds = clock.elapsedSeconds;
+                velocity.value = {};
+                continue;
+            }
+
+            if (route.nextWaypointIndex >= route.waypoints.size()) {
+                velocity.value = {};
+                continue;
+            }
+
+            const auto target = routeWaypointTarget(route, position.value);
+            const auto distance = distanceBetween(position.value, target);
+            if (distance <= kArrivalEpsilon) {
+                position.value = target;
+                advanceRouteWaypoint(route, target);
+                velocity.value = {};
+                continue;
+            }
+
+            const auto routeDirection = (target - position.value) * (1.0 / distance);
+            const auto desiredVelocity = routeDirection * static_cast<double>(agent.maxSpeed);
+            double speedScale = 1.0;
+            const auto neighborRadius = static_cast<double>(agent.radius) + kDefaultAgentRadius + kPersonalSpaceBuffer;
+            const auto neighborCandidates = resources.contains<ScenarioAgentSpatialIndexResource>()
+                ? scenarioNearbyAgents(query, resources.get<ScenarioAgentSpatialIndexResource>(), position.value, neighborRadius)
+                : nearbyAgents(query, localNeighborIndex, position.value, neighborRadius);
+            const auto avoidanceVelocity =
+                forwardPreservingAgentAvoidanceVelocity(query, entity, neighborCandidates, desiredVelocity, speedScale);
+            const auto barrierVelocity = barrierSeparationVelocity(layout_, position, agent);
+            auto finalVelocity = (desiredVelocity * speedScale) + avoidanceVelocity + barrierVelocity;
+            if (dot(finalVelocity, routeDirection) < 0.0) {
+                const auto lateral = perpendicularLeft(routeDirection);
+                finalVelocity = (routeDirection * (static_cast<double>(agent.maxSpeed) * 0.15))
+                    + (lateral * dot(finalVelocity, lateral));
+            }
+            plans.push_back({
+                .entity = entity,
+                .velocity = clampedToLength(finalVelocity, static_cast<double>(agent.maxSpeed)),
+            });
+        }
+
+        for (const auto& plan : plans) {
+            auto& position = query.get<Position>(plan.entity);
+            auto& velocity = query.get<Velocity>(plan.entity);
+            auto& route = query.get<EvacuationRoute>(plan.entity);
+            const auto& agent = query.get<Agent>(plan.entity);
+            if (route.nextWaypointIndex >= route.waypoints.size()) {
+                continue;
+            }
+
+            const auto target = routeWaypointTarget(route, position.value);
+            const auto remainingDistance = distanceBetween(position.value, target);
+            const auto stepVelocity =
+                clampedToLength(plan.velocity, std::min(static_cast<double>(agent.maxSpeed), remainingDistance / clampedDelta));
+            const auto previousPosition = position.value;
+            const auto nextPosition = constrainedMove(layout_, previousPosition, previousPosition + (stepVelocity * clampedDelta));
+            position.value = nextPosition;
+            velocity.value = (nextPosition - previousPosition) * (1.0 / clampedDelta);
+        }
+
+        resolveAgentOverlaps(query, entities);
+        advanceRoutesForCurrentZones(query, entities);
+        advanceRoutesForWaypointProgress(query, clampedDelta, entities);
+        advanceClock(query, clock, entities, clampedDelta);
+        resources.set(ScenarioSimulationStepResource{});
+    }
+
+private:
+    void advanceRouteWaypoint(EvacuationRoute& route, const Point2D& reachedPoint) const {
+        if (route.nextWaypointIndex >= route.waypoints.size()) {
+            return;
+        }
+
+        route.currentSegmentStart = reachedPoint;
+        ++route.nextWaypointIndex;
+        if (route.nextWaypointIndex < route.waypoints.size()) {
+            route.previousDistanceToWaypoint =
+                distanceToRouteWaypoint(route, route.currentSegmentStart);
+        } else {
+            route.previousDistanceToWaypoint = 0.0;
+        }
+        route.stalledSeconds = 0.0;
+    }
+
+    void advanceRoutesForWaypointProgress(
+        engine::WorldQuery& query,
+        double deltaSeconds,
+        const std::vector<engine::Entity>& entities) const {
+        for (const auto entity : entities) {
+            const auto& status = query.get<EvacuationStatus>(entity);
+            if (status.evacuated) {
+                continue;
+            }
+
+            const auto& position = query.get<Position>(entity);
+            const auto& agent = query.get<Agent>(entity);
+            auto& route = query.get<EvacuationRoute>(entity);
+            while (route.nextWaypointIndex < route.waypoints.size()) {
+                if (routePassageCrossed(layout_, route, position.value, agent.radius)) {
+                    advanceRouteWaypoint(route, position.value);
+                    continue;
+                }
+
+                const auto target = routeWaypointTarget(route, position.value);
+                const auto segment = target - route.currentSegmentStart;
+                const auto segmentLengthSquared = dot(segment, segment);
+                const auto distance = distanceToRouteWaypoint(route, position.value);
+
+                if (distance <= kArrivalEpsilon) {
+                    advanceRouteWaypoint(route, target);
+                    continue;
+                }
+
+                if (segmentLengthSquared > 1e-9) {
+                    const auto projection = dot(position.value - route.currentSegmentStart, segment);
+                    if (projection >= segmentLengthSquared - kWaypointCrossingEpsilon) {
+                        advanceRouteWaypoint(route, target);
+                        continue;
+                    }
+                }
+
+                if (route.previousDistanceToWaypoint <= 0.0
+                    || distance < route.previousDistanceToWaypoint - kWaypointProgressEpsilon) {
+                    route.previousDistanceToWaypoint = distance;
+                    route.stalledSeconds = 0.0;
+                    break;
+                }
+
+                if (deltaSeconds > 0.0) {
+                    route.stalledSeconds += deltaSeconds;
+                }
+
+                if (route.stalledSeconds >= kWaypointStallSeconds
+                    && route.nextWaypointIndex + 1 < route.waypoints.size()
+                    && segmentLengthSquared > 1e-9) {
+                    const auto projection = dot(position.value - route.currentSegmentStart, segment);
+                    if (projection > segmentLengthSquared * 0.45) {
+                        advanceRouteWaypoint(route, target);
+                        continue;
+                    }
+                }
+
+                route.previousDistanceToWaypoint = std::min(route.previousDistanceToWaypoint, distance);
+                break;
+            }
+        }
+    }
+
+    void advanceRoutesForCurrentZones(engine::WorldQuery& query, const std::vector<engine::Entity>& entities) const {
+        for (const auto entity : entities) {
+            const auto& status = query.get<EvacuationStatus>(entity);
+            if (status.evacuated) {
+                continue;
+            }
+
+            const auto& position = query.get<Position>(entity);
+            auto& route = query.get<EvacuationRoute>(entity);
+            const auto currentZoneId = zoneAt(position.value);
+            while (!currentZoneId.empty() && route.nextWaypointIndex < route.waypointZoneIds.size()) {
+                auto matchedIndex = route.waypointZoneIds.size();
+                for (auto index = route.nextWaypointIndex; index < route.waypointZoneIds.size(); ++index) {
+                    if (route.waypointZoneIds[index] == currentZoneId) {
+                        matchedIndex = index;
+                        break;
+                    }
+                }
+                if (matchedIndex == route.waypointZoneIds.size()) {
+                    break;
+                }
+
+                while (route.nextWaypointIndex <= matchedIndex && route.nextWaypointIndex < route.waypoints.size()) {
+                    advanceRouteWaypoint(route, position.value);
+                }
+            }
+        }
+    }
+
+    void replanBlockedRouteSegments(engine::WorldQuery& query, const std::vector<engine::Entity>& entities) const {
+        for (const auto entity : entities) {
+            const auto& status = query.get<EvacuationStatus>(entity);
+            if (status.evacuated) {
+                continue;
+            }
+
+            const auto& position = query.get<Position>(entity);
+            const auto& agent = query.get<Agent>(entity);
+            auto& route = query.get<EvacuationRoute>(entity);
+            if (route.nextWaypointIndex >= route.waypoints.size()) {
+                continue;
+            }
+
+            const auto target = routeWaypointTarget(route, position.value);
+            const auto clearance = static_cast<double>(agent.radius) + kPathClearance;
+            if (lineOfSightClear(layout_, position.value, target, clearance)) {
+                continue;
+            }
+
+            const auto replacement = buildPath(layout_, position.value, target, clearance);
+            if (replacement.size() <= 1) {
+                continue;
+            }
+
+            const auto originalTargetZoneId = route.nextWaypointIndex < route.waypointZoneIds.size()
+                ? route.waypointZoneIds[route.nextWaypointIndex]
+                : std::string{};
+            const auto originalTargetPassage = route.nextWaypointIndex < route.waypointPassages.size()
+                ? route.waypointPassages[route.nextWaypointIndex]
+                : pointPassage(target);
+            const auto originalFromZoneId = route.nextWaypointIndex < route.waypointFromZoneIds.size()
+                ? route.waypointFromZoneIds[route.nextWaypointIndex]
+                : std::string{};
+            route.waypoints.erase(route.waypoints.begin() + static_cast<std::ptrdiff_t>(route.nextWaypointIndex));
+            route.waypointPassages.erase(route.waypointPassages.begin() + static_cast<std::ptrdiff_t>(route.nextWaypointIndex));
+            route.waypointFromZoneIds.erase(route.waypointFromZoneIds.begin() + static_cast<std::ptrdiff_t>(route.nextWaypointIndex));
+            route.waypointZoneIds.erase(route.waypointZoneIds.begin() + static_cast<std::ptrdiff_t>(route.nextWaypointIndex));
+
+            std::vector<LineSegment2D> replacementPassages;
+            replacementPassages.reserve(replacement.size());
+            for (const auto& waypoint : replacement) {
+                replacementPassages.push_back(pointPassage(waypoint));
+            }
+            replacementPassages.back() = originalTargetPassage;
+
+            std::vector<std::string> replacementZoneIds(replacement.size(), std::string{});
+            replacementZoneIds.back() = originalTargetZoneId;
+            std::vector<std::string> replacementFromZoneIds(replacement.size(), std::string{});
+            replacementFromZoneIds.back() = originalFromZoneId;
+            route.waypoints.insert(
+                route.waypoints.begin() + static_cast<std::ptrdiff_t>(route.nextWaypointIndex),
+                replacement.begin(),
+                replacement.end());
+            route.waypointPassages.insert(
+                route.waypointPassages.begin() + static_cast<std::ptrdiff_t>(route.nextWaypointIndex),
+                replacementPassages.begin(),
+                replacementPassages.end());
+            route.waypointFromZoneIds.insert(
+                route.waypointFromZoneIds.begin() + static_cast<std::ptrdiff_t>(route.nextWaypointIndex),
+                replacementFromZoneIds.begin(),
+                replacementFromZoneIds.end());
+            route.waypointZoneIds.insert(
+                route.waypointZoneIds.begin() + static_cast<std::ptrdiff_t>(route.nextWaypointIndex),
+                replacementZoneIds.begin(),
+                replacementZoneIds.end());
+            route.currentSegmentStart = position.value;
+            route.previousDistanceToWaypoint = distanceToRouteWaypoint(route, position.value);
+            route.stalledSeconds = 0.0;
+        }
+    }
+
+    void resolveAgentOverlaps(engine::WorldQuery& query, const std::vector<engine::Entity>& entities) const {
+        for (int iteration = 0; iteration < kOverlapRelaxationIterations; ++iteration) {
+            const auto spatialIndex = buildAgentSpatialIndex(query, entities, 1.0);
+            std::unordered_set<unsigned long long> checkedPairs;
+            checkedPairs.reserve(entities.size() * 4);
+            for (const auto first : entities) {
+                auto& firstStatus = query.get<EvacuationStatus>(first);
+                if (firstStatus.evacuated) {
+                    continue;
+                }
+
+                auto& firstPosition = query.get<Position>(first);
+                const auto& firstAgent = query.get<Agent>(first);
+                const auto candidates = nearbyAgents(
+                    query,
+                    spatialIndex,
+                    firstPosition.value,
+                    static_cast<double>(firstAgent.radius) + kDefaultAgentRadius);
+                for (const auto second : candidates) {
+                    if (first == second) {
+                        continue;
+                    }
+                    const auto minIndex = std::min(first.index, second.index);
+                    const auto maxIndex = std::max(first.index, second.index);
+                    const auto pairKey = (static_cast<unsigned long long>(minIndex) << 32)
+                        ^ static_cast<unsigned int>(maxIndex);
+                    if (!checkedPairs.insert(pairKey).second) {
+                        continue;
+                    }
+
+                    auto& secondStatus = query.get<EvacuationStatus>(second);
+                    if (firstStatus.evacuated || secondStatus.evacuated) {
+                        continue;
+                    }
+
+                    auto& secondPosition = query.get<Position>(second);
+                    const auto& secondAgent = query.get<Agent>(second);
+                    const auto delta = firstPosition.value - secondPosition.value;
+                    const auto distance = lengthOf(delta);
+                    const auto minimumDistance = static_cast<double>(firstAgent.radius + secondAgent.radius);
+                    if (distance >= minimumDistance) {
+                        continue;
+                    }
+
+                    const auto direction = normalizedOr(delta, deterministicFallbackDirection(first));
+                    const auto push = std::min(0.08, (minimumDistance - distance) * 0.35);
+                    firstPosition.value = constrainedMove(layout_, firstPosition.value, firstPosition.value + (direction * push));
+                    secondPosition.value = constrainedMove(layout_, secondPosition.value, secondPosition.value - (direction * push));
+                }
+            }
+        }
+    }
+
+    void advanceClock(
+        engine::WorldQuery& query,
+        ScenarioSimulationClockResource& clock,
+        const std::vector<engine::Entity>& entities,
+        double deltaSeconds) const {
+        clock.elapsedSeconds += deltaSeconds;
+        clock.complete = clock.elapsedSeconds >= clock.timeLimitSeconds;
+        if (clock.complete) {
+            return;
+        }
+
+        std::size_t totalAgentCount = 0;
+        std::size_t evacuatedAgentCount = 0;
+        for (const auto entity : entities) {
+            ++totalAgentCount;
+            const auto& status = query.get<EvacuationStatus>(entity);
+            if (status.evacuated) {
+                ++evacuatedAgentCount;
+            }
+        }
+        clock.complete = totalAgentCount > 0 && evacuatedAgentCount >= totalAgentCount;
+    }
+
+    std::string zoneAt(const Point2D& point) const {
+        for (const auto& zone : layout_.zones) {
+            if (pointInRing(zone.area.outline, point)) {
+                return zone.id;
+            }
+        }
+        return {};
+    }
+
+    FacilityLayout2D layout_{};
+};
+
+
+
+}  // namespace
+
+std::unique_ptr<engine::EngineSystem> makeScenarioSimulationMotionSystem(FacilityLayout2D layout) {
+    return std::make_unique<ScenarioSimulationMotionSystem>(std::move(layout));
+}
+
+}  // namespace safecrowd::domain
