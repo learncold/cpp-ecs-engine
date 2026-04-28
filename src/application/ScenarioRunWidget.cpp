@@ -229,7 +229,7 @@ void ScenarioRunWidget::showResults() {
         layout_,
         scenario_,
         runner_.frame(),
-        runner_.riskSnapshot(),
+        runner_.resultRiskSnapshot(),
         [this]() {
             if (saveProjectHandler_) {
                 saveProjectHandler_();

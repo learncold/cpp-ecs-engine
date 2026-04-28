@@ -27,6 +27,8 @@ void ScenarioSimulationRunner::reset(FacilityLayout2D layout, ScenarioDraft scen
     layout_ = std::move(layout);
     scenario_ = std::move(scenario);
     frame_ = {};
+    riskSnapshot_ = {};
+    resultRiskSnapshot_ = {};
     timeLimitSeconds_ = scenario_.execution.timeLimitSeconds > 0.0
         ? scenario_.execution.timeLimitSeconds
         : kDefaultTimeLimitSeconds;
@@ -57,6 +59,10 @@ const SimulationFrame& ScenarioSimulationRunner::frame() const noexcept {
 
 const ScenarioRiskSnapshot& ScenarioSimulationRunner::riskSnapshot() const noexcept {
     return riskSnapshot_;
+}
+
+const ScenarioRiskSnapshot& ScenarioSimulationRunner::resultRiskSnapshot() const noexcept {
+    return resultRiskSnapshot_;
 }
 
 double ScenarioSimulationRunner::timeLimitSeconds() const noexcept {
@@ -141,7 +147,9 @@ void ScenarioSimulationRunner::syncFrameFromRuntime() {
         frame_ = resources.get<ScenarioSimulationFrameResource>().frame;
     }
     if (resources.contains<ScenarioRiskMetricsResource>()) {
-        riskSnapshot_ = resources.get<ScenarioRiskMetricsResource>().snapshot;
+        const auto& metrics = resources.get<ScenarioRiskMetricsResource>();
+        riskSnapshot_ = metrics.snapshot;
+        resultRiskSnapshot_ = metrics.peakSnapshot;
     }
 }
 

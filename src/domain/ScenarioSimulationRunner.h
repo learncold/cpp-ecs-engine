@@ -25,6 +25,7 @@ public:
 
     const SimulationFrame& frame() const noexcept;
     const ScenarioRiskSnapshot& riskSnapshot() const noexcept;
+    const ScenarioRiskSnapshot& resultRiskSnapshot() const noexcept;
     double timeLimitSeconds() const noexcept;
     bool complete() const noexcept;
 
@@ -50,6 +51,7 @@ private:
     std::unique_ptr<engine::EngineRuntime> runtime_{};
     SimulationFrame frame_{};
     ScenarioRiskSnapshot riskSnapshot_{};
+    ScenarioRiskSnapshot resultRiskSnapshot_{};
     double timeLimitSeconds_{60.0};
 };
 

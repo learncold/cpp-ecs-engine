@@ -245,6 +245,58 @@ SC_TEST(ScenarioRiskMetricsSystem_PublishesStalledHotspotAndBottleneckMetrics) {
     SC_EXPECT_EQ(snapshot.completionRisk, safecrowd::domain::ScenarioRiskLevel::High);
 }
 
+SC_TEST(ScenarioRiskMetricsSystem_PreservesPeakMetricsAfterAllAgentsEvacuate) {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    for (int index = 0; index < 5; ++index) {
+        seeds.push_back({
+            .position = {.value = {.x = 0.75 + (static_cast<double>(index) * 0.03), .y = 0.0}},
+            .agent = {.radius = 0.25f, .maxSpeed = 1.0f},
+            .velocity = {.value = {}},
+            .route = {
+                .waypoints = {{.x = 1.0, .y = 0.0}},
+                .waypointPassages = {{{.x = 1.0, .y = -0.4}, {.x = 1.0, .y = 0.4}}},
+                .waypointFromZoneIds = {"room"},
+                .waypointZoneIds = {"exit"},
+                .nextWaypointIndex = 0,
+                .currentSegmentStart = {.x = 0.75, .y = 0.0},
+                .previousDistanceToWaypoint = 0.25,
+                .stalledSeconds = 1.0,
+                .destinationZoneId = "exit",
+            },
+            .status = {},
+        });
+    }
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 19,
+    });
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioRiskMetricsSystem(straightExitLayout()),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(0.0);
+    auto& query = runtime.world().query();
+    for (const auto entity : query.view<safecrowd::domain::EvacuationStatus>()) {
+        query.get<safecrowd::domain::EvacuationStatus>(entity).evacuated = true;
+    }
+
+    runtime.stepFrame(0.0);
+
+    const auto& metrics =
+        runtime.world().resources().get<safecrowd::domain::ScenarioRiskMetricsResource>();
+    SC_EXPECT_TRUE(metrics.snapshot.hotspots.empty());
+    SC_EXPECT_TRUE(metrics.snapshot.bottlenecks.empty());
+    SC_EXPECT_TRUE(!metrics.peakSnapshot.hotspots.empty());
+    SC_EXPECT_TRUE(!metrics.peakSnapshot.bottlenecks.empty());
+    SC_EXPECT_EQ(metrics.peakSnapshot.stalledAgentCount, std::size_t{5});
+    SC_EXPECT_EQ(metrics.peakSnapshot.completionRisk, safecrowd::domain::ScenarioRiskLevel::High);
+}
+
 SC_TEST(ScenarioRoutePassageCrossed_UsesDoorPlaneNearEndpoint) {
     safecrowd::domain::FacilityLayout2D layout;
     layout.zones.push_back({

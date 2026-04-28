@@ -34,6 +34,7 @@ struct ScenarioAgentSpatialIndexResource {
 
 struct ScenarioRiskMetricsResource {
     ScenarioRiskSnapshot snapshot{};
+    ScenarioRiskSnapshot peakSnapshot{};
 };
 
 struct ScenarioAgentSeed {

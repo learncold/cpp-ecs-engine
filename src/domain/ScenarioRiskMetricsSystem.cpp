@@ -39,6 +39,51 @@ bool isStalled(const Velocity& velocity, const EvacuationRoute& route) {
         || route.stalledSeconds >= kStalledSecondsThreshold;
 }
 
+int riskSeverity(ScenarioRiskLevel level) {
+    switch (level) {
+    case ScenarioRiskLevel::Low:
+        return 0;
+    case ScenarioRiskLevel::Medium:
+        return 1;
+    case ScenarioRiskLevel::High:
+        return 2;
+    }
+    return 0;
+}
+
+bool isHotspotSetWorse(
+    const std::vector<ScenarioCongestionHotspot>& candidate,
+    const std::vector<ScenarioCongestionHotspot>& currentPeak) {
+    if (candidate.empty()) {
+        return false;
+    }
+    if (currentPeak.empty()) {
+        return true;
+    }
+    return candidate.front().agentCount > currentPeak.front().agentCount;
+}
+
+bool isBottleneckSetWorse(
+    const std::vector<ScenarioBottleneckMetric>& candidate,
+    const std::vector<ScenarioBottleneckMetric>& currentPeak) {
+    if (candidate.empty()) {
+        return false;
+    }
+    if (currentPeak.empty()) {
+        return true;
+    }
+
+    const auto& lhs = candidate.front();
+    const auto& rhs = currentPeak.front();
+    if (lhs.stalledAgentCount != rhs.stalledAgentCount) {
+        return lhs.stalledAgentCount > rhs.stalledAgentCount;
+    }
+    if (lhs.nearbyAgentCount != rhs.nearbyAgentCount) {
+        return lhs.nearbyAgentCount > rhs.nearbyAgentCount;
+    }
+    return lhs.averageSpeed < rhs.averageSpeed;
+}
+
 ScenarioRiskLevel completionRiskLevel(
     const ScenarioSimulationClockResource& clock,
     std::size_t totalAgentCount,
@@ -124,10 +169,31 @@ public:
             snapshot.stalledAgentCount,
             snapshot.hotspots.size(),
             snapshot.bottlenecks.size());
-        resources.set(ScenarioRiskMetricsResource{.snapshot = std::move(snapshot)});
+
+        auto peakSnapshot = resources.contains<ScenarioRiskMetricsResource>()
+            ? resources.get<ScenarioRiskMetricsResource>().peakSnapshot
+            : ScenarioRiskSnapshot{};
+        mergePeakSnapshot(peakSnapshot, snapshot);
+        resources.set(ScenarioRiskMetricsResource{
+            .snapshot = std::move(snapshot),
+            .peakSnapshot = std::move(peakSnapshot),
+        });
     }
 
 private:
+    void mergePeakSnapshot(ScenarioRiskSnapshot& peak, const ScenarioRiskSnapshot& current) const {
+        if (riskSeverity(current.completionRisk) > riskSeverity(peak.completionRisk)) {
+            peak.completionRisk = current.completionRisk;
+        }
+        peak.stalledAgentCount = std::max(peak.stalledAgentCount, current.stalledAgentCount);
+        if (isHotspotSetWorse(current.hotspots, peak.hotspots)) {
+            peak.hotspots = current.hotspots;
+        }
+        if (isBottleneckSetWorse(current.bottlenecks, peak.bottlenecks)) {
+            peak.bottlenecks = current.bottlenecks;
+        }
+    }
+
     void collectHotspots(
         ScenarioRiskSnapshot& snapshot,
         const std::unordered_map<long long, RiskCellAccumulator>& cells) const {
