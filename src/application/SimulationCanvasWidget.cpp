@@ -1,6 +1,7 @@
 #include "application/SimulationCanvasWidget.h"
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 #include <QCoreApplication>
@@ -8,6 +9,7 @@
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QRadialGradient>
 #include <QWheelEvent>
 
 namespace safecrowd::application {
@@ -16,8 +18,9 @@ namespace {
 constexpr double kViewportPadding = 32.0;
 constexpr double kVelocityIndicatorSeconds = 0.75;
 constexpr double kAgentMarkerRadius = 5.0;
-constexpr int kHotspotMinAlpha = 42;
-constexpr int kHotspotMaxAlpha = 156;
+constexpr double kDefaultHotspotCellSize = 1.5;
+constexpr int kHotspotMinCoreAlpha = 72;
+constexpr int kHotspotMaxCoreAlpha = 190;
 
 }  // namespace
 
@@ -205,18 +208,39 @@ void SimulationCanvasWidget::drawHotspotOverlay(QPainter& painter, const LayoutC
     painter.save();
     painter.setPen(Qt::NoPen);
     painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+    QPainterPath walkableClip;
+    for (const auto& zone : layout_.zones) {
+        walkableClip.addPath(layoutCanvasPolygonPath(zone.area, transform));
+    }
+    if (!walkableClip.isEmpty()) {
+        painter.setClipPath(walkableClip);
+    }
+
     for (const auto& hotspot : hotspotOverlay_) {
         if (hotspot.agentCount == 0) {
             continue;
         }
-        const auto topLeft = transform.map({.x = hotspot.cellMin.x, .y = hotspot.cellMax.y});
-        const auto bottomRight = transform.map({.x = hotspot.cellMax.x, .y = hotspot.cellMin.y});
-        const QRectF cellRect(topLeft, bottomRight);
         const auto intensity = static_cast<double>(hotspot.agentCount) / static_cast<double>(maxAgentCount);
-        const auto alpha = kHotspotMinAlpha
-            + static_cast<int>((kHotspotMaxAlpha - kHotspotMinAlpha) * intensity);
-        painter.setBrush(QColor(220, 38, 38, std::clamp(alpha, kHotspotMinAlpha, kHotspotMaxAlpha)));
-        painter.drawRoundedRect(cellRect.normalized(), 6.0, 6.0);
+        const auto center = transform.map(hotspot.center);
+        const auto cellWidth = hotspot.cellMax.x > hotspot.cellMin.x
+            ? hotspot.cellMax.x - hotspot.cellMin.x
+            : kDefaultHotspotCellSize;
+        const auto cellHeight = hotspot.cellMax.y > hotspot.cellMin.y
+            ? hotspot.cellMax.y - hotspot.cellMin.y
+            : kDefaultHotspotCellSize;
+        const auto sourceRadiusWorld = std::max(cellWidth, cellHeight) * (1.2 + (0.85 * std::sqrt(intensity)));
+        const auto radiusAnchor = transform.map({.x = hotspot.center.x + sourceRadiusWorld, .y = hotspot.center.y});
+        const auto radius = std::max(12.0, std::hypot(radiusAnchor.x() - center.x(), radiusAnchor.y() - center.y()));
+        const auto coreAlpha = kHotspotMinCoreAlpha
+            + static_cast<int>((kHotspotMaxCoreAlpha - kHotspotMinCoreAlpha) * intensity);
+
+        QRadialGradient gradient(center, radius);
+        gradient.setColorAt(0.0, QColor(185, 28, 28, std::clamp(coreAlpha, kHotspotMinCoreAlpha, kHotspotMaxCoreAlpha)));
+        gradient.setColorAt(0.28, QColor(220, 38, 38, static_cast<int>(coreAlpha * 0.62)));
+        gradient.setColorAt(0.58, QColor(249, 115, 22, static_cast<int>(coreAlpha * 0.28)));
+        gradient.setColorAt(1.0, QColor(249, 115, 22, 0));
+        painter.setBrush(gradient);
+        painter.drawEllipse(center, radius, radius);
     }
     painter.restore();
 }
