@@ -32,6 +32,23 @@ public:
     }
 };
 
+safecrowd::domain::FacilityLayout2D straightExitLayout() {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.zones.push_back({
+        .id = "room",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Room",
+        .area = {.outline = {{-1.0, -1.0}, {1.0, -1.0}, {1.0, 1.0}, {-1.0, 1.0}}},
+    });
+    layout.zones.push_back({
+        .id = "exit",
+        .kind = safecrowd::domain::ZoneKind::Exit,
+        .label = "Exit",
+        .area = {.outline = {{1.0, -1.0}, {2.0, -1.0}, {2.0, 1.0}, {1.0, 1.0}}},
+    });
+    return layout;
+}
+
 }  // namespace
 
 SC_TEST(ScenarioAgentSpawnSystem_ConfiguresClockAndSpawnsAgentSeeds) {
@@ -122,6 +139,57 @@ SC_TEST(ScenarioClockSystem_AdvancesClockResourceOnFixedSteps) {
     runtime.stepFrame(0.25);
     SC_EXPECT_NEAR(clock.elapsedSeconds, 0.5, 1e-9);
     SC_EXPECT_TRUE(clock.complete);
+}
+
+SC_TEST(ScenarioSimulationMotionSystem_AdvancesAgentsFromStepResource) {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    seeds.push_back({
+        .position = {.value = {.x = 0.0, .y = 0.0}},
+        .agent = {.radius = 0.25f, .maxSpeed = 1.0f},
+        .velocity = {.value = {}},
+        .route = {
+            .waypoints = {{.x = 1.0, .y = 0.0}},
+            .waypointPassages = {{{.x = 1.0, .y = 0.0}, {.x = 1.0, .y = 0.0}}},
+            .waypointFromZoneIds = {""},
+            .waypointZoneIds = {"exit"},
+            .nextWaypointIndex = 0,
+            .currentSegmentStart = {.x = 0.0, .y = 0.0},
+            .previousDistanceToWaypoint = 1.0,
+            .stalledSeconds = 0.0,
+            .destinationZoneId = "exit",
+        },
+        .status = {},
+    });
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 13,
+    });
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    runtime.addSystem(
+        std::make_unique<safecrowd::domain::ScenarioSpatialIndexSystem>(1.0),
+        {.phase = safecrowd::engine::UpdatePhase::PreSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioSimulationMotionSystem(straightExitLayout()),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+    runtime.addSystem(
+        std::make_unique<safecrowd::domain::ScenarioFrameSyncSystem>(),
+        {.phase = safecrowd::engine::UpdatePhase::RenderSync,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.5});
+    runtime.stepFrame(0.0);
+
+    const auto& clock = runtime.world().resources().get<safecrowd::domain::ScenarioSimulationClockResource>();
+    SC_EXPECT_NEAR(clock.elapsedSeconds, 0.5, 1e-9);
+    const auto& frame = runtime.world().resources().get<safecrowd::domain::ScenarioSimulationFrameResource>().frame;
+    SC_EXPECT_EQ(frame.agents.size(), std::size_t{1});
+    SC_EXPECT_NEAR(frame.agents.front().position.x, 0.5, 1e-9);
+    SC_EXPECT_NEAR(frame.agents.front().velocity.x, 1.0, 1e-9);
 }
 
 SC_TEST(ScenarioFrameSyncSystem_PublishesSimulationFrameResource) {

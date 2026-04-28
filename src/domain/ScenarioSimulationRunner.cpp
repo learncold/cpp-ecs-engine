@@ -1328,6 +1328,10 @@ private:
 
 }  // namespace
 
+std::unique_ptr<engine::EngineSystem> makeScenarioSimulationMotionSystem(FacilityLayout2D layout) {
+    return std::make_unique<ScenarioSimulationMotionSystem>(std::move(layout));
+}
+
 ScenarioSimulationRunner::ScenarioSimulationRunner(FacilityLayout2D layout, ScenarioDraft scenario) {
     reset(std::move(layout), std::move(scenario));
 }
@@ -1420,7 +1424,7 @@ void ScenarioSimulationRunner::initializeRuntime() {
         {.phase = engine::UpdatePhase::PreSimulation,
          .triggerPolicy = engine::TriggerPolicy::EveryFrame});
     runtime_->addSystem(
-        std::make_unique<ScenarioSimulationMotionSystem>(layout_),
+        makeScenarioSimulationMotionSystem(layout_),
         {.phase = engine::UpdatePhase::PostSimulation,
          .triggerPolicy = engine::TriggerPolicy::EveryFrame});
     runtime_->addSystem(

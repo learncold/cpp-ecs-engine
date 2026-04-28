@@ -1,9 +1,11 @@
 #pragma once
 
+#include <memory>
 #include <unordered_map>
 #include <vector>
 
 #include "domain/AgentComponents.h"
+#include "domain/FacilityLayout2D.h"
 #include "domain/ScenarioSimulationFrame.h"
 #include "engine/EngineSystem.h"
 #include "engine/Entity.h"
@@ -42,6 +44,8 @@ std::vector<engine::Entity> scenarioNearbyAgents(
     const ScenarioAgentSpatialIndexResource& index,
     const Point2D& point,
     double radius);
+
+std::unique_ptr<engine::EngineSystem> makeScenarioSimulationMotionSystem(FacilityLayout2D layout);
 
 class ScenarioAgentSpawnSystem final : public engine::EngineSystem {
 public:
