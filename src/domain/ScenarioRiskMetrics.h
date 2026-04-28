@@ -16,6 +16,8 @@ enum class ScenarioRiskLevel {
 
 struct ScenarioCongestionHotspot {
     Point2D center{};
+    Point2D cellMin{};
+    Point2D cellMax{};
     std::size_t agentCount{0};
 };
 

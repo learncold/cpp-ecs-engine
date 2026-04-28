@@ -1,17 +1,20 @@
 #pragma once
 
 #include <optional>
+#include <vector>
 
 #include <QPixmap>
 #include <QWidget>
 
 #include "application/LayoutCanvasRendering.h"
 #include "domain/FacilityLayout2D.h"
+#include "domain/ScenarioRiskMetrics.h"
 #include "domain/ScenarioSimulationRunner.h"
 
 class QEvent;
 class QKeyEvent;
 class QMouseEvent;
+class QPainter;
 class QPaintEvent;
 class QWheelEvent;
 
@@ -23,6 +26,7 @@ public:
     ~SimulationCanvasWidget() override;
 
     void setFrame(safecrowd::domain::SimulationFrame frame);
+    void setHotspotOverlay(std::vector<safecrowd::domain::ScenarioCongestionHotspot> hotspots);
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -40,9 +44,11 @@ private:
     LayoutCanvasTransform currentTransform(const LayoutCanvasBounds& bounds) const;
     void refreshLayoutCache(const LayoutCanvasBounds& bounds);
     QRectF previewViewport() const;
+    void drawHotspotOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
 
     safecrowd::domain::FacilityLayout2D layout_{};
     safecrowd::domain::SimulationFrame frame_{};
+    std::vector<safecrowd::domain::ScenarioCongestionHotspot> hotspotOverlay_{};
     LayoutCanvasCamera camera_{};
     std::optional<LayoutCanvasBounds> layoutBounds_{};
     QPixmap layoutCache_{};

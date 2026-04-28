@@ -1,5 +1,6 @@
 #include "application/SimulationCanvasWidget.h"
 
+#include <algorithm>
 #include <utility>
 
 #include <QCoreApplication>
@@ -15,6 +16,8 @@ namespace {
 constexpr double kViewportPadding = 32.0;
 constexpr double kVelocityIndicatorSeconds = 0.75;
 constexpr double kAgentMarkerRadius = 5.0;
+constexpr int kHotspotMinAlpha = 42;
+constexpr int kHotspotMaxAlpha = 156;
 
 }  // namespace
 
@@ -37,6 +40,11 @@ SimulationCanvasWidget::~SimulationCanvasWidget() {
 
 void SimulationCanvasWidget::setFrame(safecrowd::domain::SimulationFrame frame) {
     frame_ = std::move(frame);
+    update();
+}
+
+void SimulationCanvasWidget::setHotspotOverlay(std::vector<safecrowd::domain::ScenarioCongestionHotspot> hotspots) {
+    hotspotOverlay_ = std::move(hotspots);
     update();
 }
 
@@ -113,6 +121,7 @@ void SimulationCanvasWidget::paintEvent(QPaintEvent* event) {
     painter.drawPixmap(0, 0, layoutCache_);
 
     const auto transform = currentTransform(*bounds);
+    drawHotspotOverlay(painter, transform);
     for (const auto& agent : frame_.agents) {
         const auto origin = transform.map(agent.position);
         const auto tip = transform.map({
@@ -178,6 +187,38 @@ void SimulationCanvasWidget::refreshLayoutCache(const LayoutCanvasBounds& bounds
 
 QRectF SimulationCanvasWidget::previewViewport() const {
     return QRectF(rect()).adjusted(kViewportPadding, kViewportPadding, -kViewportPadding, -kViewportPadding);
+}
+
+void SimulationCanvasWidget::drawHotspotOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const {
+    if (hotspotOverlay_.empty()) {
+        return;
+    }
+
+    std::size_t maxAgentCount = 0;
+    for (const auto& hotspot : hotspotOverlay_) {
+        maxAgentCount = std::max(maxAgentCount, hotspot.agentCount);
+    }
+    if (maxAgentCount == 0) {
+        return;
+    }
+
+    painter.save();
+    painter.setPen(Qt::NoPen);
+    painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+    for (const auto& hotspot : hotspotOverlay_) {
+        if (hotspot.agentCount == 0) {
+            continue;
+        }
+        const auto topLeft = transform.map({.x = hotspot.cellMin.x, .y = hotspot.cellMax.y});
+        const auto bottomRight = transform.map({.x = hotspot.cellMax.x, .y = hotspot.cellMin.y});
+        const QRectF cellRect(topLeft, bottomRight);
+        const auto intensity = static_cast<double>(hotspot.agentCount) / static_cast<double>(maxAgentCount);
+        const auto alpha = kHotspotMinAlpha
+            + static_cast<int>((kHotspotMaxAlpha - kHotspotMinAlpha) * intensity);
+        painter.setBrush(QColor(220, 38, 38, std::clamp(alpha, kHotspotMinAlpha, kHotspotMaxAlpha)));
+        painter.drawRoundedRect(cellRect.normalized(), 6.0, 6.0);
+    }
+    painter.restore();
 }
 
 }  // namespace safecrowd::application

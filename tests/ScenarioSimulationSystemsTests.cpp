@@ -241,6 +241,10 @@ SC_TEST(ScenarioRiskMetricsSystem_PublishesStalledHotspotAndBottleneckMetrics) {
         runtime.world().resources().get<safecrowd::domain::ScenarioRiskMetricsResource>().snapshot;
     SC_EXPECT_EQ(snapshot.stalledAgentCount, std::size_t{5});
     SC_EXPECT_TRUE(!snapshot.hotspots.empty());
+    SC_EXPECT_NEAR(snapshot.hotspots.front().cellMin.x, 0.0, 1e-9);
+    SC_EXPECT_NEAR(snapshot.hotspots.front().cellMin.y, 0.0, 1e-9);
+    SC_EXPECT_NEAR(snapshot.hotspots.front().cellMax.x, 1.5, 1e-9);
+    SC_EXPECT_NEAR(snapshot.hotspots.front().cellMax.y, 1.5, 1e-9);
     SC_EXPECT_TRUE(!snapshot.bottlenecks.empty());
     SC_EXPECT_EQ(snapshot.completionRisk, safecrowd::domain::ScenarioRiskLevel::High);
 }

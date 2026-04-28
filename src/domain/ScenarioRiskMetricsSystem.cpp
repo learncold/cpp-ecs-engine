@@ -25,13 +25,42 @@ constexpr std::size_t kMaxReportedBottlenecks = 3;
 
 struct RiskCellAccumulator {
     Point2D positionSum{};
+    Point2D cellMin{};
+    Point2D cellMax{};
     std::size_t agentCount{0};
 };
 
-long long riskCellKey(const Point2D& point) {
-    const auto x = static_cast<int>(std::floor(point.x / kHotspotCellSize));
-    const auto y = static_cast<int>(std::floor(point.y / kHotspotCellSize));
+struct RiskCellAddress {
+    int x{0};
+    int y{0};
+};
+
+RiskCellAddress riskCellAddress(const Point2D& point) {
+    return {
+        .x = static_cast<int>(std::floor(point.x / kHotspotCellSize)),
+        .y = static_cast<int>(std::floor(point.y / kHotspotCellSize)),
+    };
+}
+
+long long riskCellKey(const RiskCellAddress& cell) {
+    const auto x = cell.x;
+    const auto y = cell.y;
     return (static_cast<long long>(x) << 32) ^ static_cast<unsigned int>(y);
+}
+
+Point2D riskCellMin(const RiskCellAddress& cell) {
+    return {
+        .x = static_cast<double>(cell.x) * kHotspotCellSize,
+        .y = static_cast<double>(cell.y) * kHotspotCellSize,
+    };
+}
+
+Point2D riskCellMax(const RiskCellAddress& cell) {
+    const auto min = riskCellMin(cell);
+    return {
+        .x = min.x + kHotspotCellSize,
+        .y = min.y + kHotspotCellSize,
+    };
 }
 
 bool isStalled(const Velocity& velocity, const EvacuationRoute& route) {
@@ -150,7 +179,12 @@ public:
                 ++snapshot.stalledAgentCount;
             }
 
-            auto& cell = cells[riskCellKey(position.value)];
+            const auto address = riskCellAddress(position.value);
+            auto& cell = cells[riskCellKey(address)];
+            if (cell.agentCount == 0) {
+                cell.cellMin = riskCellMin(address);
+                cell.cellMax = riskCellMax(address);
+            }
             cell.positionSum = cell.positionSum + position.value;
             ++cell.agentCount;
         }
@@ -205,6 +239,8 @@ private:
             const auto count = static_cast<double>(cell.agentCount);
             snapshot.hotspots.push_back({
                 .center = {.x = cell.positionSum.x / count, .y = cell.positionSum.y / count},
+                .cellMin = cell.cellMin,
+                .cellMax = cell.cellMax,
                 .agentCount = cell.agentCount,
             });
         }

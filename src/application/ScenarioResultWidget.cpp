@@ -158,6 +158,7 @@ ScenarioResultWidget::ScenarioResultWidget(
 
     auto* canvas = new SimulationCanvasWidget(layout, shell);
     canvas->setFrame(frame);
+    canvas->setHotspotOverlay(risk.hotspots);
     shell->setCanvas(canvas);
     shell->setReviewPanel(createResultPanel(scenario, frame, risk, shell));
     shell->setReviewPanelVisible(true);
