@@ -31,7 +31,7 @@ public:
 private:
     QWidget* createRunPanel();
     void refreshStatus();
-    void resetRun();
+    void stopRun();
     void togglePaused();
 
     QString projectName_{};
@@ -46,7 +46,8 @@ private:
     QLabel* elapsedLabel_{nullptr};
     QLabel* agentCountLabel_{nullptr};
     QPushButton* pauseButton_{nullptr};
-    QPushButton* resetButton_{nullptr};
+    QPushButton* stopButton_{nullptr};
+    QPushButton* resultButton_{nullptr};
     bool paused_{false};
 };
 

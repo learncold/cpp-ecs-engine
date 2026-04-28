@@ -3,7 +3,9 @@
 #include <utility>
 
 #include <QLabel>
+#include <QHBoxLayout>
 #include <QPushButton>
+#include <QStyle>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -21,6 +23,16 @@ QLabel* createLabel(const QString& text, QWidget* parent, ui::FontRole role = ui
     label->setFont(ui::font(role));
     label->setWordWrap(true);
     return label;
+}
+
+QPushButton* createIconButton(QStyle::StandardPixmap icon, const QString& tooltip, QWidget* parent) {
+    auto* button = new QPushButton(parent);
+    button->setIcon(parent->style()->standardIcon(icon));
+    button->setToolTip(tooltip);
+    button->setAccessibleName(tooltip);
+    button->setFixedSize(40, 36);
+    button->setStyleSheet(ui::secondaryButtonStyleSheet());
+    return button;
 }
 
 }  // namespace
@@ -88,22 +100,30 @@ QWidget* ScenarioRunWidget::createRunPanel() {
     layout->addWidget(statusLabel_);
     layout->addWidget(elapsedLabel_);
     layout->addWidget(agentCountLabel_);
+
+    auto* transportLayout = new QHBoxLayout();
+    transportLayout->setContentsMargins(0, 0, 0, 0);
+    transportLayout->setSpacing(8);
+    pauseButton_ = createIconButton(QStyle::SP_MediaPause, "Pause simulation", panel);
+    stopButton_ = createIconButton(QStyle::SP_MediaStop, "Stop and reset run", panel);
+    transportLayout->addWidget(pauseButton_);
+    transportLayout->addWidget(stopButton_);
+    transportLayout->addStretch(1);
+    layout->addLayout(transportLayout);
+
     layout->addStretch(1);
 
-    pauseButton_ = new QPushButton("Pause", panel);
-    pauseButton_->setFont(ui::font(ui::FontRole::Body));
-    pauseButton_->setStyleSheet(ui::secondaryButtonStyleSheet());
-    resetButton_ = new QPushButton("Reset Run", panel);
-    resetButton_->setFont(ui::font(ui::FontRole::Body));
-    resetButton_->setStyleSheet(ui::primaryButtonStyleSheet());
-    layout->addWidget(pauseButton_);
-    layout->addWidget(resetButton_);
+    resultButton_ = new QPushButton("View Results", panel);
+    resultButton_->setFont(ui::font(ui::FontRole::Body));
+    resultButton_->setStyleSheet(ui::primaryButtonStyleSheet());
+    resultButton_->setEnabled(false);
+    layout->addWidget(resultButton_);
 
     connect(pauseButton_, &QPushButton::clicked, this, [this]() {
         togglePaused();
     });
-    connect(resetButton_, &QPushButton::clicked, this, [this]() {
-        resetRun();
+    connect(stopButton_, &QPushButton::clicked, this, [this]() {
+        stopRun();
     });
 
     return panel;
@@ -123,19 +143,29 @@ void ScenarioRunWidget::refreshStatus() {
             .arg(runner_.timeLimitSeconds(), 0, 'f', 0));
     }
     if (agentCountLabel_ != nullptr) {
-        agentCountLabel_->setText(QString("Evacuated: %1 / %2\nActive agents: %3")
+        agentCountLabel_->setText(QString("Evacuated: %1 / %2\nActive Agents: %3")
             .arg(static_cast<int>(frame.evacuatedAgentCount))
             .arg(static_cast<int>(frame.totalAgentCount))
             .arg(static_cast<int>(frame.agents.size())));
     }
     if (pauseButton_ != nullptr) {
-        pauseButton_->setText(paused_ ? "Resume" : "Pause");
+        pauseButton_->setIcon(style()->standardIcon(paused_ ? QStyle::SP_MediaPlay : QStyle::SP_MediaPause));
+        pauseButton_->setToolTip(paused_ ? "Resume simulation" : "Pause simulation");
+        pauseButton_->setAccessibleName(paused_ ? "Resume simulation" : "Pause simulation");
         pauseButton_->setEnabled(!frame.complete);
+    }
+    if (stopButton_ != nullptr) {
+        stopButton_->setEnabled(frame.totalAgentCount > 0);
+    }
+    if (resultButton_ != nullptr) {
+        const bool allAgentsEvacuated = frame.totalAgentCount > 0
+            && frame.evacuatedAgentCount >= frame.totalAgentCount;
+        resultButton_->setEnabled(allAgentsEvacuated);
     }
 }
 
-void ScenarioRunWidget::resetRun() {
-    paused_ = false;
+void ScenarioRunWidget::stopRun() {
+    paused_ = true;
     runner_.reset(layout_, scenario_);
     canvas_->setFrame(runner_.frame());
     refreshStatus();
@@ -147,6 +177,9 @@ void ScenarioRunWidget::togglePaused() {
         return;
     }
     paused_ = !paused_;
+    if (!paused_ && timer_ != nullptr && !timer_->isActive()) {
+        timer_->start();
+    }
     refreshStatus();
 }
 
