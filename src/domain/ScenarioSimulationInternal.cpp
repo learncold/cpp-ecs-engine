@@ -195,6 +195,33 @@ bool segmentsIntersect(const Point2D& firstStart, const Point2D& firstEnd, const
         || pointOnSegment(firstEnd, secondStart, secondEnd);
 }
 
+bool segmentBoundsOverlap(
+    const Point2D& firstStart,
+    const Point2D& firstEnd,
+    const Point2D& secondStart,
+    const Point2D& secondEnd,
+    double padding = 0.0) {
+    const auto firstMinX = std::min(firstStart.x, firstEnd.x) - padding;
+    const auto firstMaxX = std::max(firstStart.x, firstEnd.x) + padding;
+    const auto firstMinY = std::min(firstStart.y, firstEnd.y) - padding;
+    const auto firstMaxY = std::max(firstStart.y, firstEnd.y) + padding;
+    const auto secondMinX = std::min(secondStart.x, secondEnd.x);
+    const auto secondMaxX = std::max(secondStart.x, secondEnd.x);
+    const auto secondMinY = std::min(secondStart.y, secondEnd.y);
+    const auto secondMaxY = std::max(secondStart.y, secondEnd.y);
+    return firstMinX <= secondMaxX
+        && firstMaxX >= secondMinX
+        && firstMinY <= secondMaxY
+        && firstMaxY >= secondMinY;
+}
+
+bool pointWithinSegmentBounds(const Point2D& point, const Point2D& start, const Point2D& end, double padding) {
+    return point.x >= std::min(start.x, end.x) - padding
+        && point.x <= std::max(start.x, end.x) + padding
+        && point.y >= std::min(start.y, end.y) - padding
+        && point.y <= std::max(start.y, end.y) + padding;
+}
+
 double distancePointToSegment(const Point2D& point, const Point2D& start, const Point2D& end) {
     return distanceBetween(point, closestPointOnSegment(point, start, end));
 }
@@ -474,11 +501,16 @@ bool movementCrossesBarrier(const FacilityLayout2D& layout, const Point2D& from,
 
         const auto& vertices = barrier.geometry.vertices;
         for (std::size_t index = 0; index + 1 < vertices.size(); ++index) {
+            if (!segmentBoundsOverlap(from, to, vertices[index], vertices[index + 1])) {
+                continue;
+            }
             if (segmentsIntersect(from, to, vertices[index], vertices[index + 1])) {
                 return true;
             }
         }
-        if (barrier.geometry.closed && segmentsIntersect(from, to, vertices.back(), vertices.front())) {
+        if (barrier.geometry.closed
+            && segmentBoundsOverlap(from, to, vertices.back(), vertices.front())
+            && segmentsIntersect(from, to, vertices.back(), vertices.front())) {
             return true;
         }
         if (barrier.geometry.closed && pointInRing(vertices, to)) {
@@ -513,11 +545,16 @@ bool pointHasClearance(const FacilityLayout2D& layout, const Point2D& point, dou
 
         const auto& vertices = barrier.geometry.vertices;
         for (std::size_t index = 0; index + 1 < vertices.size(); ++index) {
+            if (!pointWithinSegmentBounds(point, vertices[index], vertices[index + 1], clearance)) {
+                continue;
+            }
             if (distancePointToSegment(point, vertices[index], vertices[index + 1]) < clearance) {
                 return false;
             }
         }
-        if (barrier.geometry.closed && distancePointToSegment(point, vertices.back(), vertices.front()) < clearance) {
+        if (barrier.geometry.closed
+            && pointWithinSegmentBounds(point, vertices.back(), vertices.front(), clearance)
+            && distancePointToSegment(point, vertices.back(), vertices.front()) < clearance) {
             return false;
         }
     }
@@ -536,11 +573,16 @@ bool lineOfSightClear(const FacilityLayout2D& layout, const Point2D& from, const
 
         const auto& vertices = barrier.geometry.vertices;
         for (std::size_t index = 0; index + 1 < vertices.size(); ++index) {
+            if (!segmentBoundsOverlap(from, to, vertices[index], vertices[index + 1], clearance)) {
+                continue;
+            }
             if (segmentDistance(from, to, vertices[index], vertices[index + 1]) < clearance) {
                 return false;
             }
         }
-        if (barrier.geometry.closed && segmentDistance(from, to, vertices.back(), vertices.front()) < clearance) {
+        if (barrier.geometry.closed
+            && segmentBoundsOverlap(from, to, vertices.back(), vertices.front(), clearance)
+            && segmentDistance(from, to, vertices.back(), vertices.front()) < clearance) {
             return false;
         }
     }
@@ -578,13 +620,15 @@ bool nearlySamePoint(const Point2D& lhs, const Point2D& rhs) {
 }
 
 std::vector<Point2D> buildVisibilityPath(const FacilityLayout2D& layout, const Point2D& start, const Point2D& goal, double clearance) {
-    if (lineOfSightClear(layout, start, goal, clearance)) {
-        return {goal};
-    }
-
     std::vector<VisibilityNode> nodes;
     nodes.push_back({.point = start});
     nodes.push_back({.point = goal});
+
+    std::size_t candidateCapacity = nodes.size();
+    for (const auto& barrier : layout.barriers) {
+        candidateCapacity += barrier.blocksMovement ? barrier.geometry.vertices.size() * 8 : 0;
+    }
+    nodes.reserve(candidateCapacity);
 
     auto addCandidate = [&](const Point2D& candidate) {
         if (std::any_of(nodes.begin(), nodes.end(), [&](const auto& node) {
@@ -718,19 +762,43 @@ std::optional<std::vector<Point2D>> buildGridPath(
     auto nearestVisibleCell = [&](const Point2D& point) -> std::optional<std::size_t> {
         std::optional<std::size_t> best;
         double bestDistance = std::numeric_limits<double>::infinity();
-        for (int y = 0; y < height; ++y) {
-            for (int x = 0; x < width; ++x) {
-                const auto index = toIndex(x, y);
-                if (!walkable[index]) {
-                    continue;
+        const auto centerX = std::clamp(static_cast<int>(std::llround((point.x - minX) / kGridResolution)), 0, width - 1);
+        const auto centerY = std::clamp(static_cast<int>(std::llround((point.y - minY) / kGridResolution)), 0, height - 1);
+        const auto maxRing = std::max({centerX, width - 1 - centerX, centerY, height - 1 - centerY});
+
+        auto considerCell = [&](int x, int y) {
+            if (x < 0 || y < 0 || x >= width || y >= height) {
+                return;
+            }
+            const auto index = toIndex(x, y);
+            if (!walkable[index]) {
+                return;
+            }
+            const auto candidate = toPoint(x, y);
+            const auto distance = distanceBetween(point, candidate);
+            if (distance >= bestDistance || !lineOfSightClear(layout, point, candidate, clearance)) {
+                return;
+            }
+            best = index;
+            bestDistance = distance;
+        };
+
+        for (int ring = 0; ring <= maxRing; ++ring) {
+            if (ring == 0) {
+                considerCell(centerX, centerY);
+            } else {
+                for (int x = centerX - ring; x <= centerX + ring; ++x) {
+                    considerCell(x, centerY - ring);
+                    considerCell(x, centerY + ring);
                 }
-                const auto candidate = toPoint(x, y);
-                const auto distance = distanceBetween(point, candidate);
-                if (distance >= bestDistance || !lineOfSightClear(layout, point, candidate, clearance)) {
-                    continue;
+                for (int y = centerY - ring + 1; y <= centerY + ring - 1; ++y) {
+                    considerCell(centerX - ring, y);
+                    considerCell(centerX + ring, y);
                 }
-                best = index;
-                bestDistance = distance;
+            }
+
+            if (best.has_value() && static_cast<double>(std::max(0, ring - 1)) * kGridResolution > bestDistance) {
+                break;
             }
         }
         return best;
@@ -829,10 +897,14 @@ std::optional<std::vector<Point2D>> buildGridPath(
 }
 
 std::vector<Point2D> buildPath(const FacilityLayout2D& layout, const Point2D& start, const Point2D& goal, double clearance) {
+    if (lineOfSightClear(layout, start, goal, clearance)) {
+        return {goal};
+    }
+
     auto path = buildVisibilityPath(layout, start, goal, clearance);
-    if (path.size() == 1 && !lineOfSightClear(layout, start, goal, clearance)) {
+    if (path.size() == 1) {
         if (auto gridPath = buildGridPath(layout, start, goal, clearance); gridPath.has_value() && !gridPath->empty()) {
-            path = *gridPath;
+            return *gridPath;
         }
     }
     return path;
