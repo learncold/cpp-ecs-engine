@@ -12,6 +12,8 @@
 
 namespace safecrowd::application {
 
+class WorkspaceShell;
+
 class ScenarioResultWidget : public QWidget {
 public:
     explicit ScenarioResultWidget(
@@ -23,6 +25,18 @@ public:
         std::function<void()> saveProjectHandler,
         std::function<void()> openProjectHandler,
         QWidget* parent = nullptr);
+
+private:
+    void navigateToAuthoring(bool showRunPanel);
+
+    QString projectName_{};
+    safecrowd::domain::FacilityLayout2D layout_{};
+    safecrowd::domain::ScenarioDraft scenario_{};
+    safecrowd::domain::SimulationFrame frame_{};
+    safecrowd::domain::ScenarioRiskSnapshot risk_{};
+    std::function<void()> saveProjectHandler_{};
+    std::function<void()> openProjectHandler_{};
+    WorkspaceShell* shell_{nullptr};
 };
 
 }  // namespace safecrowd::application

@@ -224,6 +224,29 @@ ScenarioAuthoringWidget::ScenarioAuthoringWidget(
       layout_(layout),
       saveProjectHandler_(std::move(saveProjectHandler)),
       openProjectHandler_(std::move(openProjectHandler)) {
+    initializeUi(true);
+}
+
+ScenarioAuthoringWidget::ScenarioAuthoringWidget(
+    const QString& projectName,
+    const safecrowd::domain::FacilityLayout2D& layout,
+    InitialState initialState,
+    std::function<void()> saveProjectHandler,
+    std::function<void()> openProjectHandler,
+    QWidget* parent)
+    : QWidget(parent),
+      projectName_(projectName),
+      layout_(layout),
+      saveProjectHandler_(std::move(saveProjectHandler)),
+      openProjectHandler_(std::move(openProjectHandler)),
+      scenarios_(std::move(initialState.scenarios)),
+      currentScenarioIndex_(initialState.currentScenarioIndex),
+      navigationView_(initialState.navigationView),
+      rightPanelMode_(initialState.rightPanelMode) {
+    initializeUi(false);
+}
+
+void ScenarioAuthoringWidget::initializeUi(bool promptForScenario) {
     auto* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
@@ -237,11 +260,13 @@ ScenarioAuthoringWidget::ScenarioAuthoringWidget(
     rootLayout->addWidget(shell_);
 
     refreshNavigationPanel();
-    showEmptyCanvas();
+    refreshCanvas();
     refreshInspector();
-    QTimer::singleShot(0, this, [this]() {
-        ensureInitialScenarioPrompt();
-    });
+    if (promptForScenario) {
+        QTimer::singleShot(0, this, [this]() {
+            ensureInitialScenarioPrompt();
+        });
+    }
 }
 
 void ScenarioAuthoringWidget::addEventDraft(const QString& name, const QString& trigger, const QString& target) {

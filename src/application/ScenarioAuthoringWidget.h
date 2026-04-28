@@ -49,7 +49,23 @@ public:
         bool stagedForRun{false};
     };
 
+    struct InitialState {
+        std::vector<ScenarioState> scenarios{};
+        int currentScenarioIndex{-1};
+        NavigationView navigationView{NavigationView::Layout};
+        RightPanelMode rightPanelMode{RightPanelMode::Scenario};
+    };
+
+    explicit ScenarioAuthoringWidget(
+        const QString& projectName,
+        const safecrowd::domain::FacilityLayout2D& layout,
+        InitialState initialState,
+        std::function<void()> saveProjectHandler,
+        std::function<void()> openProjectHandler,
+        QWidget* parent = nullptr);
+
 private:
+    void initializeUi(bool promptForScenario);
     void addEventDraft(const QString& name, const QString& trigger, const QString& target);
     void createScenarioFromCurrent();
     void createScenarioWithName(const QString& name, int sourceIndex);

@@ -1,5 +1,6 @@
 #include "application/ScenarioResultWidget.h"
 
+#include <algorithm>
 #include <utility>
 
 #include <QFrame>
@@ -11,6 +12,8 @@
 #include <QSizePolicy>
 #include <QVBoxLayout>
 
+#include "application/ScenarioAuthoringWidget.h"
+#include "application/ScenarioCanvasWidget.h"
 #include "application/SimulationCanvasWidget.h"
 #include "application/UiStyle.h"
 #include "application/WorkspaceShell.h"
@@ -51,10 +54,67 @@ QString bottleneckSummary(const safecrowd::domain::ScenarioRiskSnapshot& risk) {
         .arg(static_cast<int>(bottleneck.stalledAgentCount));
 }
 
+QString zoneLabel(const safecrowd::domain::Zone2D& zone) {
+    const auto id = QString::fromStdString(zone.id);
+    const auto label = QString::fromStdString(zone.label);
+    return label.isEmpty() ? id : QString("%1  -  %2").arg(label, id);
+}
+
+const safecrowd::domain::Zone2D* firstStartZone(const safecrowd::domain::FacilityLayout2D& layout) {
+    const auto it = std::find_if(layout.zones.begin(), layout.zones.end(), [](const auto& zone) {
+        return zone.kind == safecrowd::domain::ZoneKind::Room || zone.kind == safecrowd::domain::ZoneKind::Unknown;
+    });
+    return it == layout.zones.end() ? nullptr : &(*it);
+}
+
+const safecrowd::domain::Zone2D* firstDestinationZone(const safecrowd::domain::FacilityLayout2D& layout) {
+    const auto exitIt = std::find_if(layout.zones.begin(), layout.zones.end(), [](const auto& zone) {
+        return zone.kind == safecrowd::domain::ZoneKind::Exit;
+    });
+    if (exitIt != layout.zones.end()) {
+        return &(*exitIt);
+    }
+    return layout.zones.empty() ? nullptr : &layout.zones.back();
+}
+
+ScenarioAuthoringWidget::ScenarioState scenarioStateFromDraft(
+    const safecrowd::domain::ScenarioDraft& scenario,
+    const safecrowd::domain::FacilityLayout2D& layout) {
+    ScenarioAuthoringWidget::ScenarioState state;
+    state.draft = scenario;
+    state.events = scenario.control.events;
+    state.stagedForRun = true;
+
+    if (const auto* startZone = firstStartZone(layout); startZone != nullptr) {
+        state.startText = zoneLabel(*startZone);
+    }
+    if (const auto* destinationZone = firstDestinationZone(layout); destinationZone != nullptr) {
+        state.destinationText = zoneLabel(*destinationZone);
+    }
+
+    for (const auto& placement : scenario.population.initialPlacements) {
+        ScenarioCrowdPlacement uiPlacement;
+        uiPlacement.id = QString::fromStdString(placement.id);
+        uiPlacement.name = uiPlacement.id;
+        uiPlacement.kind = (placement.targetAgentCount <= 1 && placement.area.outline.size() <= 1)
+            ? ScenarioCrowdPlacementKind::Individual
+            : ScenarioCrowdPlacementKind::Group;
+        uiPlacement.zoneId = QString::fromStdString(placement.zoneId);
+        uiPlacement.area = placement.area.outline;
+        uiPlacement.occupantCount = static_cast<int>(placement.targetAgentCount);
+        uiPlacement.velocity = placement.initialVelocity;
+        state.crowdPlacements.push_back(std::move(uiPlacement));
+    }
+
+    return state;
+}
+
 QWidget* createResultPanel(
     const safecrowd::domain::ScenarioDraft& scenario,
     const safecrowd::domain::SimulationFrame& frame,
     const safecrowd::domain::ScenarioRiskSnapshot& risk,
+    std::function<void()> backHandler,
+    std::function<void()> editHandler,
     QWidget* parent) {
     auto* panel = new QWidget(parent);
     auto* layout = new QVBoxLayout(panel);
@@ -121,16 +181,26 @@ QWidget* createResultPanel(
     actionsLayout->setContentsMargins(0, 0, 0, 0);
     actionsLayout->setSpacing(8);
     auto* backButton = new QPushButton("Back to Run", actions);
-    backButton->setEnabled(false);
     backButton->setFont(ui::font(ui::FontRole::Body));
     backButton->setStyleSheet(ui::secondaryButtonStyleSheet());
     auto* editButton = new QPushButton("Edit Scenario", actions);
-    editButton->setEnabled(false);
     editButton->setFont(ui::font(ui::FontRole::Body));
     editButton->setStyleSheet(ui::secondaryButtonStyleSheet());
     actionsLayout->addWidget(backButton);
     actionsLayout->addWidget(editButton);
     layout->addWidget(actions);
+
+    QObject::connect(backButton, &QPushButton::clicked, panel, [backHandler = std::move(backHandler)]() {
+        if (backHandler) {
+            backHandler();
+        }
+    });
+
+    QObject::connect(editButton, &QPushButton::clicked, panel, [editHandler = std::move(editHandler)]() {
+        if (editHandler) {
+            editHandler();
+        }
+    });
 
     return panel;
 }
@@ -146,29 +216,74 @@ ScenarioResultWidget::ScenarioResultWidget(
     std::function<void()> saveProjectHandler,
     std::function<void()> openProjectHandler,
     QWidget* parent)
-    : QWidget(parent) {
+    : QWidget(parent),
+      projectName_(std::move(projectName)),
+      layout_(std::move(layout)),
+      scenario_(std::move(scenario)),
+      frame_(std::move(frame)),
+      risk_(std::move(risk)),
+      saveProjectHandler_(std::move(saveProjectHandler)),
+      openProjectHandler_(std::move(openProjectHandler)) {
     auto* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
 
-    auto* shell = new WorkspaceShell(this);
-    shell->setTools({"Project"});
-    shell->setSaveProjectHandler(std::move(saveProjectHandler));
-    shell->setOpenProjectHandler(std::move(openProjectHandler));
+    shell_ = new WorkspaceShell(this);
+    shell_->setTools({"Project"});
+    shell_->setSaveProjectHandler(saveProjectHandler_);
+    shell_->setOpenProjectHandler(openProjectHandler_);
 
-    auto* canvas = new SimulationCanvasWidget(layout, shell);
-    canvas->setFrame(frame);
-    canvas->setHotspotOverlay(risk.hotspots);
-    shell->setCanvas(canvas);
-    shell->setReviewPanel(createResultPanel(scenario, frame, risk, shell));
-    shell->setReviewPanelVisible(true);
+    auto* canvas = new SimulationCanvasWidget(layout_, shell_);
+    canvas->setFrame(frame_);
+    canvas->setHotspotOverlay(risk_.hotspots);
+    shell_->setCanvas(canvas);
+    shell_->setReviewPanel(createResultPanel(
+        scenario_,
+        frame_,
+        risk_,
+        [this]() {
+            navigateToAuthoring(true);
+        },
+        [this]() {
+            navigateToAuthoring(false);
+        },
+        shell_));
+    shell_->setReviewPanelVisible(true);
 
-    auto* title = new QLabel(QString("%1  -  Result").arg(projectName), shell);
+    auto* title = new QLabel(QString("%1  -  Result").arg(projectName_), shell_);
     title->setFont(ui::font(ui::FontRole::Body));
     title->setStyleSheet(ui::mutedTextStyleSheet());
-    shell->setTopBarTrailingWidget(title);
+    shell_->setTopBarTrailingWidget(title);
 
-    rootLayout->addWidget(shell);
+    rootLayout->addWidget(shell_);
+}
+
+void ScenarioResultWidget::navigateToAuthoring(bool showRunPanel) {
+    auto* rootLayout = qobject_cast<QVBoxLayout*>(layout());
+    if (rootLayout == nullptr || shell_ == nullptr) {
+        return;
+    }
+
+    ScenarioAuthoringWidget::InitialState initial;
+    initial.scenarios.push_back(scenarioStateFromDraft(scenario_, layout_));
+    initial.currentScenarioIndex = 0;
+    initial.navigationView = ScenarioAuthoringWidget::NavigationView::Layout;
+    initial.rightPanelMode = showRunPanel
+        ? ScenarioAuthoringWidget::RightPanelMode::Run
+        : ScenarioAuthoringWidget::RightPanelMode::Scenario;
+
+    auto* authoringWidget = new ScenarioAuthoringWidget(
+        projectName_,
+        layout_,
+        std::move(initial),
+        saveProjectHandler_,
+        openProjectHandler_,
+        this);
+
+    rootLayout->replaceWidget(shell_, authoringWidget);
+    shell_->hide();
+    shell_->deleteLater();
+    shell_ = nullptr;
 }
 
 }  // namespace safecrowd::application
