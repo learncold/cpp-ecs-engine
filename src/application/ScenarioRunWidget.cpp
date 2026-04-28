@@ -9,6 +9,7 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
+#include "application/ScenarioResultWidget.h"
 #include "application/SimulationCanvasWidget.h"
 #include "application/UiStyle.h"
 #include "application/WorkspaceShell.h"
@@ -48,15 +49,17 @@ ScenarioRunWidget::ScenarioRunWidget(
       projectName_(projectName),
       layout_(layout),
       scenario_(scenario),
-      runner_(layout_, scenario_) {
+      runner_(layout_, scenario_),
+      saveProjectHandler_(std::move(saveProjectHandler)),
+      openProjectHandler_(std::move(openProjectHandler)) {
     auto* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
 
     shell_ = new WorkspaceShell(this);
     shell_->setTools({"Project"});
-    shell_->setSaveProjectHandler(std::move(saveProjectHandler));
-    shell_->setOpenProjectHandler(std::move(openProjectHandler));
+    shell_->setSaveProjectHandler(saveProjectHandler_);
+    shell_->setOpenProjectHandler(openProjectHandler_);
     canvas_ = new SimulationCanvasWidget(layout_, shell_);
     canvas_->setFrame(runner_.frame());
     shell_->setCanvas(canvas_);
@@ -134,6 +137,9 @@ QWidget* ScenarioRunWidget::createRunPanel() {
     connect(stopButton_, &QPushButton::clicked, this, [this]() {
         stopRun();
     });
+    connect(resultButton_, &QPushButton::clicked, this, [this]() {
+        showResults();
+    });
 
     return panel;
 }
@@ -202,6 +208,44 @@ void ScenarioRunWidget::stopRun() {
     canvas_->setFrame(runner_.frame());
     refreshStatus();
     timer_->start();
+}
+
+void ScenarioRunWidget::showResults() {
+    const auto& frame = runner_.frame();
+    if (frame.totalAgentCount == 0 || frame.evacuatedAgentCount < frame.totalAgentCount) {
+        return;
+    }
+    if (timer_ != nullptr) {
+        timer_->stop();
+    }
+
+    auto* rootLayout = qobject_cast<QVBoxLayout*>(layout());
+    if (rootLayout == nullptr || shell_ == nullptr) {
+        return;
+    }
+
+    auto* resultWidget = new ScenarioResultWidget(
+        projectName_,
+        layout_,
+        scenario_,
+        runner_.frame(),
+        runner_.riskSnapshot(),
+        [this]() {
+            if (saveProjectHandler_) {
+                saveProjectHandler_();
+            }
+        },
+        [this]() {
+            if (openProjectHandler_) {
+                openProjectHandler_();
+            }
+        },
+        this);
+    rootLayout->replaceWidget(shell_, resultWidget);
+    shell_->hide();
+    shell_->deleteLater();
+    shell_ = nullptr;
+    canvas_ = nullptr;
 }
 
 void ScenarioRunWidget::togglePaused() {

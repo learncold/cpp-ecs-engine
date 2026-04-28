@@ -31,6 +31,7 @@ public:
 private:
     QWidget* createRunPanel();
     void refreshStatus();
+    void showResults();
     void stopRun();
     void togglePaused();
 
@@ -38,6 +39,8 @@ private:
     safecrowd::domain::FacilityLayout2D layout_{};
     safecrowd::domain::ScenarioDraft scenario_{};
     safecrowd::domain::ScenarioSimulationRunner runner_{};
+    std::function<void()> saveProjectHandler_{};
+    std::function<void()> openProjectHandler_{};
     WorkspaceShell* shell_{nullptr};
     SimulationCanvasWidget* canvas_{nullptr};
     QTimer* timer_{nullptr};

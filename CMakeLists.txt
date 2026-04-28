@@ -190,6 +190,7 @@ if (SAFECROWD_BUILD_APP)
         src/application/ProjectPersistence.h
         src/application/ScenarioAuthoringWidget.h
         src/application/ScenarioCanvasWidget.h
+        src/application/ScenarioResultWidget.h
         src/application/ScenarioRunWidget.h
         src/application/SimulationCanvasWidget.h
         src/application/UiStyle.h
@@ -208,6 +209,7 @@ if (SAFECROWD_BUILD_APP)
         src/application/ProjectPersistence.cpp
         src/application/ScenarioAuthoringWidget.cpp
         src/application/ScenarioCanvasWidget.cpp
+        src/application/ScenarioResultWidget.cpp
         src/application/ScenarioRunWidget.cpp
         src/application/SimulationCanvasWidget.cpp
         src/application/UiStyle.cpp
