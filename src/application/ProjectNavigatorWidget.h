@@ -18,6 +18,7 @@ public:
 
     void setNewProjectHandler(std::function<void()> handler);
     void setOpenProjectHandler(std::function<void(const ProjectMetadata&)> handler);
+    void setDeleteProjectHandler(std::function<void(const ProjectMetadata&)> handler);
 
 private:
     ProjectNavigatorActions* actions_{nullptr};

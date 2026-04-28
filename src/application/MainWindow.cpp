@@ -58,6 +58,31 @@ void MainWindow::showProjectNavigator() {
     navigator->setOpenProjectHandler([this](const ProjectMetadata& metadata) {
         openProject(metadata);
     });
+    navigator->setDeleteProjectHandler([this](const ProjectMetadata& metadata) {
+        if (metadata.isBuiltInDemo()) {
+            QMessageBox::information(this, "Delete Project", "The built-in demo project cannot be deleted.");
+            return;
+        }
+
+        const auto choice = QMessageBox::question(
+            this,
+            "Delete Project",
+            QString("Delete \"%1\" and its project folder?\n\n%2")
+                .arg(metadata.name, metadata.folderPath),
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No);
+        if (choice != QMessageBox::Yes) {
+            return;
+        }
+
+        QString errorMessage;
+        if (!ProjectPersistence::deleteProject(metadata, &errorMessage)) {
+            QMessageBox::warning(this, "Delete Project", errorMessage);
+            return;
+        }
+
+        showProjectNavigator();
+    });
     setCentralWidget(navigator);
 }
 

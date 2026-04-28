@@ -11,6 +11,7 @@ class ProjectPersistence {
 public:
     static QList<ProjectMetadata> loadRecentProjects();
     static ProjectMetadata loadProject(const QString& folderPath);
+    static bool deleteProject(const ProjectMetadata& metadata, QString* errorMessage = nullptr);
     static bool loadProjectReview(const ProjectMetadata& metadata, safecrowd::domain::ImportResult* importResult);
     static bool saveProject(ProjectMetadata metadata, QString* errorMessage = nullptr);
     static bool saveProjectReview(

@@ -49,4 +49,8 @@ void ProjectNavigatorWidget::setOpenProjectHandler(std::function<void(const Proj
     projectList_->setOpenProjectHandler(std::move(handler));
 }
 
+void ProjectNavigatorWidget::setDeleteProjectHandler(std::function<void(const ProjectMetadata&)> handler) {
+    projectList_->setDeleteProjectHandler(std::move(handler));
+}
+
 }  // namespace safecrowd::application
