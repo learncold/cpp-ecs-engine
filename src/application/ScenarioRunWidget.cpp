@@ -95,11 +95,20 @@ QWidget* ScenarioRunWidget::createRunPanel() {
     elapsedLabel_->setStyleSheet(ui::mutedTextStyleSheet());
     agentCountLabel_ = createLabel("", panel);
     agentCountLabel_->setStyleSheet(ui::mutedTextStyleSheet());
+    riskLabel_ = createLabel("", panel);
+    riskLabel_->setStyleSheet(ui::mutedTextStyleSheet());
+    congestionLabel_ = createLabel("", panel);
+    congestionLabel_->setStyleSheet(ui::mutedTextStyleSheet());
+    bottleneckLabel_ = createLabel("", panel);
+    bottleneckLabel_->setStyleSheet(ui::mutedTextStyleSheet());
 
     layout->addWidget(scenarioLabel_);
     layout->addWidget(statusLabel_);
     layout->addWidget(elapsedLabel_);
     layout->addWidget(agentCountLabel_);
+    layout->addWidget(riskLabel_);
+    layout->addWidget(congestionLabel_);
+    layout->addWidget(bottleneckLabel_);
 
     auto* transportLayout = new QHBoxLayout();
     transportLayout->setContentsMargins(0, 0, 0, 0);
@@ -147,6 +156,29 @@ void ScenarioRunWidget::refreshStatus() {
             .arg(static_cast<int>(frame.evacuatedAgentCount))
             .arg(static_cast<int>(frame.totalAgentCount))
             .arg(static_cast<int>(frame.agents.size())));
+    }
+    const auto& risk = runner_.riskSnapshot();
+    if (riskLabel_ != nullptr) {
+        riskLabel_->setText(QString("Completion Risk: %1\nStalled Agents: %2")
+            .arg(safecrowd::domain::scenarioRiskLevelLabel(risk.completionRisk))
+            .arg(static_cast<int>(risk.stalledAgentCount)));
+    }
+    if (congestionLabel_ != nullptr) {
+        const auto hotspotCount = risk.hotspots.empty() ? 0 : static_cast<int>(risk.hotspots.front().agentCount);
+        congestionLabel_->setText(QString("Hotspots: %1%2")
+            .arg(static_cast<int>(risk.hotspots.size()))
+            .arg(risk.hotspots.empty() ? QString{} : QString(" (max %1 agents)").arg(hotspotCount)));
+    }
+    if (bottleneckLabel_ != nullptr) {
+        if (risk.bottlenecks.empty()) {
+            bottleneckLabel_->setText("Bottlenecks: 0");
+        } else {
+            const auto& bottleneck = risk.bottlenecks.front();
+            bottleneckLabel_->setText(QString("Worst Bottleneck: %1\nNearby: %2, Stalled: %3")
+                .arg(QString::fromStdString(bottleneck.label))
+                .arg(static_cast<int>(bottleneck.nearbyAgentCount))
+                .arg(static_cast<int>(bottleneck.stalledAgentCount)));
+        }
     }
     if (pauseButton_ != nullptr) {
         pauseButton_->setIcon(style()->standardIcon(paused_ ? QStyle::SP_MediaPlay : QStyle::SP_MediaPause));

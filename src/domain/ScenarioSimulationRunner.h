@@ -8,6 +8,7 @@
 #include "domain/AgentComponents.h"
 #include "domain/FacilityLayout2D.h"
 #include "domain/ScenarioAuthoring.h"
+#include "domain/ScenarioRiskMetrics.h"
 #include "domain/ScenarioSimulationFrame.h"
 #include "domain/ScenarioSimulationSystems.h"
 #include "engine/EngineRuntime.h"
@@ -23,6 +24,7 @@ public:
     void step(double deltaSeconds);
 
     const SimulationFrame& frame() const noexcept;
+    const ScenarioRiskSnapshot& riskSnapshot() const noexcept;
     double timeLimitSeconds() const noexcept;
     bool complete() const noexcept;
 
@@ -47,6 +49,7 @@ private:
     ScenarioDraft scenario_{};
     std::unique_ptr<engine::EngineRuntime> runtime_{};
     SimulationFrame frame_{};
+    ScenarioRiskSnapshot riskSnapshot_{};
     double timeLimitSeconds_{60.0};
 };
 

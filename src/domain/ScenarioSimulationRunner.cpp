@@ -55,6 +55,10 @@ const SimulationFrame& ScenarioSimulationRunner::frame() const noexcept {
     return frame_;
 }
 
+const ScenarioRiskSnapshot& ScenarioSimulationRunner::riskSnapshot() const noexcept {
+    return riskSnapshot_;
+}
+
 double ScenarioSimulationRunner::timeLimitSeconds() const noexcept {
     return timeLimitSeconds_;
 }
@@ -115,6 +119,11 @@ void ScenarioSimulationRunner::initializeRuntime() {
         {.phase = engine::UpdatePhase::PostSimulation,
          .triggerPolicy = engine::TriggerPolicy::EveryFrame});
     runtime_->addSystem(
+        makeScenarioRiskMetricsSystem(layout_),
+        {.phase = engine::UpdatePhase::PostSimulation,
+         .order = 10,
+         .triggerPolicy = engine::TriggerPolicy::EveryFrame});
+    runtime_->addSystem(
         std::make_unique<ScenarioFrameSyncSystem>(),
         {.phase = engine::UpdatePhase::RenderSync,
          .triggerPolicy = engine::TriggerPolicy::EveryFrame});
@@ -130,6 +139,9 @@ void ScenarioSimulationRunner::syncFrameFromRuntime() {
     auto& resources = runtime_->world().resources();
     if (resources.contains<ScenarioSimulationFrameResource>()) {
         frame_ = resources.get<ScenarioSimulationFrameResource>().frame;
+    }
+    if (resources.contains<ScenarioRiskMetricsResource>()) {
+        riskSnapshot_ = resources.get<ScenarioRiskMetricsResource>().snapshot;
     }
 }
 

@@ -6,6 +6,7 @@
 
 #include "domain/AgentComponents.h"
 #include "domain/FacilityLayout2D.h"
+#include "domain/ScenarioRiskMetrics.h"
 #include "domain/ScenarioSimulationFrame.h"
 #include "engine/EngineSystem.h"
 #include "engine/Entity.h"
@@ -31,6 +32,10 @@ struct ScenarioAgentSpatialIndexResource {
     std::unordered_map<long long, std::vector<engine::Entity>> cells{};
 };
 
+struct ScenarioRiskMetricsResource {
+    ScenarioRiskSnapshot snapshot{};
+};
+
 struct ScenarioAgentSeed {
     Position position{};
     Agent agent{};
@@ -46,6 +51,7 @@ std::vector<engine::Entity> scenarioNearbyAgents(
     double radius);
 
 std::unique_ptr<engine::EngineSystem> makeScenarioSimulationMotionSystem(FacilityLayout2D layout);
+std::unique_ptr<engine::EngineSystem> makeScenarioRiskMetricsSystem(FacilityLayout2D layout);
 
 class ScenarioAgentSpawnSystem final : public engine::EngineSystem {
 public:

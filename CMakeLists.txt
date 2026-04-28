@@ -81,6 +81,9 @@ add_library(safecrowd_domain STATIC
     src/domain/Geometry2D.h
     src/domain/PopulationSpec.h
     src/domain/ScenarioAuthoring.h
+    src/domain/ScenarioRiskMetrics.h
+    src/domain/ScenarioRiskMetrics.cpp
+    src/domain/ScenarioRiskMetricsSystem.cpp
     src/domain/ScenarioSimulationFrame.h
     src/domain/ScenarioSimulationInternal.h
     src/domain/ScenarioSimulationInternal.cpp
