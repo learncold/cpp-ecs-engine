@@ -49,6 +49,9 @@
 - `engine` must not depend on `domain` or `application`.
 - `domain` must not depend on Qt UI code.
 - `application` is responsible for wiring UI to domain logic.
+- When implementing application-layer behavior, prefer existing `domain` APIs and models over duplicating business logic in Qt widgets.
+- Application code should drive simulation/scenario behavior through domain services/runners that use the engine ECS runtime; do not bypass the ECS structure with parallel UI-owned state machines for simulation logic.
+- If a needed behavior is missing below the UI, add it in `domain` and, when appropriate, back it with engine ECS systems/resources/components instead of implementing it only in `application`.
 - If a change affects multiple layers, review dependency direction first and keep responsibilities explicit.
 
 ## Dependency Policy
