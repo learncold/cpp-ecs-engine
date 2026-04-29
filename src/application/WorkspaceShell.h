@@ -9,6 +9,7 @@ class QAction;
 class QBoxLayout;
 class QFrame;
 class QPushButton;
+class QWidget;
 
 namespace safecrowd::application {
 
@@ -19,6 +20,7 @@ public:
     void setTools(const QStringList& tools);
     void setNavigationRail(QWidget* rail);
     void setNavigationPanel(QWidget* panel);
+    void setNavigationVisible(bool visible);
     void setReviewPanel(QWidget* panel);
     void setReviewPanelVisible(bool visible);
     void setTopBarTrailingWidget(QWidget* widget);
@@ -36,6 +38,7 @@ private:
     QBoxLayout* navigationLayout_{nullptr};
     QBoxLayout* canvasLayout_{nullptr};
     QBoxLayout* reviewLayout_{nullptr};
+    QWidget* navigationCluster_{nullptr};
     QFrame* reviewPanel_{nullptr};
     QAction* openProjectAction_{nullptr};
     QAction* saveProjectAction_{nullptr};

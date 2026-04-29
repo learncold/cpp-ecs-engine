@@ -99,25 +99,25 @@ WorkspaceShell::WorkspaceShell(QWidget* parent)
     bodyLayout->setContentsMargins(0, 0, 0, 0);
     bodyLayout->setSpacing(0);
 
-    auto* leftCluster = new QWidget(this);
-    auto* leftClusterLayout = new QHBoxLayout(leftCluster);
+    navigationCluster_ = new QWidget(this);
+    auto* leftClusterLayout = new QHBoxLayout(navigationCluster_);
     leftClusterLayout->setContentsMargins(0, 0, 0, 0);
     leftClusterLayout->setSpacing(0);
 
-    auto* navigationRail = new QWidget(leftCluster);
+    auto* navigationRail = new QWidget(navigationCluster_);
     navigationRail->setFixedWidth(56);
     navigationRailLayout_ = new QVBoxLayout(navigationRail);
     navigationRailLayout_->setContentsMargins(0, 0, 0, 0);
     navigationRailLayout_->setSpacing(0);
     leftClusterLayout->addWidget(navigationRail);
 
-    auto* navigationPanel = createPanel(leftCluster);
+    auto* navigationPanel = createPanel(navigationCluster_);
     navigationPanel->setFixedWidth(260);
     navigationLayout_ = new QVBoxLayout(navigationPanel);
     navigationLayout_->setContentsMargins(18, 18, 18, 18);
     navigationLayout_->setSpacing(12);
     leftClusterLayout->addWidget(navigationPanel);
-    bodyLayout->addWidget(leftCluster);
+    bodyLayout->addWidget(navigationCluster_);
 
     auto* centerStack = new QWidget(this);
     auto* centerLayout = new QVBoxLayout(centerStack);
@@ -197,6 +197,12 @@ void WorkspaceShell::setNavigationRail(QWidget* rail) {
 
 void WorkspaceShell::setNavigationPanel(QWidget* panel) {
     replaceSingleWidget(navigationLayout_, panel);
+}
+
+void WorkspaceShell::setNavigationVisible(bool visible) {
+    if (navigationCluster_ != nullptr) {
+        navigationCluster_->setVisible(visible);
+    }
 }
 
 void WorkspaceShell::setReviewPanel(QWidget* panel) {

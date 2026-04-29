@@ -1,6 +1,7 @@
 #include "application/ScenarioAuthoringWidget.h"
 
 #include <algorithm>
+#include <utility>
 
 #include <QComboBox>
 #include <QFrame>
@@ -12,12 +13,12 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSizePolicy>
-#include <QStyle>
 #include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
 
 #include "application/LayoutNavigationPanelWidget.h"
+#include "application/NavigationTreeWidget.h"
 #include "application/ScenarioCanvasWidget.h"
 #include "application/ScenarioRunWidget.h"
 #include "application/UiStyle.h"
@@ -89,6 +90,21 @@ QIcon makeEventsIcon(const QColor& color) {
     return QIcon(pixmap);
 }
 
+QIcon makeLayoutIcon(const QColor& color) {
+    QPixmap pixmap(44, 44);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(QPen(color, 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawRect(QRectF(11, 10, 9, 10));
+    painter.drawRect(QRectF(24, 10, 9, 10));
+    painter.drawRect(QRectF(11, 24, 22, 10));
+    painter.drawLine(QPointF(20, 15), QPointF(24, 15));
+    painter.drawLine(QPointF(22, 20), QPointF(22, 24));
+    return QIcon(pixmap);
+}
+
 QWidget* createNavigationRail(
     ScenarioAuthoringWidget::NavigationView currentView,
     std::function<void(ScenarioAuthoringWidget::NavigationView)> switchViewHandler,
@@ -120,95 +136,107 @@ QWidget* createNavigationRail(
         layout->addWidget(button);
     };
 
-    makeActivityButton(activityBar->style()->standardIcon(QStyle::SP_DirIcon), "Layout", ScenarioAuthoringWidget::NavigationView::Layout);
+    makeActivityButton(makeLayoutIcon(QColor("#1f5fae")), "Layout", ScenarioAuthoringWidget::NavigationView::Layout);
     makeActivityButton(makeCrowdIcon(QColor("#1f5fae")), "Crowd", ScenarioAuthoringWidget::NavigationView::Crowd);
     makeActivityButton(makeEventsIcon(QColor("#1f5fae")), "Events", ScenarioAuthoringWidget::NavigationView::Events);
     layout->addStretch(1);
     return activityBar;
 }
 
+std::vector<NavigationTreeNode> buildCrowdTree(const ScenarioAuthoringWidget::ScenarioState* scenario) {
+    if (scenario == nullptr || scenario->crowdPlacements.empty()) {
+        return {};
+    }
+
+    std::vector<NavigationTreeNode> placements;
+    for (const auto& placement : scenario->crowdPlacements) {
+        const bool group = placement.kind == ScenarioCrowdPlacementKind::Group;
+        std::vector<NavigationTreeNode> occupants;
+        for (int index = 1; index <= placement.occupantCount; ++index) {
+            occupants.push_back({
+                .label = QString("Occupant %1").arg(index),
+                .id = QString("%1/occupant-%2").arg(placement.id).arg(index),
+                .detail = QString("Zone: %1\nVelocity: (%2, %3)")
+                              .arg(placement.zoneId)
+                              .arg(placement.velocity.x, 0, 'f', 2)
+                              .arg(placement.velocity.y, 0, 'f', 2),
+            });
+        }
+
+        placements.push_back({
+            .label = QString("%1  -  %2  -  %3 %4")
+                         .arg(
+                             placement.name.isEmpty() ? placement.id : placement.name,
+                             placement.zoneId)
+                         .arg(placement.occupantCount)
+                         .arg(placement.occupantCount == 1 ? "occupant" : "occupants"),
+            .id = placement.id,
+            .detail = QString("Velocity: (%1, %2)")
+                          .arg(placement.velocity.x, 0, 'f', 2)
+                          .arg(placement.velocity.y, 0, 'f', 2),
+            .children = group ? std::move(occupants) : std::vector<NavigationTreeNode>{},
+            .expanded = false,
+        });
+    }
+
+    return placements;
+}
+
 QWidget* createCrowdPanel(
     const ScenarioAuthoringWidget::ScenarioState* scenario,
+    std::function<void(const QString&)> selectPlacementHandler,
     QWidget* parent) {
-    auto* content = new QWidget(parent);
-    auto* layout = new QVBoxLayout(content);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(12);
-    layout->addWidget(createLabel("Crowd", content, ui::FontRole::Title));
+    return new NavigationTreeWidget(
+        "Crowd",
+        buildCrowdTree(scenario),
+        "No pedestrian placements yet",
+        std::move(selectPlacementHandler),
+        parent);
+}
 
-    if (scenario == nullptr || scenario->crowdPlacements.empty()) {
-        auto* empty = createLabel("No pedestrian placements yet", content);
-        empty->setStyleSheet(ui::mutedTextStyleSheet());
-        layout->addWidget(empty);
-        layout->addStretch(1);
-        return content;
+std::vector<NavigationTreeNode> buildEventsTree(const ScenarioAuthoringWidget::ScenarioState* scenario) {
+    if (scenario == nullptr || scenario->events.empty()) {
+        return {};
     }
 
-    auto* sectionHeader = createLabel("Placements", content, ui::FontRole::SectionTitle);
-    sectionHeader->setStyleSheet(ui::subtleTextStyleSheet());
-    layout->addWidget(sectionHeader);
-
-    auto* scrollArea = new QScrollArea(content);
-    scrollArea->setWidgetResizable(true);
-    scrollArea->setFrameShape(QFrame::NoFrame);
-    scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    ui::polishScrollArea(scrollArea);
-
-    auto* scrollContent = new QWidget(scrollArea);
-    scrollContent->setStyleSheet("QWidget { background: transparent; }");
-    auto* rowsLayout = new QVBoxLayout(scrollContent);
-    rowsLayout->setContentsMargins(0, 0, 14, 0);
-    rowsLayout->setSpacing(8);
-
-    for (const auto& placement : scenario->crowdPlacements) {
-        const auto kind = placement.kind == ScenarioCrowdPlacementKind::Individual ? "Individual" : "Group";
-        auto* row = new QPushButton(QString("%1  -  %2  -  %3 people\nvelocity (%4, %5)")
-                                        .arg(kind, placement.zoneId)
-                                        .arg(placement.occupantCount)
-                                        .arg(placement.velocity.x, 0, 'f', 2)
-                                        .arg(placement.velocity.y, 0, 'f', 2),
-                                    scrollContent);
-        row->setFont(ui::font(ui::FontRole::Body));
-        row->setMinimumHeight(56);
-        row->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-        row->setStyleSheet(ui::ghostRowStyleSheet());
-        rowsLayout->addWidget(row);
+    std::vector<NavigationTreeNode> events;
+    for (const auto& event : scenario->events) {
+        const auto eventId = QString::fromStdString(event.id);
+        events.push_back({
+            .label = QString::fromStdString(event.name),
+            .id = eventId,
+            .detail = QString::fromStdString(event.targetSummary),
+            .children = {
+                {
+                    .label = QString("Trigger  -  %1").arg(QString::fromStdString(event.triggerSummary)),
+                    .id = QString("%1/trigger").arg(eventId),
+                },
+                {
+                    .label = QString("Target  -  %1").arg(QString::fromStdString(event.targetSummary)),
+                    .id = QString("%1/target").arg(eventId),
+                },
+            },
+            .expanded = true,
+        });
     }
-    rowsLayout->addStretch(1);
-    scrollArea->setWidget(scrollContent);
-    layout->addWidget(scrollArea, 1);
-    return content;
+
+    return {{
+        .label = QString("Events (%1)").arg(static_cast<int>(scenario->events.size())),
+        .children = std::move(events),
+        .expanded = true,
+        .selectable = false,
+    }};
 }
 
 QWidget* createEventsPanel(
     const ScenarioAuthoringWidget::ScenarioState* scenario,
     QWidget* parent) {
-    auto* content = new QWidget(parent);
-    auto* layout = new QVBoxLayout(content);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(12);
-    layout->addWidget(createLabel("Events", content, ui::FontRole::Title));
-
-    if (scenario == nullptr || scenario->events.empty()) {
-        auto* empty = createLabel("No operational events yet", content);
-        empty->setStyleSheet(ui::mutedTextStyleSheet());
-        layout->addWidget(empty);
-        layout->addStretch(1);
-        return content;
-    }
-
-    for (const auto& event : scenario->events) {
-        auto* row = new QPushButton(
-            QString("%1\n%2")
-                .arg(QString::fromStdString(event.name), QString::fromStdString(event.targetSummary)),
-            content);
-        row->setFont(ui::font(ui::FontRole::Body));
-        row->setStyleSheet(ui::ghostRowStyleSheet());
-        layout->addWidget(row);
-    }
-
-    layout->addStretch(1);
-    return content;
+    return new NavigationTreeWidget(
+        "Events",
+        buildEventsTree(scenario),
+        "No operational events yet",
+        {},
+        parent);
 }
 
 }  // namespace
@@ -428,11 +456,25 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
         shell_));
 
     if (navigationView_ == NavigationView::Layout) {
-        shell_->setNavigationPanel(new LayoutNavigationPanelWidget(&layout_, {}, shell_));
+        shell_->setNavigationPanel(new LayoutNavigationPanelWidget(
+            &layout_,
+            [this](const QString& elementId) {
+                if (canvas_ != nullptr) {
+                    canvas_->focusLayoutElement(elementId);
+                }
+            },
+            shell_));
         return;
     }
     if (navigationView_ == NavigationView::Crowd) {
-        shell_->setNavigationPanel(createCrowdPanel(currentScenario(), shell_));
+        shell_->setNavigationPanel(createCrowdPanel(
+            currentScenario(),
+            [this](const QString& placementId) {
+                if (canvas_ != nullptr) {
+                    canvas_->focusPlacement(placementId);
+                }
+            },
+            shell_));
         return;
     }
     shell_->setNavigationPanel(createEventsPanel(currentScenario(), shell_));

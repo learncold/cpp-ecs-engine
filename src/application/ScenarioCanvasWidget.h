@@ -48,6 +48,8 @@ public:
 
     void setPlacements(std::vector<ScenarioCrowdPlacement> placements);
     void setPlacementsChangedHandler(std::function<void(const std::vector<ScenarioCrowdPlacement>&)> handler);
+    void focusLayoutElement(const QString& elementId);
+    void focusPlacement(const QString& placementId);
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -79,6 +81,8 @@ private:
     QString nextPlacementId(ScenarioCrowdPlacementKind kind) const;
     void addGroupPlacement(const QPointF& start, const QPointF& end);
     void addIndividualPlacement(const QPointF& position);
+    void drawFocusedLayoutElement(QPainter& painter, const LayoutCanvasTransform& transform) const;
+    void drawFocusedPlacement(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void emitPlacementsChanged();
     void repositionToolbars();
     void setToolMode(ToolMode mode);
@@ -86,6 +90,8 @@ private:
 
     safecrowd::domain::FacilityLayout2D layout_{};
     std::vector<ScenarioCrowdPlacement> placements_{};
+    QString focusedLayoutElementId_{};
+    QString focusedPlacementId_{};
     ToolMode toolMode_{ToolMode::Select};
     LayoutCanvasCamera camera_{};
     QPointF dragStart_{};

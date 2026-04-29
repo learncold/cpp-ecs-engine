@@ -1,14 +1,19 @@
 #include "application/ScenarioRunWidget.h"
 
+#include <algorithm>
 #include <utility>
 
+#include <QColor>
+#include <QIcon>
 #include <QLabel>
 #include <QHBoxLayout>
+#include <QPainter>
+#include <QPixmap>
 #include <QPushButton>
-#include <QStyle>
 #include <QTimer>
 #include <QVBoxLayout>
 
+#include "application/ScenarioAuthoringWidget.h"
 #include "application/ScenarioResultWidget.h"
 #include "application/SimulationCanvasWidget.h"
 #include "application/UiStyle.h"
@@ -19,6 +24,12 @@ namespace {
 
 constexpr double kSimulationDeltaSeconds = 1.0 / 30.0;
 
+enum class TransportIconKind {
+    Play,
+    Pause,
+    Stop,
+};
+
 QLabel* createLabel(const QString& text, QWidget* parent, ui::FontRole role = ui::FontRole::Body) {
     auto* label = new QLabel(text, parent);
     label->setFont(ui::font(role));
@@ -26,14 +37,93 @@ QLabel* createLabel(const QString& text, QWidget* parent, ui::FontRole role = ui
     return label;
 }
 
-QPushButton* createIconButton(QStyle::StandardPixmap icon, const QString& tooltip, QWidget* parent) {
+QIcon makeTransportIcon(TransportIconKind kind, const QColor& color) {
+    QPixmap pixmap(40, 40);
+    pixmap.fill(Qt::transparent);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(color);
+
+    if (kind == TransportIconKind::Play) {
+        QPolygonF triangle;
+        triangle << QPointF(16, 12) << QPointF(16, 28) << QPointF(28, 20);
+        painter.drawPolygon(triangle);
+    } else if (kind == TransportIconKind::Pause) {
+        painter.drawRoundedRect(QRectF(13, 11, 5, 18), 1.5, 1.5);
+        painter.drawRoundedRect(QRectF(22, 11, 5, 18), 1.5, 1.5);
+    } else {
+        painter.drawRoundedRect(QRectF(13, 13, 14, 14), 2, 2);
+    }
+
+    return QIcon(pixmap);
+}
+
+QPushButton* createIconButton(TransportIconKind icon, const QString& tooltip, QWidget* parent) {
     auto* button = new QPushButton(parent);
-    button->setIcon(parent->style()->standardIcon(icon));
+    button->setIcon(makeTransportIcon(icon, QColor("#16202b")));
+    button->setIconSize(QSize(22, 22));
     button->setToolTip(tooltip);
     button->setAccessibleName(tooltip);
     button->setFixedSize(40, 36);
     button->setStyleSheet(ui::secondaryButtonStyleSheet());
     return button;
+}
+
+QString zoneLabel(const safecrowd::domain::Zone2D& zone) {
+    const auto id = QString::fromStdString(zone.id);
+    const auto label = QString::fromStdString(zone.label);
+    return label.isEmpty() ? id : QString("%1  -  %2").arg(label, id);
+}
+
+const safecrowd::domain::Zone2D* firstStartZone(const safecrowd::domain::FacilityLayout2D& layout) {
+    const auto it = std::find_if(layout.zones.begin(), layout.zones.end(), [](const auto& zone) {
+        return zone.kind == safecrowd::domain::ZoneKind::Room || zone.kind == safecrowd::domain::ZoneKind::Unknown;
+    });
+    return it == layout.zones.end() ? nullptr : &(*it);
+}
+
+const safecrowd::domain::Zone2D* firstDestinationZone(const safecrowd::domain::FacilityLayout2D& layout) {
+    const auto exitIt = std::find_if(layout.zones.begin(), layout.zones.end(), [](const auto& zone) {
+        return zone.kind == safecrowd::domain::ZoneKind::Exit;
+    });
+    if (exitIt != layout.zones.end()) {
+        return &(*exitIt);
+    }
+    return layout.zones.empty() ? nullptr : &layout.zones.back();
+}
+
+ScenarioAuthoringWidget::ScenarioState scenarioStateFromDraft(
+    const safecrowd::domain::ScenarioDraft& scenario,
+    const safecrowd::domain::FacilityLayout2D& layout) {
+    ScenarioAuthoringWidget::ScenarioState state;
+    state.draft = scenario;
+    state.events = scenario.control.events;
+    state.stagedForRun = true;
+
+    if (const auto* startZone = firstStartZone(layout); startZone != nullptr) {
+        state.startText = zoneLabel(*startZone);
+    }
+    if (const auto* destinationZone = firstDestinationZone(layout); destinationZone != nullptr) {
+        state.destinationText = zoneLabel(*destinationZone);
+    }
+
+    for (const auto& placement : scenario.population.initialPlacements) {
+        ScenarioCrowdPlacement uiPlacement;
+        uiPlacement.id = QString::fromStdString(placement.id);
+        uiPlacement.name = uiPlacement.id;
+        uiPlacement.kind = (placement.targetAgentCount <= 1 && placement.area.outline.size() <= 1)
+            ? ScenarioCrowdPlacementKind::Individual
+            : ScenarioCrowdPlacementKind::Group;
+        uiPlacement.zoneId = QString::fromStdString(placement.zoneId);
+        uiPlacement.area = placement.area.outline;
+        uiPlacement.occupantCount = static_cast<int>(placement.targetAgentCount);
+        uiPlacement.velocity = placement.initialVelocity;
+        state.crowdPlacements.push_back(std::move(uiPlacement));
+    }
+
+    return state;
 }
 
 }  // namespace
@@ -60,12 +150,14 @@ ScenarioRunWidget::ScenarioRunWidget(
     shell_->setTools({"Project"});
     shell_->setSaveProjectHandler(saveProjectHandler_);
     shell_->setOpenProjectHandler(openProjectHandler_);
+    shell_->setNavigationVisible(false);
     canvas_ = new SimulationCanvasWidget(layout_, shell_);
     canvas_->setFrame(runner_.frame());
     shell_->setCanvas(canvas_);
     shell_->setReviewPanel(createRunPanel());
     shell_->setReviewPanelVisible(true);
     rootLayout->addWidget(shell_);
+    addBackToAuthoringButton();
 
     timer_ = new QTimer(this);
     timer_->setInterval(33);
@@ -116,8 +208,8 @@ QWidget* ScenarioRunWidget::createRunPanel() {
     auto* transportLayout = new QHBoxLayout();
     transportLayout->setContentsMargins(0, 0, 0, 0);
     transportLayout->setSpacing(8);
-    pauseButton_ = createIconButton(QStyle::SP_MediaPause, "Pause simulation", panel);
-    stopButton_ = createIconButton(QStyle::SP_MediaStop, "Stop and reset run", panel);
+    pauseButton_ = createIconButton(TransportIconKind::Pause, "Pause simulation", panel);
+    stopButton_ = createIconButton(TransportIconKind::Stop, "Stop and reset run", panel);
     transportLayout->addWidget(pauseButton_);
     transportLayout->addWidget(stopButton_);
     transportLayout->addStretch(1);
@@ -142,6 +234,67 @@ QWidget* ScenarioRunWidget::createRunPanel() {
     });
 
     return panel;
+}
+
+void ScenarioRunWidget::addBackToAuthoringButton() {
+    if (canvas_ == nullptr) {
+        return;
+    }
+
+    auto* button = new QPushButton("<", canvas_);
+    button->setToolTip("Back to scenario editor");
+    button->setAccessibleName("Back to scenario editor");
+    button->setFixedSize(40, 36);
+    button->move(16, 16);
+    button->raise();
+    button->setStyleSheet(
+        "QPushButton {"
+        " background: rgba(255, 255, 255, 232);"
+        " border: 1px solid #c9d5e2;"
+        " border-radius: 10px;"
+        " color: #16202b;"
+        " font-size: 18px;"
+        " font-weight: 700;"
+        " padding-bottom: 2px;"
+        "}"
+        "QPushButton:hover {"
+        " background: #eef3f8;"
+        " border-color: #b8c6d6;"
+        "}");
+    connect(button, &QPushButton::clicked, this, [this]() {
+        returnToAuthoring();
+    });
+}
+
+void ScenarioRunWidget::returnToAuthoring() {
+    if (timer_ != nullptr) {
+        timer_->stop();
+    }
+
+    auto* rootLayout = qobject_cast<QVBoxLayout*>(layout());
+    if (rootLayout == nullptr || shell_ == nullptr) {
+        return;
+    }
+
+    ScenarioAuthoringWidget::InitialState initial;
+    initial.scenarios.push_back(scenarioStateFromDraft(scenario_, layout_));
+    initial.currentScenarioIndex = 0;
+    initial.navigationView = ScenarioAuthoringWidget::NavigationView::Layout;
+    initial.rightPanelMode = ScenarioAuthoringWidget::RightPanelMode::Scenario;
+
+    auto* authoringWidget = new ScenarioAuthoringWidget(
+        projectName_,
+        layout_,
+        std::move(initial),
+        saveProjectHandler_,
+        openProjectHandler_,
+        this);
+
+    rootLayout->replaceWidget(shell_, authoringWidget);
+    shell_->hide();
+    shell_->deleteLater();
+    shell_ = nullptr;
+    canvas_ = nullptr;
 }
 
 void ScenarioRunWidget::refreshStatus() {
@@ -187,7 +340,9 @@ void ScenarioRunWidget::refreshStatus() {
         }
     }
     if (pauseButton_ != nullptr) {
-        pauseButton_->setIcon(style()->standardIcon(paused_ ? QStyle::SP_MediaPlay : QStyle::SP_MediaPause));
+        pauseButton_->setIcon(makeTransportIcon(
+            paused_ ? TransportIconKind::Play : TransportIconKind::Pause,
+            QColor("#16202b")));
         pauseButton_->setToolTip(paused_ ? "Resume simulation" : "Pause simulation");
         pauseButton_->setAccessibleName(paused_ ? "Resume simulation" : "Pause simulation");
         pauseButton_->setEnabled(!frame.complete);

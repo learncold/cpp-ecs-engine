@@ -181,6 +181,7 @@ if (SAFECROWD_BUILD_APP)
         src/application/LayoutPreviewWidget.h
         src/application/LayoutReviewWidget.h
         src/application/MainWindow.h
+        src/application/NavigationTreeWidget.h
         src/application/NewProjectRequest.h
         src/application/NewProjectWidget.h
         src/application/ProjectListWidget.h
@@ -202,6 +203,7 @@ if (SAFECROWD_BUILD_APP)
         src/application/LayoutReviewWidget.cpp
         src/application/main.cpp
         src/application/MainWindow.cpp
+        src/application/NavigationTreeWidget.cpp
         src/application/NewProjectWidget.cpp
         src/application/ProjectListWidget.cpp
         src/application/ProjectNavigatorActions.cpp

@@ -4,13 +4,15 @@
 
 #include <QFrame>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QLabel>
+#include <QPainter>
+#include <QPixmap>
 #include <QPushButton>
 #include <QShortcut>
 #include <QScrollArea>
 #include <QStringList>
 #include <QKeySequence>
-#include <QStyle>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -62,6 +64,38 @@ bool isLiveValidationIssue(safecrowd::domain::ImportIssueCode code) {
     default:
         return false;
     }
+}
+
+QIcon makeIssuesIcon(const QColor& color) {
+    QPixmap pixmap(44, 44);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(QPen(color, 2.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(Qt::NoBrush);
+    QPolygonF triangle;
+    triangle << QPointF(22, 9) << QPointF(34, 32) << QPointF(10, 32);
+    painter.drawPolygon(triangle);
+    painter.drawLine(QPointF(22, 17), QPointF(22, 24));
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(color);
+    painter.drawEllipse(QPointF(22, 28), 1.7, 1.7);
+    return QIcon(pixmap);
+}
+
+QIcon makeLayoutIcon(const QColor& color) {
+    QPixmap pixmap(44, 44);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(QPen(color, 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawRect(QRectF(11, 10, 9, 10));
+    painter.drawRect(QRectF(24, 10, 9, 10));
+    painter.drawRect(QRectF(11, 24, 22, 10));
+    painter.drawLine(QPointF(20, 15), QPointF(24, 15));
+    painter.drawLine(QPointF(22, 20), QPointF(22, 24));
+    return QIcon(pixmap);
 }
 
 QWidget* createIssueList(
@@ -164,14 +198,14 @@ QWidget* createNavigationRail(
     };
 
     auto* issuesButton = makeActivityButton(
-        activityBar->style()->standardIcon(QStyle::SP_MessageBoxWarning),
+        makeIssuesIcon(QColor("#1f5fae")),
         "Issues",
         showIssues,
         [switchViewHandler]() {
             switchViewHandler(true);
         });
     auto* layoutButton = makeActivityButton(
-        activityBar->style()->standardIcon(QStyle::SP_DirIcon),
+        makeLayoutIcon(QColor("#1f5fae")),
         "Layout",
         !showIssues,
         [switchViewHandler]() {
