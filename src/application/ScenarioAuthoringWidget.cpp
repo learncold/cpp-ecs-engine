@@ -56,6 +56,36 @@ const safecrowd::domain::Zone2D* firstDestinationZone(const safecrowd::domain::F
     return layout.zones.empty() ? nullptr : &layout.zones.back();
 }
 
+struct EventPreset {
+    QString name{};
+    QString triggerSummary{};
+    QString targetSummary{};
+};
+
+const std::vector<EventPreset>& sprint1EventPresets() {
+    static const std::vector<EventPreset> presets{
+        {
+            .name = "Exit Closure",
+            .triggerSummary = "Trigger: operator command during run setup",
+            .targetSummary = "Target: primary exit route is marked closed for review",
+        },
+        {
+            .name = "Staged Release",
+            .triggerSummary = "Trigger: release group after initial evacuation wave",
+            .targetSummary = "Target: queued occupants enter from the selected start area",
+        },
+    };
+    return presets;
+}
+
+QString readinessListText(const QString& readyText, const QStringList& missingItems) {
+    if (missingItems.isEmpty()) {
+        return readyText;
+    }
+
+    return QString("Missing before ready:\n- %1").arg(missingItems.join("\n- "));
+}
+
 QIcon makeCrowdIcon(const QColor& color) {
     QPixmap pixmap(44, 44);
     pixmap.fill(Qt::transparent);
@@ -182,12 +212,48 @@ QWidget* createCrowdPanel(
 
 QWidget* createEventsPanel(
     const ScenarioAuthoringWidget::ScenarioState* scenario,
+    std::function<void(const QString&, const QString&, const QString&)> addEventHandler,
     QWidget* parent) {
     auto* content = new QWidget(parent);
     auto* layout = new QVBoxLayout(content);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(12);
     layout->addWidget(createLabel("Events", content, ui::FontRole::Title));
+
+    auto* libraryHeader = createLabel("Event Library", content, ui::FontRole::SectionTitle);
+    libraryHeader->setStyleSheet(ui::subtleTextStyleSheet());
+    layout->addWidget(libraryHeader);
+
+    const auto addPresetButton = [&](const EventPreset& preset) {
+        const auto name = preset.name;
+        const auto triggerSummary = preset.triggerSummary;
+        const auto targetSummary = preset.targetSummary;
+        auto* button = new QPushButton(
+            QString("%1\n%2\n%3")
+                .arg(name, triggerSummary, targetSummary),
+            content);
+        button->setFont(ui::font(ui::FontRole::Body));
+        button->setMinimumHeight(78);
+        button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        button->setStyleSheet(ui::secondaryButtonStyleSheet());
+        button->setEnabled(scenario != nullptr);
+        button->setToolTip(QString("Add another %1 event").arg(name));
+        auto handler = addEventHandler;
+        QObject::connect(button, &QPushButton::clicked, content, [=]() {
+            if (handler) {
+                handler(name, triggerSummary, targetSummary);
+            }
+        });
+        layout->addWidget(button);
+    };
+
+    for (const auto& preset : sprint1EventPresets()) {
+        addPresetButton(preset);
+    }
+
+    auto* configuredHeader = createLabel("Configured Events", content, ui::FontRole::SectionTitle);
+    configuredHeader->setStyleSheet(ui::subtleTextStyleSheet());
+    layout->addWidget(configuredHeader);
 
     if (scenario == nullptr || scenario->events.empty()) {
         auto* empty = createLabel("No operational events yet", content);
@@ -199,10 +265,15 @@ QWidget* createEventsPanel(
 
     for (const auto& event : scenario->events) {
         auto* row = new QPushButton(
-            QString("%1\n%2")
-                .arg(QString::fromStdString(event.name), QString::fromStdString(event.targetSummary)),
+            QString("%1\n%2\n%3")
+                .arg(
+                    QString::fromStdString(event.name),
+                    QString::fromStdString(event.triggerSummary),
+                    QString::fromStdString(event.targetSummary)),
             content);
         row->setFont(ui::font(ui::FontRole::Body));
+        row->setMinimumHeight(72);
+        row->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         row->setStyleSheet(ui::ghostRowStyleSheet());
         layout->addWidget(row);
     }
@@ -275,16 +346,16 @@ void ScenarioAuthoringWidget::addEventDraft(const QString& name, const QString& 
         return;
     }
 
-    const auto exists = std::any_of(scenario->events.begin(), scenario->events.end(), [&](const auto& event) {
-        return QString::fromStdString(event.name) == name;
-    });
-    if (exists) {
-        return;
+    auto eventName = name;
+    for (int suffix = 2; std::any_of(scenario->events.begin(), scenario->events.end(), [&](const auto& event) {
+             return QString::fromStdString(event.name) == eventName;
+         }); ++suffix) {
+        eventName = QString("%1 %2").arg(name).arg(suffix);
     }
 
     scenario->events.push_back({
         .id = QString("event-%1").arg(static_cast<int>(scenario->events.size()) + 1).toStdString(),
-        .name = name.toStdString(),
+        .name = eventName.toStdString(),
         .triggerSummary = trigger.toStdString(),
         .targetSummary = target.toStdString(),
     });
@@ -379,13 +450,14 @@ void ScenarioAuthoringWidget::refreshInspector() {
             for (const auto& placement : scenario->crowdPlacements) {
                 people += placement.occupantCount;
             }
-            scenarioSummaryLabel_->setText(QString("Name: %1\nRole: %2\nPopulation: %3\nStart: %4\nDestination: %5\nEvents: %6")
+            scenarioSummaryLabel_->setText(QString("Name: %1\nRole: %2\nPopulation: %3\nStart: %4\nDestination: %5\nEvents: %6\nStaged: %7")
                 .arg(
                     QString::fromStdString(scenario->draft.name),
                     scenario->draft.role == safecrowd::domain::ScenarioRole::Baseline ? "Baseline" : "Alternative")
                 .arg(people)
                 .arg(scenario->startText, scenario->destinationText)
-                .arg(static_cast<int>(scenario->events.size())));
+                .arg(static_cast<int>(scenario->events.size()))
+                .arg(scenario->stagedForRun ? "Yes" : "No"));
         }
     }
 
@@ -408,9 +480,23 @@ void ScenarioAuthoringWidget::refreshInspector() {
     if (newScenarioButton_ != nullptr) {
         newScenarioButton_->setText(hasScenario ? "New Scenario from Current" : "New Scenario");
     }
+
+    const auto readiness = readinessStatus();
+    if (readinessLabel_ != nullptr) {
+        if (rightPanelMode_ == RightPanelMode::Run) {
+            readinessLabel_->setText(readinessListText("Ready to run the staged baseline scenario.", readiness.missingRunItems));
+        } else {
+            readinessLabel_->setText(readinessListText("Ready to stage this scenario.", readiness.missingStageItems));
+        }
+    }
     if (stageScenarioButton_ != nullptr) {
-        stageScenarioButton_->setEnabled(hasScenario);
+        stageScenarioButton_->setEnabled(readiness.missingStageItems.isEmpty());
         stageScenarioButton_->setText(hasScenario && scenario->stagedForRun ? "Staged for Run" : "Stage Scenario");
+        stageScenarioButton_->setToolTip(readinessListText("This scenario can be staged for run.", readiness.missingStageItems));
+    }
+    if (executeRunButton_ != nullptr) {
+        executeRunButton_->setEnabled(readiness.missingRunItems.isEmpty());
+        executeRunButton_->setToolTip(readinessListText("Run the staged baseline scenario.", readiness.missingRunItems));
     }
 }
 
@@ -435,13 +521,19 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
         shell_->setNavigationPanel(createCrowdPanel(currentScenario(), shell_));
         return;
     }
-    shell_->setNavigationPanel(createEventsPanel(currentScenario(), shell_));
+    shell_->setNavigationPanel(createEventsPanel(
+        currentScenario(),
+        [this](const QString& name, const QString& trigger, const QString& target) {
+            addEventDraft(name, trigger, target);
+        },
+        shell_));
 }
 
 void ScenarioAuthoringWidget::refreshRightPanel() {
     scenarioSwitcher_ = nullptr;
     scenarioSummaryLabel_ = nullptr;
     changesLabel_ = nullptr;
+    readinessLabel_ = nullptr;
     newScenarioButton_ = nullptr;
     stageScenarioButton_ = nullptr;
     stagedScenariosLabel_ = nullptr;
@@ -479,6 +571,14 @@ void ScenarioAuthoringWidget::refreshScenarioSwitcher() {
 }
 
 void ScenarioAuthoringWidget::runFirstStagedBaselineScenario() {
+    const auto readiness = readinessStatus();
+    if (!readiness.missingRunItems.isEmpty()) {
+        if (readinessLabel_ != nullptr) {
+            readinessLabel_->setText(readinessListText("Ready to run the staged baseline scenario.", readiness.missingRunItems));
+        }
+        return;
+    }
+
     const auto* scenario = firstStagedBaselineScenario();
     if (scenario == nullptr) {
         if (stagedScenariosLabel_ != nullptr) {
@@ -499,6 +599,9 @@ void ScenarioAuthoringWidget::runFirstStagedBaselineScenario() {
         scenario->draft,
         saveProjectHandler_,
         openProjectHandler_,
+        [this](bool showRunPanel) {
+            returnFromRun(showRunPanel);
+        },
         this);
     rootLayout->replaceWidget(shell_, runWidget);
     shell_->hide();
@@ -517,7 +620,42 @@ void ScenarioAuthoringWidget::setRightPanelMode(RightPanelMode mode) {
     refreshRightPanel();
 }
 
+void ScenarioAuthoringWidget::returnFromRun(bool showRunPanel) {
+    auto* rootLayout = qobject_cast<QVBoxLayout*>(layout());
+    if (rootLayout == nullptr) {
+        return;
+    }
+
+    while (auto* item = rootLayout->takeAt(0)) {
+        if (auto* widget = item->widget()) {
+            widget->hide();
+            widget->deleteLater();
+        }
+        delete item;
+    }
+
+    rightPanelMode_ = showRunPanel ? RightPanelMode::Run : RightPanelMode::Scenario;
+    shell_ = new WorkspaceShell(this);
+    shell_->setTools({"Project"});
+    shell_->setSaveProjectHandler(saveProjectHandler_);
+    shell_->setOpenProjectHandler(openProjectHandler_);
+    shell_->setTopBarTrailingWidget(createTopBarTogglePanel());
+    refreshRightPanel();
+    rootLayout->addWidget(shell_);
+    refreshNavigationPanel();
+    refreshCanvas();
+    refreshInspector();
+}
+
 void ScenarioAuthoringWidget::stageCurrentScenario() {
+    const auto readiness = readinessStatus();
+    if (!readiness.missingStageItems.isEmpty()) {
+        if (readinessLabel_ != nullptr) {
+            readinessLabel_->setText(readinessListText("Ready to stage this scenario.", readiness.missingStageItems));
+        }
+        return;
+    }
+
     auto* scenario = currentScenario();
     if (scenario == nullptr) {
         return;
@@ -628,21 +766,27 @@ QWidget* ScenarioAuthoringWidget::createRunPanel() {
                 continue;
             }
             const auto role = scenario.draft.role == safecrowd::domain::ScenarioRole::Baseline ? "Baseline" : "Alternative";
-            lines << QString("- %1 (%2)").arg(QString::fromStdString(scenario.draft.name), role);
+            lines << QString("- %1 (%2), Events: %3")
+                .arg(QString::fromStdString(scenario.draft.name), role)
+                .arg(static_cast<int>(scenario.events.size()));
         }
     }
     stagedScenariosLabel_->setText(lines.join('\n'));
     layout->addWidget(stagedScenariosLabel_);
+
+    readinessLabel_ = createLabel("", panel);
+    readinessLabel_->setStyleSheet(ui::mutedTextStyleSheet());
+    layout->addWidget(readinessLabel_);
     layout->addStretch(1);
 
     executeRunButton_ = new QPushButton("Run Staged Scenarios", panel);
     executeRunButton_->setFont(ui::font(ui::FontRole::Body));
     executeRunButton_->setStyleSheet(ui::primaryButtonStyleSheet());
-    executeRunButton_->setEnabled(stagedCount > 0);
     layout->addWidget(executeRunButton_);
     connect(executeRunButton_, &QPushButton::clicked, this, [this]() {
         runFirstStagedBaselineScenario();
     });
+    refreshInspector();
 
     return panel;
 }
@@ -672,6 +816,10 @@ QWidget* ScenarioAuthoringWidget::createScenarioPanel() {
     changesLabel_ = createLabel("", inspector);
     changesLabel_->setStyleSheet(ui::mutedTextStyleSheet());
     inspectorLayout->addWidget(changesLabel_);
+
+    readinessLabel_ = createLabel("", inspector);
+    readinessLabel_->setStyleSheet(ui::mutedTextStyleSheet());
+    inspectorLayout->addWidget(readinessLabel_);
     inspectorLayout->addStretch(1);
 
     stageScenarioButton_ = new QPushButton("Stage Scenario", inspector);
@@ -732,6 +880,40 @@ QWidget* ScenarioAuthoringWidget::createTopBarTogglePanel() {
     return panel;
 }
 
+ScenarioAuthoringWidget::ReadinessStatus ScenarioAuthoringWidget::readinessStatus() const {
+    ReadinessStatus status;
+    const auto* scenario = currentScenario();
+    const auto* stagedBaseline = firstStagedBaselineScenario();
+    status.hasCurrentScenario = scenario != nullptr;
+    status.hasCurrentPopulation = scenario != nullptr && !scenario->draft.population.initialPlacements.empty();
+    status.hasDestinationZone = firstDestinationZone(layout_) != nullptr;
+    status.hasStagedBaselineScenario = stagedBaseline != nullptr;
+    status.hasRunnableBaselinePopulation = stagedBaseline != nullptr
+        && !stagedBaseline->draft.population.initialPlacements.empty();
+
+    if (!status.hasCurrentScenario) {
+        status.missingStageItems << "Create or select a scenario.";
+    }
+    if (!status.hasCurrentPopulation) {
+        status.missingStageItems << "Add at least one population placement on the Crowd canvas.";
+    }
+    if (!status.hasDestinationZone) {
+        status.missingStageItems << "Approve a layout with an Exit zone or another destination zone.";
+    }
+
+    if (!status.hasStagedBaselineScenario) {
+        status.missingRunItems << "Stage a baseline scenario for run.";
+    }
+    if (status.hasStagedBaselineScenario && !status.hasRunnableBaselinePopulation) {
+        status.missingRunItems << "Add at least one population placement to the staged baseline scenario.";
+    }
+    if (!status.hasDestinationZone) {
+        status.missingRunItems << "Approve a layout with an Exit zone or another destination zone.";
+    }
+
+    return status;
+}
+
 ScenarioAuthoringWidget::ScenarioState* ScenarioAuthoringWidget::currentScenario() {
     if (currentScenarioIndex_ < 0 || currentScenarioIndex_ >= static_cast<int>(scenarios_.size())) {
         return nullptr;
@@ -751,6 +933,15 @@ const ScenarioAuthoringWidget::ScenarioState* ScenarioAuthoringWidget::firstStag
         return scenario.stagedForRun && scenario.draft.role == safecrowd::domain::ScenarioRole::Baseline;
     });
     return it == scenarios_.end() ? nullptr : &(*it);
+}
+
+ScenarioAuthoringWidget::InitialState ScenarioAuthoringWidget::currentState() const {
+    return {
+        .scenarios = scenarios_,
+        .currentScenarioIndex = currentScenarioIndex_,
+        .navigationView = navigationView_,
+        .rightPanelMode = rightPanelMode_,
+    };
 }
 
 }  // namespace safecrowd::application

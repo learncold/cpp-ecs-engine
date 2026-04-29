@@ -24,6 +24,7 @@ public:
         safecrowd::domain::ScenarioRiskSnapshot risk,
         std::function<void()> saveProjectHandler,
         std::function<void()> openProjectHandler,
+        std::function<void(bool)> returnToAuthoringHandler,
         QWidget* parent = nullptr);
 
 private:
@@ -36,6 +37,7 @@ private:
     safecrowd::domain::ScenarioRiskSnapshot risk_{};
     std::function<void()> saveProjectHandler_{};
     std::function<void()> openProjectHandler_{};
+    std::function<void(bool)> returnToAuthoringHandler_{};
     WorkspaceShell* shell_{nullptr};
 };
 

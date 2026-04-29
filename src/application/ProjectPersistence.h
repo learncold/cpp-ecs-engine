@@ -3,6 +3,7 @@
 #include <QList>
 
 #include "application/ProjectMetadata.h"
+#include "application/ScenarioAuthoringWidget.h"
 #include "domain/ImportResult.h"
 
 namespace safecrowd::application {
@@ -16,6 +17,13 @@ public:
     static bool saveProjectReview(
         const ProjectMetadata& metadata,
         const safecrowd::domain::ImportResult& importResult,
+        QString* errorMessage = nullptr);
+    static bool loadScenarioAuthoringState(
+        const ProjectMetadata& metadata,
+        ScenarioAuthoringWidget::InitialState* state);
+    static bool saveScenarioAuthoringState(
+        const ProjectMetadata& metadata,
+        const ScenarioAuthoringWidget::InitialState& state,
         QString* errorMessage = nullptr);
 };
 

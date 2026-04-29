@@ -19,6 +19,40 @@ namespace {
 
 constexpr double kSimulationDeltaSeconds = 1.0 / 30.0;
 
+bool allAgentsEvacuated(const safecrowd::domain::SimulationFrame& frame) {
+    return frame.totalAgentCount > 0 && frame.evacuatedAgentCount >= frame.totalAgentCount;
+}
+
+QString completionOutcome(const safecrowd::domain::SimulationFrame& frame) {
+    if (!frame.complete) {
+        return "In progress";
+    }
+    return allAgentsEvacuated(frame) ? "Evacuation complete" : "Time limit reached";
+}
+
+QString runStatusText(const safecrowd::domain::SimulationFrame& frame, bool paused) {
+    if (frame.complete) {
+        return completionOutcome(frame);
+    }
+    if (paused && frame.elapsedSeconds <= 0.0 && frame.evacuatedAgentCount == 0) {
+        return "Reset to start";
+    }
+    return paused ? "Paused" : "Running";
+}
+
+QString hotspotSummary(const safecrowd::domain::ScenarioRiskSnapshot& risk) {
+    if (risk.hotspots.empty()) {
+        return "Hotspots: 0";
+    }
+
+    const auto& hotspot = risk.hotspots.front();
+    return QString("Hotspots: %1\nWorst: %2 agents at (%3, %4)")
+        .arg(static_cast<int>(risk.hotspots.size()))
+        .arg(static_cast<int>(hotspot.agentCount))
+        .arg(hotspot.center.x, 0, 'f', 1)
+        .arg(hotspot.center.y, 0, 'f', 1);
+}
+
 QLabel* createLabel(const QString& text, QWidget* parent, ui::FontRole role = ui::FontRole::Body) {
     auto* label = new QLabel(text, parent);
     label->setFont(ui::font(role));
@@ -44,6 +78,7 @@ ScenarioRunWidget::ScenarioRunWidget(
     const safecrowd::domain::ScenarioDraft& scenario,
     std::function<void()> saveProjectHandler,
     std::function<void()> openProjectHandler,
+    std::function<void(bool)> returnToAuthoringHandler,
     QWidget* parent)
     : QWidget(parent),
       projectName_(projectName),
@@ -51,7 +86,8 @@ ScenarioRunWidget::ScenarioRunWidget(
       scenario_(scenario),
       runner_(layout_, scenario_),
       saveProjectHandler_(std::move(saveProjectHandler)),
-      openProjectHandler_(std::move(openProjectHandler)) {
+      openProjectHandler_(std::move(openProjectHandler)),
+      returnToAuthoringHandler_(std::move(returnToAuthoringHandler)) {
     auto* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
@@ -117,7 +153,7 @@ QWidget* ScenarioRunWidget::createRunPanel() {
     transportLayout->setContentsMargins(0, 0, 0, 0);
     transportLayout->setSpacing(8);
     pauseButton_ = createIconButton(QStyle::SP_MediaPause, "Pause simulation", panel);
-    stopButton_ = createIconButton(QStyle::SP_MediaStop, "Stop and reset run", panel);
+    stopButton_ = createIconButton(QStyle::SP_MediaStop, "Reset run to start; no result is created", panel);
     transportLayout->addWidget(pauseButton_);
     transportLayout->addWidget(stopButton_);
     transportLayout->addStretch(1);
@@ -129,6 +165,7 @@ QWidget* ScenarioRunWidget::createRunPanel() {
     resultButton_->setFont(ui::font(ui::FontRole::Body));
     resultButton_->setStyleSheet(ui::primaryButtonStyleSheet());
     resultButton_->setEnabled(false);
+    resultButton_->setToolTip("Available after evacuation completes or the time limit is reached");
     layout->addWidget(resultButton_);
 
     connect(pauseButton_, &QPushButton::clicked, this, [this]() {
@@ -150,7 +187,7 @@ void ScenarioRunWidget::refreshStatus() {
         scenarioLabel_->setText(QString("Scenario: %1").arg(QString::fromStdString(scenario_.name)));
     }
     if (statusLabel_ != nullptr) {
-        statusLabel_->setText(QString("Status: %1").arg(frame.complete ? "Complete" : paused_ ? "Paused" : "Running"));
+        statusLabel_->setText(QString("Status: %1").arg(runStatusText(frame, paused_)));
     }
     if (elapsedLabel_ != nullptr) {
         elapsedLabel_->setText(QString("Elapsed: %1 / %2 sec")
@@ -170,10 +207,7 @@ void ScenarioRunWidget::refreshStatus() {
             .arg(static_cast<int>(risk.stalledAgentCount)));
     }
     if (congestionLabel_ != nullptr) {
-        const auto hotspotCount = risk.hotspots.empty() ? 0 : static_cast<int>(risk.hotspots.front().agentCount);
-        congestionLabel_->setText(QString("Hotspots: %1%2")
-            .arg(static_cast<int>(risk.hotspots.size()))
-            .arg(risk.hotspots.empty() ? QString{} : QString(" (max %1 agents)").arg(hotspotCount)));
+        congestionLabel_->setText(hotspotSummary(risk));
     }
     if (bottleneckLabel_ != nullptr) {
         if (risk.bottlenecks.empty()) {
@@ -193,12 +227,15 @@ void ScenarioRunWidget::refreshStatus() {
         pauseButton_->setEnabled(!frame.complete);
     }
     if (stopButton_ != nullptr) {
+        stopButton_->setToolTip("Reset run to start; no result is created");
+        stopButton_->setAccessibleName("Reset run to start");
         stopButton_->setEnabled(frame.totalAgentCount > 0);
     }
     if (resultButton_ != nullptr) {
-        const bool allAgentsEvacuated = frame.totalAgentCount > 0
-            && frame.evacuatedAgentCount >= frame.totalAgentCount;
-        resultButton_->setEnabled(allAgentsEvacuated);
+        resultButton_->setEnabled(frame.complete);
+        resultButton_->setToolTip(frame.complete
+            ? QString("Open results: %1").arg(completionOutcome(frame))
+            : "Available after evacuation completes or the time limit is reached");
     }
 }
 
@@ -212,7 +249,7 @@ void ScenarioRunWidget::stopRun() {
 
 void ScenarioRunWidget::showResults() {
     const auto& frame = runner_.frame();
-    if (frame.totalAgentCount == 0 || frame.evacuatedAgentCount < frame.totalAgentCount) {
+    if (!frame.complete) {
         return;
     }
     if (timer_ != nullptr) {
@@ -240,6 +277,7 @@ void ScenarioRunWidget::showResults() {
                 openProjectHandler_();
             }
         },
+        returnToAuthoringHandler_,
         this);
     rootLayout->replaceWidget(shell_, resultWidget);
     shell_->hide();
