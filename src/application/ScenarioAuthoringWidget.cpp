@@ -246,12 +246,14 @@ ScenarioAuthoringWidget::ScenarioAuthoringWidget(
     const safecrowd::domain::FacilityLayout2D& layout,
     std::function<void()> saveProjectHandler,
     std::function<void()> openProjectHandler,
+    std::function<void()> backToLayoutReviewHandler,
     QWidget* parent)
     : QWidget(parent),
       projectName_(projectName),
       layout_(layout),
       saveProjectHandler_(std::move(saveProjectHandler)),
-      openProjectHandler_(std::move(openProjectHandler)) {
+      openProjectHandler_(std::move(openProjectHandler)),
+      backToLayoutReviewHandler_(std::move(backToLayoutReviewHandler)) {
     initializeUi(true);
 }
 
@@ -261,12 +263,14 @@ ScenarioAuthoringWidget::ScenarioAuthoringWidget(
     InitialState initialState,
     std::function<void()> saveProjectHandler,
     std::function<void()> openProjectHandler,
+    std::function<void()> backToLayoutReviewHandler,
     QWidget* parent)
     : QWidget(parent),
       projectName_(projectName),
       layout_(layout),
       saveProjectHandler_(std::move(saveProjectHandler)),
       openProjectHandler_(std::move(openProjectHandler)),
+      backToLayoutReviewHandler_(std::move(backToLayoutReviewHandler)),
       scenarios_(std::move(initialState.scenarios)),
       currentScenarioIndex_(initialState.currentScenarioIndex),
       navigationView_(initialState.navigationView),
@@ -283,6 +287,7 @@ void ScenarioAuthoringWidget::initializeUi(bool promptForScenario) {
     shell_->setTools({"Project"});
     shell_->setSaveProjectHandler(saveProjectHandler_);
     shell_->setOpenProjectHandler(openProjectHandler_);
+    shell_->setBackHandler(backToLayoutReviewHandler_);
     shell_->setTopBarTrailingWidget(createTopBarTogglePanel());
     refreshRightPanel();
     rootLayout->addWidget(shell_);
@@ -541,6 +546,7 @@ void ScenarioAuthoringWidget::runFirstStagedBaselineScenario() {
         scenario->draft,
         saveProjectHandler_,
         openProjectHandler_,
+        backToLayoutReviewHandler_,
         this);
     rootLayout->replaceWidget(shell_, runWidget);
     shell_->hide();

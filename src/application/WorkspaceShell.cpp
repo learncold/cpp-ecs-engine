@@ -57,6 +57,26 @@ QPushButton* createFlatTopBarButton(QWidget* parent, const QString& text) {
     return button;
 }
 
+QPushButton* createFlatTopBarIconButton(QWidget* parent, const QString& text) {
+    auto* button = new QPushButton(text, parent);
+    button->setFont(ui::font(ui::FontRole::Body));
+    button->setFixedSize(32, 32);
+    button->setCursor(Qt::PointingHandCursor);
+    button->setStyleSheet(
+        "QPushButton {"
+        " background: transparent;"
+        " border: 0;"
+        " border-radius: 10px;"
+        " color: #16202b;"
+        " font-size: 18px;"
+        " font-weight: 700;"
+        "}"
+        "QPushButton:hover {"
+        " background: #eef3f8;"
+        "}");
+    return button;
+}
+
 }  // namespace
 
 WorkspaceShell::WorkspaceShell(QWidget* parent)
@@ -173,9 +193,42 @@ void WorkspaceShell::setFixedWidthVisible(QWidget* widget, bool visible, int wid
 }
 
 void WorkspaceShell::setTools(const QStringList& tools) {
+    tools_ = tools;
+    rebuildTopBar();
+}
+
+void WorkspaceShell::setBackHandler(std::function<void()> handler) {
+    backHandler_ = std::move(handler);
+    rebuildTopBar();
+}
+
+void WorkspaceShell::clearTopBar() {
+    while (auto* item = topBarLayout_->takeAt(0)) {
+        delete item->widget();
+        delete item;
+    }
+
+    openProjectAction_ = nullptr;
+    saveProjectAction_ = nullptr;
+    backButton_ = nullptr;
+}
+
+void WorkspaceShell::rebuildTopBar() {
     clearTopBar();
 
-    for (const auto& tool : tools) {
+    if (backHandler_) {
+        backButton_ = createFlatTopBarIconButton(this, "<");
+        backButton_->setToolTip("Back");
+        backButton_->setAccessibleName("Back");
+        connect(backButton_, &QPushButton::clicked, this, [this]() {
+            if (backHandler_) {
+                backHandler_();
+            }
+        });
+        topBarLayout_->addWidget(backButton_);
+    }
+
+    for (const auto& tool : tools_) {
         auto* button = createTopBarButton(tool);
         if (tool == "Project") {
             auto* menu = new QMenu(button);
@@ -195,17 +248,6 @@ void WorkspaceShell::setTools(const QStringList& tools) {
         }
         topBarLayout_->addWidget(button);
     }
-
-}
-
-void WorkspaceShell::clearTopBar() {
-    while (auto* item = topBarLayout_->takeAt(0)) {
-        delete item->widget();
-        delete item;
-    }
-
-    openProjectAction_ = nullptr;
-    saveProjectAction_ = nullptr;
 }
 
 QPushButton* WorkspaceShell::createTopBarButton(const QString& text) {

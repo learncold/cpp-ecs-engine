@@ -35,6 +35,7 @@ public:
     explicit WorkspaceShell(WorkspaceShellOptions options, QWidget* parent = nullptr);
 
     void setTools(const QStringList& tools);
+    void setBackHandler(std::function<void()> handler);
     void setNavigationRail(QWidget* rail);
     void setNavigationPanel(QWidget* panel);
     void setNavigationVisible(bool visible);
@@ -50,6 +51,7 @@ private:
     void initialize(const WorkspaceShellOptions& options);
     void setFixedWidthVisible(QWidget* widget, bool visible, int width);
     void clearTopBar();
+    void rebuildTopBar();
     QPushButton* createTopBarButton(const QString& text);
 
     QFrame* topBar_{nullptr};
@@ -70,6 +72,9 @@ private:
     QAction* saveProjectAction_{nullptr};
     std::function<void()> openProjectHandler_{};
     std::function<void()> saveProjectHandler_{};
+    std::function<void()> backHandler_{};
+    QStringList tools_{};
+    QPushButton* backButton_{nullptr};
 };
 
 }  // namespace safecrowd::application

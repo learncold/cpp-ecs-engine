@@ -27,6 +27,7 @@ public:
         const safecrowd::domain::ScenarioDraft& scenario,
         std::function<void()> saveProjectHandler,
         std::function<void()> openProjectHandler,
+        std::function<void()> backToLayoutReviewHandler,
         QWidget* parent = nullptr);
 
 private:
@@ -44,6 +45,7 @@ private:
     safecrowd::domain::ScenarioSimulationRunner runner_{};
     std::function<void()> saveProjectHandler_{};
     std::function<void()> openProjectHandler_{};
+    std::function<void()> backToLayoutReviewHandler_{};
     WorkspaceShell* shell_{nullptr};
     SimulationCanvasWidget* canvas_{nullptr};
     QTimer* timer_{nullptr};

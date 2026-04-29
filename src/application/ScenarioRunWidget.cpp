@@ -168,6 +168,7 @@ ScenarioRunWidget::ScenarioRunWidget(
     const safecrowd::domain::ScenarioDraft& scenario,
     std::function<void()> saveProjectHandler,
     std::function<void()> openProjectHandler,
+    std::function<void()> backToLayoutReviewHandler,
     QWidget* parent)
     : QWidget(parent),
       projectName_(projectName),
@@ -175,7 +176,8 @@ ScenarioRunWidget::ScenarioRunWidget(
       scenario_(scenario),
       runner_(layout_, scenario_),
       saveProjectHandler_(std::move(saveProjectHandler)),
-      openProjectHandler_(std::move(openProjectHandler)) {
+      openProjectHandler_(std::move(openProjectHandler)),
+      backToLayoutReviewHandler_(std::move(backToLayoutReviewHandler)) {
     auto* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
@@ -189,6 +191,7 @@ ScenarioRunWidget::ScenarioRunWidget(
     shell_->setTools({"Project"});
     shell_->setSaveProjectHandler(saveProjectHandler_);
     shell_->setOpenProjectHandler(openProjectHandler_);
+    shell_->setBackHandler(backToLayoutReviewHandler_);
     canvas_ = new SimulationCanvasWidget(layout_, shell_);
     canvas_->setFrame(runner_.frame());
     shell_->setCanvas(canvas_);
@@ -334,6 +337,7 @@ void ScenarioRunWidget::returnToAuthoring() {
         std::move(initial),
         saveProjectHandler_,
         openProjectHandler_,
+        backToLayoutReviewHandler_,
         this);
 
     rootLayout->replaceWidget(shell_, authoringWidget);
@@ -450,6 +454,7 @@ void ScenarioRunWidget::showResults() {
                 openProjectHandler_();
             }
         },
+        backToLayoutReviewHandler_,
         this);
     rootLayout->replaceWidget(shell_, resultWidget);
     shell_->hide();
