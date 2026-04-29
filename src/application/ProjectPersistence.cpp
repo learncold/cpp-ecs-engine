@@ -20,6 +20,12 @@ constexpr auto kProjectFileName = "safecrowd-project.json";
 constexpr auto kLayoutFileName = "layout.dxf";
 constexpr auto kReviewFileName = "layout-review.json";
 
+bool isProjectManagedEntry(const QString& fileName) {
+    return fileName.compare(kProjectFileName, Qt::CaseInsensitive) == 0
+        || fileName.compare(kLayoutFileName, Qt::CaseInsensitive) == 0
+        || fileName.compare(kReviewFileName, Qt::CaseInsensitive) == 0;
+}
+
 QString projectFilePath(const QString& folderPath) {
     return QDir(folderPath).filePath(kProjectFileName);
 }
@@ -120,6 +126,40 @@ void removeRecentProject(const QString& folderPath) {
     root["projects"] = updated;
     QString ignoredError;
     writeJsonDocument(recentPath, QJsonDocument(root), &ignoredError);
+}
+
+bool canDeleteProjectFolder(const QString& folderPath, QString* errorMessage) {
+    QDir folder(folderPath);
+    if (!folder.exists()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QString("Project folder does not exist: %1").arg(folderPath);
+        }
+        return false;
+    }
+
+    const QFileInfo folderInfo(folder.absolutePath());
+    if (folderInfo.absoluteFilePath() == QDir(folderInfo.absolutePath()).rootPath()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QString("Refusing to delete a drive root: %1").arg(folderPath);
+        }
+        return false;
+    }
+
+    const auto entries = folder.entryInfoList(
+        QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot,
+        QDir::Name);
+    for (const auto& entry : entries) {
+        if (!entry.isFile() || !isProjectManagedEntry(entry.fileName())) {
+            if (errorMessage != nullptr) {
+                *errorMessage = QString(
+                    "Refusing to delete project folder because it contains a file or folder not created by SafeCrowd: %1")
+                    .arg(entry.fileName());
+            }
+            return false;
+        }
+    }
+
+    return true;
 }
 
 bool copyLayoutIntoProject(ProjectMetadata& metadata, QString* errorMessage) {
@@ -496,6 +536,10 @@ bool ProjectPersistence::deleteProject(const ProjectMetadata& metadata, QString*
         if (errorMessage != nullptr) {
             *errorMessage = "The selected folder does not contain a valid SafeCrowd project.";
         }
+        return false;
+    }
+
+    if (!canDeleteProjectFolder(metadata.folderPath, errorMessage)) {
         return false;
     }
 
