@@ -105,6 +105,29 @@ void upsertRecentProject(const ProjectMetadata& metadata) {
     writeJsonDocument(recentPath, QJsonDocument(root), &ignoredError);
 }
 
+void removeRecentProject(const QString& folderPath) {
+    const auto recentPath = recentProjectsPath();
+    const auto document = readJsonDocument(recentPath);
+    if (!document.isObject()) {
+        return;
+    }
+
+    QJsonArray updated;
+    const auto normalizedFolder = QDir(folderPath).absolutePath();
+    for (const auto& value : document.object().value("projects").toArray()) {
+        const auto existing = fromJson(value.toObject());
+        if (QDir(existing.folderPath).absolutePath() == normalizedFolder) {
+            continue;
+        }
+        updated.append(value);
+    }
+
+    QJsonObject root;
+    root["projects"] = updated;
+    QString ignoredError;
+    writeJsonDocument(recentPath, QJsonDocument(root), &ignoredError);
+}
+
 bool copyLayoutIntoProject(ProjectMetadata& metadata, QString* errorMessage) {
     const auto sourcePath = QFileInfo(metadata.layoutPath).absoluteFilePath();
     const auto targetPath = QDir(metadata.folderPath).filePath(kLayoutFileName);
@@ -608,6 +631,47 @@ ProjectMetadata ProjectPersistence::loadProject(const QString& folderPath) {
     }
 
     return fromJson(document.object());
+}
+
+bool ProjectPersistence::deleteProject(const ProjectMetadata& metadata, QString* errorMessage) {
+    if (metadata.isBuiltInDemo()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = "Built-in demo projects cannot be deleted.";
+        }
+        return false;
+    }
+
+    if (metadata.folderPath.isEmpty()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = "Project folder is missing.";
+        }
+        return false;
+    }
+
+    const auto projectFile = projectFilePath(metadata.folderPath);
+    if (!QFileInfo::exists(projectFile)) {
+        removeRecentProject(metadata.folderPath);
+        return true;
+    }
+
+    const auto loaded = loadProject(metadata.folderPath);
+    if (!loaded.isValid()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = "The selected folder does not contain a valid SafeCrowd project.";
+        }
+        return false;
+    }
+
+    QDir folder(metadata.folderPath);
+    if (!folder.removeRecursively()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QString("Failed to delete project folder: %1").arg(metadata.folderPath);
+        }
+        return false;
+    }
+
+    removeRecentProject(metadata.folderPath);
+    return true;
 }
 
 bool ProjectPersistence::loadProjectReview(const ProjectMetadata& metadata, safecrowd::domain::ImportResult* importResult) {

@@ -9,11 +9,12 @@
 - `product/`: 개요, 사용자 시나리오, 위험 정의, 백로그 같은 제품 요구와 범위
 - `references/`: 외부 조사 자료와 튜토리얼. 기준 문서의 보조 근거로만 사용
 - `제출용/`: 학교 제출 산출물. 저장소 운영 기준 문서와 분리해 보관
+- `UI.md`: 앱 화면 흐름, 기능 기준, Sprint별 UI 개선 체크리스트
 
 ## 시작점
 
+- [UI.md](UI.md)
 - [architecture/프로젝트 구조.md](architecture/프로젝트 구조.md)
-- [architecture/UI 디자인 대상 창 목록.md](architecture/UI 디자인 대상 창 목록.md)
 - [process/GitHub Project.md](process/GitHub Project.md)
 - [product/개요서.md](product/개요서.md)
 - [product/사용자 시나리오.md](product/사용자 시나리오.md)

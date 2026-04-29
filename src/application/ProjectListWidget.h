@@ -15,11 +15,13 @@ public:
     explicit ProjectListWidget(const QList<ProjectMetadata>& projects, QWidget* parent = nullptr);
 
     void setOpenProjectHandler(std::function<void(const ProjectMetadata&)> handler);
+    void setDeleteProjectHandler(std::function<void(const ProjectMetadata&)> handler);
 
 private:
     void addProjectRow(const ProjectMetadata& project);
 
     std::function<void(const ProjectMetadata&)> openProjectHandler_{};
+    std::function<void(const ProjectMetadata&)> deleteProjectHandler_{};
 };
 
 }  // namespace safecrowd::application
