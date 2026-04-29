@@ -32,7 +32,6 @@ public:
 
 private:
     QWidget* createRunPanel();
-    void addBackToAuthoringButton();
     void returnToAuthoring();
     void refreshStatus();
     void showResults();

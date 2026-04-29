@@ -381,6 +381,7 @@ LayoutReviewWidget::LayoutReviewWidget(
     : QWidget(parent),
       projectName_(projectName),
       importResult_(importResult),
+      openProjectHandler_(std::move(openProjectHandler)),
       approvalHandler_(std::move(approvalHandler)) {
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -404,7 +405,8 @@ LayoutReviewWidget::LayoutReviewWidget(
 
     shell_->setTools({"Project", "Tool"});
     shell_->setSaveProjectHandler(std::move(saveProjectHandler));
-    shell_->setOpenProjectHandler(std::move(openProjectHandler));
+    shell_->setOpenProjectHandler(openProjectHandler_);
+    shell_->setBackHandler(openProjectHandler_);
     shell_->setCanvas(preview_);
     shell_->setReviewPanel(reviewPanel);
 

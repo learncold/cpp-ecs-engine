@@ -200,7 +200,6 @@ ScenarioRunWidget::ScenarioRunWidget(
     shell_->setReviewPanel(createRunPanel());
     shell_->setReviewPanelVisible(true);
     rootLayout->addWidget(shell_);
-    addBackToAuthoringButton();
 
     timer_ = new QTimer(this);
     timer_->setInterval(33);
@@ -285,36 +284,6 @@ QWidget* ScenarioRunWidget::createRunPanel() {
     });
 
     return panel;
-}
-
-void ScenarioRunWidget::addBackToAuthoringButton() {
-    if (canvas_ == nullptr) {
-        return;
-    }
-
-    auto* button = new QPushButton("<", canvas_);
-    button->setToolTip("Back to scenario editor");
-    button->setAccessibleName("Back to scenario editor");
-    button->setFixedSize(40, 36);
-    button->move(16, 16);
-    button->raise();
-    button->setStyleSheet(
-        "QPushButton {"
-        " background: rgba(255, 255, 255, 232);"
-        " border: 1px solid #c9d5e2;"
-        " border-radius: 10px;"
-        " color: #16202b;"
-        " font-size: 18px;"
-        " font-weight: 700;"
-        " padding-bottom: 2px;"
-        "}"
-        "QPushButton:hover {"
-        " background: #eef3f8;"
-        " border-color: #b8c6d6;"
-        "}");
-    connect(button, &QPushButton::clicked, this, [this]() {
-        returnToAuthoring();
-    });
 }
 
 void ScenarioRunWidget::returnToAuthoring() {
