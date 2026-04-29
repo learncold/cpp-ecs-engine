@@ -319,9 +319,7 @@ void ScenarioCanvasWidget::paintEvent(QPaintEvent* event) {
     }
     const auto transform = currentTransform(*bounds);
 
-    painter.setPen(QPen(QColor("#d7e0ea"), 1));
-    painter.setBrush(QColor("#ffffff"));
-    painter.drawRoundedRect(viewport.adjusted(-18, -18, 18, 18), 14, 14);
+    drawLayoutCanvasSurface(painter, QRectF(rect()));
 
     drawFacilityLayoutCanvas(painter, layout_, transform);
     drawFocusedLayoutElement(painter, transform);

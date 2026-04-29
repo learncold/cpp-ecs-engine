@@ -309,6 +309,12 @@ void drawLayoutCanvasGrid(QPainter& painter, const QRectF& viewport) {
     }
 }
 
+void drawLayoutCanvasSurface(QPainter& painter, const QRectF& viewport) {
+    painter.setPen(QPen(QColor("#d7e0ea"), 1));
+    painter.setBrush(QColor("#ffffff"));
+    painter.drawRect(viewport.adjusted(0.5, 0.5, -0.5, -0.5));
+}
+
 void drawFacilityLayoutCanvas(QPainter& painter, const safecrowd::domain::FacilityLayout2D& layout, const LayoutCanvasTransform& transform) {
     painter.setPen(Qt::NoPen);
     for (const auto& zone : layout.zones) {

@@ -1,6 +1,7 @@
 #include "application/ScenarioRunWidget.h"
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 #include <QColor>
@@ -9,6 +10,7 @@
 #include <QHBoxLayout>
 #include <QPainter>
 #include <QPixmap>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -35,6 +37,30 @@ QLabel* createLabel(const QString& text, QWidget* parent, ui::FontRole role = ui
     label->setFont(ui::font(role));
     label->setWordWrap(true);
     return label;
+}
+
+QProgressBar* createProgressBar(const QString& tooltip, QWidget* parent) {
+    auto* progress = new QProgressBar(parent);
+    progress->setRange(0, 100);
+    progress->setValue(0);
+    progress->setTextVisible(true);
+    progress->setFixedHeight(14);
+    progress->setToolTip(tooltip);
+    progress->setAccessibleName(tooltip);
+    progress->setStyleSheet(
+        "QProgressBar {"
+        " background: #e8eef5;"
+        " border: 0;"
+        " border-radius: 7px;"
+        " color: #4f5d6b;"
+        " font-size: 9px;"
+        " text-align: center;"
+        "}"
+        "QProgressBar::chunk {"
+        " background: #1f5fae;"
+        " border-radius: 7px;"
+        "}");
+    return progress;
 }
 
 QIcon makeTransportIcon(TransportIconKind kind, const QColor& color) {
@@ -75,6 +101,14 @@ QString zoneLabel(const safecrowd::domain::Zone2D& zone) {
     const auto id = QString::fromStdString(zone.id);
     const auto label = QString::fromStdString(zone.label);
     return label.isEmpty() ? id : QString("%1  -  %2").arg(label, id);
+}
+
+int percentValue(double numerator, double denominator) {
+    if (denominator <= 0.0) {
+        return 0;
+    }
+    const auto percent = std::clamp((numerator / denominator) * 100.0, 0.0, 100.0);
+    return static_cast<int>(std::round(percent));
 }
 
 const safecrowd::domain::Zone2D* firstStartZone(const safecrowd::domain::FacilityLayout2D& layout) {
@@ -146,11 +180,15 @@ ScenarioRunWidget::ScenarioRunWidget(
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
 
-    shell_ = new WorkspaceShell(this);
+    shell_ = new WorkspaceShell(WorkspaceShellOptions{
+        .showTopBar = true,
+        .navigationMode = WorkspaceNavigationMode::None,
+        .showReviewPanel = true,
+        .reviewPanelWidth = 280,
+    }, this);
     shell_->setTools({"Project"});
     shell_->setSaveProjectHandler(saveProjectHandler_);
     shell_->setOpenProjectHandler(openProjectHandler_);
-    shell_->setNavigationVisible(false);
     canvas_ = new SimulationCanvasWidget(layout_, shell_);
     canvas_->setFrame(runner_.frame());
     shell_->setCanvas(canvas_);
@@ -188,19 +226,27 @@ QWidget* ScenarioRunWidget::createRunPanel() {
     statusLabel_->setStyleSheet(ui::mutedTextStyleSheet());
     elapsedLabel_ = createLabel("", panel);
     elapsedLabel_->setStyleSheet(ui::mutedTextStyleSheet());
+    timeProgressBar_ = createProgressBar("Time progress against the scenario time limit.", panel);
     agentCountLabel_ = createLabel("", panel);
     agentCountLabel_->setStyleSheet(ui::mutedTextStyleSheet());
+    evacuationProgressBar_ = createProgressBar("Evacuation progress based on evacuated agents divided by total agents.", panel);
     riskLabel_ = createLabel("", panel);
     riskLabel_->setStyleSheet(ui::mutedTextStyleSheet());
+    riskLabel_->setToolTip(QString("%1\n\n%2")
+        .arg(safecrowd::domain::scenarioRiskDefinition(), safecrowd::domain::scenarioStalledDefinition()));
     congestionLabel_ = createLabel("", panel);
     congestionLabel_->setStyleSheet(ui::mutedTextStyleSheet());
+    congestionLabel_->setToolTip(safecrowd::domain::scenarioHotspotDefinition());
     bottleneckLabel_ = createLabel("", panel);
     bottleneckLabel_->setStyleSheet(ui::mutedTextStyleSheet());
+    bottleneckLabel_->setToolTip(safecrowd::domain::scenarioBottleneckDefinition());
 
     layout->addWidget(scenarioLabel_);
     layout->addWidget(statusLabel_);
     layout->addWidget(elapsedLabel_);
+    layout->addWidget(timeProgressBar_);
     layout->addWidget(agentCountLabel_);
+    layout->addWidget(evacuationProgressBar_);
     layout->addWidget(riskLabel_);
     layout->addWidget(congestionLabel_);
     layout->addWidget(bottleneckLabel_);
@@ -310,11 +356,19 @@ void ScenarioRunWidget::refreshStatus() {
             .arg(frame.elapsedSeconds, 0, 'f', 1)
             .arg(runner_.timeLimitSeconds(), 0, 'f', 0));
     }
+    if (timeProgressBar_ != nullptr) {
+        timeProgressBar_->setValue(percentValue(frame.elapsedSeconds, runner_.timeLimitSeconds()));
+    }
     if (agentCountLabel_ != nullptr) {
         agentCountLabel_->setText(QString("Evacuated: %1 / %2\nActive Agents: %3")
             .arg(static_cast<int>(frame.evacuatedAgentCount))
             .arg(static_cast<int>(frame.totalAgentCount))
             .arg(static_cast<int>(frame.agents.size())));
+    }
+    if (evacuationProgressBar_ != nullptr) {
+        evacuationProgressBar_->setValue(percentValue(
+            static_cast<double>(frame.evacuatedAgentCount),
+            static_cast<double>(frame.totalAgentCount)));
     }
     const auto& risk = runner_.riskSnapshot();
     if (riskLabel_ != nullptr) {
@@ -333,8 +387,11 @@ void ScenarioRunWidget::refreshStatus() {
             bottleneckLabel_->setText("Bottlenecks: 0");
         } else {
             const auto& bottleneck = risk.bottlenecks.front();
-            bottleneckLabel_->setText(QString("Worst Bottleneck: %1\nNearby: %2, Stalled: %3")
-                .arg(QString::fromStdString(bottleneck.label))
+            const auto label = QString::fromStdString(bottleneck.label);
+            const auto id = QString::fromStdString(bottleneck.connectionId);
+            const auto idLine = (!id.isEmpty() && id != label) ? QString("\nID: %1").arg(id) : QString{};
+            bottleneckLabel_->setText(QString("Worst Bottleneck: %1%2\nNearby: %3, Stalled: %4")
+                .arg(label, idLine)
                 .arg(static_cast<int>(bottleneck.nearbyAgentCount))
                 .arg(static_cast<int>(bottleneck.stalledAgentCount)));
         }
@@ -351,9 +408,7 @@ void ScenarioRunWidget::refreshStatus() {
         stopButton_->setEnabled(frame.totalAgentCount > 0);
     }
     if (resultButton_ != nullptr) {
-        const bool allAgentsEvacuated = frame.totalAgentCount > 0
-            && frame.evacuatedAgentCount >= frame.totalAgentCount;
-        resultButton_->setEnabled(allAgentsEvacuated);
+        resultButton_->setEnabled(frame.complete && frame.totalAgentCount > 0);
     }
 }
 
@@ -367,7 +422,7 @@ void ScenarioRunWidget::stopRun() {
 
 void ScenarioRunWidget::showResults() {
     const auto& frame = runner_.frame();
-    if (frame.totalAgentCount == 0 || frame.evacuatedAgentCount < frame.totalAgentCount) {
+    if (frame.totalAgentCount == 0 || !frame.complete) {
         return;
     }
     if (timer_ != nullptr) {

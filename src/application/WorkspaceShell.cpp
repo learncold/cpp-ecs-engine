@@ -1,5 +1,7 @@
 #include "application/WorkspaceShell.h"
 
+#include <algorithm>
+
 #include <QAction>
 #include <QFrame>
 #include <QHBoxLayout>
@@ -7,6 +9,7 @@
 #include <QPushButton>
 #include <QSizePolicy>
 #include <QVBoxLayout>
+#include <QWidget>
 
 #include "application/UiStyle.h"
 
@@ -57,43 +60,55 @@ QPushButton* createFlatTopBarButton(QWidget* parent, const QString& text) {
 }  // namespace
 
 WorkspaceShell::WorkspaceShell(QWidget* parent)
+    : WorkspaceShell(WorkspaceShellOptions{}, parent) {
+}
+
+WorkspaceShell::WorkspaceShell(WorkspaceShellOptions options, QWidget* parent)
     : QWidget(parent) {
+    initialize(options);
+}
+
+void WorkspaceShell::initialize(const WorkspaceShellOptions& options) {
     setObjectName("WorkspaceShell");
     setStyleSheet("#WorkspaceShell { background: #f4f7fb; }");
+    navigationRailWidth_ = options.navigationRailWidth;
+    navigationPanelWidth_ = options.navigationPanelWidth;
+    reviewPanelWidth_ = options.reviewPanelWidth;
 
     auto* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
 
-    auto* topBar = new QFrame(this);
-    topBar->setFixedHeight(48);
-    topBar->setFrameShape(QFrame::StyledPanel);
-    topBar->setLineWidth(1);
-    topBar->setStyleSheet(
+    topBar_ = new QFrame(this);
+    topBar_->setFixedHeight(48);
+    topBar_->setFrameShape(QFrame::StyledPanel);
+    topBar_->setLineWidth(1);
+    topBar_->setStyleSheet(
         "QFrame {"
         " background: #ffffff;"
         " border: 0;"
         " border-bottom: 1px solid #d7e0ea;"
         "}"
     );
+    topBar_->setVisible(options.showTopBar);
 
-    auto* topBarRootLayout = new QHBoxLayout(topBar);
+    auto* topBarRootLayout = new QHBoxLayout(topBar_);
     topBarRootLayout->setContentsMargins(16, 8, 16, 8);
     topBarRootLayout->setSpacing(4);
 
-    auto* topBarLeft = new QWidget(topBar);
+    auto* topBarLeft = new QWidget(topBar_);
     topBarLayout_ = new QHBoxLayout(topBarLeft);
     topBarLayout_->setContentsMargins(0, 0, 0, 0);
     topBarLayout_->setSpacing(4);
     topBarRootLayout->addWidget(topBarLeft);
     topBarRootLayout->addStretch(1);
 
-    auto* topBarTrailing = new QWidget(topBar);
+    auto* topBarTrailing = new QWidget(topBar_);
     topBarTrailingLayout_ = new QHBoxLayout(topBarTrailing);
     topBarTrailingLayout_->setContentsMargins(0, 0, 0, 0);
     topBarTrailingLayout_->setSpacing(8);
     topBarRootLayout->addWidget(topBarTrailing);
-    rootLayout->addWidget(topBar);
+    rootLayout->addWidget(topBar_);
 
     auto* bodyLayout = new QHBoxLayout();
     bodyLayout->setContentsMargins(0, 0, 0, 0);
@@ -104,19 +119,19 @@ WorkspaceShell::WorkspaceShell(QWidget* parent)
     leftClusterLayout->setContentsMargins(0, 0, 0, 0);
     leftClusterLayout->setSpacing(0);
 
-    auto* navigationRail = new QWidget(navigationCluster_);
-    navigationRail->setFixedWidth(56);
-    navigationRailLayout_ = new QVBoxLayout(navigationRail);
+    navigationRail_ = new QWidget(navigationCluster_);
+    navigationRail_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
+    navigationRailLayout_ = new QVBoxLayout(navigationRail_);
     navigationRailLayout_->setContentsMargins(0, 0, 0, 0);
     navigationRailLayout_->setSpacing(0);
-    leftClusterLayout->addWidget(navigationRail);
+    leftClusterLayout->addWidget(navigationRail_);
 
-    auto* navigationPanel = createPanel(navigationCluster_);
-    navigationPanel->setFixedWidth(260);
-    navigationLayout_ = new QVBoxLayout(navigationPanel);
+    navigationPanel_ = createPanel(navigationCluster_);
+    navigationPanel_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
+    navigationLayout_ = new QVBoxLayout(navigationPanel_);
     navigationLayout_->setContentsMargins(18, 18, 18, 18);
     navigationLayout_->setSpacing(12);
-    leftClusterLayout->addWidget(navigationPanel);
+    leftClusterLayout->addWidget(navigationPanel_);
     bodyLayout->addWidget(navigationCluster_);
 
     auto* centerStack = new QWidget(this);
@@ -134,13 +149,27 @@ WorkspaceShell::WorkspaceShell(QWidget* parent)
     bodyLayout->addWidget(centerStack, 1);
 
     reviewPanel_ = createPanel(this);
-    reviewPanel_->setFixedWidth(280);
+    reviewPanel_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
     reviewLayout_ = new QVBoxLayout(reviewPanel_);
     reviewLayout_->setContentsMargins(18, 18, 18, 18);
     reviewLayout_->setSpacing(12);
     bodyLayout->addWidget(reviewPanel_);
 
     rootLayout->addLayout(bodyLayout, 1);
+    setNavigationMode(options.navigationMode);
+    setReviewPanelVisible(options.showReviewPanel);
+}
+
+void WorkspaceShell::setFixedWidthVisible(QWidget* widget, bool visible, int width) {
+    if (widget == nullptr) {
+        return;
+    }
+
+    const auto clampedWidth = std::max(0, width);
+    widget->setVisible(visible);
+    widget->setMinimumWidth(visible ? clampedWidth : 0);
+    widget->setMaximumWidth(visible ? clampedWidth : 0);
+    widget->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
 }
 
 void WorkspaceShell::setTools(const QStringList& tools) {
@@ -200,9 +229,21 @@ void WorkspaceShell::setNavigationPanel(QWidget* panel) {
 }
 
 void WorkspaceShell::setNavigationVisible(bool visible) {
-    if (navigationCluster_ != nullptr) {
-        navigationCluster_->setVisible(visible);
+    setNavigationMode(visible ? WorkspaceNavigationMode::RailAndPanel : WorkspaceNavigationMode::None);
+}
+
+void WorkspaceShell::setNavigationMode(WorkspaceNavigationMode mode) {
+    if (navigationCluster_ == nullptr || navigationRail_ == nullptr || navigationPanel_ == nullptr) {
+        return;
     }
+
+    const auto showRail = mode == WorkspaceNavigationMode::RailOnly
+        || mode == WorkspaceNavigationMode::RailAndPanel;
+    const auto showPanel = mode == WorkspaceNavigationMode::PanelOnly
+        || mode == WorkspaceNavigationMode::RailAndPanel;
+    setFixedWidthVisible(navigationRail_, showRail, navigationRailWidth_);
+    setFixedWidthVisible(navigationPanel_, showPanel, navigationPanelWidth_);
+    navigationCluster_->setVisible(showRail || showPanel);
 }
 
 void WorkspaceShell::setReviewPanel(QWidget* panel) {
@@ -210,9 +251,7 @@ void WorkspaceShell::setReviewPanel(QWidget* panel) {
 }
 
 void WorkspaceShell::setReviewPanelVisible(bool visible) {
-    if (reviewPanel_ != nullptr) {
-        reviewPanel_->setVisible(visible);
-    }
+    setFixedWidthVisible(reviewPanel_, visible, reviewPanelWidth_);
 }
 
 void WorkspaceShell::setTopBarTrailingWidget(QWidget* widget) {

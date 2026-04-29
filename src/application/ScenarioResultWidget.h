@@ -27,6 +27,7 @@ public:
         QWidget* parent = nullptr);
 
 private:
+    void rerunScenario();
     void navigateToAuthoring(bool showRunPanel);
 
     QString projectName_{};

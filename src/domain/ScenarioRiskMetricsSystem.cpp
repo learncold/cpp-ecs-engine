@@ -14,12 +14,6 @@ namespace {
 
 using namespace simulation_internal;
 
-constexpr double kStalledSpeedThreshold = 0.12;
-constexpr double kStalledSecondsThreshold = 0.75;
-constexpr double kHotspotCellSize = 1.5;
-constexpr std::size_t kHotspotAgentThreshold = 5;
-constexpr double kBottleneckRadius = 1.25;
-constexpr std::size_t kBottleneckAgentThreshold = 3;
 constexpr std::size_t kMaxReportedHotspots = 3;
 constexpr std::size_t kMaxReportedBottlenecks = 3;
 
@@ -37,8 +31,8 @@ struct RiskCellAddress {
 
 RiskCellAddress riskCellAddress(const Point2D& point) {
     return {
-        .x = static_cast<int>(std::floor(point.x / kHotspotCellSize)),
-        .y = static_cast<int>(std::floor(point.y / kHotspotCellSize)),
+        .x = static_cast<int>(std::floor(point.x / kScenarioHotspotCellSize)),
+        .y = static_cast<int>(std::floor(point.y / kScenarioHotspotCellSize)),
     };
 }
 
@@ -50,22 +44,22 @@ long long riskCellKey(const RiskCellAddress& cell) {
 
 Point2D riskCellMin(const RiskCellAddress& cell) {
     return {
-        .x = static_cast<double>(cell.x) * kHotspotCellSize,
-        .y = static_cast<double>(cell.y) * kHotspotCellSize,
+        .x = static_cast<double>(cell.x) * kScenarioHotspotCellSize,
+        .y = static_cast<double>(cell.y) * kScenarioHotspotCellSize,
     };
 }
 
 Point2D riskCellMax(const RiskCellAddress& cell) {
     const auto min = riskCellMin(cell);
     return {
-        .x = min.x + kHotspotCellSize,
-        .y = min.y + kHotspotCellSize,
+        .x = min.x + kScenarioHotspotCellSize,
+        .y = min.y + kScenarioHotspotCellSize,
     };
 }
 
 bool isStalled(const Velocity& velocity, const EvacuationRoute& route) {
-    return lengthOf(velocity.value) <= kStalledSpeedThreshold
-        || route.stalledSeconds >= kStalledSecondsThreshold;
+    return lengthOf(velocity.value) <= kScenarioStalledSpeedThreshold
+        || route.stalledSeconds >= kScenarioStalledSecondsThreshold;
 }
 
 int riskSeverity(ScenarioRiskLevel level) {
@@ -233,7 +227,7 @@ private:
         const std::unordered_map<long long, RiskCellAccumulator>& cells) const {
         snapshot.hotspots.reserve(cells.size());
         for (const auto& [_, cell] : cells) {
-            if (cell.agentCount < kHotspotAgentThreshold) {
+            if (cell.agentCount < kScenarioHotspotAgentThreshold) {
                 continue;
             }
             const auto count = static_cast<double>(cell.agentCount);
@@ -253,6 +247,23 @@ private:
         }
     }
 
+    std::string zoneDisplayName(const std::string& zoneId) const {
+        const auto* zone = findZone(layout_, zoneId);
+        if (zone == nullptr) {
+            return zoneId;
+        }
+        return zone->label.empty() ? zone->id : zone->label;
+    }
+
+    std::string connectionLabel(const Connection2D& connection) const {
+        const auto from = zoneDisplayName(connection.fromZoneId);
+        const auto to = zoneDisplayName(connection.toZoneId);
+        if (!from.empty() && !to.empty()) {
+            return from + " -> " + to;
+        }
+        return connection.id;
+    }
+
     void collectBottlenecks(
         ScenarioRiskSnapshot& snapshot,
         engine::WorldQuery& query,
@@ -264,7 +275,7 @@ private:
 
             ScenarioBottleneckMetric metric;
             metric.connectionId = connection.id;
-            metric.label = connection.id;
+            metric.label = connectionLabel(connection);
             metric.passage = connection.centerSpan;
             double speedSum = 0.0;
 
@@ -279,7 +290,7 @@ private:
                 const auto distanceToConnection = distanceBetween(
                     position.value,
                     closestPointOnSegment(position.value, connection.centerSpan.start, connection.centerSpan.end));
-                if (distanceToConnection > kBottleneckRadius) {
+                if (distanceToConnection > kScenarioBottleneckRadius) {
                     continue;
                 }
 
@@ -294,8 +305,8 @@ private:
                 continue;
             }
             metric.averageSpeed = speedSum / static_cast<double>(metric.nearbyAgentCount);
-            if (metric.nearbyAgentCount >= kBottleneckAgentThreshold
-                && (metric.stalledAgentCount > 0 || metric.averageSpeed <= kStalledSpeedThreshold * 2.0)) {
+            if (metric.nearbyAgentCount >= kScenarioBottleneckAgentThreshold
+                && (metric.stalledAgentCount > 0 || metric.averageSpeed <= kScenarioStalledSpeedThreshold * 2.0)) {
                 snapshot.bottlenecks.push_back(std::move(metric));
             }
         }

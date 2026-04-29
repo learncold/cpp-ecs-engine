@@ -1,6 +1,7 @@
 #include "TestSupport.h"
 
 #include <memory>
+#include <string>
 
 #include "domain/AgentComponents.h"
 #include "domain/ScenarioSimulationInternal.h"
@@ -246,6 +247,7 @@ SC_TEST(ScenarioRiskMetricsSystem_PublishesStalledHotspotAndBottleneckMetrics) {
     SC_EXPECT_NEAR(snapshot.hotspots.front().cellMax.x, 1.5, 1e-9);
     SC_EXPECT_NEAR(snapshot.hotspots.front().cellMax.y, 1.5, 1e-9);
     SC_EXPECT_TRUE(!snapshot.bottlenecks.empty());
+    SC_EXPECT_EQ(snapshot.bottlenecks.front().label, std::string{"Room -> Exit"});
     SC_EXPECT_EQ(snapshot.completionRisk, safecrowd::domain::ScenarioRiskLevel::High);
 }
 

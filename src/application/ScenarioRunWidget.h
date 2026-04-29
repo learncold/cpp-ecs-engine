@@ -10,6 +10,7 @@
 #include "domain/ScenarioSimulationRunner.h"
 
 class QLabel;
+class QProgressBar;
 class QPushButton;
 class QTimer;
 
@@ -49,7 +50,9 @@ private:
     QLabel* scenarioLabel_{nullptr};
     QLabel* statusLabel_{nullptr};
     QLabel* elapsedLabel_{nullptr};
+    QProgressBar* timeProgressBar_{nullptr};
     QLabel* agentCountLabel_{nullptr};
+    QProgressBar* evacuationProgressBar_{nullptr};
     QLabel* riskLabel_{nullptr};
     QLabel* congestionLabel_{nullptr};
     QLabel* bottleneckLabel_{nullptr};

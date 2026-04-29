@@ -1,8 +1,10 @@
 #include "application/ScenarioResultWidget.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <utility>
 
+#include <QColor>
 #include <QFrame>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -14,6 +16,7 @@
 
 #include "application/ScenarioAuthoringWidget.h"
 #include "application/ScenarioCanvasWidget.h"
+#include "application/ScenarioRunWidget.h"
 #include "application/SimulationCanvasWidget.h"
 #include "application/UiStyle.h"
 #include "application/WorkspaceShell.h"
@@ -28,9 +31,12 @@ QLabel* createLabel(const QString& text, QWidget* parent, ui::FontRole role = ui
     return label;
 }
 
-QFrame* createMetricCard(const QString& title, const QString& value, QWidget* parent) {
+QFrame* createMetricCard(const QString& title, const QString& value, QWidget* parent, const QString& tooltip = {}) {
     auto* card = new QFrame(parent);
     card->setStyleSheet(ui::panelStyleSheet());
+    if (!tooltip.isEmpty()) {
+        card->setToolTip(tooltip);
+    }
     auto* layout = new QVBoxLayout(card);
     layout->setContentsMargins(14, 12, 14, 12);
     layout->setSpacing(6);
@@ -38,20 +44,89 @@ QFrame* createMetricCard(const QString& title, const QString& value, QWidget* pa
     auto* titleLabel = createLabel(title, card);
     titleLabel->setStyleSheet(ui::mutedTextStyleSheet());
     auto* valueLabel = createLabel(value, card, ui::FontRole::SectionTitle);
+    if (!tooltip.isEmpty()) {
+        titleLabel->setToolTip(tooltip);
+        valueLabel->setToolTip(tooltip);
+    }
     layout->addWidget(titleLabel);
     layout->addWidget(valueLabel);
     return card;
 }
 
-QString bottleneckSummary(const safecrowd::domain::ScenarioRiskSnapshot& risk) {
-    if (risk.bottlenecks.empty()) {
-        return "None";
-    }
-    const auto& bottleneck = risk.bottlenecks.front();
-    return QString("%1\n%2 nearby, %3 stalled")
-        .arg(QString::fromStdString(bottleneck.label))
-        .arg(static_cast<int>(bottleneck.nearbyAgentCount))
-        .arg(static_cast<int>(bottleneck.stalledAgentCount));
+QLabel* createReportSectionHeader(const QString& text, QWidget* parent) {
+    auto* label = createLabel(text, parent, ui::FontRole::SectionTitle);
+    label->setStyleSheet(ui::mutedTextStyleSheet());
+    return label;
+}
+
+QPushButton* createBottleneckRowButton(
+    const safecrowd::domain::ScenarioBottleneckMetric& bottleneck,
+    std::size_t index,
+    QWidget* parent) {
+    const auto label = QString::fromStdString(bottleneck.label);
+    const auto id = QString::fromStdString(bottleneck.connectionId);
+    const auto idLine = (!id.isEmpty() && id != label) ? QString("\nID: %1").arg(id) : QString{};
+    auto* button = new QPushButton(
+        QString("%1. %2%3\n%4 nearby, %5 stalled")
+            .arg(static_cast<int>(index + 1))
+            .arg(label, idLine)
+            .arg(static_cast<int>(bottleneck.nearbyAgentCount))
+            .arg(static_cast<int>(bottleneck.stalledAgentCount)),
+        parent);
+    button->setFont(ui::font(ui::FontRole::Body));
+    button->setCursor(Qt::PointingHandCursor);
+    button->setStyleSheet(ui::ghostRowStyleSheet());
+    button->setToolTip(QString("%1\nClick to focus this bottleneck on the canvas.")
+        .arg(safecrowd::domain::scenarioBottleneckDefinition()));
+    return button;
+}
+
+QPushButton* createHotspotRowButton(
+    const safecrowd::domain::ScenarioCongestionHotspot& hotspot,
+    std::size_t index,
+    QWidget* parent) {
+    auto* button = new QPushButton(
+        QString("%1. (%2, %3)  -  %4 agents")
+            .arg(static_cast<int>(index + 1))
+            .arg(hotspot.center.x, 0, 'f', 1)
+            .arg(hotspot.center.y, 0, 'f', 1)
+            .arg(static_cast<int>(hotspot.agentCount)),
+        parent);
+    button->setFont(ui::font(ui::FontRole::Body));
+    button->setCursor(Qt::PointingHandCursor);
+    button->setStyleSheet(ui::ghostRowStyleSheet());
+    button->setToolTip(QString("%1\nClick to focus this hotspot on the canvas.")
+        .arg(safecrowd::domain::scenarioHotspotDefinition()));
+    return button;
+}
+
+QFrame* createLegendSwatch(const QColor& color, QWidget* parent) {
+    auto* swatch = new QFrame(parent);
+    swatch->setFixedSize(22, 12);
+    swatch->setStyleSheet(QString(
+        "QFrame {"
+        " background: %1;"
+        " border: 1px solid rgba(127, 29, 29, 80);"
+        " border-radius: 3px;"
+        "}").arg(color.name()));
+    return swatch;
+}
+
+QWidget* createHotspotLegend(QWidget* parent) {
+    auto* legend = new QWidget(parent);
+    auto* layout = new QHBoxLayout(legend);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(6);
+
+    auto* label = createLabel("Intensity", legend, ui::FontRole::Caption);
+    label->setStyleSheet(ui::subtleTextStyleSheet());
+    layout->addWidget(label);
+    layout->addWidget(createLegendSwatch(QColor("#f97316"), legend));
+    layout->addWidget(createLegendSwatch(QColor("#dc2626"), legend));
+    layout->addWidget(createLegendSwatch(QColor("#b91c1c"), legend));
+    layout->addStretch(1);
+    legend->setToolTip("Hotspot color intensity is relative to the largest hotspot in this result.");
+    return legend;
 }
 
 QString zoneLabel(const safecrowd::domain::Zone2D& zone) {
@@ -113,7 +188,7 @@ QWidget* createResultPanel(
     const safecrowd::domain::ScenarioDraft& scenario,
     const safecrowd::domain::SimulationFrame& frame,
     const safecrowd::domain::ScenarioRiskSnapshot& risk,
-    std::function<void()> backHandler,
+    std::function<void()> runAgainHandler,
     std::function<void()> editHandler,
     QWidget* parent) {
     auto* panel = new QWidget(parent);
@@ -133,54 +208,24 @@ QWidget* createResultPanel(
     const auto evacuated = static_cast<int>(frame.evacuatedAgentCount);
     metricsGrid->addWidget(createMetricCard("Evacuated", QString("%1 / %2").arg(evacuated).arg(total), panel), 0, 0);
     metricsGrid->addWidget(createMetricCard("Time", QString("%1 sec").arg(frame.elapsedSeconds, 0, 'f', 1), panel), 0, 1);
-    metricsGrid->addWidget(createMetricCard("Risk", safecrowd::domain::scenarioRiskLevelLabel(risk.completionRisk), panel), 1, 0);
-    metricsGrid->addWidget(createMetricCard("Stalled", QString::number(static_cast<int>(risk.stalledAgentCount)), panel), 1, 1);
+    metricsGrid->addWidget(createMetricCard(
+        "Risk",
+        safecrowd::domain::scenarioRiskLevelLabel(risk.completionRisk),
+        panel,
+        safecrowd::domain::scenarioRiskDefinition()), 1, 0);
+    metricsGrid->addWidget(createMetricCard(
+        "Stalled",
+        QString::number(static_cast<int>(risk.stalledAgentCount)),
+        panel,
+        safecrowd::domain::scenarioStalledDefinition()), 1, 1);
     layout->addLayout(metricsGrid);
-
-    auto* detailArea = new QScrollArea(panel);
-    detailArea->setWidgetResizable(true);
-    detailArea->setFrameShape(QFrame::NoFrame);
-    ui::polishScrollArea(detailArea);
-
-    auto* details = new QWidget(detailArea);
-    auto* detailsLayout = new QVBoxLayout(details);
-    detailsLayout->setContentsMargins(0, 0, 10, 0);
-    detailsLayout->setSpacing(12);
-
-    auto* bottleneckHeader = createLabel("Worst Bottleneck", details, ui::FontRole::SectionTitle);
-    detailsLayout->addWidget(bottleneckHeader);
-    auto* bottleneck = createLabel(bottleneckSummary(risk), details);
-    bottleneck->setStyleSheet(ui::mutedTextStyleSheet());
-    detailsLayout->addWidget(bottleneck);
-
-    auto* hotspotHeader = createLabel("Hotspots", details, ui::FontRole::SectionTitle);
-    detailsLayout->addWidget(hotspotHeader);
-    if (risk.hotspots.empty()) {
-        auto* empty = createLabel("None detected", details);
-        empty->setStyleSheet(ui::mutedTextStyleSheet());
-        detailsLayout->addWidget(empty);
-    } else {
-        for (const auto& hotspot : risk.hotspots) {
-            auto* row = createLabel(
-                QString("(%1, %2)  -  %3 agents")
-                    .arg(hotspot.center.x, 0, 'f', 1)
-                    .arg(hotspot.center.y, 0, 'f', 1)
-                    .arg(static_cast<int>(hotspot.agentCount)),
-                details);
-            row->setStyleSheet(ui::mutedTextStyleSheet());
-            detailsLayout->addWidget(row);
-        }
-    }
-
-    detailsLayout->addStretch(1);
-    detailArea->setWidget(details);
-    layout->addWidget(detailArea, 1);
+    layout->addStretch(1);
 
     auto* actions = new QWidget(panel);
     auto* actionsLayout = new QHBoxLayout(actions);
     actionsLayout->setContentsMargins(0, 0, 0, 0);
     actionsLayout->setSpacing(8);
-    auto* backButton = new QPushButton("Back to Run", actions);
+    auto* backButton = new QPushButton("Run Again", actions);
     backButton->setFont(ui::font(ui::FontRole::Body));
     backButton->setStyleSheet(ui::secondaryButtonStyleSheet());
     auto* editButton = new QPushButton("Edit Scenario", actions);
@@ -190,9 +235,9 @@ QWidget* createResultPanel(
     actionsLayout->addWidget(editButton);
     layout->addWidget(actions);
 
-    QObject::connect(backButton, &QPushButton::clicked, panel, [backHandler = std::move(backHandler)]() {
-        if (backHandler) {
-            backHandler();
+    QObject::connect(backButton, &QPushButton::clicked, panel, [runAgainHandler = std::move(runAgainHandler)]() {
+        if (runAgainHandler) {
+            runAgainHandler();
         }
     });
 
@@ -202,6 +247,82 @@ QWidget* createResultPanel(
         }
     });
 
+    return panel;
+}
+
+QWidget* createResultFindingsPanel(
+    const safecrowd::domain::ScenarioRiskSnapshot& risk,
+    std::function<void(std::size_t)> bottleneckFocusHandler,
+    std::function<void(std::size_t)> hotspotFocusHandler,
+    QWidget* parent) {
+    auto* panel = new QWidget(parent);
+    auto* layout = new QVBoxLayout(panel);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(12);
+
+    layout->addWidget(createLabel("Result Reports", panel, ui::FontRole::Title));
+    auto* caption = createLabel("Risk findings and spatial reports", panel, ui::FontRole::Caption);
+    caption->setStyleSheet(ui::subtleTextStyleSheet());
+    layout->addWidget(caption);
+
+    auto* area = new QScrollArea(panel);
+    area->setWidgetResizable(true);
+    area->setFrameShape(QFrame::NoFrame);
+    ui::polishScrollArea(area);
+
+    auto* content = new QWidget(area);
+    auto* contentLayout = new QVBoxLayout(content);
+    contentLayout->setContentsMargins(0, 0, 10, 0);
+    contentLayout->setSpacing(12);
+
+    auto* bottleneckHeader = createReportSectionHeader("Bottlenecks", content);
+    bottleneckHeader->setToolTip(safecrowd::domain::scenarioBottleneckDefinition());
+    contentLayout->addWidget(bottleneckHeader);
+    if (risk.bottlenecks.empty()) {
+        auto* empty = createLabel("None detected", content);
+        empty->setStyleSheet(ui::mutedTextStyleSheet());
+        contentLayout->addWidget(empty);
+    } else {
+        for (std::size_t index = 0; index < risk.bottlenecks.size(); ++index) {
+            auto* row = createBottleneckRowButton(risk.bottlenecks[index], index, content);
+            QObject::connect(row, &QPushButton::clicked, content, [bottleneckFocusHandler, index]() {
+                if (bottleneckFocusHandler) {
+                    bottleneckFocusHandler(index);
+                }
+            });
+            contentLayout->addWidget(row);
+        }
+    }
+
+    auto* hotspotHeader = createReportSectionHeader("Hotspots", content);
+    hotspotHeader->setToolTip(safecrowd::domain::scenarioHotspotDefinition());
+    contentLayout->addWidget(hotspotHeader);
+    contentLayout->addWidget(createHotspotLegend(content));
+    if (risk.hotspots.empty()) {
+        auto* empty = createLabel("None detected", content);
+        empty->setStyleSheet(ui::mutedTextStyleSheet());
+        contentLayout->addWidget(empty);
+    } else {
+        for (std::size_t index = 0; index < risk.hotspots.size(); ++index) {
+            auto* row = createHotspotRowButton(risk.hotspots[index], index, content);
+            QObject::connect(row, &QPushButton::clicked, content, [hotspotFocusHandler, index]() {
+                if (hotspotFocusHandler) {
+                    hotspotFocusHandler(index);
+                }
+            });
+            contentLayout->addWidget(row);
+        }
+    }
+
+    auto* futureHeader = createReportSectionHeader("Additional Reports", content);
+    contentLayout->addWidget(futureHeader);
+    auto* futureText = createLabel("Flow, capacity, exposure, and comparison reports can be added here.", content);
+    futureText->setStyleSheet(ui::subtleTextStyleSheet());
+    contentLayout->addWidget(futureText);
+
+    contentLayout->addStretch(1);
+    area->setWidget(content);
+    layout->addWidget(area, 1);
     return panel;
 }
 
@@ -228,7 +349,12 @@ ScenarioResultWidget::ScenarioResultWidget(
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
 
-    shell_ = new WorkspaceShell(this);
+    shell_ = new WorkspaceShell(WorkspaceShellOptions{
+        .showTopBar = true,
+        .navigationMode = WorkspaceNavigationMode::PanelOnly,
+        .showReviewPanel = true,
+        .reviewPanelWidth = 280,
+    }, this);
     shell_->setTools({"Project"});
     shell_->setSaveProjectHandler(saveProjectHandler_);
     shell_->setOpenProjectHandler(openProjectHandler_);
@@ -236,13 +362,23 @@ ScenarioResultWidget::ScenarioResultWidget(
     auto* canvas = new SimulationCanvasWidget(layout_, shell_);
     canvas->setFrame(frame_);
     canvas->setHotspotOverlay(risk_.hotspots);
+    canvas->setBottleneckOverlay(risk_.bottlenecks);
     shell_->setCanvas(canvas);
+    shell_->setNavigationPanel(createResultFindingsPanel(
+        risk_,
+        [canvas](std::size_t index) {
+            canvas->focusBottleneck(index);
+        },
+        [canvas](std::size_t index) {
+            canvas->focusHotspot(index);
+        },
+        shell_));
     shell_->setReviewPanel(createResultPanel(
         scenario_,
         frame_,
         risk_,
         [this]() {
-            navigateToAuthoring(true);
+            rerunScenario();
         },
         [this]() {
             navigateToAuthoring(false);
@@ -256,6 +392,26 @@ ScenarioResultWidget::ScenarioResultWidget(
     shell_->setTopBarTrailingWidget(title);
 
     rootLayout->addWidget(shell_);
+}
+
+void ScenarioResultWidget::rerunScenario() {
+    auto* rootLayout = qobject_cast<QVBoxLayout*>(layout());
+    if (rootLayout == nullptr || shell_ == nullptr) {
+        return;
+    }
+
+    auto* runWidget = new ScenarioRunWidget(
+        projectName_,
+        layout_,
+        scenario_,
+        saveProjectHandler_,
+        openProjectHandler_,
+        this);
+
+    rootLayout->replaceWidget(shell_, runWidget);
+    shell_->hide();
+    shell_->deleteLater();
+    shell_ = nullptr;
 }
 
 void ScenarioResultWidget::navigateToAuthoring(bool showRunPanel) {

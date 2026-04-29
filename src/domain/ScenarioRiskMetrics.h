@@ -8,6 +8,13 @@
 
 namespace safecrowd::domain {
 
+inline constexpr double kScenarioStalledSpeedThreshold = 0.12;
+inline constexpr double kScenarioStalledSecondsThreshold = 0.75;
+inline constexpr double kScenarioHotspotCellSize = 1.5;
+inline constexpr std::size_t kScenarioHotspotAgentThreshold = 5;
+inline constexpr double kScenarioBottleneckRadius = 1.25;
+inline constexpr std::size_t kScenarioBottleneckAgentThreshold = 3;
+
 enum class ScenarioRiskLevel {
     Low,
     Medium,
@@ -38,5 +45,9 @@ struct ScenarioRiskSnapshot {
 };
 
 const char* scenarioRiskLevelLabel(ScenarioRiskLevel level) noexcept;
+const char* scenarioRiskDefinition() noexcept;
+const char* scenarioStalledDefinition() noexcept;
+const char* scenarioHotspotDefinition() noexcept;
+const char* scenarioBottleneckDefinition() noexcept;
 
 }  // namespace safecrowd::domain

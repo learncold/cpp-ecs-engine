@@ -103,6 +103,7 @@ QPolygonF layoutCanvasPolylinePath(const safecrowd::domain::Polyline2D& polyline
 void drawLayoutCanvasLine(QPainter& painter, const safecrowd::domain::LineSegment2D& line, const LayoutCanvasTransform& transform);
 void drawLayoutCanvasPolyline(QPainter& painter, const safecrowd::domain::Polyline2D& polyline, const LayoutCanvasTransform& transform);
 void drawLayoutCanvasGrid(QPainter& painter, const QRectF& viewport);
+void drawLayoutCanvasSurface(QPainter& painter, const QRectF& viewport);
 void drawFacilityLayoutCanvas(QPainter& painter, const safecrowd::domain::FacilityLayout2D& layout, const LayoutCanvasTransform& transform);
 
 }  // namespace safecrowd::application
