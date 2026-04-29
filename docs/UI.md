@@ -320,6 +320,8 @@ stage된 baseline 시나리오를 실제로 실행하고 진행 상태를 보는
 - Workspace Shell은 left reports panel, simulation canvas, right summary panel 구성 사용
 - hotspot overlay 표시
 - bottleneck overlay 표시
+- 누적 대피 곡선 표시
+- T90/T95 대피 완료 시각 표시
 - evacuated count 표시
 - elapsed time 표시
 - risk level 표시
@@ -335,9 +337,12 @@ stage된 baseline 시나리오를 실제로 실행하고 진행 상태를 보는
 
 - Evacuated
 - Time
+- T90
+- T95
 - Risk
 - Stalled
 - Result Reports
+- Evacuation Progress
 - Bottlenecks
 - Hotspots
 - Hotspot intensity legend

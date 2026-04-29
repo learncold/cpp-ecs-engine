@@ -7,6 +7,7 @@
 
 #include "domain/FacilityLayout2D.h"
 #include "domain/ScenarioAuthoring.h"
+#include "domain/ScenarioResultArtifacts.h"
 #include "domain/ScenarioRiskMetrics.h"
 #include "domain/ScenarioSimulationFrame.h"
 
@@ -22,6 +23,7 @@ public:
         safecrowd::domain::ScenarioDraft scenario,
         safecrowd::domain::SimulationFrame frame,
         safecrowd::domain::ScenarioRiskSnapshot risk,
+        safecrowd::domain::ScenarioResultArtifacts artifacts,
         std::function<void()> saveProjectHandler,
         std::function<void()> openProjectHandler,
         QWidget* parent = nullptr);
@@ -35,6 +37,7 @@ private:
     safecrowd::domain::ScenarioDraft scenario_{};
     safecrowd::domain::SimulationFrame frame_{};
     safecrowd::domain::ScenarioRiskSnapshot risk_{};
+    safecrowd::domain::ScenarioResultArtifacts artifacts_{};
     std::function<void()> saveProjectHandler_{};
     std::function<void()> openProjectHandler_{};
     WorkspaceShell* shell_{nullptr};

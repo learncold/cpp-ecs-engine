@@ -84,6 +84,7 @@ add_library(safecrowd_domain STATIC
     src/domain/ScenarioRiskMetrics.h
     src/domain/ScenarioRiskMetrics.cpp
     src/domain/ScenarioRiskMetricsSystem.cpp
+    src/domain/ScenarioResultArtifacts.h
     src/domain/ScenarioSimulationFrame.h
     src/domain/ScenarioSimulationInternal.h
     src/domain/ScenarioSimulationInternal.cpp

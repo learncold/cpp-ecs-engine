@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <utility>
 
 #include "engine/EngineWorld.h"
@@ -28,6 +29,24 @@ SpatialCell spatialCellFor(const Point2D& point, double cellSize) {
 
 double distanceBetween(const Point2D& lhs, const Point2D& rhs) {
     return std::hypot(lhs.x - rhs.x, lhs.y - rhs.y);
+}
+
+std::optional<double> percentileCompletionTime(
+    std::vector<double> completionTimes,
+    std::size_t totalAgentCount,
+    double percentile) {
+    if (totalAgentCount == 0 || completionTimes.empty()) {
+        return std::nullopt;
+    }
+
+    const auto targetCount = static_cast<std::size_t>(
+        std::ceil(static_cast<double>(totalAgentCount) * percentile));
+    if (targetCount == 0 || completionTimes.size() < targetCount) {
+        return std::nullopt;
+    }
+
+    std::sort(completionTimes.begin(), completionTimes.end());
+    return completionTimes[targetCount - 1];
 }
 
 }  // namespace
@@ -167,6 +186,88 @@ void ScenarioFrameSyncSystem::update(engine::EngineWorld& world, const engine::E
     }
 
     resources.set(ScenarioSimulationFrameResource{.frame = std::move(frame)});
+}
+
+ScenarioResultArtifactsSystem::ScenarioResultArtifactsSystem(double sampleIntervalSeconds)
+    : sampleIntervalSeconds_(sampleIntervalSeconds > 0.0 ? sampleIntervalSeconds : 1.0) {
+}
+
+void ScenarioResultArtifactsSystem::configure(engine::EngineWorld& world) {
+    world.resources().set(ScenarioResultArtifactsResource{
+        .artifacts = {},
+        .lastRecordedEvacuatedCount = std::numeric_limits<std::size_t>::max(),
+        .nextSampleTimeSeconds = 0.0,
+        .sampleIntervalSeconds = sampleIntervalSeconds_,
+    });
+}
+
+void ScenarioResultArtifactsSystem::update(engine::EngineWorld& world, const engine::EngineStepContext& step) {
+    (void)step;
+
+    auto& query = world.query();
+    auto& resources = world.resources();
+    if (!resources.contains<ScenarioResultArtifactsResource>()) {
+        configure(world);
+    }
+
+    auto& result = resources.get<ScenarioResultArtifactsResource>();
+    double elapsedSeconds = 0.0;
+    bool complete = false;
+    if (resources.contains<ScenarioSimulationClockResource>()) {
+        const auto& clock = resources.get<ScenarioSimulationClockResource>();
+        elapsedSeconds = clock.elapsedSeconds;
+        complete = clock.complete;
+    }
+
+    std::size_t totalAgentCount = 0;
+    std::size_t evacuatedCount = 0;
+    std::vector<double> completionTimes;
+    const auto entities = query.view<EvacuationStatus>();
+    completionTimes.reserve(entities.size());
+    for (const auto entity : entities) {
+        ++totalAgentCount;
+        const auto& status = query.get<EvacuationStatus>(entity);
+        if (!status.evacuated) {
+            continue;
+        }
+        ++evacuatedCount;
+        completionTimes.push_back(status.completionTimeSeconds);
+    }
+
+    result.artifacts.timingSummary.t50Seconds =
+        percentileCompletionTime(completionTimes, totalAgentCount, 0.50);
+    result.artifacts.timingSummary.t90Seconds =
+        percentileCompletionTime(completionTimes, totalAgentCount, 0.90);
+    result.artifacts.timingSummary.t95Seconds =
+        percentileCompletionTime(completionTimes, totalAgentCount, 0.95);
+    if (totalAgentCount > 0 && completionTimes.size() == totalAgentCount) {
+        result.artifacts.timingSummary.finalEvacuationTimeSeconds =
+            *std::max_element(completionTimes.begin(), completionTimes.end());
+    } else {
+        result.artifacts.timingSummary.finalEvacuationTimeSeconds = std::nullopt;
+    }
+
+    const auto shouldRecordSample =
+        result.artifacts.evacuationProgress.empty()
+        || evacuatedCount != result.lastRecordedEvacuatedCount
+        || elapsedSeconds + 1e-9 >= result.nextSampleTimeSeconds
+        || complete;
+    if (!shouldRecordSample) {
+        return;
+    }
+
+    result.artifacts.evacuationProgress.push_back({
+        .timeSeconds = elapsedSeconds,
+        .evacuatedCount = evacuatedCount,
+        .totalCount = totalAgentCount,
+        .evacuatedRatio = totalAgentCount == 0
+            ? 0.0
+            : static_cast<double>(evacuatedCount) / static_cast<double>(totalAgentCount),
+    });
+    result.lastRecordedEvacuatedCount = evacuatedCount;
+    while (result.nextSampleTimeSeconds <= elapsedSeconds + 1e-9) {
+        result.nextSampleTimeSeconds += result.sampleIntervalSeconds;
+    }
 }
 
 }  // namespace safecrowd::domain

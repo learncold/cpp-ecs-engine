@@ -8,6 +8,7 @@
 #include "domain/AgentComponents.h"
 #include "domain/FacilityLayout2D.h"
 #include "domain/ScenarioAuthoring.h"
+#include "domain/ScenarioResultArtifacts.h"
 #include "domain/ScenarioRiskMetrics.h"
 #include "domain/ScenarioSimulationFrame.h"
 #include "domain/ScenarioSimulationSystems.h"
@@ -26,6 +27,7 @@ public:
     const SimulationFrame& frame() const noexcept;
     const ScenarioRiskSnapshot& riskSnapshot() const noexcept;
     const ScenarioRiskSnapshot& resultRiskSnapshot() const noexcept;
+    const ScenarioResultArtifacts& resultArtifacts() const noexcept;
     double timeLimitSeconds() const noexcept;
     bool complete() const noexcept;
 
@@ -52,6 +54,7 @@ private:
     SimulationFrame frame_{};
     ScenarioRiskSnapshot riskSnapshot_{};
     ScenarioRiskSnapshot resultRiskSnapshot_{};
+    ScenarioResultArtifacts resultArtifacts_{};
     double timeLimitSeconds_{60.0};
 };
 

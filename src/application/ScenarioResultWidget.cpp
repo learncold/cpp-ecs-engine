@@ -9,6 +9,8 @@
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QPainter>
+#include <QPainterPath>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSizePolicy>
@@ -30,6 +32,110 @@ QLabel* createLabel(const QString& text, QWidget* parent, ui::FontRole role = ui
     label->setWordWrap(true);
     return label;
 }
+
+QString formatOptionalSeconds(const std::optional<double>& seconds) {
+    return seconds.has_value() ? QString("%1 sec").arg(*seconds, 0, 'f', 1) : QString("Pending");
+}
+
+class EvacuationProgressWidget final : public QWidget {
+public:
+    explicit EvacuationProgressWidget(
+        safecrowd::domain::ScenarioResultArtifacts artifacts,
+        QWidget* parent = nullptr)
+        : QWidget(parent),
+          artifacts_(std::move(artifacts)) {
+        setMinimumHeight(150);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        setToolTip("Cumulative evacuation curve. T90/T95 indicate when 90%/95% of occupants have evacuated.");
+    }
+
+protected:
+    void paintEvent(QPaintEvent* event) override {
+        (void)event;
+
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        painter.fillRect(rect(), QColor("#ffffff"));
+        painter.setPen(QPen(QColor("#d8e2ee"), 1));
+        painter.drawRect(rect().adjusted(0, 0, -1, -1));
+
+        const QRectF plot = QRectF(rect()).adjusted(34, 18, -14, -28);
+        painter.setPen(QPen(QColor("#e4ebf3"), 1));
+        painter.drawLine(plot.bottomLeft(), plot.bottomRight());
+        painter.drawLine(plot.bottomLeft(), plot.topLeft());
+        painter.setFont(ui::font(ui::FontRole::Caption));
+        painter.setPen(QColor("#687789"));
+        painter.drawText(QRectF(4, plot.top() - 8, 26, 18), Qt::AlignRight | Qt::AlignVCenter, "100%");
+        painter.drawText(QRectF(4, plot.bottom() - 10, 26, 18), Qt::AlignRight | Qt::AlignVCenter, "0%");
+
+        if (artifacts_.evacuationProgress.empty()) {
+            painter.drawText(plot, Qt::AlignCenter, "No evacuation samples");
+            return;
+        }
+
+        const auto maxTimeIt = std::max_element(
+            artifacts_.evacuationProgress.begin(),
+            artifacts_.evacuationProgress.end(),
+            [](const auto& lhs, const auto& rhs) {
+                return lhs.timeSeconds < rhs.timeSeconds;
+            });
+        const auto maxTime = std::max(1.0, maxTimeIt->timeSeconds);
+
+        QPainterPath path;
+        for (std::size_t index = 0; index < artifacts_.evacuationProgress.size(); ++index) {
+            const auto& sample = artifacts_.evacuationProgress[index];
+            const auto x = plot.left() + (std::clamp(sample.timeSeconds / maxTime, 0.0, 1.0) * plot.width());
+            const auto y = plot.bottom() - (std::clamp(sample.evacuatedRatio, 0.0, 1.0) * plot.height());
+            if (index == 0) {
+                path.moveTo(x, y);
+            } else {
+                path.lineTo(x, y);
+            }
+        }
+
+        painter.setPen(QPen(QColor("#1f5fae"), 2.5));
+        painter.drawPath(path);
+        painter.setBrush(QColor("#1f5fae"));
+        painter.setPen(Qt::NoPen);
+        for (const auto& sample : artifacts_.evacuationProgress) {
+            const auto x = plot.left() + (std::clamp(sample.timeSeconds / maxTime, 0.0, 1.0) * plot.width());
+            const auto y = plot.bottom() - (std::clamp(sample.evacuatedRatio, 0.0, 1.0) * plot.height());
+            painter.drawEllipse(QPointF(x, y), 2.5, 2.5);
+        }
+
+        drawTimingMarker(painter, plot, maxTime, artifacts_.timingSummary.t90Seconds, "T90");
+        drawTimingMarker(painter, plot, maxTime, artifacts_.timingSummary.t95Seconds, "T95");
+
+        painter.setPen(QColor("#687789"));
+        const auto last = artifacts_.evacuationProgress.back();
+        painter.drawText(
+            QRectF(plot.left(), plot.bottom() + 6, plot.width(), 18),
+            Qt::AlignLeft | Qt::AlignVCenter,
+            QString("%1 / %2 evacuated by %3 sec")
+                .arg(static_cast<int>(last.evacuatedCount))
+                .arg(static_cast<int>(last.totalCount))
+                .arg(last.timeSeconds, 0, 'f', 1));
+    }
+
+private:
+    void drawTimingMarker(
+        QPainter& painter,
+        const QRectF& plot,
+        double maxTime,
+        const std::optional<double>& seconds,
+        const QString& label) const {
+        if (!seconds.has_value()) {
+            return;
+        }
+        const auto x = plot.left() + (std::clamp(*seconds / maxTime, 0.0, 1.0) * plot.width());
+        painter.setPen(QPen(QColor("#d97706"), 1, Qt::DashLine));
+        painter.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()));
+        painter.setPen(QColor("#92400e"));
+        painter.drawText(QRectF(x + 4, plot.top(), 46, 18), Qt::AlignLeft | Qt::AlignVCenter, label);
+    }
+
+    safecrowd::domain::ScenarioResultArtifacts artifacts_{};
+};
 
 QFrame* createMetricCard(const QString& title, const QString& value, QWidget* parent, const QString& tooltip = {}) {
     auto* card = new QFrame(parent);
@@ -188,6 +294,7 @@ QWidget* createResultPanel(
     const safecrowd::domain::ScenarioDraft& scenario,
     const safecrowd::domain::SimulationFrame& frame,
     const safecrowd::domain::ScenarioRiskSnapshot& risk,
+    const safecrowd::domain::ScenarioResultArtifacts& artifacts,
     std::function<void()> runAgainHandler,
     std::function<void()> editHandler,
     QWidget* parent) {
@@ -218,6 +325,16 @@ QWidget* createResultPanel(
         QString::number(static_cast<int>(risk.stalledAgentCount)),
         panel,
         safecrowd::domain::scenarioStalledDefinition()), 1, 1);
+    metricsGrid->addWidget(createMetricCard(
+        "T90",
+        formatOptionalSeconds(artifacts.timingSummary.t90Seconds),
+        panel,
+        "Time at which 90% of occupants completed evacuation."), 2, 0);
+    metricsGrid->addWidget(createMetricCard(
+        "T95",
+        formatOptionalSeconds(artifacts.timingSummary.t95Seconds),
+        panel,
+        "Time at which 95% of occupants completed evacuation."), 2, 1);
     layout->addLayout(metricsGrid);
     layout->addStretch(1);
 
@@ -251,6 +368,7 @@ QWidget* createResultPanel(
 }
 
 QWidget* createResultFindingsPanel(
+    const safecrowd::domain::ScenarioResultArtifacts& artifacts,
     const safecrowd::domain::ScenarioRiskSnapshot& risk,
     std::function<void(std::size_t)> bottleneckFocusHandler,
     std::function<void(std::size_t)> hotspotFocusHandler,
@@ -274,6 +392,19 @@ QWidget* createResultFindingsPanel(
     auto* contentLayout = new QVBoxLayout(content);
     contentLayout->setContentsMargins(0, 0, 10, 0);
     contentLayout->setSpacing(12);
+
+    auto* progressHeader = createReportSectionHeader("Evacuation Progress", content);
+    progressHeader->setToolTip("Cumulative evacuation curve and percentile completion times.");
+    contentLayout->addWidget(progressHeader);
+    contentLayout->addWidget(new EvacuationProgressWidget(artifacts, content));
+    auto* timing = createLabel(
+        QString("T90: %1\nT95: %2")
+            .arg(formatOptionalSeconds(artifacts.timingSummary.t90Seconds))
+            .arg(formatOptionalSeconds(artifacts.timingSummary.t95Seconds)),
+        content,
+        ui::FontRole::Caption);
+    timing->setStyleSheet(ui::mutedTextStyleSheet());
+    contentLayout->addWidget(timing);
 
     auto* bottleneckHeader = createReportSectionHeader("Bottlenecks", content);
     bottleneckHeader->setToolTip(safecrowd::domain::scenarioBottleneckDefinition());
@@ -334,6 +465,7 @@ ScenarioResultWidget::ScenarioResultWidget(
     safecrowd::domain::ScenarioDraft scenario,
     safecrowd::domain::SimulationFrame frame,
     safecrowd::domain::ScenarioRiskSnapshot risk,
+    safecrowd::domain::ScenarioResultArtifacts artifacts,
     std::function<void()> saveProjectHandler,
     std::function<void()> openProjectHandler,
     QWidget* parent)
@@ -343,6 +475,7 @@ ScenarioResultWidget::ScenarioResultWidget(
       scenario_(std::move(scenario)),
       frame_(std::move(frame)),
       risk_(std::move(risk)),
+      artifacts_(std::move(artifacts)),
       saveProjectHandler_(std::move(saveProjectHandler)),
       openProjectHandler_(std::move(openProjectHandler)) {
     auto* rootLayout = new QVBoxLayout(this);
@@ -365,6 +498,7 @@ ScenarioResultWidget::ScenarioResultWidget(
     canvas->setBottleneckOverlay(risk_.bottlenecks);
     shell_->setCanvas(canvas);
     shell_->setNavigationPanel(createResultFindingsPanel(
+        artifacts_,
         risk_,
         [canvas](std::size_t index) {
             canvas->focusBottleneck(index);
@@ -377,6 +511,7 @@ ScenarioResultWidget::ScenarioResultWidget(
         scenario_,
         frame_,
         risk_,
+        artifacts_,
         [this]() {
             rerunScenario();
         },

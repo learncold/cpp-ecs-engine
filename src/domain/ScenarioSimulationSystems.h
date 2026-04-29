@@ -6,6 +6,7 @@
 
 #include "domain/AgentComponents.h"
 #include "domain/FacilityLayout2D.h"
+#include "domain/ScenarioResultArtifacts.h"
 #include "domain/ScenarioRiskMetrics.h"
 #include "domain/ScenarioSimulationFrame.h"
 #include "engine/EngineSystem.h"
@@ -35,6 +36,13 @@ struct ScenarioAgentSpatialIndexResource {
 struct ScenarioRiskMetricsResource {
     ScenarioRiskSnapshot snapshot{};
     ScenarioRiskSnapshot peakSnapshot{};
+};
+
+struct ScenarioResultArtifactsResource {
+    ScenarioResultArtifacts artifacts{};
+    std::size_t lastRecordedEvacuatedCount{static_cast<std::size_t>(-1)};
+    double nextSampleTimeSeconds{0.0};
+    double sampleIntervalSeconds{1.0};
 };
 
 struct ScenarioAgentSeed {
@@ -89,6 +97,17 @@ private:
 class ScenarioFrameSyncSystem final : public engine::EngineSystem {
 public:
     void update(engine::EngineWorld& world, const engine::EngineStepContext& step) override;
+};
+
+class ScenarioResultArtifactsSystem final : public engine::EngineSystem {
+public:
+    explicit ScenarioResultArtifactsSystem(double sampleIntervalSeconds = 1.0);
+
+    void configure(engine::EngineWorld& world) override;
+    void update(engine::EngineWorld& world, const engine::EngineStepContext& step) override;
+
+private:
+    double sampleIntervalSeconds_{1.0};
 };
 
 }  // namespace safecrowd::domain
