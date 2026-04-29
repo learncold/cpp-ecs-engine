@@ -36,6 +36,8 @@ public:
 
     void setTools(const QStringList& tools);
     void setBackHandler(std::function<void()> handler);
+    QPushButton* createBackButton(QWidget* parent = nullptr) const;
+    QWidget* createPanelHeader(const QString& title, QWidget* parent = nullptr, bool includeBackButton = true) const;
     void setNavigationRail(QWidget* rail);
     void setNavigationPanel(QWidget* panel);
     void setNavigationVisible(bool visible);
@@ -74,7 +76,6 @@ private:
     std::function<void()> saveProjectHandler_{};
     std::function<void()> backHandler_{};
     QStringList tools_{};
-    QPushButton* backButton_{nullptr};
 };
 
 }  // namespace safecrowd::application

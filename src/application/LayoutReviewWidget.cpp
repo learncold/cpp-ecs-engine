@@ -152,6 +152,7 @@ QPushButton* createIssueFilterButton(const QString& label, int count, bool selec
 QWidget* createNavigationRail(
     bool showIssues,
     std::function<void(bool)> switchViewHandler,
+    const WorkspaceShell* shell,
     QWidget* parent) {
     auto* activityBar = new QFrame(parent);
     activityBar->setFixedWidth(56);
@@ -214,6 +215,9 @@ QWidget* createNavigationRail(
     (void)issuesButton;
     (void)layoutButton;
     activityLayout->addStretch(1);
+    if (shell != nullptr) {
+        activityLayout->addWidget(shell->createBackButton(activityBar), 0, Qt::AlignHCenter);
+    }
     return activityBar;
 }
 
@@ -222,26 +226,28 @@ QWidget* createNavigationPanel(
     bool showIssues,
     std::function<void(const safecrowd::domain::ImportIssue&)> selectIssueHandler,
     std::function<void(const QString&)> selectLayoutElementHandler,
+    const WorkspaceShell* shell,
     QWidget* parent) {
     auto* content = new QWidget(parent);
     auto* layout = new QVBoxLayout(content);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(12);
 
-    auto* title = new QLabel(showIssues ? "Issues" : "Layout", content);
-    title->setFont(ui::font(ui::FontRole::Title));
-    layout->addWidget(title);
-
     if (!showIssues) {
-        if (auto* titleItem = layout->takeAt(0)) {
-            delete titleItem->widget();
-            delete titleItem;
-        }
         layout->addWidget(new LayoutNavigationPanelWidget(
             importResult.layout.has_value() ? &(*importResult.layout) : nullptr,
             std::move(selectLayoutElementHandler),
-            content));
+            content,
+            shell != nullptr ? shell->createPanelHeader("Layout", content, false) : nullptr));
         return content;
+    }
+
+    if (shell != nullptr) {
+        layout->addWidget(shell->createPanelHeader("Issues", content, false));
+    } else {
+        auto* title = new QLabel("Issues", content);
+        title->setFont(ui::font(ui::FontRole::Title));
+        layout->addWidget(title);
     }
 
     const auto blockingCount = std::count_if(importResult.issues.begin(), importResult.issues.end(), [](const auto& issue) {
@@ -518,6 +524,7 @@ void LayoutReviewWidget::refreshNavigationPanel() {
             navigationView_ = showIssues ? NavigationView::Issues : NavigationView::Layout;
             refreshNavigationPanel();
         },
+        shell_,
         shell_));
     shell_->setNavigationPanel(createNavigationPanel(
         importResult_,
@@ -528,6 +535,7 @@ void LayoutReviewWidget::refreshNavigationPanel() {
         [this](const QString& elementId) {
             handleLayoutElementSelected(elementId);
         },
+        shell_,
         shell_));
 }
 

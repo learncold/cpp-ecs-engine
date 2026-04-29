@@ -183,13 +183,14 @@ NavigationTreeWidget::NavigationTreeWidget(
     std::vector<NavigationTreeNode> nodes,
     const QString& emptyText,
     std::function<void(const QString&)> activateItemHandler,
-    QWidget* parent)
+    QWidget* parent,
+    QWidget* headerWidget)
     : QWidget(parent) {
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(12);
 
-    layout->addWidget(createLabel(title, this, ui::FontRole::Title));
+    layout->addWidget(headerWidget != nullptr ? headerWidget : createLabel(title, this, ui::FontRole::Title));
 
     if (nodes.empty()) {
         auto* empty = createLabel(emptyText, this);

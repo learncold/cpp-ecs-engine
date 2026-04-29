@@ -109,7 +109,8 @@ std::vector<NavigationTreeNode> buildLayoutTree(const safecrowd::domain::Facilit
 LayoutNavigationPanelWidget::LayoutNavigationPanelWidget(
     const safecrowd::domain::FacilityLayout2D* facilityLayout,
     std::function<void(const QString&)> selectElementHandler,
-    QWidget* parent)
+    QWidget* parent,
+    QWidget* headerWidget)
     : QWidget(parent) {
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -119,7 +120,8 @@ LayoutNavigationPanelWidget::LayoutNavigationPanelWidget(
         buildLayoutTree(facilityLayout),
         "No recognized layout elements",
         std::move(selectElementHandler),
-        this));
+        this,
+        headerWidget));
 }
 
 }  // namespace safecrowd::application

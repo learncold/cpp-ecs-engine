@@ -297,13 +297,14 @@ QWidget* createResultPanel(
     const safecrowd::domain::ScenarioResultArtifacts& artifacts,
     std::function<void()> runAgainHandler,
     std::function<void()> editHandler,
+    const WorkspaceShell* shell,
     QWidget* parent) {
     auto* panel = new QWidget(parent);
     auto* layout = new QVBoxLayout(panel);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(12);
 
-    layout->addWidget(createLabel("Results", panel, ui::FontRole::Title));
+    layout->addWidget(shell != nullptr ? shell->createPanelHeader("Results", panel) : createLabel("Results", panel, ui::FontRole::Title));
     auto* scenarioLabel = createLabel(QString("Scenario: %1").arg(QString::fromStdString(scenario.name)), panel);
     scenarioLabel->setStyleSheet(ui::mutedTextStyleSheet());
     layout->addWidget(scenarioLabel);
@@ -523,6 +524,7 @@ ScenarioResultWidget::ScenarioResultWidget(
         [this]() {
             navigateToAuthoring(false);
         },
+        shell_,
         shell_));
     shell_->setReviewPanelVisible(true);
 

@@ -14,7 +14,8 @@ public:
     explicit LayoutNavigationPanelWidget(
         const safecrowd::domain::FacilityLayout2D* layout,
         std::function<void(const QString&)> selectElementHandler = {},
-        QWidget* parent = nullptr);
+        QWidget* parent = nullptr,
+        QWidget* headerWidget = nullptr);
 };
 
 }  // namespace safecrowd::application

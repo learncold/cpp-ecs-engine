@@ -2,7 +2,6 @@
 
 #include <cstdint>
 
-#include "domain/Snapshot.h"
 #include "engine/EngineRuntime.h"
 #include "engine/EngineState.h"
 
@@ -25,7 +24,6 @@ public:
     void update(double deltaSeconds);
 
     SimulationSummary summary() const;
-    SimulationSnapshot snapshot() const;
     engine::EngineRuntime& runtime() noexcept;
     const engine::EngineRuntime& runtime() const noexcept;
 

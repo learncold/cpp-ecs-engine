@@ -46,19 +46,6 @@ SimulationSummary SafeCrowdDomain::summary() const {
     };
 }
 
-SimulationSnapshot SafeCrowdDomain::snapshot() const {
-    const auto& stats = runtime_.stats();
-    const double simulationTime =
-        (static_cast<double>(stats.fixedStepIndex) + stats.alpha) *
-        runtime_.config().fixedDeltaTime;
-
-    return buildSnapshot(
-        runtime_.world().query(),
-        stats.frameIndex,
-        stats.fixedStepIndex,
-        simulationTime);
-}
-
 engine::EngineRuntime& SafeCrowdDomain::runtime() noexcept {
     return runtime_;
 }

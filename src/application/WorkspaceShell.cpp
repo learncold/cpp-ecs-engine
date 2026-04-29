@@ -3,9 +3,14 @@
 #include <algorithm>
 
 #include <QAction>
+#include <QColor>
 #include <QFrame>
 #include <QHBoxLayout>
+#include <QIcon>
+#include <QLabel>
 #include <QMenu>
+#include <QPainter>
+#include <QPixmap>
 #include <QPushButton>
 #include <QSizePolicy>
 #include <QVBoxLayout>
@@ -57,19 +62,31 @@ QPushButton* createFlatTopBarButton(QWidget* parent, const QString& text) {
     return button;
 }
 
-QPushButton* createFlatTopBarIconButton(QWidget* parent, const QString& text) {
-    auto* button = new QPushButton(text, parent);
-    button->setFont(ui::font(ui::FontRole::Body));
+QIcon makeBackIcon(const QColor& color) {
+    QPixmap pixmap(32, 32);
+    pixmap.fill(Qt::transparent);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(QPen(color, 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.drawLine(QPointF(19, 9), QPointF(11, 16));
+    painter.drawLine(QPointF(11, 16), QPointF(19, 23));
+    return QIcon(pixmap);
+}
+
+QPushButton* createPanelBackButton(QWidget* parent) {
+    auto* button = new QPushButton(parent);
+    button->setIcon(makeBackIcon(QColor("#16202b")));
+    button->setIconSize(QSize(22, 22));
     button->setFixedSize(32, 32);
+    button->setToolTip("Back");
+    button->setAccessibleName("Back");
     button->setCursor(Qt::PointingHandCursor);
     button->setStyleSheet(
         "QPushButton {"
         " background: transparent;"
         " border: 0;"
         " border-radius: 10px;"
-        " color: #16202b;"
-        " font-size: 18px;"
-        " font-weight: 700;"
         "}"
         "QPushButton:hover {"
         " background: #eef3f8;"
@@ -199,7 +216,33 @@ void WorkspaceShell::setTools(const QStringList& tools) {
 
 void WorkspaceShell::setBackHandler(std::function<void()> handler) {
     backHandler_ = std::move(handler);
-    rebuildTopBar();
+}
+
+QPushButton* WorkspaceShell::createBackButton(QWidget* parent) const {
+    auto* button = createPanelBackButton(parent);
+    connect(button, &QPushButton::clicked, button, [this]() {
+        if (backHandler_) {
+            backHandler_();
+        }
+    });
+    return button;
+}
+
+QWidget* WorkspaceShell::createPanelHeader(const QString& title, QWidget* parent, bool includeBackButton) const {
+    auto* header = new QWidget(parent);
+    auto* layout = new QHBoxLayout(header);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(8);
+
+    if (includeBackButton && backHandler_) {
+        layout->addWidget(createBackButton(header), 0, Qt::AlignVCenter);
+    }
+
+    auto* label = new QLabel(title, header);
+    label->setFont(ui::font(ui::FontRole::Title));
+    label->setWordWrap(false);
+    layout->addWidget(label, 1, Qt::AlignVCenter);
+    return header;
 }
 
 void WorkspaceShell::clearTopBar() {
@@ -210,23 +253,10 @@ void WorkspaceShell::clearTopBar() {
 
     openProjectAction_ = nullptr;
     saveProjectAction_ = nullptr;
-    backButton_ = nullptr;
 }
 
 void WorkspaceShell::rebuildTopBar() {
     clearTopBar();
-
-    if (backHandler_) {
-        backButton_ = createFlatTopBarIconButton(this, "<");
-        backButton_->setToolTip("Back");
-        backButton_->setAccessibleName("Back");
-        connect(backButton_, &QPushButton::clicked, this, [this]() {
-            if (backHandler_) {
-                backHandler_();
-            }
-        });
-        topBarLayout_->addWidget(backButton_);
-    }
 
     for (const auto& tool : tools_) {
         auto* button = createTopBarButton(tool);

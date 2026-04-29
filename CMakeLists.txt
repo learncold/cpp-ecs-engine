@@ -115,8 +115,6 @@ add_library(safecrowd_domain STATIC
     src/domain/CompressionSystem.cpp
     src/domain/CompressionSystem.h
     src/domain/Metrics.h
-    src/domain/Snapshot.cpp
-    src/domain/Snapshot.h
 )
 
 target_include_directories(safecrowd_domain
@@ -143,7 +141,6 @@ if (BUILD_TESTING)
         tests/PackedComponentStorageTests.cpp
         tests/SafeCrowdDomainTests.cpp
         tests/CompressionSystemTests.cpp
-        tests/SnapshotTests.cpp
         tests/ScenarioSimulationSystemsTests.cpp
         tests/EcsCoreTests.cpp
         tests/ImportContractsTests.cpp

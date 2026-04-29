@@ -108,6 +108,7 @@ QIcon makeLayoutIcon(const QColor& color) {
 QWidget* createNavigationRail(
     ScenarioAuthoringWidget::NavigationView currentView,
     std::function<void(ScenarioAuthoringWidget::NavigationView)> switchViewHandler,
+    const WorkspaceShell* shell,
     QWidget* parent) {
     auto* activityBar = new QFrame(parent);
     activityBar->setFixedWidth(56);
@@ -140,6 +141,9 @@ QWidget* createNavigationRail(
     makeActivityButton(makeCrowdIcon(QColor("#1f5fae")), "Crowd", ScenarioAuthoringWidget::NavigationView::Crowd);
     makeActivityButton(makeEventsIcon(QColor("#1f5fae")), "Events", ScenarioAuthoringWidget::NavigationView::Events);
     layout->addStretch(1);
+    if (shell != nullptr) {
+        layout->addWidget(shell->createBackButton(activityBar), 0, Qt::AlignHCenter);
+    }
     return activityBar;
 }
 
@@ -185,13 +189,15 @@ std::vector<NavigationTreeNode> buildCrowdTree(const ScenarioAuthoringWidget::Sc
 QWidget* createCrowdPanel(
     const ScenarioAuthoringWidget::ScenarioState* scenario,
     std::function<void(const QString&)> selectPlacementHandler,
+    const WorkspaceShell* shell,
     QWidget* parent) {
     return new NavigationTreeWidget(
         "Crowd",
         buildCrowdTree(scenario),
         "No pedestrian placements yet",
         std::move(selectPlacementHandler),
-        parent);
+        parent,
+        shell != nullptr ? shell->createPanelHeader("Crowd", parent, false) : nullptr);
 }
 
 std::vector<NavigationTreeNode> buildEventsTree(const ScenarioAuthoringWidget::ScenarioState* scenario) {
@@ -230,13 +236,15 @@ std::vector<NavigationTreeNode> buildEventsTree(const ScenarioAuthoringWidget::S
 
 QWidget* createEventsPanel(
     const ScenarioAuthoringWidget::ScenarioState* scenario,
+    const WorkspaceShell* shell,
     QWidget* parent) {
     return new NavigationTreeWidget(
         "Events",
         buildEventsTree(scenario),
         "No operational events yet",
         {},
-        parent);
+        parent,
+        shell != nullptr ? shell->createPanelHeader("Events", parent, false) : nullptr);
 }
 
 }  // namespace
@@ -458,6 +466,7 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
             navigationView_ = view;
             refreshNavigationPanel();
         },
+        shell_,
         shell_));
 
     if (navigationView_ == NavigationView::Layout) {
@@ -468,7 +477,8 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
                     canvas_->focusLayoutElement(elementId);
                 }
             },
-            shell_));
+            shell_,
+            shell_->createPanelHeader("Layout", shell_, false)));
         return;
     }
     if (navigationView_ == NavigationView::Crowd) {
@@ -479,10 +489,11 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
                     canvas_->focusPlacement(placementId);
                 }
             },
+            shell_,
             shell_));
         return;
     }
-    shell_->setNavigationPanel(createEventsPanel(currentScenario(), shell_));
+    shell_->setNavigationPanel(createEventsPanel(currentScenario(), shell_, shell_));
 }
 
 void ScenarioAuthoringWidget::refreshRightPanel() {

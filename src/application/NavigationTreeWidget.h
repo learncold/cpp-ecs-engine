@@ -24,7 +24,8 @@ public:
         std::vector<NavigationTreeNode> nodes,
         const QString& emptyText,
         std::function<void(const QString&)> activateItemHandler = {},
-        QWidget* parent = nullptr);
+        QWidget* parent = nullptr,
+        QWidget* headerWidget = nullptr);
 };
 
 }  // namespace safecrowd::application
