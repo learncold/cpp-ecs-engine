@@ -161,6 +161,7 @@ void MainWindow::saveCurrentProject() {
 void MainWindow::showLayoutReview(const ProjectMetadata& metadata) {
     currentProject_ = metadata;
     hasCurrentProject_ = true;
+    lastApprovedImportResult_.reset();
 
     auto importResult = metadata.isBuiltInDemo()
         ? makeDemoImportResult()
@@ -177,6 +178,13 @@ void MainWindow::showLayoutReview(const ProjectMetadata& metadata) {
 
     applySavedReviewState(metadata, &importResult);
 
+    showLayoutReview(metadata, std::move(importResult));
+}
+
+void MainWindow::showLayoutReview(const ProjectMetadata& metadata, safecrowd::domain::ImportResult importResult) {
+    currentProject_ = metadata;
+    hasCurrentProject_ = true;
+
     setCentralWidget(new LayoutReviewWidget(
         metadata.name,
         importResult,
@@ -189,6 +197,7 @@ void MainWindow::showLayoutReview(const ProjectMetadata& metadata) {
             showProjectNavigator();
         },
         [this](const safecrowd::domain::ImportResult& approvedImportResult) {
+            lastApprovedImportResult_ = approvedImportResult;
             showScenarioAuthoring(approvedImportResult);
         },
         this));
@@ -200,6 +209,8 @@ void MainWindow::showScenarioAuthoring(const safecrowd::domain::ImportResult& im
         return;
     }
 
+    lastApprovedImportResult_ = importResult;
+
     setCentralWidget(new ScenarioAuthoringWidget(
         currentProject_.name,
         *importResult.layout,
@@ -210,6 +221,13 @@ void MainWindow::showScenarioAuthoring(const safecrowd::domain::ImportResult& im
             hasCurrentProject_ = false;
             currentProject_ = {};
             showProjectNavigator();
+        },
+        [this]() {
+            if (lastApprovedImportResult_.has_value()) {
+                showLayoutReview(currentProject_, *lastApprovedImportResult_);
+            } else {
+                showLayoutReview(currentProject_);
+            }
         },
         this));
 }
