@@ -166,6 +166,7 @@ void MainWindow::saveCurrentProject() {
 void MainWindow::showLayoutReview(const ProjectMetadata& metadata) {
     currentProject_ = metadata;
     hasCurrentProject_ = true;
+    lastApprovedImportResult_.reset();
 
     auto importResult = metadata.isBuiltInDemo()
         ? makeDemoImportResult()
@@ -181,6 +182,13 @@ void MainWindow::showLayoutReview(const ProjectMetadata& metadata) {
         }();
 
     applySavedReviewState(metadata, &importResult);
+
+    showLayoutReview(metadata, std::move(importResult));
+}
+
+void MainWindow::showLayoutReview(const ProjectMetadata& metadata, safecrowd::domain::ImportResult importResult) {
+    currentProject_ = metadata;
+    hasCurrentProject_ = true;
 
     setCentralWidget(new LayoutReviewWidget(
         metadata.name,
@@ -201,6 +209,7 @@ void MainWindow::showLayoutReview(const ProjectMetadata& metadata) {
                     return;
                 }
             }
+            lastApprovedImportResult_ = approvedImportResult;
             showScenarioAuthoring(approvedImportResult);
         },
         this));
@@ -222,8 +231,15 @@ void MainWindow::showScenarioAuthoring(const safecrowd::domain::ImportResult& im
     };
     auto openProjectHandler = [this]() {
         hasCurrentProject_ = false;
-        currentProject_ = {};
-        showProjectNavigator();
+            currentProject_ = {};
+            showProjectNavigator();
+        };
+    auto backToLayoutReviewHandler = [this]() {
+        if (lastApprovedImportResult_.has_value()) {
+            showLayoutReview(currentProject_, *lastApprovedImportResult_);
+        } else {
+            showLayoutReview(currentProject_);
+        }
     };
 
     if (hasSavedScenarioState) {
@@ -233,15 +249,18 @@ void MainWindow::showScenarioAuthoring(const safecrowd::domain::ImportResult& im
             std::move(initialState),
             saveHandler,
             openProjectHandler,
+            backToLayoutReviewHandler,
             this));
         return;
     }
+    lastApprovedImportResult_ = importResult;
 
     setCentralWidget(new ScenarioAuthoringWidget(
         currentProject_.name,
         *importResult.layout,
         saveHandler,
         openProjectHandler,
+        backToLayoutReviewHandler,
         this));
 }
 

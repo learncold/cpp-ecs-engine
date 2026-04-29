@@ -1,6 +1,7 @@
 #include "TestSupport.h"
 
 #include <memory>
+#include <string>
 
 #include "domain/AgentComponents.h"
 #include "domain/ScenarioSimulationInternal.h"
@@ -30,6 +31,35 @@ public:
     }
 
     void update(safecrowd::engine::EngineWorld&, const safecrowd::engine::EngineStepContext&) override {
+    }
+};
+
+class ConfigureEvacuatedAgentsSystem final : public safecrowd::engine::EngineSystem {
+public:
+    void configure(safecrowd::engine::EngineWorld& world) override {
+        world.resources().set(safecrowd::domain::ScenarioSimulationClockResource{
+            .elapsedSeconds = 7.0,
+            .timeLimitSeconds = 10.0,
+            .complete = true,
+        });
+        spawnEvacuatedAgent(world, 2.0);
+        spawnEvacuatedAgent(world, 5.0);
+        spawnEvacuatedAgent(world, 7.0);
+    }
+
+    void update(safecrowd::engine::EngineWorld&, const safecrowd::engine::EngineStepContext&) override {
+    }
+
+private:
+    static void spawnEvacuatedAgent(safecrowd::engine::EngineWorld& world, double completionTimeSeconds) {
+        world.commands().spawnEntity(
+            safecrowd::domain::Position{.value = {.x = completionTimeSeconds, .y = 0.0}},
+            safecrowd::domain::Agent{.radius = 0.25f, .maxSpeed = 1.5f},
+            safecrowd::domain::Velocity{.value = {}},
+            safecrowd::domain::EvacuationStatus{
+                .evacuated = true,
+                .completionTimeSeconds = completionTimeSeconds,
+            });
     }
 };
 
@@ -246,6 +276,7 @@ SC_TEST(ScenarioRiskMetricsSystem_PublishesStalledHotspotAndBottleneckMetrics) {
     SC_EXPECT_NEAR(snapshot.hotspots.front().cellMax.x, 1.5, 1e-9);
     SC_EXPECT_NEAR(snapshot.hotspots.front().cellMax.y, 1.5, 1e-9);
     SC_EXPECT_TRUE(!snapshot.bottlenecks.empty());
+    SC_EXPECT_EQ(snapshot.bottlenecks.front().label, std::string{"Room -> Exit"});
     SC_EXPECT_EQ(snapshot.completionRisk, safecrowd::domain::ScenarioRiskLevel::High);
 }
 
@@ -299,6 +330,38 @@ SC_TEST(ScenarioRiskMetricsSystem_PreservesPeakMetricsAfterAllAgentsEvacuate) {
     SC_EXPECT_TRUE(!metrics.peakSnapshot.bottlenecks.empty());
     SC_EXPECT_EQ(metrics.peakSnapshot.stalledAgentCount, std::size_t{5});
     SC_EXPECT_EQ(metrics.peakSnapshot.completionRisk, safecrowd::domain::ScenarioRiskLevel::High);
+}
+
+SC_TEST(ScenarioResultArtifactsSystem_PublishesEvacuationCurveAndPercentiles) {
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 23,
+    });
+    runtime.addSystem(std::make_unique<ConfigureEvacuatedAgentsSystem>());
+    runtime.addSystem(
+        std::make_unique<safecrowd::domain::ScenarioResultArtifactsSystem>(1.0),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(0.0);
+
+    const auto& artifacts =
+        runtime.world().resources().get<safecrowd::domain::ScenarioResultArtifactsResource>().artifacts;
+    SC_EXPECT_EQ(artifacts.evacuationProgress.size(), std::size_t{1});
+    SC_EXPECT_NEAR(artifacts.evacuationProgress.front().timeSeconds, 7.0, 1e-9);
+    SC_EXPECT_EQ(artifacts.evacuationProgress.front().evacuatedCount, std::size_t{3});
+    SC_EXPECT_EQ(artifacts.evacuationProgress.front().totalCount, std::size_t{3});
+    SC_EXPECT_NEAR(artifacts.evacuationProgress.front().evacuatedRatio, 1.0, 1e-9);
+    SC_EXPECT_TRUE(artifacts.timingSummary.t50Seconds.has_value());
+    SC_EXPECT_TRUE(artifacts.timingSummary.t90Seconds.has_value());
+    SC_EXPECT_TRUE(artifacts.timingSummary.t95Seconds.has_value());
+    SC_EXPECT_TRUE(artifacts.timingSummary.finalEvacuationTimeSeconds.has_value());
+    SC_EXPECT_NEAR(*artifacts.timingSummary.t50Seconds, 5.0, 1e-9);
+    SC_EXPECT_NEAR(*artifacts.timingSummary.t90Seconds, 7.0, 1e-9);
+    SC_EXPECT_NEAR(*artifacts.timingSummary.t95Seconds, 7.0, 1e-9);
+    SC_EXPECT_NEAR(*artifacts.timingSummary.finalEvacuationTimeSeconds, 7.0, 1e-9);
 }
 
 SC_TEST(ScenarioRoutePassageCrossed_UsesDoorPlaneNearEndpoint) {

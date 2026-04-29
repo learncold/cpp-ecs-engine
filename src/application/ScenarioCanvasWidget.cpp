@@ -196,6 +196,18 @@ void ScenarioCanvasWidget::setPlacementsChangedHandler(std::function<void(const 
     placementsChangedHandler_ = std::move(handler);
 }
 
+void ScenarioCanvasWidget::focusLayoutElement(const QString& elementId) {
+    focusedLayoutElementId_ = elementId;
+    focusedPlacementId_.clear();
+    update();
+}
+
+void ScenarioCanvasWidget::focusPlacement(const QString& placementId) {
+    focusedPlacementId_ = placementId.section('/', 0, 0);
+    focusedLayoutElementId_.clear();
+    update();
+}
+
 bool ScenarioCanvasWidget::eventFilter(QObject* watched, QEvent* event) {
     (void)watched;
     camera_.handleGlobalKeyEvent(event);
@@ -307,11 +319,10 @@ void ScenarioCanvasWidget::paintEvent(QPaintEvent* event) {
     }
     const auto transform = currentTransform(*bounds);
 
-    painter.setPen(QPen(QColor("#d7e0ea"), 1));
-    painter.setBrush(QColor("#ffffff"));
-    painter.drawRoundedRect(viewport.adjusted(-18, -18, 18, 18), 14, 14);
+    drawLayoutCanvasSurface(painter, QRectF(rect()));
 
     drawFacilityLayoutCanvas(painter, layout_, transform);
+    drawFocusedLayoutElement(painter, transform);
 
     painter.setPen(Qt::NoPen);
     for (const auto& placement : placements_) {
@@ -362,6 +373,7 @@ void ScenarioCanvasWidget::paintEvent(QPaintEvent* event) {
             painter.setPen(Qt::NoPen);
         }
     }
+    drawFocusedPlacement(painter, transform);
 
     if (dragging_) {
         painter.setPen(QPen(QColor("#1f5fae"), 1.5, Qt::DashLine));
@@ -388,6 +400,74 @@ void ScenarioCanvasWidget::wheelEvent(QWheelEvent* event) {
     }
 
     QWidget::wheelEvent(event);
+}
+
+void ScenarioCanvasWidget::drawFocusedLayoutElement(QPainter& painter, const LayoutCanvasTransform& transform) const {
+    if (focusedLayoutElementId_.isEmpty()) {
+        return;
+    }
+
+    const QPen highlightPen(QColor("#f2a900"), 3.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+    const QColor highlightFill(242, 169, 0, 42);
+
+    for (const auto& zone : layout_.zones) {
+        if (QString::fromStdString(zone.id) != focusedLayoutElementId_) {
+            continue;
+        }
+        painter.setPen(highlightPen);
+        painter.setBrush(highlightFill);
+        painter.drawPath(layoutCanvasPolygonPath(zone.area, transform));
+        return;
+    }
+
+    for (const auto& connection : layout_.connections) {
+        if (QString::fromStdString(connection.id) != focusedLayoutElementId_) {
+            continue;
+        }
+        painter.setPen(highlightPen);
+        painter.setBrush(Qt::NoBrush);
+        drawLayoutCanvasLine(painter, connection.centerSpan, transform);
+        return;
+    }
+
+    for (const auto& barrier : layout_.barriers) {
+        if (QString::fromStdString(barrier.id) != focusedLayoutElementId_) {
+            continue;
+        }
+        painter.setPen(highlightPen);
+        painter.setBrush(Qt::NoBrush);
+        drawLayoutCanvasPolyline(painter, barrier.geometry, transform);
+        return;
+    }
+}
+
+void ScenarioCanvasWidget::drawFocusedPlacement(QPainter& painter, const LayoutCanvasTransform& transform) const {
+    if (focusedPlacementId_.isEmpty()) {
+        return;
+    }
+
+    const auto it = std::find_if(placements_.begin(), placements_.end(), [this](const auto& placement) {
+        return placement.id == focusedPlacementId_;
+    });
+    if (it == placements_.end() || it->area.empty()) {
+        return;
+    }
+
+    painter.setPen(QPen(QColor("#f2a900"), 3.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(QColor(242, 169, 0, 42));
+
+    if (it->kind == ScenarioCrowdPlacementKind::Individual || it->area.size() < 4) {
+        painter.drawEllipse(transform.map(it->area.front()), kOccupantMarkerRadius + 7.0, kOccupantMarkerRadius + 7.0);
+        return;
+    }
+
+    QPainterPath path;
+    path.moveTo(transform.map(it->area.front()));
+    for (std::size_t index = 1; index < it->area.size(); ++index) {
+        path.lineTo(transform.map(it->area[index]));
+    }
+    path.closeSubpath();
+    painter.drawPath(path);
 }
 
 std::optional<LayoutCanvasBounds> ScenarioCanvasWidget::collectBounds() const {

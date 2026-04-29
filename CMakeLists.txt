@@ -84,6 +84,7 @@ add_library(safecrowd_domain STATIC
     src/domain/ScenarioRiskMetrics.h
     src/domain/ScenarioRiskMetrics.cpp
     src/domain/ScenarioRiskMetricsSystem.cpp
+    src/domain/ScenarioResultArtifacts.h
     src/domain/ScenarioSimulationFrame.h
     src/domain/ScenarioSimulationInternal.h
     src/domain/ScenarioSimulationInternal.cpp
@@ -114,8 +115,6 @@ add_library(safecrowd_domain STATIC
     src/domain/CompressionSystem.cpp
     src/domain/CompressionSystem.h
     src/domain/Metrics.h
-    src/domain/Snapshot.cpp
-    src/domain/Snapshot.h
 )
 
 target_include_directories(safecrowd_domain
@@ -142,7 +141,6 @@ if (BUILD_TESTING)
         tests/PackedComponentStorageTests.cpp
         tests/SafeCrowdDomainTests.cpp
         tests/CompressionSystemTests.cpp
-        tests/SnapshotTests.cpp
         tests/ScenarioSimulationSystemsTests.cpp
         tests/EcsCoreTests.cpp
         tests/ImportContractsTests.cpp
@@ -181,6 +179,7 @@ if (SAFECROWD_BUILD_APP)
         src/application/LayoutPreviewWidget.h
         src/application/LayoutReviewWidget.h
         src/application/MainWindow.h
+        src/application/NavigationTreeWidget.h
         src/application/NewProjectRequest.h
         src/application/NewProjectWidget.h
         src/application/ProjectListWidget.h
@@ -202,6 +201,7 @@ if (SAFECROWD_BUILD_APP)
         src/application/LayoutReviewWidget.cpp
         src/application/main.cpp
         src/application/MainWindow.cpp
+        src/application/NavigationTreeWidget.cpp
         src/application/NewProjectWidget.cpp
         src/application/ProjectListWidget.cpp
         src/application/ProjectNavigatorActions.cpp

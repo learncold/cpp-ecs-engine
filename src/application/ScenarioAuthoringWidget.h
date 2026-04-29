@@ -26,6 +26,7 @@ public:
         const safecrowd::domain::FacilityLayout2D& layout,
         std::function<void()> saveProjectHandler,
         std::function<void()> openProjectHandler,
+        std::function<void()> backToLayoutReviewHandler,
         QWidget* parent = nullptr);
 
     enum class NavigationView {
@@ -63,6 +64,7 @@ public:
         InitialState initialState,
         std::function<void()> saveProjectHandler,
         std::function<void()> openProjectHandler,
+        std::function<void()> backToLayoutReviewHandler,
         QWidget* parent = nullptr);
 
     [[nodiscard]] InitialState currentState() const;
@@ -106,6 +108,7 @@ private:
     safecrowd::domain::FacilityLayout2D layout_{};
     std::function<void()> saveProjectHandler_{};
     std::function<void()> openProjectHandler_{};
+    std::function<void()> backToLayoutReviewHandler_{};
     std::vector<ScenarioState> scenarios_{};
     int currentScenarioIndex_{-1};
     NavigationView navigationView_{NavigationView::Layout};

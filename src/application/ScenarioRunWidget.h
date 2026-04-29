@@ -10,6 +10,7 @@
 #include "domain/ScenarioSimulationRunner.h"
 
 class QLabel;
+class QProgressBar;
 class QPushButton;
 class QTimer;
 
@@ -26,11 +27,12 @@ public:
         const safecrowd::domain::ScenarioDraft& scenario,
         std::function<void()> saveProjectHandler,
         std::function<void()> openProjectHandler,
-        std::function<void(bool)> returnToAuthoringHandler,
+        std::function<void()> backToLayoutReviewHandler,
         QWidget* parent = nullptr);
 
 private:
     QWidget* createRunPanel();
+    void returnToAuthoring();
     void refreshStatus();
     void showResults();
     void stopRun();
@@ -42,15 +44,17 @@ private:
     safecrowd::domain::ScenarioSimulationRunner runner_{};
     std::function<void()> saveProjectHandler_{};
     std::function<void()> openProjectHandler_{};
-    std::function<void(bool)> returnToAuthoringHandler_{};
+    std::function<void()> backToLayoutReviewHandler_{};
     WorkspaceShell* shell_{nullptr};
     SimulationCanvasWidget* canvas_{nullptr};
     QTimer* timer_{nullptr};
     QLabel* scenarioLabel_{nullptr};
     QLabel* statusLabel_{nullptr};
     QLabel* elapsedLabel_{nullptr};
+    QProgressBar* timeProgressBar_{nullptr};
     QLabel* agentCountLabel_{nullptr};
     QLabel* eventLabel_{nullptr};
+    QProgressBar* evacuationProgressBar_{nullptr};
     QLabel* riskLabel_{nullptr};
     QLabel* congestionLabel_{nullptr};
     QLabel* bottleneckLabel_{nullptr};

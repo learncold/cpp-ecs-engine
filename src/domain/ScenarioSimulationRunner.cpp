@@ -29,6 +29,7 @@ void ScenarioSimulationRunner::reset(FacilityLayout2D layout, ScenarioDraft scen
     frame_ = {};
     riskSnapshot_ = {};
     resultRiskSnapshot_ = {};
+    resultArtifacts_ = {};
     timeLimitSeconds_ = scenario_.execution.timeLimitSeconds > 0.0
         ? scenario_.execution.timeLimitSeconds
         : kDefaultTimeLimitSeconds;
@@ -63,6 +64,10 @@ const ScenarioRiskSnapshot& ScenarioSimulationRunner::riskSnapshot() const noexc
 
 const ScenarioRiskSnapshot& ScenarioSimulationRunner::resultRiskSnapshot() const noexcept {
     return resultRiskSnapshot_;
+}
+
+const ScenarioResultArtifacts& ScenarioSimulationRunner::resultArtifacts() const noexcept {
+    return resultArtifacts_;
 }
 
 double ScenarioSimulationRunner::timeLimitSeconds() const noexcept {
@@ -130,6 +135,11 @@ void ScenarioSimulationRunner::initializeRuntime() {
          .order = 10,
          .triggerPolicy = engine::TriggerPolicy::EveryFrame});
     runtime_->addSystem(
+        std::make_unique<ScenarioResultArtifactsSystem>(scenario_.execution.sampleIntervalSeconds),
+        {.phase = engine::UpdatePhase::PostSimulation,
+         .order = 20,
+         .triggerPolicy = engine::TriggerPolicy::EveryFrame});
+    runtime_->addSystem(
         std::make_unique<ScenarioFrameSyncSystem>(),
         {.phase = engine::UpdatePhase::RenderSync,
          .triggerPolicy = engine::TriggerPolicy::EveryFrame});
@@ -150,6 +160,9 @@ void ScenarioSimulationRunner::syncFrameFromRuntime() {
         const auto& metrics = resources.get<ScenarioRiskMetricsResource>();
         riskSnapshot_ = metrics.snapshot;
         resultRiskSnapshot_ = metrics.peakSnapshot;
+    }
+    if (resources.contains<ScenarioResultArtifactsResource>()) {
+        resultArtifacts_ = resources.get<ScenarioResultArtifactsResource>().artifacts;
     }
 }
 

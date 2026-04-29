@@ -50,6 +50,7 @@ private:
 
     QString projectName_{};
     safecrowd::domain::ImportResult importResult_{};
+    std::function<void()> openProjectHandler_{};
     std::function<void(const safecrowd::domain::ImportResult&)> approvalHandler_{};
     std::vector<safecrowd::domain::FacilityLayout2D> undoHistory_{};
     WorkspaceShell* shell_{nullptr};

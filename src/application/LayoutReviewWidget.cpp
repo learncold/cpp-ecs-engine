@@ -4,13 +4,15 @@
 
 #include <QFrame>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QLabel>
+#include <QPainter>
+#include <QPixmap>
 #include <QPushButton>
 #include <QShortcut>
 #include <QScrollArea>
 #include <QStringList>
 #include <QKeySequence>
-#include <QStyle>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -62,6 +64,38 @@ bool isLiveValidationIssue(safecrowd::domain::ImportIssueCode code) {
     default:
         return false;
     }
+}
+
+QIcon makeIssuesIcon(const QColor& color) {
+    QPixmap pixmap(44, 44);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(QPen(color, 2.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(Qt::NoBrush);
+    QPolygonF triangle;
+    triangle << QPointF(22, 9) << QPointF(34, 32) << QPointF(10, 32);
+    painter.drawPolygon(triangle);
+    painter.drawLine(QPointF(22, 17), QPointF(22, 24));
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(color);
+    painter.drawEllipse(QPointF(22, 28), 1.7, 1.7);
+    return QIcon(pixmap);
+}
+
+QIcon makeLayoutIcon(const QColor& color) {
+    QPixmap pixmap(44, 44);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(QPen(color, 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawRect(QRectF(11, 10, 9, 10));
+    painter.drawRect(QRectF(24, 10, 9, 10));
+    painter.drawRect(QRectF(11, 24, 22, 10));
+    painter.drawLine(QPointF(20, 15), QPointF(24, 15));
+    painter.drawLine(QPointF(22, 20), QPointF(22, 24));
+    return QIcon(pixmap);
 }
 
 QWidget* createIssueList(
@@ -118,6 +152,7 @@ QPushButton* createIssueFilterButton(const QString& label, int count, bool selec
 QWidget* createNavigationRail(
     bool showIssues,
     std::function<void(bool)> switchViewHandler,
+    const WorkspaceShell* shell,
     QWidget* parent) {
     auto* activityBar = new QFrame(parent);
     activityBar->setFixedWidth(56);
@@ -164,14 +199,14 @@ QWidget* createNavigationRail(
     };
 
     auto* issuesButton = makeActivityButton(
-        activityBar->style()->standardIcon(QStyle::SP_MessageBoxWarning),
+        makeIssuesIcon(QColor("#1f5fae")),
         "Issues",
         showIssues,
         [switchViewHandler]() {
             switchViewHandler(true);
         });
     auto* layoutButton = makeActivityButton(
-        activityBar->style()->standardIcon(QStyle::SP_DirIcon),
+        makeLayoutIcon(QColor("#1f5fae")),
         "Layout",
         !showIssues,
         [switchViewHandler]() {
@@ -180,6 +215,9 @@ QWidget* createNavigationRail(
     (void)issuesButton;
     (void)layoutButton;
     activityLayout->addStretch(1);
+    if (shell != nullptr) {
+        activityLayout->addWidget(shell->createBackButton(activityBar), 0, Qt::AlignHCenter);
+    }
     return activityBar;
 }
 
@@ -188,26 +226,28 @@ QWidget* createNavigationPanel(
     bool showIssues,
     std::function<void(const safecrowd::domain::ImportIssue&)> selectIssueHandler,
     std::function<void(const QString&)> selectLayoutElementHandler,
+    const WorkspaceShell* shell,
     QWidget* parent) {
     auto* content = new QWidget(parent);
     auto* layout = new QVBoxLayout(content);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(12);
 
-    auto* title = new QLabel(showIssues ? "Issues" : "Layout", content);
-    title->setFont(ui::font(ui::FontRole::Title));
-    layout->addWidget(title);
-
     if (!showIssues) {
-        if (auto* titleItem = layout->takeAt(0)) {
-            delete titleItem->widget();
-            delete titleItem;
-        }
         layout->addWidget(new LayoutNavigationPanelWidget(
             importResult.layout.has_value() ? &(*importResult.layout) : nullptr,
             std::move(selectLayoutElementHandler),
-            content));
+            content,
+            shell != nullptr ? shell->createPanelHeader("Layout", content, false) : nullptr));
         return content;
+    }
+
+    if (shell != nullptr) {
+        layout->addWidget(shell->createPanelHeader("Issues", content, false));
+    } else {
+        auto* title = new QLabel("Issues", content);
+        title->setFont(ui::font(ui::FontRole::Title));
+        layout->addWidget(title);
     }
 
     const auto blockingCount = std::count_if(importResult.issues.begin(), importResult.issues.end(), [](const auto& issue) {
@@ -355,6 +395,7 @@ LayoutReviewWidget::LayoutReviewWidget(
     : QWidget(parent),
       projectName_(projectName),
       importResult_(importResult),
+      openProjectHandler_(std::move(openProjectHandler)),
       approvalHandler_(std::move(approvalHandler)) {
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -379,7 +420,8 @@ LayoutReviewWidget::LayoutReviewWidget(
 
     shell_->setTools({"Project", "Tool"});
     shell_->setSaveProjectHandler(std::move(saveProjectHandler));
-    shell_->setOpenProjectHandler(std::move(openProjectHandler));
+    shell_->setOpenProjectHandler(openProjectHandler_);
+    shell_->setBackHandler(openProjectHandler_);
     shell_->setCanvas(preview_);
     shell_->setReviewPanel(reviewPanel);
 
@@ -504,6 +546,7 @@ void LayoutReviewWidget::refreshNavigationPanel() {
             navigationView_ = showIssues ? NavigationView::Issues : NavigationView::Layout;
             refreshNavigationPanel();
         },
+        shell_,
         shell_));
     shell_->setNavigationPanel(createNavigationPanel(
         importResult_,
@@ -514,6 +557,7 @@ void LayoutReviewWidget::refreshNavigationPanel() {
         [this](const QString& elementId) {
             handleLayoutElementSelected(elementId);
         },
+        shell_,
         shell_));
 }
 

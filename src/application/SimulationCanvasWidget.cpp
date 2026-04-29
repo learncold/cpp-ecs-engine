@@ -19,6 +19,8 @@ constexpr double kViewportPadding = 32.0;
 constexpr double kVelocityIndicatorSeconds = 0.75;
 constexpr double kAgentMarkerRadius = 5.0;
 constexpr double kDefaultHotspotCellSize = 1.5;
+constexpr double kHotspotFocusZoom = 2.8;
+constexpr double kBottleneckFocusZoom = 2.4;
 constexpr int kHotspotMinCoreAlpha = 72;
 constexpr int kHotspotMaxCoreAlpha = 190;
 
@@ -48,7 +50,41 @@ void SimulationCanvasWidget::setFrame(safecrowd::domain::SimulationFrame frame) 
 
 void SimulationCanvasWidget::setHotspotOverlay(std::vector<safecrowd::domain::ScenarioCongestionHotspot> hotspots) {
     hotspotOverlay_ = std::move(hotspots);
+    if (focusedHotspotIndex_.has_value() && *focusedHotspotIndex_ >= hotspotOverlay_.size()) {
+        focusedHotspotIndex_.reset();
+    }
     update();
+}
+
+void SimulationCanvasWidget::setBottleneckOverlay(std::vector<safecrowd::domain::ScenarioBottleneckMetric> bottlenecks) {
+    bottleneckOverlay_ = std::move(bottlenecks);
+    if (focusedBottleneckIndex_.has_value() && *focusedBottleneckIndex_ >= bottleneckOverlay_.size()) {
+        focusedBottleneckIndex_.reset();
+    }
+    update();
+}
+
+void SimulationCanvasWidget::focusHotspot(std::size_t index) {
+    if (index >= hotspotOverlay_.size()) {
+        return;
+    }
+
+    focusedHotspotIndex_ = index;
+    focusedBottleneckIndex_.reset();
+    focusWorldPoint(hotspotOverlay_[index].center, std::max(camera_.zoom(), kHotspotFocusZoom));
+}
+
+void SimulationCanvasWidget::focusBottleneck(std::size_t index) {
+    if (index >= bottleneckOverlay_.size()) {
+        return;
+    }
+
+    const auto& passage = bottleneckOverlay_[index].passage;
+    focusedBottleneckIndex_ = index;
+    focusedHotspotIndex_.reset();
+    focusWorldPoint(
+        {.x = (passage.start.x + passage.end.x) / 2.0, .y = (passage.start.y + passage.end.y) / 2.0},
+        std::max(camera_.zoom(), kBottleneckFocusZoom));
 }
 
 bool SimulationCanvasWidget::eventFilter(QObject* watched, QEvent* event) {
@@ -125,6 +161,7 @@ void SimulationCanvasWidget::paintEvent(QPaintEvent* event) {
 
     const auto transform = currentTransform(*bounds);
     drawHotspotOverlay(painter, transform);
+    drawBottleneckOverlay(painter, transform);
     for (const auto& agent : frame_.agents) {
         const auto origin = transform.map(agent.position);
         const auto tip = transform.map({
@@ -175,11 +212,8 @@ void SimulationCanvasWidget::refreshLayoutCache(const LayoutCanvasBounds& bounds
     QPainter painter(&layoutCache_);
     painter.setRenderHint(QPainter::Antialiasing, true);
 
-    const auto viewport = previewViewport();
     const auto transform = currentTransform(bounds);
-    painter.setPen(QPen(QColor("#d7e0ea"), 1));
-    painter.setBrush(QColor("#ffffff"));
-    painter.drawRoundedRect(viewport.adjusted(-18, -18, 18, 18), 14, 14);
+    drawLayoutCanvasSurface(painter, QRectF(rect()));
     drawFacilityLayoutCanvas(painter, layout_, transform);
 
     layoutCacheSize_ = currentSize;
@@ -190,6 +224,26 @@ void SimulationCanvasWidget::refreshLayoutCache(const LayoutCanvasBounds& bounds
 
 QRectF SimulationCanvasWidget::previewViewport() const {
     return QRectF(rect()).adjusted(kViewportPadding, kViewportPadding, -kViewportPadding, -kViewportPadding);
+}
+
+void SimulationCanvasWidget::focusWorldPoint(const safecrowd::domain::Point2D& point, double zoom) {
+    const auto bounds = collectBounds();
+    if (!bounds.has_value()) {
+        return;
+    }
+
+    const auto viewport = previewViewport();
+    if (viewport.width() <= 0.0 || viewport.height() <= 0.0) {
+        return;
+    }
+
+    camera_.setZoom(std::clamp(zoom, 0.1, 50.0));
+    camera_.setPanOffset({});
+
+    const LayoutCanvasTransform transform(*bounds, viewport, camera_.zoom(), {});
+    camera_.setPanOffset(viewport.center() - transform.map(point));
+    layoutCacheValid_ = false;
+    update();
 }
 
 void SimulationCanvasWidget::drawHotspotOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const {
@@ -241,6 +295,37 @@ void SimulationCanvasWidget::drawHotspotOverlay(QPainter& painter, const LayoutC
         gradient.setColorAt(1.0, QColor(249, 115, 22, 0));
         painter.setBrush(gradient);
         painter.drawEllipse(center, radius, radius);
+
+        if (focusedHotspotIndex_.has_value()
+            && *focusedHotspotIndex_ < hotspotOverlay_.size()
+            && &hotspot == &hotspotOverlay_[*focusedHotspotIndex_]) {
+            painter.setBrush(Qt::NoBrush);
+            painter.setPen(QPen(QColor(127, 29, 29, 220), 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            painter.drawEllipse(center, radius + 4.0, radius + 4.0);
+            painter.setPen(Qt::NoPen);
+        }
+    }
+    painter.restore();
+}
+
+void SimulationCanvasWidget::drawBottleneckOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const {
+    if (bottleneckOverlay_.empty()) {
+        return;
+    }
+
+    painter.save();
+    painter.setBrush(Qt::NoBrush);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    for (std::size_t index = 0; index < bottleneckOverlay_.size(); ++index) {
+        const auto focused = focusedBottleneckIndex_.has_value() && *focusedBottleneckIndex_ == index;
+        painter.setPen(QPen(
+            focused ? QColor(127, 29, 29, 235) : QColor(220, 38, 38, 150),
+            focused ? 6.0 : 4.0,
+            Qt::SolidLine,
+            Qt::RoundCap));
+        painter.drawLine(
+            transform.map(bottleneckOverlay_[index].passage.start),
+            transform.map(bottleneckOverlay_[index].passage.end));
     }
     painter.restore();
 }
