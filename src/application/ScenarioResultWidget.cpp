@@ -10,6 +10,7 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSizePolicy>
+#include <QStringList>
 #include <QVBoxLayout>
 
 #include "application/ScenarioCanvasWidget.h"
@@ -64,6 +65,20 @@ QString bottleneckSummary(const safecrowd::domain::ScenarioRiskSnapshot& risk) {
         .arg(static_cast<int>(bottleneck.stalledAgentCount));
 }
 
+QString configuredEventSummary(const safecrowd::domain::ScenarioDraft& scenario) {
+    if (scenario.control.events.empty()) {
+        return "None";
+    }
+
+    QStringList names;
+    for (const auto& event : scenario.control.events) {
+        names << QString::fromStdString(event.name);
+    }
+    return QString("%1 configured\n%2")
+        .arg(static_cast<int>(scenario.control.events.size()))
+        .arg(names.join(", "));
+}
+
 QWidget* createResultPanel(
     const safecrowd::domain::ScenarioDraft& scenario,
     const safecrowd::domain::SimulationFrame& frame,
@@ -76,8 +91,8 @@ QWidget* createResultPanel(
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(12);
 
-    layout->addWidget(createLabel("Results", panel, ui::FontRole::Title));
-    auto* scenarioLabel = createLabel(QString("Scenario: %1").arg(QString::fromStdString(scenario.name)), panel);
+    layout->addWidget(createLabel("Baseline Result", panel, ui::FontRole::Title));
+    auto* scenarioLabel = createLabel(QString("Staged baseline: %1").arg(QString::fromStdString(scenario.name)), panel);
     scenarioLabel->setStyleSheet(ui::mutedTextStyleSheet());
     layout->addWidget(scenarioLabel);
     auto* outcomeLabel = createLabel(QString("Outcome: %1").arg(completionOutcome(frame)), panel);
@@ -89,13 +104,21 @@ QWidget* createResultPanel(
     metricsGrid->setSpacing(8);
     const auto total = static_cast<int>(frame.totalAgentCount);
     const auto evacuated = static_cast<int>(frame.evacuatedAgentCount);
+    const auto remaining = std::max(0, total - evacuated);
     const auto active = static_cast<int>(frame.agents.size());
     metricsGrid->addWidget(createMetricCard("Total", QString::number(total), panel), 0, 0);
     metricsGrid->addWidget(createMetricCard("Evacuated", QString("%1 / %2").arg(evacuated).arg(total), panel), 0, 1);
-    metricsGrid->addWidget(createMetricCard("Elapsed", QString("%1 sec").arg(frame.elapsedSeconds, 0, 'f', 1), panel), 1, 0);
-    metricsGrid->addWidget(createMetricCard("Active", QString::number(active), panel), 1, 1);
-    metricsGrid->addWidget(createMetricCard("Completion Risk", safecrowd::domain::scenarioRiskLevelLabel(risk.completionRisk), panel), 2, 0);
-    metricsGrid->addWidget(createMetricCard("Stalled", QString::number(static_cast<int>(risk.stalledAgentCount)), panel), 2, 1);
+    metricsGrid->addWidget(createMetricCard("Remaining", QString("%1 / %2").arg(remaining).arg(total), panel), 1, 0);
+    metricsGrid->addWidget(createMetricCard(
+        "Elapsed / Time limit",
+        QString("%1 / %2 sec")
+            .arg(frame.elapsedSeconds, 0, 'f', 1)
+            .arg(scenario.execution.timeLimitSeconds, 0, 'f', 0),
+        panel), 1, 1);
+    metricsGrid->addWidget(createMetricCard("Active", QString::number(active), panel), 2, 0);
+    metricsGrid->addWidget(createMetricCard("Configured Events", configuredEventSummary(scenario), panel), 2, 1);
+    metricsGrid->addWidget(createMetricCard("Completion Risk", safecrowd::domain::scenarioRiskLevelLabel(risk.completionRisk), panel), 3, 0);
+    metricsGrid->addWidget(createMetricCard("Stalled", QString::number(static_cast<int>(risk.stalledAgentCount)), panel), 3, 1);
     layout->addLayout(metricsGrid);
 
     auto* detailArea = new QScrollArea(panel);

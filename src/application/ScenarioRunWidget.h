@@ -50,6 +50,7 @@ private:
     QLabel* statusLabel_{nullptr};
     QLabel* elapsedLabel_{nullptr};
     QLabel* agentCountLabel_{nullptr};
+    QLabel* eventLabel_{nullptr};
     QLabel* riskLabel_{nullptr};
     QLabel* congestionLabel_{nullptr};
     QLabel* bottleneckLabel_{nullptr};

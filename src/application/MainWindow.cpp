@@ -213,7 +213,10 @@ void MainWindow::showScenarioAuthoring(const safecrowd::domain::ImportResult& im
     }
 
     ScenarioAuthoringWidget::InitialState initialState;
-    const bool hasSavedScenarioState = ProjectPersistence::loadScenarioAuthoringState(currentProject_, &initialState);
+    const bool hasSavedScenarioState = ProjectPersistence::loadScenarioAuthoringState(
+        currentProject_,
+        *importResult.layout,
+        &initialState);
     auto saveHandler = [this]() {
         saveCurrentProject();
     };

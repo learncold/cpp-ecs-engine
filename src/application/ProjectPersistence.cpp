@@ -1,6 +1,7 @@
 #include "application/ProjectPersistence.h"
 
 #include <algorithm>
+#include <unordered_set>
 #include <utility>
 
 #include <QDateTime>
@@ -546,6 +547,15 @@ std::vector<ScenarioCrowdPlacement> placementsFromJson(const QJsonArray& array) 
     return placements;
 }
 
+std::unordered_set<std::string> layoutZoneIds(const safecrowd::domain::FacilityLayout2D& layout) {
+    std::unordered_set<std::string> zoneIds;
+    zoneIds.reserve(layout.zones.size());
+    for (const auto& zone : layout.zones) {
+        zoneIds.insert(zone.id);
+    }
+    return zoneIds;
+}
+
 void syncDraftFromScenarioState(ScenarioAuthoringWidget::ScenarioState* scenario) {
     if (scenario == nullptr) {
         return;
@@ -561,6 +571,30 @@ void syncDraftFromScenarioState(ScenarioAuthoringWidget::ScenarioState* scenario
         initialPlacement.targetAgentCount = static_cast<std::size_t>(placement.occupantCount);
         initialPlacement.initialVelocity = placement.velocity;
         scenario->draft.population.initialPlacements.push_back(std::move(initialPlacement));
+    }
+}
+
+void removePlacementsOutsideLayout(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    ScenarioAuthoringWidget::ScenarioState* scenario) {
+    if (scenario == nullptr || scenario->crowdPlacements.empty()) {
+        return;
+    }
+
+    const auto validZoneIds = layoutZoneIds(layout);
+    const auto oldSize = scenario->crowdPlacements.size();
+    scenario->crowdPlacements.erase(
+        std::remove_if(
+            scenario->crowdPlacements.begin(),
+            scenario->crowdPlacements.end(),
+            [&validZoneIds](const ScenarioCrowdPlacement& placement) {
+                return !validZoneIds.contains(placement.zoneId.toStdString());
+            }),
+        scenario->crowdPlacements.end());
+
+    if (scenario->crowdPlacements.size() != oldSize) {
+        scenario->stagedForRun = false;
+        syncDraftFromScenarioState(scenario);
     }
 }
 
@@ -763,6 +797,7 @@ bool ProjectPersistence::saveProjectReview(
 
 bool ProjectPersistence::loadScenarioAuthoringState(
     const ProjectMetadata& metadata,
+    const safecrowd::domain::FacilityLayout2D& layout,
     ScenarioAuthoringWidget::InitialState* state) {
     if (metadata.isBuiltInDemo() || state == nullptr) {
         return false;
@@ -783,6 +818,9 @@ bool ProjectPersistence::loadScenarioAuthoringState(
 
     for (const auto& value : root.value("scenarios").toArray()) {
         loaded.scenarios.push_back(scenarioStateFromJson(value.toObject()));
+    }
+    for (auto& scenario : loaded.scenarios) {
+        removePlacementsOutsideLayout(layout, &scenario);
     }
 
     if (loaded.scenarios.empty()) {

@@ -66,13 +66,13 @@ const std::vector<EventPreset>& sprint1EventPresets() {
     static const std::vector<EventPreset> presets{
         {
             .name = "Exit Closure",
-            .triggerSummary = "Trigger: operator command during run setup",
-            .targetSummary = "Target: primary exit route is marked closed for review",
+            .triggerSummary = "Configured trigger: operator command during run setup",
+            .targetSummary = "Configured target: primary exit route noted for review",
         },
         {
             .name = "Staged Release",
-            .triggerSummary = "Trigger: release group after initial evacuation wave",
-            .targetSummary = "Target: queued occupants enter from the selected start area",
+            .triggerSummary = "Configured trigger: release group after initial evacuation wave",
+            .targetSummary = "Configured target: queued occupants noted for the selected start area",
         },
     };
     return presets;
@@ -230,9 +230,9 @@ QWidget* createEventsPanel(
     auto* layout = new QVBoxLayout(content);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(12);
-    layout->addWidget(createLabel("Events", content, ui::FontRole::Title));
+    layout->addWidget(createLabel("Scenario Events", content, ui::FontRole::Title));
 
-    auto* libraryHeader = createLabel("Event Library", content, ui::FontRole::SectionTitle);
+    auto* libraryHeader = createLabel("Configured Event Library", content, ui::FontRole::SectionTitle);
     libraryHeader->setStyleSheet(ui::subtleTextStyleSheet());
     layout->addWidget(libraryHeader);
 
@@ -268,7 +268,7 @@ QWidget* createEventsPanel(
     layout->addWidget(configuredHeader);
 
     if (scenario == nullptr || scenario->events.empty()) {
-        auto* empty = createLabel("No operational events yet", content);
+        auto* empty = createLabel("No configured scenario events yet", content);
         empty->setStyleSheet(ui::mutedTextStyleSheet());
         layout->addWidget(empty);
         layout->addStretch(1);
@@ -716,7 +716,7 @@ void ScenarioAuthoringWidget::showEmptyCanvas() {
     auto* title = createLabel("Create a scenario", canvas, ui::FontRole::Title);
     title->setAlignment(Qt::AlignCenter);
     layout->addWidget(title);
-    auto* detail = createLabel("Name the first scenario to start authoring Layout, Crowd, and Events settings.", canvas);
+    auto* detail = createLabel("Name the first scenario to start authoring Layout, Crowd, and Scenario Events settings.", canvas);
     detail->setAlignment(Qt::AlignCenter);
     detail->setStyleSheet(ui::mutedTextStyleSheet());
     layout->addWidget(detail);
@@ -769,19 +769,24 @@ QWidget* ScenarioAuthoringWidget::createRunPanel() {
     const auto stagedCount = std::count_if(scenarios_.begin(), scenarios_.end(), [](const auto& scenario) {
         return scenario.stagedForRun;
     });
-    if (stagedCount == 0) {
-        lines << "No staged scenarios";
+    const auto stagedBaselineCount = std::count_if(scenarios_.begin(), scenarios_.end(), [](const auto& scenario) {
+        return scenario.stagedForRun && scenario.draft.role == safecrowd::domain::ScenarioRole::Baseline;
+    });
+    if (stagedBaselineCount == 0) {
+        lines << "No staged baseline scenario";
     } else {
-        lines << "Staged scenarios";
+        lines << "Staged baseline for Sprint 1 run";
         for (const auto& scenario : scenarios_) {
-            if (!scenario.stagedForRun) {
+            if (!scenario.stagedForRun || scenario.draft.role != safecrowd::domain::ScenarioRole::Baseline) {
                 continue;
             }
-            const auto role = scenario.draft.role == safecrowd::domain::ScenarioRole::Baseline ? "Baseline" : "Alternative";
-            lines << QString("- %1 (%2)\n  Events: %3")
-                .arg(QString::fromStdString(scenario.draft.name), role)
+            lines << QString("- %1\n  Configured events: %2")
+                .arg(QString::fromStdString(scenario.draft.name))
                 .arg(eventSummary(scenario.events));
         }
+    }
+    if (stagedCount > stagedBaselineCount) {
+        lines << "Staged alternatives remain authored but are not run in Sprint 1.";
     }
     stagedScenariosLabel_->setText(lines.join('\n'));
     layout->addWidget(stagedScenariosLabel_);
@@ -791,7 +796,7 @@ QWidget* ScenarioAuthoringWidget::createRunPanel() {
     layout->addWidget(readinessLabel_);
     layout->addStretch(1);
 
-    executeRunButton_ = new QPushButton("Run Staged Scenarios", panel);
+    executeRunButton_ = new QPushButton("Run Staged Baseline", panel);
     executeRunButton_->setFont(ui::font(ui::FontRole::Body));
     executeRunButton_->setStyleSheet(ui::primaryButtonStyleSheet());
     layout->addWidget(executeRunButton_);

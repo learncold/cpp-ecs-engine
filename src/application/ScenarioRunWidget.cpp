@@ -5,6 +5,7 @@
 #include <QLabel>
 #include <QHBoxLayout>
 #include <QPushButton>
+#include <QStringList>
 #include <QStyle>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -51,6 +52,20 @@ QString hotspotSummary(const safecrowd::domain::ScenarioRiskSnapshot& risk) {
         .arg(static_cast<int>(hotspot.agentCount))
         .arg(hotspot.center.x, 0, 'f', 1)
         .arg(hotspot.center.y, 0, 'f', 1);
+}
+
+QString configuredEventSummary(const safecrowd::domain::ScenarioDraft& scenario) {
+    if (scenario.control.events.empty()) {
+        return "Configured Events: none";
+    }
+
+    QStringList names;
+    for (const auto& event : scenario.control.events) {
+        names << QString::fromStdString(event.name);
+    }
+    return QString("Configured Events: %1\n%2")
+        .arg(static_cast<int>(scenario.control.events.size()))
+        .arg(names.join(", "));
 }
 
 QLabel* createLabel(const QString& text, QWidget* parent, ui::FontRole role = ui::FontRole::Body) {
@@ -125,7 +140,7 @@ QWidget* ScenarioRunWidget::createRunPanel() {
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(12);
 
-    layout->addWidget(createLabel("Run", panel, ui::FontRole::Title));
+    layout->addWidget(createLabel("Baseline Run", panel, ui::FontRole::Title));
     scenarioLabel_ = createLabel("", panel);
     scenarioLabel_->setStyleSheet(ui::mutedTextStyleSheet());
     statusLabel_ = createLabel("", panel);
@@ -134,6 +149,8 @@ QWidget* ScenarioRunWidget::createRunPanel() {
     elapsedLabel_->setStyleSheet(ui::mutedTextStyleSheet());
     agentCountLabel_ = createLabel("", panel);
     agentCountLabel_->setStyleSheet(ui::mutedTextStyleSheet());
+    eventLabel_ = createLabel("", panel);
+    eventLabel_->setStyleSheet(ui::mutedTextStyleSheet());
     riskLabel_ = createLabel("", panel);
     riskLabel_->setStyleSheet(ui::mutedTextStyleSheet());
     congestionLabel_ = createLabel("", panel);
@@ -145,6 +162,7 @@ QWidget* ScenarioRunWidget::createRunPanel() {
     layout->addWidget(statusLabel_);
     layout->addWidget(elapsedLabel_);
     layout->addWidget(agentCountLabel_);
+    layout->addWidget(eventLabel_);
     layout->addWidget(riskLabel_);
     layout->addWidget(congestionLabel_);
     layout->addWidget(bottleneckLabel_);
@@ -184,7 +202,7 @@ QWidget* ScenarioRunWidget::createRunPanel() {
 void ScenarioRunWidget::refreshStatus() {
     const auto& frame = runner_.frame();
     if (scenarioLabel_ != nullptr) {
-        scenarioLabel_->setText(QString("Scenario: %1").arg(QString::fromStdString(scenario_.name)));
+        scenarioLabel_->setText(QString("Staged baseline: %1").arg(QString::fromStdString(scenario_.name)));
     }
     if (statusLabel_ != nullptr) {
         statusLabel_->setText(QString("Status: %1").arg(runStatusText(frame, paused_)));
@@ -199,6 +217,9 @@ void ScenarioRunWidget::refreshStatus() {
             .arg(static_cast<int>(frame.evacuatedAgentCount))
             .arg(static_cast<int>(frame.totalAgentCount))
             .arg(static_cast<int>(frame.agents.size())));
+    }
+    if (eventLabel_ != nullptr) {
+        eventLabel_->setText(configuredEventSummary(scenario_));
     }
     const auto& risk = runner_.riskSnapshot();
     if (riskLabel_ != nullptr) {
