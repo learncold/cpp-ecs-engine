@@ -86,6 +86,18 @@ QString readinessListText(const QString& readyText, const QStringList& missingIt
     return QString("Missing before ready:\n- %1").arg(missingItems.join("\n- "));
 }
 
+QString eventSummary(const std::vector<safecrowd::domain::OperationalEventDraft>& events) {
+    if (events.empty()) {
+        return "none";
+    }
+
+    QStringList names;
+    for (const auto& event : events) {
+        names << QString::fromStdString(event.name);
+    }
+    return names.join(", ");
+}
+
 QIcon makeCrowdIcon(const QColor& color) {
     QPixmap pixmap(44, 44);
     pixmap.fill(Qt::transparent);
@@ -766,9 +778,9 @@ QWidget* ScenarioAuthoringWidget::createRunPanel() {
                 continue;
             }
             const auto role = scenario.draft.role == safecrowd::domain::ScenarioRole::Baseline ? "Baseline" : "Alternative";
-            lines << QString("- %1 (%2), Events: %3")
+            lines << QString("- %1 (%2)\n  Events: %3")
                 .arg(QString::fromStdString(scenario.draft.name), role)
-                .arg(static_cast<int>(scenario.events.size()));
+                .arg(eventSummary(scenario.events));
         }
     }
     stagedScenariosLabel_->setText(lines.join('\n'));

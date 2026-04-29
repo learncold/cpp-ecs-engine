@@ -57,6 +57,7 @@ private:
     QLabel* inspectorTitleLabel_{nullptr};
     QLabel* inspectorDetailLabel_{nullptr};
     QLabel* approvalStatusLabel_{nullptr};
+    QPushButton* undoButton_{nullptr};
     QPushButton* approveButton_{nullptr};
     NavigationView navigationView_{NavigationView::Issues};
     QString selectedIssueTargetId_{};
