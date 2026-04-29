@@ -360,7 +360,9 @@ ScenarioResultWidget::ScenarioResultWidget(
     shell_->setTools({"Project"});
     shell_->setSaveProjectHandler(saveProjectHandler_);
     shell_->setOpenProjectHandler(openProjectHandler_);
-    shell_->setBackHandler(backToLayoutReviewHandler_);
+    shell_->setBackHandler([this]() {
+        navigateToAuthoring(true);
+    });
 
     auto* canvas = new SimulationCanvasWidget(layout_, shell_);
     canvas->setFrame(frame_);

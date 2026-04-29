@@ -191,7 +191,9 @@ ScenarioRunWidget::ScenarioRunWidget(
     shell_->setTools({"Project"});
     shell_->setSaveProjectHandler(saveProjectHandler_);
     shell_->setOpenProjectHandler(openProjectHandler_);
-    shell_->setBackHandler(backToLayoutReviewHandler_);
+    shell_->setBackHandler([this]() {
+        returnToAuthoring();
+    });
     canvas_ = new SimulationCanvasWidget(layout_, shell_);
     canvas_->setFrame(runner_.frame());
     shell_->setCanvas(canvas_);
