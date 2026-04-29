@@ -26,6 +26,7 @@ public:
         safecrowd::domain::ScenarioResultArtifacts artifacts,
         std::function<void()> saveProjectHandler,
         std::function<void()> openProjectHandler,
+        std::function<void()> backToLayoutReviewHandler,
         QWidget* parent = nullptr);
 
 private:
@@ -40,6 +41,7 @@ private:
     safecrowd::domain::ScenarioResultArtifacts artifacts_{};
     std::function<void()> saveProjectHandler_{};
     std::function<void()> openProjectHandler_{};
+    std::function<void()> backToLayoutReviewHandler_{};
     WorkspaceShell* shell_{nullptr};
 };
 

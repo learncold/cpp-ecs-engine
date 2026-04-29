@@ -168,6 +168,7 @@ ScenarioRunWidget::ScenarioRunWidget(
     const safecrowd::domain::ScenarioDraft& scenario,
     std::function<void()> saveProjectHandler,
     std::function<void()> openProjectHandler,
+    std::function<void()> backToLayoutReviewHandler,
     QWidget* parent)
     : QWidget(parent),
       projectName_(projectName),
@@ -175,7 +176,8 @@ ScenarioRunWidget::ScenarioRunWidget(
       scenario_(scenario),
       runner_(layout_, scenario_),
       saveProjectHandler_(std::move(saveProjectHandler)),
-      openProjectHandler_(std::move(openProjectHandler)) {
+      openProjectHandler_(std::move(openProjectHandler)),
+      backToLayoutReviewHandler_(std::move(backToLayoutReviewHandler)) {
     auto* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
@@ -189,13 +191,15 @@ ScenarioRunWidget::ScenarioRunWidget(
     shell_->setTools({"Project"});
     shell_->setSaveProjectHandler(saveProjectHandler_);
     shell_->setOpenProjectHandler(openProjectHandler_);
+    shell_->setBackHandler([this]() {
+        returnToAuthoring();
+    });
     canvas_ = new SimulationCanvasWidget(layout_, shell_);
     canvas_->setFrame(runner_.frame());
     shell_->setCanvas(canvas_);
     shell_->setReviewPanel(createRunPanel());
     shell_->setReviewPanelVisible(true);
     rootLayout->addWidget(shell_);
-    addBackToAuthoringButton();
 
     timer_ = new QTimer(this);
     timer_->setInterval(33);
@@ -282,36 +286,6 @@ QWidget* ScenarioRunWidget::createRunPanel() {
     return panel;
 }
 
-void ScenarioRunWidget::addBackToAuthoringButton() {
-    if (canvas_ == nullptr) {
-        return;
-    }
-
-    auto* button = new QPushButton("<", canvas_);
-    button->setToolTip("Back to scenario editor");
-    button->setAccessibleName("Back to scenario editor");
-    button->setFixedSize(40, 36);
-    button->move(16, 16);
-    button->raise();
-    button->setStyleSheet(
-        "QPushButton {"
-        " background: rgba(255, 255, 255, 232);"
-        " border: 1px solid #c9d5e2;"
-        " border-radius: 10px;"
-        " color: #16202b;"
-        " font-size: 18px;"
-        " font-weight: 700;"
-        " padding-bottom: 2px;"
-        "}"
-        "QPushButton:hover {"
-        " background: #eef3f8;"
-        " border-color: #b8c6d6;"
-        "}");
-    connect(button, &QPushButton::clicked, this, [this]() {
-        returnToAuthoring();
-    });
-}
-
 void ScenarioRunWidget::returnToAuthoring() {
     if (timer_ != nullptr) {
         timer_->stop();
@@ -334,6 +308,7 @@ void ScenarioRunWidget::returnToAuthoring() {
         std::move(initial),
         saveProjectHandler_,
         openProjectHandler_,
+        backToLayoutReviewHandler_,
         this);
 
     rootLayout->replaceWidget(shell_, authoringWidget);
@@ -451,6 +426,7 @@ void ScenarioRunWidget::showResults() {
                 openProjectHandler_();
             }
         },
+        backToLayoutReviewHandler_,
         this);
     rootLayout->replaceWidget(shell_, resultWidget);
     shell_->hide();
