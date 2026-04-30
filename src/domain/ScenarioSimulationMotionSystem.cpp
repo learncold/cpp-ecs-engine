@@ -3,6 +3,7 @@
 #include "domain/ScenarioSimulationInternal.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <memory>
 #include <unordered_set>
 #include <utility>
@@ -36,6 +37,10 @@ public:
             return;
         }
 
+        const std::uint64_t layoutRevision = resources.contains<ScenarioLayoutRevisionResource>()
+            ? resources.get<ScenarioLayoutRevisionResource>().revision
+            : 0U;
+
         const auto clampedDelta = std::max(0.0, resources.get<ScenarioSimulationStepResource>().deltaSeconds);
         if (clampedDelta <= 0.0) {
             activeLayout_ = nullptr;
@@ -52,7 +57,8 @@ public:
 
         advanceRoutesForCurrentZones(query, entities);
         advanceRoutesForWaypointProgress(query, 0.0, entities);
-        replanBlockedRouteSegments(query, entities);
+        replanBlockedExitRoutes(query, entities, clock.elapsedSeconds, layoutRevision);
+        replanBlockedRouteSegments(query, entities, clock.elapsedSeconds, layoutRevision);
 
         for (const auto entity : entities) {
             auto& position = query.get<Position>(entity);
@@ -143,8 +149,122 @@ public:
     }
 
 private:
+    static constexpr double kExitReplanCooldownSeconds = 0.75;
+    static constexpr double kNoExitReplanCooldownSeconds = 7.0;
+    static constexpr double kSegmentReplanCooldownSeconds = 0.25;
+    static constexpr double kFailedSegmentReplanCooldownSeconds = 1.25;
+
+    struct RoutePlan {
+        std::vector<Point2D> waypoints{};
+        std::vector<LineSegment2D> waypointPassages{};
+        std::vector<std::string> waypointFromZoneIds{};
+        std::vector<std::string> waypointZoneIds{};
+        std::vector<std::string> waypointFloorIds{};
+        std::vector<std::string> waypointConnectionIds{};
+        std::vector<bool> waypointVerticalTransitions{};
+        std::string destinationZoneId{};
+    };
+
     const FacilityLayout2D& layout() const {
         return activeLayout_ == nullptr ? layout_ : *activeLayout_;
+    }
+
+    const Connection2D* findConnectionById(const std::string& connectionId) const {
+        if (connectionId.empty()) {
+            return nullptr;
+        }
+        const auto it = std::find_if(layout().connections.begin(), layout().connections.end(), [&](const auto& connection) {
+            return connection.id == connectionId;
+        });
+        return it == layout().connections.end() ? nullptr : &(*it);
+    }
+
+    bool nextConnectionBlocked(const EvacuationRoute& route) const {
+        if (route.nextWaypointIndex >= route.waypoints.size() || route.nextWaypointIndex >= route.waypointConnectionIds.size()) {
+            return false;
+        }
+        for (std::size_t index = route.nextWaypointIndex; index < route.waypointConnectionIds.size(); ++index) {
+            const auto& connectionId = route.waypointConnectionIds[index];
+            if (connectionId.empty()) {
+                continue;
+            }
+            const auto* connection = findConnectionById(connectionId);
+            return connection != nullptr && connection->directionality == TravelDirection::Closed;
+        }
+        return false;
+    }
+
+    RoutePlan routePlanToNearestExit(const Point2D& start, const std::string& startZoneId) const {
+        RoutePlan plan;
+        auto zoneRoute = zoneRouteToNearestExit(layout(), startZoneId);
+        if (!zoneRoute.has_value() || zoneRoute->empty()) {
+            return plan;
+        }
+
+        plan.destinationZoneId = zoneRoute->back();
+
+        Point2D segmentStart = start;
+        auto appendSegment = [&](const std::vector<Point2D>& segment,
+                                 const LineSegment2D& finalPassage,
+                                 const std::string& finalFromZoneId,
+                                 const std::string& finalZoneId,
+                                 const std::string& finalFloorId,
+                                 const std::string& finalConnectionId,
+                                 bool finalVerticalTransition) {
+            for (std::size_t waypointIndex = 0; waypointIndex < segment.size(); ++waypointIndex) {
+                const bool isFinalWaypoint = waypointIndex + 1 == segment.size();
+                plan.waypoints.push_back(segment[waypointIndex]);
+                plan.waypointPassages.push_back(isFinalWaypoint ? finalPassage : pointPassage(segment[waypointIndex]));
+                plan.waypointFromZoneIds.push_back(isFinalWaypoint ? finalFromZoneId : std::string{});
+                plan.waypointZoneIds.push_back(isFinalWaypoint ? finalZoneId : std::string{});
+                plan.waypointFloorIds.push_back(isFinalWaypoint ? finalFloorId : std::string{});
+                plan.waypointConnectionIds.push_back(isFinalWaypoint ? finalConnectionId : std::string{});
+                plan.waypointVerticalTransitions.push_back(isFinalWaypoint && finalVerticalTransition);
+            }
+        };
+
+        for (std::size_t index = 1; index < zoneRoute->size(); ++index) {
+            const auto& fromZoneId = (*zoneRoute)[index - 1];
+            const auto& toZoneId = (*zoneRoute)[index];
+            if (const auto* connection = findConnectionBetween(layout(), fromZoneId, toZoneId)) {
+                const auto passage = passageWithClearance(*connection, kCandidateClearance);
+                const auto fromFloorId = floorIdForZone(layout(), fromZoneId);
+                const auto toFloorId = floorIdForZone(layout(), toZoneId);
+                const auto segmentLayout = layoutForFloor(layout(), fromFloorId);
+                const auto target = closestPointOnSegment(segmentStart, passage.start, passage.end);
+                const auto segment = buildPath(segmentLayout, segmentStart, target, kCandidateClearance);
+                appendSegment(
+                    segment,
+                    passage,
+                    fromZoneId,
+                    toZoneId,
+                    toFloorId.empty() ? fromFloorId : toFloorId,
+                    connection->id,
+                    isVerticalConnection(*connection));
+                segmentStart = target;
+            }
+        }
+
+        if (const auto* exitZone = findZone(layout(), zoneRoute->back())) {
+            const auto exitCenter = polygonCenter(exitZone->area);
+            if (distanceBetween(segmentStart, exitCenter) > kArrivalEpsilon) {
+                const auto exitFloorId = exitZone->floorId;
+                const auto segmentLayout = layoutForFloor(layout(), exitFloorId);
+                const auto segment = buildPath(segmentLayout, segmentStart, exitCenter, kCandidateClearance);
+                appendSegment(segment, pointPassage(exitCenter), std::string{}, exitZone->id, exitFloorId, std::string{}, false);
+            }
+        }
+
+        if (!plan.waypoints.empty() && distanceBetween(start, plan.waypoints.front()) <= kArrivalEpsilon) {
+            plan.waypoints.erase(plan.waypoints.begin());
+            plan.waypointPassages.erase(plan.waypointPassages.begin());
+            plan.waypointFromZoneIds.erase(plan.waypointFromZoneIds.begin());
+            plan.waypointZoneIds.erase(plan.waypointZoneIds.begin());
+            plan.waypointFloorIds.erase(plan.waypointFloorIds.begin());
+            plan.waypointConnectionIds.erase(plan.waypointConnectionIds.begin());
+            plan.waypointVerticalTransitions.erase(plan.waypointVerticalTransitions.begin());
+        }
+        return plan;
     }
 
     void advanceRouteWaypoint(EvacuationRoute& route, const Point2D& reachedPoint) const {
@@ -166,6 +286,7 @@ private:
             route.previousDistanceToWaypoint = 0.0;
         }
         route.stalledSeconds = 0.0;
+        route.nextSegmentReplanSeconds = 0.0;
     }
 
     void advanceRoutesForWaypointProgress(
@@ -262,7 +383,86 @@ private:
         }
     }
 
-    void replanBlockedRouteSegments(engine::WorldQuery& query, const std::vector<engine::Entity>& entities) const {
+    void replanBlockedExitRoutes(
+        engine::WorldQuery& query,
+        const std::vector<engine::Entity>& entities,
+        double elapsedSeconds,
+        std::uint64_t layoutRevision) const {
+        for (const auto entity : entities) {
+            const auto& status = query.get<EvacuationStatus>(entity);
+            if (status.evacuated) {
+                continue;
+            }
+
+            auto& route = query.get<EvacuationRoute>(entity);
+            if (layoutRevision != route.observedLayoutRevision) {
+                route.observedLayoutRevision = layoutRevision;
+                route.nextExitReplanSeconds = 0.0;
+                route.nextSegmentReplanSeconds = 0.0;
+            }
+
+            const bool blockedAhead = nextConnectionBlocked(route);
+            if (!blockedAhead && !route.noExitAvailable) {
+                continue;
+            }
+
+            if (elapsedSeconds + 1e-9 < route.nextExitReplanSeconds) {
+                continue;
+            }
+
+            const auto& position = query.get<Position>(entity);
+            const auto startZoneId = zoneAt(position.value, route.currentFloorId);
+            if (startZoneId.empty()) {
+                route.nextExitReplanSeconds = elapsedSeconds + kExitReplanCooldownSeconds;
+                continue;
+            }
+
+            const auto plan = routePlanToNearestExit(position.value, startZoneId);
+            if (plan.destinationZoneId.empty()) {
+                route.noExitAvailable = true;
+                route.destinationZoneId.clear();
+                route.waypoints.clear();
+                route.waypointPassages.clear();
+                route.waypointFromZoneIds.clear();
+                route.waypointZoneIds.clear();
+                route.waypointFloorIds.clear();
+                route.waypointConnectionIds.clear();
+                route.waypointVerticalTransitions.clear();
+                route.nextWaypointIndex = 0;
+                route.currentSegmentStart = position.value;
+                route.displayFloorId = route.currentFloorId;
+                route.previousDistanceToWaypoint = 0.0;
+                route.stalledSeconds = 0.0;
+                route.nextExitReplanSeconds = elapsedSeconds + kNoExitReplanCooldownSeconds;
+                continue;
+            }
+
+            route.destinationZoneId = plan.destinationZoneId;
+            route.waypoints = plan.waypoints;
+            route.waypointPassages = plan.waypointPassages;
+            route.waypointFromZoneIds = plan.waypointFromZoneIds;
+            route.waypointZoneIds = plan.waypointZoneIds;
+            route.waypointFloorIds = plan.waypointFloorIds;
+            route.waypointConnectionIds = plan.waypointConnectionIds;
+            route.waypointVerticalTransitions = plan.waypointVerticalTransitions;
+            route.nextWaypointIndex = 0;
+            route.currentSegmentStart = position.value;
+            route.displayFloorId = route.currentFloorId;
+            route.previousDistanceToWaypoint = route.waypoints.empty()
+                ? 0.0
+                : distanceToRouteWaypoint(route, position.value);
+            route.stalledSeconds = 0.0;
+            route.noExitAvailable = false;
+            route.nextSegmentReplanSeconds = 0.0;
+            route.nextExitReplanSeconds = elapsedSeconds + kExitReplanCooldownSeconds;
+        }
+    }
+
+    void replanBlockedRouteSegments(
+        engine::WorldQuery& query,
+        const std::vector<engine::Entity>& entities,
+        double elapsedSeconds,
+        std::uint64_t layoutRevision) const {
         for (const auto entity : entities) {
             const auto& status = query.get<EvacuationStatus>(entity);
             if (status.evacuated) {
@@ -272,7 +472,21 @@ private:
             const auto& position = query.get<Position>(entity);
             const auto& agent = query.get<Agent>(entity);
             auto& route = query.get<EvacuationRoute>(entity);
+            if (route.noExitAvailable) {
+                continue;
+            }
+            if (layoutRevision != route.observedLayoutRevision) {
+                route.observedLayoutRevision = layoutRevision;
+                route.nextExitReplanSeconds = 0.0;
+                route.nextSegmentReplanSeconds = 0.0;
+            }
             if (route.nextWaypointIndex >= route.waypoints.size()) {
+                continue;
+            }
+            if (nextConnectionBlocked(route)) {
+                continue;
+            }
+            if (elapsedSeconds + 1e-9 < route.nextSegmentReplanSeconds) {
                 continue;
             }
 
@@ -285,6 +499,7 @@ private:
 
             const auto replacement = buildPath(floorLayout, position.value, target, clearance);
             if (replacement.size() <= 1) {
+                route.nextSegmentReplanSeconds = elapsedSeconds + kFailedSegmentReplanCooldownSeconds;
                 continue;
             }
 
@@ -366,6 +581,7 @@ private:
             route.currentSegmentStart = position.value;
             route.previousDistanceToWaypoint = distanceToRouteWaypoint(route, position.value);
             route.stalledSeconds = 0.0;
+            route.nextSegmentReplanSeconds = elapsedSeconds + kSegmentReplanCooldownSeconds;
         }
     }
 
@@ -514,4 +730,3 @@ std::unique_ptr<engine::EngineSystem> makeScenarioSimulationMotionSystem(Facilit
 }
 
 }  // namespace safecrowd::domain
-

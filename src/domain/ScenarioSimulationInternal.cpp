@@ -2,9 +2,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <optional>
 #include <queue>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace safecrowd::domain::simulation_internal {
@@ -503,6 +506,122 @@ const Connection2D* findConnectionBetween(const FacilityLayout2D& layout, const 
         return false;
     });
     return it == layout.connections.end() ? nullptr : &(*it);
+}
+
+std::optional<std::vector<std::string>> zoneRouteToNearestExit(const FacilityLayout2D& layout, const std::string& startZoneId) {
+    if (startZoneId.empty()) {
+        return std::nullopt;
+    }
+
+    if (const auto* startZone = findZone(layout, startZoneId); startZone != nullptr && startZone->kind == ZoneKind::Exit) {
+        return std::vector<std::string>{startZoneId};
+    }
+
+    std::unordered_set<std::string> exitZoneIds;
+    exitZoneIds.reserve(layout.zones.size());
+    for (const auto& zone : layout.zones) {
+        if (zone.kind == ZoneKind::Exit) {
+            exitZoneIds.insert(zone.id);
+        }
+    }
+    if (exitZoneIds.empty()) {
+        return std::nullopt;
+    }
+
+    std::unordered_map<std::string, Point2D> centers;
+    centers.reserve(layout.zones.size());
+    for (const auto& zone : layout.zones) {
+        centers.emplace(zone.id, polygonCenter(zone.area));
+    }
+    const auto zoneCenter = [&](const std::string& zoneId) -> Point2D {
+        const auto it = centers.find(zoneId);
+        return it == centers.end() ? Point2D{} : it->second;
+    };
+
+    std::unordered_map<std::string, std::vector<std::pair<std::string, double>>> adjacency;
+    adjacency.reserve(layout.zones.size() * 2);
+    for (const auto& connection : layout.connections) {
+        if (connection.directionality == TravelDirection::Closed) {
+            continue;
+        }
+        if (!canTraverseConnection(layout, connection)) {
+            continue;
+        }
+
+        const auto portal = midpoint(connection.centerSpan);
+        const auto fromCenter = zoneCenter(connection.fromZoneId);
+        const auto toCenter = zoneCenter(connection.toZoneId);
+        const auto forwardWeight =
+            distanceBetween(fromCenter, portal) + distanceBetween(portal, toCenter);
+        const auto reverseWeight =
+            distanceBetween(toCenter, portal) + distanceBetween(portal, fromCenter);
+
+        if (connection.directionality != TravelDirection::ReverseOnly) {
+            adjacency[connection.fromZoneId].push_back({connection.toZoneId, forwardWeight});
+        }
+        if (connection.directionality != TravelDirection::ForwardOnly) {
+            adjacency[connection.toZoneId].push_back({connection.fromZoneId, reverseWeight});
+        }
+    }
+
+    struct QueueItem {
+        double distance{0.0};
+        std::string zoneId{};
+
+        bool operator>(const QueueItem& other) const noexcept {
+            return distance > other.distance;
+        }
+    };
+
+    std::unordered_map<std::string, double> dist;
+    dist.reserve(layout.zones.size());
+    std::unordered_map<std::string, std::string> prev;
+    prev.reserve(layout.zones.size());
+    std::priority_queue<QueueItem, std::vector<QueueItem>, std::greater<QueueItem>> pq;
+
+    dist[startZoneId] = 0.0;
+    pq.push({.distance = 0.0, .zoneId = startZoneId});
+
+    while (!pq.empty()) {
+        const auto current = pq.top();
+        pq.pop();
+
+        const auto bestIt = dist.find(current.zoneId);
+        if (bestIt == dist.end() || current.distance > bestIt->second + 1e-12) {
+            continue;
+        }
+
+        if (exitZoneIds.contains(current.zoneId)) {
+            std::vector<std::string> route;
+            for (auto zoneId = current.zoneId; !zoneId.empty();) {
+                route.push_back(zoneId);
+                const auto it = prev.find(zoneId);
+                zoneId = it == prev.end() ? std::string{} : it->second;
+            }
+            std::reverse(route.begin(), route.end());
+            return route;
+        }
+
+        const auto adjIt = adjacency.find(current.zoneId);
+        if (adjIt == adjacency.end()) {
+            continue;
+        }
+
+        for (const auto& [next, cost] : adjIt->second) {
+            if (next.empty()) {
+                continue;
+            }
+            const auto nextDistance = current.distance + std::max(0.0, cost);
+            const auto distIt = dist.find(next);
+            if (distIt == dist.end() || nextDistance + 1e-12 < distIt->second) {
+                dist[next] = nextDistance;
+                prev[next] = current.zoneId;
+                pq.push({.distance = nextDistance, .zoneId = next});
+            }
+        }
+    }
+
+    return std::nullopt;
 }
 
 double speedOf(const Point2D& velocity) {

@@ -264,55 +264,7 @@ ScenarioSimulationRunner::RoutePlan ScenarioSimulationRunner::routePlan(const Po
 }
 
 std::optional<std::vector<std::string>> ScenarioSimulationRunner::zoneRouteToExit(const std::string& startZoneId) const {
-    if (startZoneId.empty()) {
-        return std::nullopt;
-    }
-    if (const auto* startZone = findZone(layout_, startZoneId); startZone != nullptr && startZone->kind == ZoneKind::Exit) {
-        return std::vector<std::string>{startZoneId};
-    }
-
-    std::unordered_map<std::string, std::string> previous;
-    std::unordered_set<std::string> visited;
-    std::deque<std::string> queue;
-    visited.insert(startZoneId);
-    queue.push_back(startZoneId);
-
-    while (!queue.empty()) {
-        const auto current = queue.front();
-        queue.pop_front();
-        if (const auto* zone = findZone(layout_, current); zone != nullptr && zone->kind == ZoneKind::Exit) {
-            std::vector<std::string> route;
-            for (auto zoneId = current; !zoneId.empty();) {
-                route.push_back(zoneId);
-                const auto prev = previous.find(zoneId);
-                zoneId = prev == previous.end() ? std::string{} : prev->second;
-            }
-            std::reverse(route.begin(), route.end());
-            return route;
-        }
-
-        for (const auto& connection : layout_.connections) {
-            if (connection.directionality == TravelDirection::Closed) {
-                continue;
-            }
-            if (!canTraverseConnection(layout_, connection)) {
-                continue;
-            }
-            std::string next;
-            if (connection.fromZoneId == current && connection.directionality != TravelDirection::ReverseOnly) {
-                next = connection.toZoneId;
-            } else if (connection.toZoneId == current && connection.directionality != TravelDirection::ForwardOnly) {
-                next = connection.fromZoneId;
-            }
-            if (!next.empty() && !visited.contains(next)) {
-                visited.insert(next);
-                previous[next] = current;
-                queue.push_back(next);
-            }
-        }
-    }
-
-    return std::nullopt;
+    return zoneRouteToNearestExit(layout_, startZoneId);
 }
 
 std::string ScenarioSimulationRunner::zoneAt(const Point2D& point, const std::string& floorId) const {

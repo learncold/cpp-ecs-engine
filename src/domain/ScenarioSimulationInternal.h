@@ -103,6 +103,7 @@ bool pointInRing(const std::vector<Point2D>& ring, const Point2D& point);
 Point2D polygonCenter(const Polygon2D& polygon);
 const Zone2D* findZone(const FacilityLayout2D& layout, const std::string& zoneId);
 const Connection2D* findConnectionBetween(const FacilityLayout2D& layout, const std::string& from, const std::string& to);
+std::optional<std::vector<std::string>> zoneRouteToNearestExit(const FacilityLayout2D& layout, const std::string& startZoneId);
 std::string floorIdForZone(const FacilityLayout2D& layout, const std::string& zoneId);
 bool isVerticalConnection(const Connection2D& connection);
 bool canTraverseConnection(const FacilityLayout2D& layout, const Connection2D& connection);
