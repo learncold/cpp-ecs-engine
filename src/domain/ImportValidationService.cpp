@@ -151,9 +151,13 @@ std::vector<ImportIssue> ImportValidationService::validate(const FacilityLayout2
     }
 
     std::unordered_set<std::string> exitZoneIds;
+    std::size_t roomZoneCount = 0;
     for (const auto& zone : layout.zones) {
         if (zone.kind == ZoneKind::Exit) {
             exitZoneIds.insert(zone.id);
+        }
+        if (zone.kind == ZoneKind::Room) {
+            ++roomZoneCount;
         }
     }
 
@@ -164,6 +168,15 @@ std::vector<ImportIssue> ImportValidationService::validate(const FacilityLayout2
             .message = "Imported layout does not contain an inferred exit zone.",
             .targetId = layout.id,
             .isBlocking = true,
+        });
+    }
+
+    if (roomZoneCount == 0) {
+        issues.push_back({
+            .severity = ImportIssueSeverity::Warning,
+            .code = ImportIssueCode::MissingRoom,
+            .message = "Agents can only be placed inside Room or Exit zones.",
+            .targetId = layout.id,
         });
     }
 

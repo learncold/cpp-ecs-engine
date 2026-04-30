@@ -130,6 +130,39 @@ SC_TEST(ImportValidationServiceReportsMissingExitDisconnectedAreaAndNarrowConnec
     SC_EXPECT_TRUE(safecrowd::domain::hasBlockingImportIssue(issues));
 }
 
+SC_TEST(ImportValidationServiceReportsMissingRoomAsNonBlockingWarning) {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.id = "layout-L1";
+    layout.levelId = "L1";
+    layout.floors.push_back({
+        .id = "L1",
+        .label = "Floor 1",
+    });
+    layout.zones.push_back({
+        .id = "zone-exit-1",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Exit,
+        .label = "Exit 1",
+        .area = {
+            .outline = {
+                {0.0, 0.0},
+                {4.0, 0.0},
+                {4.0, 4.0},
+                {0.0, 4.0},
+            },
+        },
+    });
+
+    safecrowd::domain::ImportValidationService validator;
+    const auto issues = validator.validate(layout);
+
+    SC_EXPECT_TRUE(containsIssueCode(issues, safecrowd::domain::ImportIssueCode::MissingRoom));
+    SC_EXPECT_TRUE(!safecrowd::domain::hasBlockingImportIssue(issues));
+    SC_EXPECT_EQ(
+        std::string(safecrowd::domain::toString(safecrowd::domain::ImportIssueCode::MissingRoom)),
+        std::string("MissingRoom"));
+}
+
 SC_TEST(ImportValidationServiceReportsInvalidFloorReferences) {
     safecrowd::domain::FacilityLayout2D layout;
     layout.id = "layout-L1";

@@ -554,6 +554,7 @@ bool isLiveValidationIssue(safecrowd::domain::ImportIssueCode code) {
 
     switch (code) {
     case ImportIssueCode::MissingExit:
+    case ImportIssueCode::MissingRoom:
     case ImportIssueCode::DisconnectedWalkableArea:
     case ImportIssueCode::WidthBelowMinimum:
     case ImportIssueCode::InvalidFloorReference:
