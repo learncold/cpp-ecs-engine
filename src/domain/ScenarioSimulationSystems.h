@@ -1,11 +1,13 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <unordered_map>
 #include <vector>
 
 #include "domain/AgentComponents.h"
 #include "domain/FacilityLayout2D.h"
+#include "domain/ScenarioAuthoring.h"
 #include "domain/ScenarioResultArtifacts.h"
 #include "domain/ScenarioRiskMetrics.h"
 #include "domain/ScenarioSimulationFrame.h"
@@ -46,6 +48,10 @@ struct ScenarioLayoutCacheResource {
     std::unordered_map<std::string, std::vector<ScenarioConnectionTraversal>> traversableConnectionsByZone{};
 };
 
+struct ScenarioLayoutRevisionResource {
+    std::uint64_t revision{0};
+};
+
 struct ScenarioRiskMetricsResource {
     ScenarioRiskSnapshot snapshot{};
     ScenarioRiskSnapshot peakSnapshot{};
@@ -73,6 +79,9 @@ std::vector<engine::Entity> scenarioNearbyAgents(
     double radius);
 
 std::unique_ptr<engine::EngineSystem> makeScenarioSimulationMotionSystem();
+std::unique_ptr<engine::EngineSystem> makeScenarioControlSystem(
+    FacilityLayout2D baseLayout,
+    std::vector<ConnectionBlockDraft> blocks);
 std::unique_ptr<engine::EngineSystem> makeScenarioSimulationMotionSystem(FacilityLayout2D layout);
 std::unique_ptr<engine::EngineSystem> makeScenarioRiskMetricsSystem(FacilityLayout2D layout);
 

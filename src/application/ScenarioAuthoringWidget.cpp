@@ -406,6 +406,18 @@ void ScenarioAuthoringWidget::refreshCanvas() {
     canvas_->setPlacementsChangedHandler([this](const std::vector<ScenarioCrowdPlacement>& placements) {
         updateCurrentScenarioPlacements(placements);
     });
+    canvas_->setConnectionBlocks(scenario->draft.control.connectionBlocks);
+    canvas_->setConnectionBlocksChangedHandler([this](const std::vector<safecrowd::domain::ConnectionBlockDraft>& blocks) {
+        auto* current = currentScenario();
+        if (current == nullptr) {
+            return;
+        }
+        current->draft.control.connectionBlocks = blocks;
+        refreshInspector();
+        if (rightPanelMode_ == RightPanelMode::Run) {
+            refreshRightPanel();
+        }
+    });
     shell_->setCanvas(canvas_);
 }
 
@@ -475,7 +487,7 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
             &layout_,
             [this](const QString& elementId) {
                 if (canvas_ != nullptr) {
-                    canvas_->focusLayoutElement(elementId);
+                    canvas_->activateLayoutElement(elementId);
                 }
             },
             shell_,

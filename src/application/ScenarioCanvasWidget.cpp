@@ -5,16 +5,23 @@
 #include <optional>
 
 #include <QCoreApplication>
+#include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QEvent>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMouseEvent>
+#include <QMenu>
+#include <QMessageBox>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPushButton>
 #include <QSpinBox>
 #include <QToolButton>
+#include <QVBoxLayout>
 #include <QWheelEvent>
 
 namespace safecrowd::application {
@@ -171,6 +178,18 @@ QIcon makeToolIcon(const QString& type, const QColor& color) {
         return QIcon(pixmap);
     }
 
+    if (type == "block") {
+        painter.setPen(QPen(color, 3.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawEllipse(QPointF(22, 22), 11.5, 11.5);
+        painter.drawLine(QPointF(14.5, 29.5), QPointF(29.5, 14.5));
+        return QIcon(pixmap);
+    }
+
+    if (type != "group") {
+        return QIcon(pixmap);
+    }
+
     painter.setBrush(color);
     painter.setPen(Qt::NoPen);
     painter.drawEllipse(QPointF(17, 15), 4.0, 4.0);
@@ -179,6 +198,177 @@ QIcon makeToolIcon(const QString& type, const QColor& color) {
     painter.drawRoundedRect(QRectF(12, 30, 20, 5), 2.5, 2.5);
     return QIcon(pixmap);
 }
+
+double intervalSecondsFrom(int value, const QString& unit) {
+    if (unit == "hour") {
+        return static_cast<double>(value) * 3600.0;
+    }
+    if (unit == "min") {
+        return static_cast<double>(value) * 60.0;
+    }
+    return static_cast<double>(value);
+}
+
+QStringList intervalUnitOptions() {
+    return {"sec", "min", "hour"};
+}
+
+class ConnectionBlockScheduleDialog final : public QDialog {
+public:
+    explicit ConnectionBlockScheduleDialog(
+        std::vector<safecrowd::domain::ConnectionBlockIntervalDraft> intervals,
+        QWidget* parent = nullptr)
+        : QDialog(parent),
+          intervals_(std::move(intervals)) {
+        setWindowTitle("Block door schedule");
+        setModal(true);
+
+        auto* root = new QVBoxLayout(this);
+        root->setContentsMargins(12, 12, 12, 12);
+        root->setSpacing(10);
+
+        auto* caption = new QLabel("Add one or more block/unblock intervals.", this);
+        caption->setWordWrap(true);
+        root->addWidget(caption);
+
+        rowsContainer_ = new QWidget(this);
+        rowsLayout_ = new QVBoxLayout(rowsContainer_);
+        rowsLayout_->setContentsMargins(0, 0, 0, 0);
+        rowsLayout_->setSpacing(8);
+        root->addWidget(rowsContainer_);
+
+        auto* addRowButton = new QPushButton("+", this);
+        addRowButton->setToolTip("Add interval");
+        addRowButton->setFixedSize(36, 32);
+        root->addWidget(addRowButton, 0, Qt::AlignLeft);
+        connect(addRowButton, &QPushButton::clicked, this, [this]() {
+            addRow({});
+        });
+
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+        root->addWidget(buttons);
+        connect(buttons, &QDialogButtonBox::accepted, this, [this]() {
+            if (!applyFromUi()) {
+                return;
+            }
+            accept();
+        });
+        connect(buttons, &QDialogButtonBox::rejected, this, [this]() {
+            reject();
+        });
+
+        if (intervals_.empty()) {
+            addRow({});
+        } else {
+            for (const auto& interval : intervals_) {
+                addRow(interval);
+            }
+        }
+    }
+
+    std::vector<safecrowd::domain::ConnectionBlockIntervalDraft> intervals() const {
+        return intervals_;
+    }
+
+private:
+    struct Row {
+        QWidget* container{nullptr};
+        QSpinBox* startValue{nullptr};
+        QComboBox* startUnit{nullptr};
+        QSpinBox* endValue{nullptr};
+        QComboBox* endUnit{nullptr};
+        QPushButton* removeButton{nullptr};
+    };
+
+    static int clampIntSeconds(double seconds) {
+        if (!std::isfinite(seconds) || seconds < 0.0) {
+            return 0;
+        }
+        const auto value = static_cast<long long>(std::llround(seconds));
+        return static_cast<int>(std::clamp<long long>(value, 0, 1'000'000'000LL));
+    }
+
+    void addRow(const safecrowd::domain::ConnectionBlockIntervalDraft& interval) {
+        auto* row = new QWidget(rowsContainer_);
+        auto* layout = new QHBoxLayout(row);
+        layout->setContentsMargins(0, 0, 0, 0);
+        layout->setSpacing(8);
+
+        auto* startLabel = new QLabel("Start", row);
+        layout->addWidget(startLabel);
+
+        auto* startValue = new QSpinBox(row);
+        startValue->setRange(0, 1'000'000'000);
+        startValue->setValue(clampIntSeconds(interval.startSeconds));
+        layout->addWidget(startValue);
+
+        auto* startUnit = new QComboBox(row);
+        startUnit->addItems(intervalUnitOptions());
+        startUnit->setCurrentText("sec");
+        layout->addWidget(startUnit);
+
+        auto* endLabel = new QLabel("End", row);
+        layout->addWidget(endLabel);
+
+        auto* endValue = new QSpinBox(row);
+        endValue->setRange(0, 1'000'000'000);
+        endValue->setValue(clampIntSeconds(interval.endSeconds));
+        layout->addWidget(endValue);
+
+        auto* endUnit = new QComboBox(row);
+        endUnit->addItems(intervalUnitOptions());
+        endUnit->setCurrentText("sec");
+        layout->addWidget(endUnit);
+
+        auto* remove = new QPushButton("-", row);
+        remove->setToolTip("Remove interval");
+        remove->setFixedSize(32, 32);
+        layout->addWidget(remove);
+
+        Row widgets{
+            .container = row,
+            .startValue = startValue,
+            .startUnit = startUnit,
+            .endValue = endValue,
+            .endUnit = endUnit,
+            .removeButton = remove,
+        };
+        rows_.push_back(widgets);
+        rowsLayout_->addWidget(row);
+
+        connect(remove, &QPushButton::clicked, this, [this, row]() {
+            rows_.erase(std::remove_if(rows_.begin(), rows_.end(), [&](const Row& r) { return r.container == row; }), rows_.end());
+            row->deleteLater();
+        });
+    }
+
+    bool applyFromUi() {
+        std::vector<safecrowd::domain::ConnectionBlockIntervalDraft> intervals;
+        intervals.reserve(rows_.size());
+        for (const auto& row : rows_) {
+            if (row.startValue == nullptr || row.startUnit == nullptr || row.endValue == nullptr || row.endUnit == nullptr) {
+                continue;
+            }
+            const auto startSeconds = intervalSecondsFrom(row.startValue->value(), row.startUnit->currentText());
+            const auto endSeconds = intervalSecondsFrom(row.endValue->value(), row.endUnit->currentText());
+            if (endSeconds < startSeconds) {
+                QMessageBox::warning(this, "Invalid interval", "End time must be greater than or equal to start time.");
+                return false;
+            }
+            intervals.push_back({
+                .startSeconds = startSeconds,
+                .endSeconds = endSeconds,
+            });
+        }
+        intervals_ = std::move(intervals);
+        return true;
+    }
+
+    QWidget* rowsContainer_{nullptr};
+    QVBoxLayout* rowsLayout_{nullptr};
+    std::vector<Row> rows_{};
+    std::vector<safecrowd::domain::ConnectionBlockIntervalDraft> intervals_{};
+};
 
 }  // namespace
 
@@ -217,6 +407,15 @@ void ScenarioCanvasWidget::setPlacementsChangedHandler(std::function<void(const 
     placementsChangedHandler_ = std::move(handler);
 }
 
+void ScenarioCanvasWidget::setConnectionBlocks(std::vector<safecrowd::domain::ConnectionBlockDraft> blocks) {
+    connectionBlocks_ = std::move(blocks);
+    update();
+}
+
+void ScenarioCanvasWidget::setConnectionBlocksChangedHandler(std::function<void(const std::vector<safecrowd::domain::ConnectionBlockDraft>&)> handler) {
+    connectionBlocksChangedHandler_ = std::move(handler);
+}
+
 void ScenarioCanvasWidget::focusLayoutElement(const QString& elementId) {
     if (elementId.startsWith("floor:")) {
         currentFloorId_ = elementId.mid(QString("floor:").size());
@@ -231,6 +430,24 @@ void ScenarioCanvasWidget::focusLayoutElement(const QString& elementId) {
     focusedLayoutElementId_ = elementId;
     focusedPlacementId_.clear();
     update();
+}
+
+void ScenarioCanvasWidget::activateLayoutElement(const QString& elementId) {
+    focusLayoutElement(elementId);
+
+    if (toolMode_ != ToolMode::BlockDoor) {
+        return;
+    }
+
+    const auto targetId = elementId.toStdString();
+    const auto it = std::find_if(layout_.connections.begin(), layout_.connections.end(), [&](const auto& connection) {
+        return connection.id == targetId;
+    });
+    if (it == layout_.connections.end()) {
+        return;
+    }
+
+    addConnectionBlockForConnection(*it);
 }
 
 void ScenarioCanvasWidget::focusPlacement(const QString& placementId) {
@@ -298,6 +515,41 @@ void ScenarioCanvasWidget::mousePressEvent(QMouseEvent* event) {
         return;
     }
 
+    if (event->button() == Qt::RightButton) {
+        const auto point = unmapPoint(event->position());
+        constexpr double kPickRadiusPixels = 18.0;
+        const auto offsetPoint = unmapPoint(event->position() + QPointF(kPickRadiusPixels, 0.0));
+        const auto dx = offsetPoint.x - point.x;
+        const auto dy = offsetPoint.y - point.y;
+        const auto hitTolerance = std::max(1.2, std::hypot(dx, dy));
+        for (const auto& block : connectionBlocks_) {
+            if (block.connectionId.empty()) {
+                continue;
+            }
+            const auto it = std::find_if(layout_.connections.begin(), layout_.connections.end(), [&](const auto& connection) {
+                return connection.id == block.connectionId;
+            });
+            if (it == layout_.connections.end()) {
+                continue;
+            }
+            if (!matchesFloor(it->floorId, currentFloorId_)) {
+                continue;
+            }
+            const auto halfWidth = std::max(0.0, it->effectiveWidth * 0.5);
+            const auto distance = std::max(
+                0.0,
+                distancePointToSegment(point, it->centerSpan.start, it->centerSpan.end) - halfWidth);
+            if (distance <= hitTolerance) {
+                openConnectionBlockScheduleEditor(QString::fromStdString(block.id), event->globalPosition().toPoint());
+                event->accept();
+                return;
+            }
+        }
+
+        QWidget::mousePressEvent(event);
+        return;
+    }
+
     if (event->button() != Qt::LeftButton || event->position().y() < kTopToolbarHeight + kPropertyPanelHeight) {
         QWidget::mousePressEvent(event);
         return;
@@ -314,6 +566,12 @@ void ScenarioCanvasWidget::mousePressEvent(QMouseEvent* event) {
         dragStart_ = event->position();
         dragCurrent_ = dragStart_;
         update();
+        event->accept();
+        return;
+    }
+
+    if (toolMode_ == ToolMode::BlockDoor) {
+        addConnectionBlock(event->position());
         event->accept();
         return;
     }
@@ -415,6 +673,7 @@ void ScenarioCanvasWidget::paintEvent(QPaintEvent* event) {
         }
     }
     drawFocusedPlacement(painter, transform);
+    drawConnectionBlocks(painter, transform);
 
     if (dragging_) {
         painter.setPen(QPen(QColor("#1f5fae"), 1.5, Qt::DashLine));
@@ -429,10 +688,6 @@ void ScenarioCanvasWidget::resizeEvent(QResizeEvent* event) {
 }
 
 void ScenarioCanvasWidget::wheelEvent(QWheelEvent* event) {
-    if (switchFloorByWheel(event)) {
-        return;
-    }
-
     const auto bounds = collectBounds();
     if (!bounds.has_value()) {
         QWidget::wheelEvent(event);
@@ -527,6 +782,31 @@ void ScenarioCanvasWidget::drawFocusedPlacement(QPainter& painter, const LayoutC
     painter.drawPath(path);
 }
 
+void ScenarioCanvasWidget::drawConnectionBlocks(QPainter& painter, const LayoutCanvasTransform& transform) const {
+    painter.setBrush(Qt::NoBrush);
+    painter.setPen(QPen(QColor("#c0392b"), 2.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+
+    for (const auto& block : connectionBlocks_) {
+        if (block.connectionId.empty()) {
+            continue;
+        }
+        const auto it = std::find_if(layout_.connections.begin(), layout_.connections.end(), [&](const auto& connection) {
+            return connection.id == block.connectionId;
+        });
+        if (it == layout_.connections.end()) {
+            continue;
+        }
+        if (!matchesFloor(it->floorId, currentFloorId_)) {
+            continue;
+        }
+
+        const auto center = transform.map(connectionCenter(*it));
+        const double r = 10.0;
+        painter.drawEllipse(center, r, r);
+        painter.drawLine(QPointF(center.x() - 6.5, center.y() + 6.5), QPointF(center.x() + 6.5, center.y() - 6.5));
+    }
+}
+
 std::optional<LayoutCanvasBounds> ScenarioCanvasWidget::collectBounds() const {
     return collectLayoutCanvasBounds(layout_, currentFloorId_.toStdString());
 }
@@ -594,6 +874,31 @@ QString ScenarioCanvasWidget::zoneAt(const safecrowd::domain::Point2D& point) co
         }
     }
     return {};
+}
+
+const safecrowd::domain::Connection2D* ScenarioCanvasWidget::connectionAt(
+    const safecrowd::domain::Point2D& point,
+    double toleranceWorldUnits) const {
+    const safecrowd::domain::Connection2D* best = nullptr;
+    double bestDistance = std::max(0.0, toleranceWorldUnits);
+    for (const auto& connection : layout_.connections) {
+        if (!matchesFloor(connection.floorId, currentFloorId_)) {
+            continue;
+        }
+        const auto distance = distancePointToSegment(point, connection.centerSpan.start, connection.centerSpan.end);
+        if (distance <= bestDistance) {
+            bestDistance = distance;
+            best = &connection;
+        }
+    }
+    return best;
+}
+
+safecrowd::domain::Point2D ScenarioCanvasWidget::connectionCenter(const safecrowd::domain::Connection2D& connection) const {
+    return {
+        .x = (connection.centerSpan.start.x + connection.centerSpan.end.x) * 0.5,
+        .y = (connection.centerSpan.start.y + connection.centerSpan.end.y) * 0.5,
+    };
 }
 
 bool ScenarioCanvasWidget::placementPointBlocked(const safecrowd::domain::Point2D& point) const {
@@ -725,6 +1030,10 @@ QString ScenarioCanvasWidget::nextPlacementId(ScenarioCrowdPlacementKind kind) c
     return QString("%1-%2").arg(prefix).arg(static_cast<int>(placements_.size()) + 1);
 }
 
+QString ScenarioCanvasWidget::nextConnectionBlockId() const {
+    return QString("block-%1").arg(static_cast<int>(connectionBlocks_.size()) + 1);
+}
+
 void ScenarioCanvasWidget::addGroupPlacement(const QPointF& start, const QPointF& end) {
     if ((QLineF(start, end).length()) < 8.0) {
         return;
@@ -783,9 +1092,104 @@ void ScenarioCanvasWidget::addIndividualPlacement(const QPointF& position) {
     update();
 }
 
+void ScenarioCanvasWidget::addConnectionBlock(const QPointF& position) {
+    const auto point = unmapPoint(position);
+    constexpr double kPickRadiusPixels = 18.0;
+    const auto offsetPoint = unmapPoint(position + QPointF(kPickRadiusPixels, 0.0));
+    const auto dx = offsetPoint.x - point.x;
+    const auto dy = offsetPoint.y - point.y;
+    const auto pixelToleranceWorldUnits = std::hypot(dx, dy);
+
+    const auto toleranceWorldUnits = std::max(1.2, pixelToleranceWorldUnits);
+    const safecrowd::domain::Connection2D* connection = nullptr;
+    double bestDistance = toleranceWorldUnits;
+    for (const auto& candidate : layout_.connections) {
+        if (!matchesFloor(candidate.floorId, currentFloorId_)) {
+            continue;
+        }
+        if (candidate.kind != safecrowd::domain::ConnectionKind::Doorway
+            && candidate.kind != safecrowd::domain::ConnectionKind::Exit) {
+            continue;
+        }
+        const auto halfWidth = std::max(0.0, candidate.effectiveWidth * 0.5);
+        const auto distance =
+            std::max(0.0, distancePointToSegment(point, candidate.centerSpan.start, candidate.centerSpan.end) - halfWidth);
+        if (distance <= bestDistance) {
+            bestDistance = distance;
+            connection = &candidate;
+        }
+    }
+    if (connection == nullptr) {
+        QMessageBox::information(this, "Block door", "This tool can only be used on exits or doors.");
+        return;
+    }
+
+    addConnectionBlockForConnection(*connection);
+}
+
+void ScenarioCanvasWidget::addConnectionBlockForConnection(const safecrowd::domain::Connection2D& connection) {
+    if (connection.kind != safecrowd::domain::ConnectionKind::Doorway
+        && connection.kind != safecrowd::domain::ConnectionKind::Exit) {
+        QMessageBox::information(this, "Block door", "This tool can only be used on exits or doors.");
+        return;
+    }
+
+    for (const auto& existing : connectionBlocks_) {
+        if (existing.connectionId == connection.id) {
+            QMessageBox::information(this, "Block door", "This door or exit is already blocked.");
+            return;
+        }
+    }
+
+    safecrowd::domain::ConnectionBlockDraft draft;
+    draft.id = nextConnectionBlockId().toStdString();
+    draft.connectionId = connection.id;
+    connectionBlocks_.push_back(std::move(draft));
+    emitConnectionBlocksChanged();
+    update();
+}
+
+void ScenarioCanvasWidget::openConnectionBlockScheduleEditor(const QString& blockId, const QPoint& screenPosition) {
+    QMenu menu(this);
+    auto* editAction = menu.addAction("Set schedule...");
+    auto* deleteAction = menu.addAction("Delete");
+    const auto* selected = menu.exec(screenPosition);
+    if (selected != editAction && selected != deleteAction) {
+        return;
+    }
+
+    auto it = std::find_if(connectionBlocks_.begin(), connectionBlocks_.end(), [&](const auto& block) {
+        return QString::fromStdString(block.id) == blockId;
+    });
+    if (it == connectionBlocks_.end()) {
+        return;
+    }
+
+    if (selected == deleteAction) {
+        connectionBlocks_.erase(it);
+        emitConnectionBlocksChanged();
+        update();
+        return;
+    }
+
+    ConnectionBlockScheduleDialog dialog(it->intervals, this);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    it->intervals = dialog.intervals();
+    emitConnectionBlocksChanged();
+    update();
+}
+
 void ScenarioCanvasWidget::emitPlacementsChanged() {
     if (placementsChangedHandler_) {
         placementsChangedHandler_(placements_);
+    }
+}
+
+void ScenarioCanvasWidget::emitConnectionBlocksChanged() {
+    if (connectionBlocksChangedHandler_) {
+        connectionBlocksChangedHandler_(connectionBlocks_);
     }
 }
 
@@ -810,6 +1214,9 @@ void ScenarioCanvasWidget::setToolMode(ToolMode mode) {
     }
     if (groupToolButton_ != nullptr) {
         groupToolButton_->setChecked(mode == ToolMode::GroupPlacement);
+    }
+    if (blockDoorToolButton_ != nullptr) {
+        blockDoorToolButton_->setChecked(mode == ToolMode::BlockDoor);
     }
     if (groupCountLabel_ != nullptr) {
         groupCountLabel_->setVisible(mode == ToolMode::GroupPlacement);
@@ -855,6 +1262,7 @@ void ScenarioCanvasWidget::setupToolbars() {
     selectToolButton_ = makeButton(makeToolIcon("select", QColor("#16202b")), "Select");
     individualToolButton_ = makeButton(makeToolIcon("individual", QColor("#1f5fae")), "Add Individual Occupant");
     groupToolButton_ = makeButton(makeToolIcon("group", QColor("#1f5fae")), "Add Occupant Group");
+    blockDoorToolButton_ = makeButton(makeToolIcon("block", QColor("#c0392b")), "block door");
     topLayout->addStretch(1);
 
     groupCountLabel_ = new QLabel("Group count", propertyPanel_);
@@ -870,45 +1278,10 @@ void ScenarioCanvasWidget::setupToolbars() {
     connect(selectToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::Select); });
     connect(individualToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::IndividualPlacement); });
     connect(groupToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::GroupPlacement); });
+    connect(blockDoorToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::BlockDoor); });
 
     setToolMode(ToolMode::Select);
     repositionToolbars();
-}
-
-bool ScenarioCanvasWidget::switchFloorByWheel(QWheelEvent* event) {
-    if (event == nullptr || !(event->modifiers() & Qt::ControlModifier) || layout_.floors.size() <= 1) {
-        return false;
-    }
-
-    const auto delta = event->angleDelta().y() != 0 ? event->angleDelta().y() : event->pixelDelta().y();
-    if (delta == 0) {
-        return false;
-    }
-
-    int currentIndex = 0;
-    for (std::size_t index = 0; index < layout_.floors.size(); ++index) {
-        if (QString::fromStdString(layout_.floors[index].id) == currentFloorId_) {
-            currentIndex = static_cast<int>(index);
-            break;
-        }
-    }
-
-    const auto nextIndex = std::clamp(
-        currentIndex + (delta > 0 ? 1 : -1),
-        0,
-        static_cast<int>(layout_.floors.size() - 1));
-    const auto nextFloorId = QString::fromStdString(layout_.floors[static_cast<std::size_t>(nextIndex)].id);
-    if (!nextFloorId.isEmpty() && nextFloorId != currentFloorId_) {
-        currentFloorId_ = nextFloorId;
-        focusedLayoutElementId_.clear();
-        focusedPlacementId_.clear();
-        dragging_ = false;
-        camera_.reset();
-        update();
-    }
-
-    event->accept();
-    return true;
 }
 
 }  // namespace safecrowd::application

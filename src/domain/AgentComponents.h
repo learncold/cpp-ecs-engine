@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -34,6 +35,10 @@ struct EvacuationRoute {
     double previousDistanceToWaypoint{0.0};
     double stalledSeconds{0.0};
     double replanCooldownSeconds{0.0};
+    double nextExitReplanSeconds{0.0};
+    double nextSegmentReplanSeconds{0.0};
+    std::uint64_t observedLayoutRevision{0};
+    bool noExitAvailable{false};
     std::string destinationZoneId{};
     std::string currentFloorId{};
     std::string displayFloorId{};

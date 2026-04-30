@@ -144,6 +144,10 @@ void ScenarioSimulationRunner::initializeRuntime() {
     });
     runtime_->addSystem(std::make_unique<ScenarioAgentSpawnSystem>(createAgentSeeds(), timeLimitSeconds_));
     runtime_->addSystem(
+        makeScenarioControlSystem(layout_, scenario_.control.connectionBlocks),
+        {.phase = engine::UpdatePhase::PreSimulation,
+         .triggerPolicy = engine::TriggerPolicy::EveryFrame});
+    runtime_->addSystem(
         std::make_unique<ScenarioSpatialIndexSystem>(1.0),
         {.phase = engine::UpdatePhase::PreSimulation,
          .triggerPolicy = engine::TriggerPolicy::EveryFrame});
@@ -261,44 +265,7 @@ ScenarioSimulationRunner::RoutePlan ScenarioSimulationRunner::routePlan(const Po
 }
 
 std::optional<std::vector<std::string>> ScenarioSimulationRunner::zoneRouteToExit(const std::string& startZoneId) const {
-    if (startZoneId.empty()) {
-        return std::nullopt;
-    }
-    if (const auto* startZone = findCachedZone(layoutCache_, startZoneId); startZone != nullptr && startZone->kind == ZoneKind::Exit) {
-        return std::vector<std::string>{startZoneId};
-    }
-
-    std::unordered_map<std::string, std::string> previous;
-    std::unordered_set<std::string> visited;
-    std::deque<std::string> queue;
-    visited.insert(startZoneId);
-    queue.push_back(startZoneId);
-
-    while (!queue.empty()) {
-        const auto current = queue.front();
-        queue.pop_front();
-        if (const auto* zone = findCachedZone(layoutCache_, current); zone != nullptr && zone->kind == ZoneKind::Exit) {
-            std::vector<std::string> route;
-            for (auto zoneId = current; !zoneId.empty();) {
-                route.push_back(zoneId);
-                const auto prev = previous.find(zoneId);
-                zoneId = prev == previous.end() ? std::string{} : prev->second;
-            }
-            std::reverse(route.begin(), route.end());
-            return route;
-        }
-
-        for (const auto& traversal : cachedTraversalsForZone(layoutCache_, current)) {
-            const auto& next = traversal.nextZoneId;
-            if (!next.empty() && !visited.contains(next)) {
-                visited.insert(next);
-                previous[next] = current;
-                queue.push_back(next);
-            }
-        }
-    }
-
-    return std::nullopt;
+    return zoneRouteToNearestExit(layoutCache_, startZoneId);
 }
 
 std::string ScenarioSimulationRunner::zoneAt(const Point2D& point, const std::string& floorId) const {

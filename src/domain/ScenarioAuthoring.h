@@ -28,8 +28,20 @@ struct OperationalEventDraft {
     std::string targetSummary{};
 };
 
+struct ConnectionBlockIntervalDraft {
+    double startSeconds{0.0};
+    double endSeconds{0.0};
+};
+
+struct ConnectionBlockDraft {
+    std::string id{};
+    std::string connectionId{};
+    std::vector<ConnectionBlockIntervalDraft> intervals{};
+};
+
 struct ControlPlan {
     std::vector<OperationalEventDraft> events{};
+    std::vector<ConnectionBlockDraft> connectionBlocks{};
 };
 
 struct ExecutionConfig {

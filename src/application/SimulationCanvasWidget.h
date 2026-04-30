@@ -31,6 +31,7 @@ public:
     ~SimulationCanvasWidget() override;
 
     void setFrame(safecrowd::domain::SimulationFrame frame);
+    void setConnectionBlocks(std::vector<safecrowd::domain::ConnectionBlockDraft> blocks);
     void setHotspotOverlay(std::vector<safecrowd::domain::ScenarioCongestionHotspot> hotspots);
     void setBottleneckOverlay(std::vector<safecrowd::domain::ScenarioBottleneckMetric> bottlenecks);
     void focusHotspot(std::size_t index);
@@ -54,15 +55,16 @@ private:
     void refreshLayoutCache(const LayoutCanvasBounds& bounds);
     QRectF previewViewport() const;
     void focusWorldPoint(const safecrowd::domain::Point2D& point, double zoom);
+    void drawConnectionBlockOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawHotspotOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawBottleneckOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void setCurrentFloorId(std::string floorId, bool manualSelection);
     void setupFloorSelector();
-    bool switchFloorByWheel(QWheelEvent* event);
     void repositionFloorSelector();
 
     safecrowd::domain::FacilityLayout2D layout_{};
     safecrowd::domain::SimulationFrame frame_{};
+    std::vector<safecrowd::domain::ConnectionBlockDraft> connectionBlocks_{};
     std::vector<safecrowd::domain::ScenarioCongestionHotspot> hotspotOverlay_{};
     std::vector<safecrowd::domain::ScenarioBottleneckMetric> bottleneckOverlay_{};
     std::optional<std::size_t> focusedHotspotIndex_{};
