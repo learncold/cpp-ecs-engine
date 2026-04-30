@@ -113,8 +113,8 @@ private:
     bool roomAutoWallsEnabled_{true};
     bool doorCreatesLeaf_{true};
     bool verticalLinkCreatesRamp_{false};
-    safecrowd::domain::StairEntryDirection lowerStairEntryDirection_{safecrowd::domain::StairEntryDirection::West};
-    safecrowd::domain::StairEntryDirection upperStairEntryDirection_{safecrowd::domain::StairEntryDirection::East};
+    safecrowd::domain::StairEntryDirection stairEntryDirection_{safecrowd::domain::StairEntryDirection::West};
+    safecrowd::domain::StairEntryDirection destinationStairEntryDirection_{safecrowd::domain::StairEntryDirection::East};
     double doorWidth_{1.2};
     QString currentFloorId_{};
     QFrame* toolbarCorner_{nullptr};
@@ -125,10 +125,10 @@ private:
     QDoubleSpinBox* doorWidthSpinBox_{nullptr};
     QCheckBox* doorLeafCheckBox_{nullptr};
     QComboBox* verticalTargetFloorComboBox_{nullptr};
-    QLabel* lowerStairEntryLabel_{nullptr};
-    QComboBox* lowerStairEntryComboBox_{nullptr};
-    QLabel* upperStairEntryLabel_{nullptr};
-    QComboBox* upperStairEntryComboBox_{nullptr};
+    QLabel* stairEntryLabel_{nullptr};
+    QComboBox* stairEntryComboBox_{nullptr};
+    QLabel* destinationStairEntryLabel_{nullptr};
+    QComboBox* destinationStairEntryComboBox_{nullptr};
     QCheckBox* rampLinkCheckBox_{nullptr};
     QComboBox* floorComboBox_{nullptr};
     QToolButton* selectToolButton_{nullptr};

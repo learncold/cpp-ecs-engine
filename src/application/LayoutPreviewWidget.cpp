@@ -1926,8 +1926,10 @@ void LayoutPreviewWidget::createVerticalLink(const QPointF& startWorld, const QP
         return it == layout.floors.end() ? 0.0 : it->elevationMeters;
     };
     const bool sourceIsLower = floorElevation(sourceFloorId) <= floorElevation(targetFloorId);
-    const auto sourceEntryDirection = sourceIsLower ? lowerStairEntryDirection_ : upperStairEntryDirection_;
-    const auto targetEntryDirection = sourceIsLower ? upperStairEntryDirection_ : lowerStairEntryDirection_;
+    const auto sourceEntryDirection = stairEntryDirection_;
+    const auto targetEntryDirection = destinationStairEntryDirection_;
+    const auto lowerEntryDirection = sourceIsLower ? sourceEntryDirection : targetEntryDirection;
+    const auto upperEntryDirection = sourceIsLower ? targetEntryDirection : sourceEntryDirection;
     const auto sourceEntrySpan = entrySpanForRectangle(rectangle, sourceEntryDirection);
     const auto targetEntrySpan = entrySpanForRectangle(rectangle, targetEntryDirection);
     const auto sourceOutsideSample = entryOutsideSample(rectangle, sourceEntryDirection);
@@ -1996,8 +1998,8 @@ void LayoutPreviewWidget::createVerticalLink(const QPointF& startWorld, const QP
         .directionality = safecrowd::domain::TravelDirection::Bidirectional,
         .isStair = !verticalLinkCreatesRamp_,
         .isRamp = verticalLinkCreatesRamp_,
-        .lowerEntryDirection = lowerStairEntryDirection_,
-        .upperEntryDirection = upperStairEntryDirection_,
+        .lowerEntryDirection = lowerEntryDirection,
+        .upperEntryDirection = upperEntryDirection,
         .centerSpan = span,
     });
 
@@ -2502,21 +2504,21 @@ void LayoutPreviewWidget::setupToolbars() {
     verticalTargetFloorComboBox_->setToolTip("Target floor");
     propertyLayout->addWidget(verticalTargetFloorComboBox_);
 
-    lowerStairEntryLabel_ = new QLabel("Lower entry", propertyPanel_);
-    propertyLayout->addWidget(lowerStairEntryLabel_);
-    lowerStairEntryComboBox_ = new QComboBox(propertyPanel_);
-    lowerStairEntryComboBox_->setMinimumWidth(118);
-    lowerStairEntryComboBox_->setToolTip("Lower-floor stair entry side");
-    populateStairEntryCombo(*lowerStairEntryComboBox_, lowerStairEntryDirection_);
-    propertyLayout->addWidget(lowerStairEntryComboBox_);
+    stairEntryLabel_ = new QLabel("Entry", propertyPanel_);
+    propertyLayout->addWidget(stairEntryLabel_);
+    stairEntryComboBox_ = new QComboBox(propertyPanel_);
+    stairEntryComboBox_->setMinimumWidth(118);
+    stairEntryComboBox_->setToolTip("Entry side on the current floor");
+    populateStairEntryCombo(*stairEntryComboBox_, stairEntryDirection_);
+    propertyLayout->addWidget(stairEntryComboBox_);
 
-    upperStairEntryLabel_ = new QLabel("Upper entry", propertyPanel_);
-    propertyLayout->addWidget(upperStairEntryLabel_);
-    upperStairEntryComboBox_ = new QComboBox(propertyPanel_);
-    upperStairEntryComboBox_->setMinimumWidth(118);
-    upperStairEntryComboBox_->setToolTip("Upper-floor stair entry side");
-    populateStairEntryCombo(*upperStairEntryComboBox_, upperStairEntryDirection_);
-    propertyLayout->addWidget(upperStairEntryComboBox_);
+    destinationStairEntryLabel_ = new QLabel("Destination entry", propertyPanel_);
+    propertyLayout->addWidget(destinationStairEntryLabel_);
+    destinationStairEntryComboBox_ = new QComboBox(propertyPanel_);
+    destinationStairEntryComboBox_->setMinimumWidth(118);
+    destinationStairEntryComboBox_->setToolTip("Entry side on the destination floor");
+    populateStairEntryCombo(*destinationStairEntryComboBox_, destinationStairEntryDirection_);
+    propertyLayout->addWidget(destinationStairEntryComboBox_);
 
     rampLinkCheckBox_ = new QCheckBox("Ramp", propertyPanel_);
     rampLinkCheckBox_->setChecked(verticalLinkCreatesRamp_);
@@ -2593,16 +2595,16 @@ void LayoutPreviewWidget::setupToolbars() {
     connect(rampLinkCheckBox_, &QCheckBox::toggled, this, [this](bool checked) {
         verticalLinkCreatesRamp_ = checked;
     });
-    connect(lowerStairEntryComboBox_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int index) {
-        if (index >= 0 && lowerStairEntryComboBox_ != nullptr) {
-            lowerStairEntryDirection_ = static_cast<safecrowd::domain::StairEntryDirection>(
-                lowerStairEntryComboBox_->itemData(index).toInt());
+    connect(stairEntryComboBox_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int index) {
+        if (index >= 0 && stairEntryComboBox_ != nullptr) {
+            stairEntryDirection_ = static_cast<safecrowd::domain::StairEntryDirection>(
+                stairEntryComboBox_->itemData(index).toInt());
         }
     });
-    connect(upperStairEntryComboBox_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int index) {
-        if (index >= 0 && upperStairEntryComboBox_ != nullptr) {
-            upperStairEntryDirection_ = static_cast<safecrowd::domain::StairEntryDirection>(
-                upperStairEntryComboBox_->itemData(index).toInt());
+    connect(destinationStairEntryComboBox_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int index) {
+        if (index >= 0 && destinationStairEntryComboBox_ != nullptr) {
+            destinationStairEntryDirection_ = static_cast<safecrowd::domain::StairEntryDirection>(
+                destinationStairEntryComboBox_->itemData(index).toInt());
         }
     });
 
@@ -2621,10 +2623,10 @@ void LayoutPreviewWidget::refreshPropertyPanel() {
         || doorWidthSpinBox_ == nullptr
         || doorLeafCheckBox_ == nullptr
         || verticalTargetFloorComboBox_ == nullptr
-        || lowerStairEntryLabel_ == nullptr
-        || lowerStairEntryComboBox_ == nullptr
-        || upperStairEntryLabel_ == nullptr
-        || upperStairEntryComboBox_ == nullptr
+        || stairEntryLabel_ == nullptr
+        || stairEntryComboBox_ == nullptr
+        || destinationStairEntryLabel_ == nullptr
+        || destinationStairEntryComboBox_ == nullptr
         || rampLinkCheckBox_ == nullptr) {
         return;
     }
@@ -2636,10 +2638,10 @@ void LayoutPreviewWidget::refreshPropertyPanel() {
     doorWidthSpinBox_->setVisible(showDoorOptions);
     doorLeafCheckBox_->setVisible(showDoorOptions);
     verticalTargetFloorComboBox_->setVisible(showVerticalOptions);
-    lowerStairEntryLabel_->setVisible(showVerticalOptions);
-    lowerStairEntryComboBox_->setVisible(showVerticalOptions);
-    upperStairEntryLabel_->setVisible(showVerticalOptions);
-    upperStairEntryComboBox_->setVisible(showVerticalOptions);
+    stairEntryLabel_->setVisible(showVerticalOptions);
+    stairEntryComboBox_->setVisible(showVerticalOptions);
+    destinationStairEntryLabel_->setVisible(showVerticalOptions);
+    destinationStairEntryComboBox_->setVisible(showVerticalOptions);
     rampLinkCheckBox_->setVisible(showVerticalOptions);
     propertyPanel_->setVisible(importResult_.layout.has_value() && (showRoomWallsOption || showDoorOptions || showVerticalOptions));
 }
