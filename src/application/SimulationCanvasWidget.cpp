@@ -6,10 +6,14 @@
 
 #include <QCoreApplication>
 #include <QEvent>
+#include <QFrame>
+#include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPushButton>
 #include <QRadialGradient>
+#include <QResizeEvent>
 #include <QWheelEvent>
 
 namespace safecrowd::application {
@@ -24,6 +28,28 @@ constexpr double kBottleneckFocusZoom = 2.4;
 constexpr int kHotspotMinCoreAlpha = 72;
 constexpr int kHotspotMaxCoreAlpha = 190;
 
+QPushButton* createViewControlButton(const QString& text, const QString& tooltip, QWidget* parent) {
+    auto* button = new QPushButton(text, parent);
+    button->setFixedSize(text == "Fit" ? QSize(42, 30) : QSize(30, 30));
+    button->setCursor(Qt::PointingHandCursor);
+    button->setToolTip(tooltip);
+    button->setAccessibleName(tooltip);
+    button->setStyleSheet(
+        "QPushButton {"
+        " background: #ffffff;"
+        " border: 1px solid #d7e0ea;"
+        " border-radius: 8px;"
+        " color: #16202b;"
+        " font-weight: 700;"
+        " padding: 0;"
+        "}"
+        "QPushButton:hover {"
+        " background: #eef3f8;"
+        " border-color: #b8c6d6;"
+        "}");
+    return button;
+}
+
 }  // namespace
 
 SimulationCanvasWidget::SimulationCanvasWidget(safecrowd::domain::FacilityLayout2D layout, QWidget* parent)
@@ -32,8 +58,11 @@ SimulationCanvasWidget::SimulationCanvasWidget(safecrowd::domain::FacilityLayout
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
     setMinimumSize(520, 360);
+    setCursor(Qt::OpenHandCursor);
     setStyleSheet("QWidget { background: #f4f7fb; }");
+    camera_.setPrimaryButtonPanEnabled(true);
     layoutBounds_ = collectLayoutCanvasBounds(layout_);
+    createViewControls();
     QCoreApplication::instance()->installEventFilter(this);
 }
 
@@ -109,9 +138,7 @@ void SimulationCanvasWidget::keyReleaseEvent(QKeyEvent* event) {
 
 void SimulationCanvasWidget::mouseDoubleClickEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton) {
-        camera_.reset();
-        layoutCacheValid_ = false;
-        update();
+        resetView();
         event->accept();
         return;
     }
@@ -120,7 +147,7 @@ void SimulationCanvasWidget::mouseDoubleClickEvent(QMouseEvent* event) {
 
 void SimulationCanvasWidget::mouseMoveEvent(QMouseEvent* event) {
     if (camera_.updatePan(event)) {
-        layoutCacheValid_ = false;
+        invalidateLayoutCache();
         update();
         return;
     }
@@ -130,6 +157,7 @@ void SimulationCanvasWidget::mouseMoveEvent(QMouseEvent* event) {
 void SimulationCanvasWidget::mousePressEvent(QMouseEvent* event) {
     setFocus(Qt::MouseFocusReason);
     if (camera_.beginPan(event)) {
+        setCursor(Qt::ClosedHandCursor);
         return;
     }
     QWidget::mousePressEvent(event);
@@ -137,6 +165,7 @@ void SimulationCanvasWidget::mousePressEvent(QMouseEvent* event) {
 
 void SimulationCanvasWidget::mouseReleaseEvent(QMouseEvent* event) {
     if (camera_.finishPan(event)) {
+        setCursor(Qt::OpenHandCursor);
         return;
     }
     QWidget::mouseReleaseEvent(event);
@@ -176,6 +205,11 @@ void SimulationCanvasWidget::paintEvent(QPaintEvent* event) {
     }
 }
 
+void SimulationCanvasWidget::resizeEvent(QResizeEvent* event) {
+    QWidget::resizeEvent(event);
+    positionViewControls();
+}
+
 void SimulationCanvasWidget::wheelEvent(QWheelEvent* event) {
     const auto bounds = collectBounds();
     if (!bounds.has_value()) {
@@ -183,11 +217,88 @@ void SimulationCanvasWidget::wheelEvent(QWheelEvent* event) {
         return;
     }
     if (camera_.zoomAt(event, *bounds, previewViewport())) {
-        layoutCacheValid_ = false;
+        invalidateLayoutCache();
         update();
         return;
     }
     QWidget::wheelEvent(event);
+}
+
+void SimulationCanvasWidget::createViewControls() {
+    viewControls_ = new QFrame(this);
+    viewControls_->setObjectName("simulationViewControls");
+    viewControls_->setStyleSheet(
+        "#simulationViewControls {"
+        " background: rgba(255, 255, 255, 230);"
+        " border: 1px solid #d7e0ea;"
+        " border-radius: 12px;"
+        "}"
+    );
+    auto* layout = new QHBoxLayout(viewControls_);
+    layout->setContentsMargins(6, 6, 6, 6);
+    layout->setSpacing(6);
+
+    auto* zoomInButton = createViewControlButton("+", "Zoom in", viewControls_);
+    auto* zoomOutButton = createViewControlButton("-", "Zoom out", viewControls_);
+    auto* fitButton = createViewControlButton("Fit", "Fit to view", viewControls_);
+    layout->addWidget(zoomInButton);
+    layout->addWidget(zoomOutButton);
+    layout->addWidget(fitButton);
+
+    connect(zoomInButton, &QPushButton::clicked, this, [this]() {
+        zoomAtCanvasPoint(rect().center(), 1.2);
+    });
+    connect(zoomOutButton, &QPushButton::clicked, this, [this]() {
+        zoomAtCanvasPoint(rect().center(), 1.0 / 1.2);
+    });
+    connect(fitButton, &QPushButton::clicked, this, [this]() {
+        resetView();
+    });
+
+    viewControls_->adjustSize();
+    positionViewControls();
+}
+
+void SimulationCanvasWidget::positionViewControls() {
+    if (viewControls_ == nullptr) {
+        return;
+    }
+
+    viewControls_->adjustSize();
+    const int margin = 14;
+    viewControls_->move(width() - viewControls_->width() - margin, margin);
+    viewControls_->raise();
+}
+
+void SimulationCanvasWidget::resetView() {
+    camera_.reset();
+    invalidateLayoutCache();
+    update();
+}
+
+void SimulationCanvasWidget::zoomAtCanvasPoint(const QPointF& anchorPoint, double factor) {
+    const auto bounds = collectBounds();
+    if (!bounds.has_value() || factor <= 0.0) {
+        return;
+    }
+
+    const auto viewport = previewViewport();
+    if (viewport.width() <= 0.0 || viewport.height() <= 0.0) {
+        return;
+    }
+
+    const LayoutCanvasTransform currentTransform(*bounds, viewport, camera_.zoom(), camera_.panOffset());
+    const auto anchorWorld = currentTransform.unmap(anchorPoint);
+    camera_.setZoom(std::clamp(camera_.zoom() * factor, 0.1, 50.0));
+
+    const LayoutCanvasTransform updatedTransform(*bounds, viewport, camera_.zoom(), camera_.panOffset());
+    camera_.setPanOffset(camera_.panOffset() + anchorPoint - updatedTransform.map(anchorWorld));
+    invalidateLayoutCache();
+    update();
+}
+
+void SimulationCanvasWidget::invalidateLayoutCache() {
+    layoutCacheValid_ = false;
 }
 
 std::optional<LayoutCanvasBounds> SimulationCanvasWidget::collectBounds() const {
@@ -242,7 +353,7 @@ void SimulationCanvasWidget::focusWorldPoint(const safecrowd::domain::Point2D& p
 
     const LayoutCanvasTransform transform(*bounds, viewport, camera_.zoom(), {});
     camera_.setPanOffset(viewport.center() - transform.map(point));
-    layoutCacheValid_ = false;
+    invalidateLayoutCache();
     update();
 }
 

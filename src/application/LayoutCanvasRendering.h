@@ -76,6 +76,10 @@ public:
         panOffset_ = panOffset;
     }
 
+    void setPrimaryButtonPanEnabled(bool enabled) noexcept {
+        primaryButtonPanEnabled_ = enabled;
+    }
+
     bool panning() const noexcept {
         return panning_;
     }
@@ -87,6 +91,7 @@ private:
     Qt::MouseButton panButton_{Qt::NoButton};
     bool panning_{false};
     bool spacePressed_{false};
+    bool primaryButtonPanEnabled_{false};
 };
 
 void includeLayoutCanvasPoint(LayoutCanvasBounds& bounds, const safecrowd::domain::Point2D& point);
