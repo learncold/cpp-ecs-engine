@@ -5,11 +5,17 @@
 #include <utility>
 
 #include <QCoreApplication>
+#include <QComboBox>
 #include <QEvent>
+#include <QFrame>
+#include <QHBoxLayout>
 #include <QKeyEvent>
+#include <QLabel>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QRadialGradient>
+#include <QResizeEvent>
+#include <QSignalBlocker>
 #include <QWheelEvent>
 
 namespace safecrowd::application {
@@ -23,6 +29,7 @@ constexpr double kHotspotFocusZoom = 2.8;
 constexpr double kBottleneckFocusZoom = 2.4;
 constexpr int kHotspotMinCoreAlpha = 72;
 constexpr int kHotspotMaxCoreAlpha = 190;
+constexpr int kFloorSelectorMargin = 14;
 
 std::string defaultFloorId(const safecrowd::domain::FacilityLayout2D& layout) {
     if (!layout.floors.empty() && !layout.floors.front().id.empty()) {
@@ -47,6 +54,7 @@ SimulationCanvasWidget::SimulationCanvasWidget(safecrowd::domain::FacilityLayout
     currentFloorId_ = defaultFloorId(layout_);
     layoutBounds_ = collectLayoutCanvasBounds(layout_, currentFloorId_);
     QCoreApplication::instance()->installEventFilter(this);
+    setupFloorSelector();
 }
 
 SimulationCanvasWidget::~SimulationCanvasWidget() {
@@ -63,11 +71,11 @@ void SimulationCanvasWidget::setFrame(safecrowd::domain::SimulationFrame frame) 
     const auto hasAgentOnCurrentFloor = std::any_of(frame_.agents.begin(), frame_.agents.end(), [this](const auto& agent) {
         return matchesFloor(agent.floorId, currentFloorId_);
     });
-    if (!hasAgentOnCurrentFloor && firstAgentFloor != frame_.agents.end() && firstAgentFloor->floorId != currentFloorId_) {
-        currentFloorId_ = firstAgentFloor->floorId;
-        layoutBounds_ = collectLayoutCanvasBounds(layout_, currentFloorId_);
-        layoutCacheValid_ = false;
-        camera_.reset();
+    if (!manualFloorSelection_
+        && !hasAgentOnCurrentFloor
+        && firstAgentFloor != frame_.agents.end()
+        && firstAgentFloor->floorId != currentFloorId_) {
+        setCurrentFloorId(firstAgentFloor->floorId, false);
     }
     update();
 }
@@ -201,6 +209,11 @@ void SimulationCanvasWidget::paintEvent(QPaintEvent* event) {
         painter.setBrush(QColor("#1f5fae"));
         painter.drawEllipse(origin, kAgentMarkerRadius, kAgentMarkerRadius);
     }
+}
+
+void SimulationCanvasWidget::resizeEvent(QResizeEvent* event) {
+    QWidget::resizeEvent(event);
+    repositionFloorSelector();
 }
 
 void SimulationCanvasWidget::wheelEvent(QWheelEvent* event) {
@@ -358,6 +371,90 @@ void SimulationCanvasWidget::drawBottleneckOverlay(QPainter& painter, const Layo
             transform.map(bottleneckOverlay_[index].passage.end));
     }
     painter.restore();
+}
+
+void SimulationCanvasWidget::setCurrentFloorId(std::string floorId, bool manualSelection) {
+    if (floorId == currentFloorId_ && manualSelection == manualFloorSelection_) {
+        return;
+    }
+
+    currentFloorId_ = std::move(floorId);
+    manualFloorSelection_ = manualSelection;
+    layoutBounds_ = collectLayoutCanvasBounds(layout_, currentFloorId_);
+    layoutCacheValid_ = false;
+    camera_.reset();
+
+    if (floorComboBox_ != nullptr) {
+        const auto index = floorComboBox_->findData(QString::fromStdString(currentFloorId_));
+        if (index >= 0 && floorComboBox_->currentIndex() != index) {
+            const QSignalBlocker blocker(floorComboBox_);
+            floorComboBox_->setCurrentIndex(index);
+        }
+    }
+    update();
+}
+
+void SimulationCanvasWidget::setupFloorSelector() {
+    if (layout_.floors.size() <= 1) {
+        return;
+    }
+
+    floorSelectorFrame_ = new QFrame(this);
+    floorSelectorFrame_->setObjectName("simulationFloorSelector");
+    floorSelectorFrame_->setStyleSheet(
+        "QFrame#simulationFloorSelector {"
+        " background: rgba(255, 255, 255, 238);"
+        " border: 1px solid #d8e2ee;"
+        " border-radius: 10px;"
+        "}"
+        "QLabel { color: #4f5d6b; background: transparent; font-size: 12px; }"
+        "QComboBox {"
+        " background: #ffffff;"
+        " border: 1px solid #cad6e3;"
+        " border-radius: 7px;"
+        " padding: 4px 24px 4px 8px;"
+        " color: #16202b;"
+        " min-width: 116px;"
+        "}");
+
+    auto* layout = new QHBoxLayout(floorSelectorFrame_);
+    layout->setContentsMargins(10, 8, 10, 8);
+    layout->setSpacing(8);
+    auto* label = new QLabel("Floor", floorSelectorFrame_);
+    floorComboBox_ = new QComboBox(floorSelectorFrame_);
+    for (const auto& floor : layout_.floors) {
+        const auto id = QString::fromStdString(floor.id);
+        const auto labelText = floor.label.empty()
+            ? id
+            : QString("%1 (%2)").arg(QString::fromStdString(floor.label), id);
+        floorComboBox_->addItem(labelText, id);
+    }
+    const auto currentIndex = floorComboBox_->findData(QString::fromStdString(currentFloorId_));
+    if (currentIndex >= 0) {
+        floorComboBox_->setCurrentIndex(currentIndex);
+    }
+    layout->addWidget(label);
+    layout->addWidget(floorComboBox_);
+
+    connect(floorComboBox_, &QComboBox::currentIndexChanged, this, [this](int index) {
+        if (floorComboBox_ == nullptr || index < 0) {
+            return;
+        }
+        setCurrentFloorId(floorComboBox_->itemData(index).toString().toStdString(), true);
+    });
+
+    floorSelectorFrame_->adjustSize();
+    repositionFloorSelector();
+    floorSelectorFrame_->raise();
+}
+
+void SimulationCanvasWidget::repositionFloorSelector() {
+    if (floorSelectorFrame_ == nullptr) {
+        return;
+    }
+    floorSelectorFrame_->adjustSize();
+    floorSelectorFrame_->move(kFloorSelectorMargin, kFloorSelectorMargin);
+    floorSelectorFrame_->raise();
 }
 
 }  // namespace safecrowd::application

@@ -14,10 +14,13 @@
 #include "domain/ScenarioSimulationRunner.h"
 
 class QEvent;
+class QComboBox;
+class QFrame;
 class QKeyEvent;
 class QMouseEvent;
 class QPainter;
 class QPaintEvent;
+class QResizeEvent;
 class QWheelEvent;
 
 namespace safecrowd::application {
@@ -42,6 +45,7 @@ protected:
     void mousePressEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
     void paintEvent(QPaintEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
 
 private:
@@ -52,6 +56,9 @@ private:
     void focusWorldPoint(const safecrowd::domain::Point2D& point, double zoom);
     void drawHotspotOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawBottleneckOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
+    void setCurrentFloorId(std::string floorId, bool manualSelection);
+    void setupFloorSelector();
+    void repositionFloorSelector();
 
     safecrowd::domain::FacilityLayout2D layout_{};
     safecrowd::domain::SimulationFrame frame_{};
@@ -62,6 +69,9 @@ private:
     LayoutCanvasCamera camera_{};
     std::optional<LayoutCanvasBounds> layoutBounds_{};
     std::string currentFloorId_{};
+    bool manualFloorSelection_{false};
+    QFrame* floorSelectorFrame_{nullptr};
+    QComboBox* floorComboBox_{nullptr};
     QPixmap layoutCache_{};
     QSize layoutCacheSize_{};
     QPointF layoutCachePan_{};
