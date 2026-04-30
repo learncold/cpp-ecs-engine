@@ -73,6 +73,7 @@ private:
     std::optional<LayoutCanvasBounds> collectBounds() const;
     LayoutCanvasTransform currentTransform(const LayoutCanvasBounds& bounds) const;
     QRectF previewViewport() const;
+    void selectFloorForElement(const QString& elementId);
     safecrowd::domain::Point2D unmapPoint(const QPointF& point) const;
     QString zoneAt(const safecrowd::domain::Point2D& point) const;
     bool placementAreaBlocked(const std::vector<safecrowd::domain::Point2D>& area, int occupantCount) const;
@@ -90,6 +91,7 @@ private:
 
     safecrowd::domain::FacilityLayout2D layout_{};
     std::vector<ScenarioCrowdPlacement> placements_{};
+    QString currentFloorId_{};
     QString focusedLayoutElementId_{};
     QString focusedPlacementId_{};
     ToolMode toolMode_{ToolMode::Select};

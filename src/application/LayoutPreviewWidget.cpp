@@ -35,6 +35,7 @@ constexpr double kConnectionWidth = 1.2;
 constexpr double kConnectionHitTolerance = 10.0;
 constexpr double kDraftMinimumSize = 0.2;
 constexpr double kGeometryEpsilon = 1e-4;
+constexpr double kPolygonCloseTolerancePixels = 12.0;
 constexpr double kMinimumDoorWidth = 0.9;
 constexpr int kTopToolbarHeight = 44;
 constexpr int kPropertyPanelHeight = 42;
@@ -533,6 +534,10 @@ bool pointInPolygon(const safecrowd::domain::Polygon2D& polygon, const QPointF& 
 
 double distanceToLineSegmentWorld(const QPointF& point, const safecrowd::domain::Point2D& start, const safecrowd::domain::Point2D& end) {
     return distanceToSegment(point, QPointF(start.x, start.y), QPointF(end.x, end.y));
+}
+
+double distanceBetweenScreenPoints(const QPointF& lhs, const QPointF& rhs) {
+    return std::hypot(lhs.x() - rhs.x(), lhs.y() - rhs.y());
 }
 
 double distanceToPolygonBoundary(const safecrowd::domain::Polygon2D& polygon, const QPointF& point) {
@@ -1235,6 +1240,18 @@ LayoutPreviewWidget::~LayoutPreviewWidget() {
 }
 
 void LayoutPreviewWidget::focusElement(const QString& elementId) {
+    if (elementId.startsWith("floor:")) {
+        const auto floorId = elementId.mid(QString("floor:").size());
+        if (!floorId.isEmpty()) {
+            currentFloorId_ = floorId;
+            clearSelection();
+            refreshFloorSelector();
+            camera_.reset();
+            update();
+        }
+        return;
+    }
+
     if (importResult_.layout.has_value()) {
         if (containsZone(*importResult_.layout, elementId)) {
             selectFloorForElement(elementId);
@@ -1373,6 +1390,21 @@ void LayoutPreviewWidget::keyPressEvent(QKeyEvent* event) {
         return;
     }
 
+    if (toolMode_ == ToolMode::DrawRoom && roomDrawMode_ == RoomDrawMode::Polygon && drafting_) {
+        if (event->key() == Qt::Key_Escape) {
+            drafting_ = false;
+            roomPolygonDraftPoints_.clear();
+            update();
+            event->accept();
+            return;
+        }
+        if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
+            finishRoomPolygonDraft();
+            event->accept();
+            return;
+        }
+    }
+
     QWidget::keyPressEvent(event);
 }
 
@@ -1385,6 +1417,12 @@ void LayoutPreviewWidget::keyReleaseEvent(QKeyEvent* event) {
 }
 
 void LayoutPreviewWidget::mouseDoubleClickEvent(QMouseEvent* event) {
+    if (toolMode_ == ToolMode::DrawRoom && roomDrawMode_ == RoomDrawMode::Polygon && drafting_) {
+        finishRoomPolygonDraft();
+        event->accept();
+        return;
+    }
+
     QWidget::mouseDoubleClickEvent(event);
     resetView();
 }
@@ -1435,6 +1473,36 @@ void LayoutPreviewWidget::mousePressEvent(QMouseEvent* event) {
             return;
         }
 
+        if (toolMode_ == ToolMode::DrawRoom && roomDrawMode_ == RoomDrawMode::Polygon) {
+            const LayoutTransform transform(*bounds, previewViewport(rect()), camera_.zoom(), camera_.panOffset());
+            const auto world = transform.unmap(event->position());
+            const auto snappedWorld = snapWorldPoint(QPointF(world.x, world.y), transform);
+            if (drafting_ && roomPolygonDraftPoints_.size() >= 3) {
+                const auto firstScreen = transform.map({
+                    .x = roomPolygonDraftPoints_.front().x(),
+                    .y = roomPolygonDraftPoints_.front().y(),
+                });
+                const auto currentScreen = transform.map({.x = snappedWorld.x(), .y = snappedWorld.y()});
+                if (distanceBetweenScreenPoints(firstScreen, currentScreen) <= kPolygonCloseTolerancePixels) {
+                    finishRoomPolygonDraft();
+                    event->accept();
+                    return;
+                }
+            }
+
+            drafting_ = true;
+            draftCurrentWorld_ = snappedWorld;
+            if (roomPolygonDraftPoints_.empty()
+                || distanceBetweenScreenPoints(
+                    transform.map({.x = roomPolygonDraftPoints_.back().x(), .y = roomPolygonDraftPoints_.back().y()}),
+                    transform.map({.x = snappedWorld.x(), .y = snappedWorld.y()})) > 1.0) {
+                roomPolygonDraftPoints_.push_back(snappedWorld);
+            }
+            update();
+            event->accept();
+            return;
+        }
+
         if (toolMode_ != ToolMode::Select && toolMode_ != ToolMode::Delete) {
             const LayoutTransform transform(*bounds, previewViewport(rect()), camera_.zoom(), camera_.panOffset());
             const auto world = transform.unmap(event->position());
@@ -1458,7 +1526,8 @@ void LayoutPreviewWidget::mouseReleaseEvent(QMouseEvent* event) {
         return;
     }
 
-    if (drafting_ && event->button() == Qt::LeftButton) {
+    if (drafting_ && event->button() == Qt::LeftButton
+        && !(toolMode_ == ToolMode::DrawRoom && roomDrawMode_ == RoomDrawMode::Polygon)) {
         drafting_ = false;
         const auto bounds = collectBounds(importResult_, currentFloorId());
         if (bounds.has_value()) {
@@ -1615,21 +1684,45 @@ void LayoutPreviewWidget::paintEvent(QPaintEvent* event) {
         painter.setBrush(QColor(31, 95, 174, 60));
         painter.setPen(QPen(QColor(31, 95, 174), 2.0, Qt::DashLine));
 
-        const safecrowd::domain::Point2D start{draftStartWorld_.x(), draftStartWorld_.y()};
-        const safecrowd::domain::Point2D current{draftCurrentWorld_.x(), draftCurrentWorld_.y()};
-        if (toolMode_ == ToolMode::DrawWall || toolMode_ == ToolMode::DrawDoor) {
-            painter.setBrush(Qt::NoBrush);
-            painter.drawLine(transform.map(start), transform.map(current));
+        if (toolMode_ == ToolMode::DrawRoom && roomDrawMode_ == RoomDrawMode::Polygon) {
+            QPolygonF draftPolygon;
+            for (const auto& point : roomPolygonDraftPoints_) {
+                draftPolygon.append(transform.map({.x = point.x(), .y = point.y()}));
+            }
+            if (!roomPolygonDraftPoints_.empty()) {
+                draftPolygon.append(transform.map({.x = draftCurrentWorld_.x(), .y = draftCurrentWorld_.y()}));
+            }
+
+            painter.setBrush(roomPolygonDraftPoints_.size() >= 3 ? QColor(31, 95, 174, 42) : Qt::NoBrush);
+            if (draftPolygon.size() >= 2) {
+                painter.drawPolyline(draftPolygon);
+            }
+            if (roomPolygonDraftPoints_.size() >= 3) {
+                painter.drawLine(draftPolygon.last(), draftPolygon.first());
+            }
+            painter.setBrush(QColor(31, 95, 174));
+            painter.setPen(Qt::NoPen);
+            for (const auto& point : roomPolygonDraftPoints_) {
+                painter.drawEllipse(transform.map({.x = point.x(), .y = point.y()}), 3.5, 3.5);
+            }
+            painter.setPen(QPen(QColor(31, 95, 174), 2.0, Qt::DashLine));
         } else {
-            const safecrowd::domain::Polygon2D polygon{
-                .outline = {
-                    {.x = std::min(start.x, current.x), .y = std::min(start.y, current.y)},
-                    {.x = std::max(start.x, current.x), .y = std::min(start.y, current.y)},
-                    {.x = std::max(start.x, current.x), .y = std::max(start.y, current.y)},
-                    {.x = std::min(start.x, current.x), .y = std::max(start.y, current.y)},
-                },
-            };
-            painter.drawPath(polygonPath(polygon, transform));
+            const safecrowd::domain::Point2D start{draftStartWorld_.x(), draftStartWorld_.y()};
+            const safecrowd::domain::Point2D current{draftCurrentWorld_.x(), draftCurrentWorld_.y()};
+            if (toolMode_ == ToolMode::DrawWall || toolMode_ == ToolMode::DrawDoor) {
+                painter.setBrush(Qt::NoBrush);
+                painter.drawLine(transform.map(start), transform.map(current));
+            } else {
+                const safecrowd::domain::Polygon2D polygon{
+                    .outline = {
+                        {.x = std::min(start.x, current.x), .y = std::min(start.y, current.y)},
+                        {.x = std::max(start.x, current.x), .y = std::min(start.y, current.y)},
+                        {.x = std::max(start.x, current.x), .y = std::max(start.y, current.y)},
+                        {.x = std::min(start.x, current.x), .y = std::max(start.y, current.y)},
+                    },
+                };
+                painter.drawPath(polygonPath(polygon, transform));
+            }
         }
     }
 
@@ -1722,6 +1815,70 @@ void LayoutPreviewWidget::clearSelection() {
     selectedConnectionId_.clear();
     selectedBarrierId_.clear();
     focusedTargetId_.clear();
+    emitCurrentSelection();
+    update();
+}
+
+void LayoutPreviewWidget::createRoomPolygon(const std::vector<QPointF>& points) {
+    if (!importResult_.layout.has_value() || points.size() < 3) {
+        return;
+    }
+
+    safecrowd::domain::Polygon2D roomPolygon;
+    roomPolygon.outline.reserve(points.size());
+    for (const auto& point : points) {
+        roomPolygon.outline.push_back({.x = point.x(), .y = point.y()});
+    }
+
+    QPolygonF polygonForArea;
+    for (const auto& point : points) {
+        polygonForArea.append(point);
+    }
+    if (polygonArea(polygonForArea) < kDraftMinimumSize) {
+        return;
+    }
+
+    auto& layout = *importResult_.layout;
+    QPainterPath candidatePath = worldPolygonPath(roomPolygon);
+    QPainterPath occupiedRooms;
+    for (const auto& zone : layout.zones) {
+        if (zone.kind != safecrowd::domain::ZoneKind::Room) {
+            continue;
+        }
+        occupiedRooms = occupiedRooms.united(worldPolygonPath(zone.area));
+    }
+
+    auto polygonsToCreate = polygonsFromFillPath(candidatePath.subtracted(occupiedRooms).simplified());
+    if (polygonsToCreate.empty()) {
+        return;
+    }
+
+    QString lastZoneId;
+    for (const auto& polygon : polygonsToCreate) {
+        const auto zoneId = nextZoneId(layout);
+        const auto zoneNumber = static_cast<int>(layout.zones.size()) + 1;
+        const auto floorId = currentFloorId().toStdString();
+        layout.zones.push_back({
+            .id = zoneId.toStdString(),
+            .floorId = floorId,
+            .kind = safecrowd::domain::ZoneKind::Room,
+            .label = QString("Room %1").arg(zoneNumber).toStdString(),
+            .area = polygon,
+            .defaultCapacity = 0u,
+        });
+
+        if (roomAutoWallsEnabled_) {
+            appendAutoWallsForPolygon(layout, polygon, floorId);
+        }
+
+        lastZoneId = zoneId;
+    }
+
+    selectedZoneId_ = lastZoneId;
+    selectedConnectionId_.clear();
+    selectedBarrierId_.clear();
+    focusedTargetId_ = lastZoneId;
+    notifyLayoutEdited();
     emitCurrentSelection();
     update();
 }
@@ -2222,6 +2379,20 @@ void LayoutPreviewWidget::emitCurrentSelection() {
     }
 }
 
+void LayoutPreviewWidget::finishRoomPolygonDraft() {
+    if (!drafting_ || roomPolygonDraftPoints_.size() < 3) {
+        drafting_ = false;
+        roomPolygonDraftPoints_.clear();
+        update();
+        return;
+    }
+
+    auto points = roomPolygonDraftPoints_;
+    drafting_ = false;
+    roomPolygonDraftPoints_.clear();
+    createRoomPolygon(points);
+}
+
 QPointF LayoutPreviewWidget::snapWorldPoint(const QPointF& worldPoint, const LayoutCanvasTransform& transform) const {
     if (!importResult_.layout.has_value()) {
         return worldPoint;
@@ -2420,6 +2591,10 @@ void LayoutPreviewWidget::refreshFloorSelector() {
 }
 
 void LayoutPreviewWidget::setToolMode(ToolMode mode) {
+    if (toolMode_ != mode) {
+        drafting_ = false;
+        roomPolygonDraftPoints_.clear();
+    }
     toolMode_ = mode;
     if (selectToolButton_ != nullptr) {
         selectToolButton_->setChecked(toolMode_ == ToolMode::Select);
@@ -2485,6 +2660,13 @@ void LayoutPreviewWidget::setupToolbars() {
     roomAutoWallsCheckBox_ = new QCheckBox("Auto-create surrounding walls", propertyPanel_);
     roomAutoWallsCheckBox_->setChecked(roomAutoWallsEnabled_);
     propertyLayout->addWidget(roomAutoWallsCheckBox_);
+
+    roomDrawModeComboBox_ = new QComboBox(propertyPanel_);
+    roomDrawModeComboBox_->setMinimumWidth(120);
+    roomDrawModeComboBox_->setToolTip("Room drawing mode");
+    roomDrawModeComboBox_->addItem("Rectangle", static_cast<int>(RoomDrawMode::Rectangle));
+    roomDrawModeComboBox_->addItem("Polygon", static_cast<int>(RoomDrawMode::Polygon));
+    propertyLayout->addWidget(roomDrawModeComboBox_);
 
     doorWidthSpinBox_ = new QDoubleSpinBox(propertyPanel_);
     doorWidthSpinBox_->setDecimals(2);
@@ -2586,6 +2768,15 @@ void LayoutPreviewWidget::setupToolbars() {
     connect(roomAutoWallsCheckBox_, &QCheckBox::toggled, this, [this](bool checked) {
         roomAutoWallsEnabled_ = checked;
     });
+    connect(roomDrawModeComboBox_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int index) {
+        if (index < 0 || roomDrawModeComboBox_ == nullptr) {
+            return;
+        }
+        roomDrawMode_ = static_cast<RoomDrawMode>(roomDrawModeComboBox_->itemData(index).toInt());
+        drafting_ = false;
+        roomPolygonDraftPoints_.clear();
+        update();
+    });
     connect(doorWidthSpinBox_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double value) {
         doorWidth_ = value;
     });
@@ -2620,6 +2811,7 @@ void LayoutPreviewWidget::setupToolbars() {
 void LayoutPreviewWidget::refreshPropertyPanel() {
     if (propertyPanel_ == nullptr
         || roomAutoWallsCheckBox_ == nullptr
+        || roomDrawModeComboBox_ == nullptr
         || doorWidthSpinBox_ == nullptr
         || doorLeafCheckBox_ == nullptr
         || verticalTargetFloorComboBox_ == nullptr
@@ -2635,6 +2827,7 @@ void LayoutPreviewWidget::refreshPropertyPanel() {
     const bool showDoorOptions = toolMode_ == ToolMode::DrawDoor;
     const bool showVerticalOptions = toolMode_ == ToolMode::DrawStair;
     roomAutoWallsCheckBox_->setVisible(showRoomWallsOption);
+    roomDrawModeComboBox_->setVisible(showRoomWallsOption);
     doorWidthSpinBox_->setVisible(showDoorOptions);
     doorLeafCheckBox_->setVisible(showDoorOptions);
     verticalTargetFloorComboBox_->setVisible(showVerticalOptions);

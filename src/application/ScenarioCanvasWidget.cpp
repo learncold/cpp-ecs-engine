@@ -30,6 +30,20 @@ constexpr double kOccupantWorldRadius = 0.25;
 constexpr double kVelocityIndicatorSeconds = 0.75;
 constexpr double kGeometryEpsilon = 1e-9;
 
+bool matchesFloor(const std::string& elementFloorId, const QString& floorId) {
+    return floorId.isEmpty() || elementFloorId.empty() || QString::fromStdString(elementFloorId) == floorId;
+}
+
+QString defaultFloorId(const safecrowd::domain::FacilityLayout2D& layout) {
+    if (!layout.floors.empty() && !layout.floors.front().id.empty()) {
+        return QString::fromStdString(layout.floors.front().id);
+    }
+    if (!layout.levelId.empty()) {
+        return QString::fromStdString(layout.levelId);
+    }
+    return {};
+}
+
 bool pointInRing(const std::vector<safecrowd::domain::Point2D>& ring, const safecrowd::domain::Point2D& point) {
     if (ring.size() < 3) {
         return false;
@@ -173,6 +187,7 @@ ScenarioCanvasWidget::ScenarioCanvasWidget(
     QWidget* parent)
     : QWidget(parent),
       layout_(std::move(layout)) {
+    currentFloorId_ = defaultFloorId(layout_);
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
     setMinimumSize(520, 360);
@@ -197,6 +212,16 @@ void ScenarioCanvasWidget::setPlacementsChangedHandler(std::function<void(const 
 }
 
 void ScenarioCanvasWidget::focusLayoutElement(const QString& elementId) {
+    if (elementId.startsWith("floor:")) {
+        currentFloorId_ = elementId.mid(QString("floor:").size());
+        focusedLayoutElementId_.clear();
+        focusedPlacementId_.clear();
+        camera_.reset();
+        update();
+        return;
+    }
+
+    selectFloorForElement(elementId);
     focusedLayoutElementId_ = elementId;
     focusedPlacementId_.clear();
     update();
@@ -321,7 +346,7 @@ void ScenarioCanvasWidget::paintEvent(QPaintEvent* event) {
 
     drawLayoutCanvasSurface(painter, QRectF(rect()));
 
-    drawFacilityLayoutCanvas(painter, layout_, transform);
+    drawFacilityLayoutCanvas(painter, layout_, transform, currentFloorId_.toStdString());
     drawFocusedLayoutElement(painter, transform);
 
     painter.setPen(Qt::NoPen);
@@ -411,6 +436,9 @@ void ScenarioCanvasWidget::drawFocusedLayoutElement(QPainter& painter, const Lay
     const QColor highlightFill(242, 169, 0, 42);
 
     for (const auto& zone : layout_.zones) {
+        if (!matchesFloor(zone.floorId, currentFloorId_)) {
+            continue;
+        }
         if (QString::fromStdString(zone.id) != focusedLayoutElementId_) {
             continue;
         }
@@ -421,6 +449,9 @@ void ScenarioCanvasWidget::drawFocusedLayoutElement(QPainter& painter, const Lay
     }
 
     for (const auto& connection : layout_.connections) {
+        if (!matchesFloor(connection.floorId, currentFloorId_)) {
+            continue;
+        }
         if (QString::fromStdString(connection.id) != focusedLayoutElementId_) {
             continue;
         }
@@ -431,6 +462,9 @@ void ScenarioCanvasWidget::drawFocusedLayoutElement(QPainter& painter, const Lay
     }
 
     for (const auto& barrier : layout_.barriers) {
+        if (!matchesFloor(barrier.floorId, currentFloorId_)) {
+            continue;
+        }
         if (QString::fromStdString(barrier.id) != focusedLayoutElementId_) {
             continue;
         }
@@ -471,11 +505,44 @@ void ScenarioCanvasWidget::drawFocusedPlacement(QPainter& painter, const LayoutC
 }
 
 std::optional<LayoutCanvasBounds> ScenarioCanvasWidget::collectBounds() const {
-    return collectLayoutCanvasBounds(layout_);
+    return collectLayoutCanvasBounds(layout_, currentFloorId_.toStdString());
 }
 
 LayoutCanvasTransform ScenarioCanvasWidget::currentTransform(const LayoutCanvasBounds& bounds) const {
     return LayoutCanvasTransform(bounds, previewViewport(), camera_.zoom(), camera_.panOffset());
+}
+
+void ScenarioCanvasWidget::selectFloorForElement(const QString& elementId) {
+    auto selectFloor = [&](const std::string& floorId) {
+        if (floorId.empty()) {
+            return;
+        }
+        const auto floorIdText = QString::fromStdString(floorId);
+        if (floorIdText == currentFloorId_) {
+            return;
+        }
+        currentFloorId_ = floorIdText;
+        camera_.reset();
+    };
+
+    for (const auto& zone : layout_.zones) {
+        if (QString::fromStdString(zone.id) == elementId) {
+            selectFloor(zone.floorId);
+            return;
+        }
+    }
+    for (const auto& connection : layout_.connections) {
+        if (QString::fromStdString(connection.id) == elementId) {
+            selectFloor(connection.floorId);
+            return;
+        }
+    }
+    for (const auto& barrier : layout_.barriers) {
+        if (QString::fromStdString(barrier.id) == elementId) {
+            selectFloor(barrier.floorId);
+            return;
+        }
+    }
 }
 
 safecrowd::domain::Point2D ScenarioCanvasWidget::unmapPoint(const QPointF& point) const {
@@ -496,6 +563,9 @@ QRectF ScenarioCanvasWidget::previewViewport() const {
 
 QString ScenarioCanvasWidget::zoneAt(const safecrowd::domain::Point2D& point) const {
     for (const auto& zone : layout_.zones) {
+        if (!matchesFloor(zone.floorId, currentFloorId_)) {
+            continue;
+        }
         if (pointInRing(zone.area.outline, point)) {
             return QString::fromStdString(zone.id);
         }
@@ -505,6 +575,9 @@ QString ScenarioCanvasWidget::zoneAt(const safecrowd::domain::Point2D& point) co
 
 bool ScenarioCanvasWidget::placementPointBlocked(const safecrowd::domain::Point2D& point) const {
     for (const auto& barrier : layout_.barriers) {
+        if (!matchesFloor(barrier.floorId, currentFloorId_)) {
+            continue;
+        }
         if (!barrier.blocksMovement || barrier.geometry.vertices.size() < 2) {
             continue;
         }
@@ -543,6 +616,9 @@ bool ScenarioCanvasWidget::placementAreaBlocked(
 
     if (area.size() >= 4) {
         for (const auto& barrier : layout_.barriers) {
+            if (!matchesFloor(barrier.floorId, currentFloorId_)) {
+                continue;
+            }
             if (!barrier.blocksMovement || barrier.geometry.vertices.size() < 2) {
                 continue;
             }
