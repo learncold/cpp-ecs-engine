@@ -4,6 +4,7 @@
 #include <vector>
 
 #include <QString>
+#include <QStringList>
 #include <QWidget>
 
 #include "application/ScenarioCanvasWidget.h"
@@ -66,6 +67,8 @@ public:
         std::function<void()> backToLayoutReviewHandler,
         QWidget* parent = nullptr);
 
+    [[nodiscard]] InitialState currentState() const;
+
 private:
     void initializeUi(bool promptForScenario);
     void addEventDraft(const QString& name, const QString& trigger, const QString& target);
@@ -77,6 +80,7 @@ private:
     void refreshNavigationPanel();
     void refreshRightPanel();
     void refreshScenarioSwitcher();
+    void returnFromRun(bool showRunPanel);
     void runFirstStagedBaselineScenario();
     void setRightPanelMode(RightPanelMode mode);
     void stageCurrentScenario();
@@ -86,6 +90,16 @@ private:
     QWidget* createRunPanel();
     QWidget* createScenarioPanel();
     QWidget* createTopBarTogglePanel();
+    struct ReadinessStatus {
+        bool hasCurrentScenario{false};
+        bool hasCurrentPopulation{false};
+        bool hasDestinationZone{false};
+        bool hasStagedBaselineScenario{false};
+        bool hasRunnableBaselinePopulation{false};
+        QStringList missingStageItems{};
+        QStringList missingRunItems{};
+    };
+    [[nodiscard]] ReadinessStatus readinessStatus() const;
     ScenarioState* currentScenario();
     const ScenarioState* currentScenario() const;
     const ScenarioState* firstStagedBaselineScenario() const;
@@ -106,6 +120,7 @@ private:
     QComboBox* scenarioSwitcher_{nullptr};
     QLabel* scenarioSummaryLabel_{nullptr};
     QLabel* changesLabel_{nullptr};
+    QLabel* readinessLabel_{nullptr};
     QLabel* stagedScenariosLabel_{nullptr};
     QPushButton* newScenarioButton_{nullptr};
     QPushButton* stageScenarioButton_{nullptr};

@@ -14,6 +14,7 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSizePolicy>
+#include <QStringList>
 #include <QVBoxLayout>
 
 #include "application/ScenarioAuthoringWidget.h"
@@ -35,6 +36,61 @@ QLabel* createLabel(const QString& text, QWidget* parent, ui::FontRole role = ui
 
 QString formatOptionalSeconds(const std::optional<double>& seconds) {
     return seconds.has_value() ? QString("%1 sec").arg(*seconds, 0, 'f', 1) : QString("Pending");
+}
+
+QString zoneLabel(const safecrowd::domain::Zone2D& zone) {
+    const auto id = QString::fromStdString(zone.id);
+    const auto label = QString::fromStdString(zone.label);
+    return label.isEmpty() ? id : QString("%1  -  %2").arg(label, id);
+}
+
+const safecrowd::domain::Zone2D* firstStartZone(const safecrowd::domain::FacilityLayout2D& layout) {
+    const auto it = std::find_if(layout.zones.begin(), layout.zones.end(), [](const auto& zone) {
+        return zone.kind == safecrowd::domain::ZoneKind::Room || zone.kind == safecrowd::domain::ZoneKind::Unknown;
+    });
+    return it == layout.zones.end() ? nullptr : &(*it);
+}
+
+const safecrowd::domain::Zone2D* firstDestinationZone(const safecrowd::domain::FacilityLayout2D& layout) {
+    const auto exitIt = std::find_if(layout.zones.begin(), layout.zones.end(), [](const auto& zone) {
+        return zone.kind == safecrowd::domain::ZoneKind::Exit;
+    });
+    if (exitIt != layout.zones.end()) {
+        return &(*exitIt);
+    }
+    return layout.zones.empty() ? nullptr : &layout.zones.back();
+}
+
+ScenarioAuthoringWidget::ScenarioState scenarioStateFromDraft(
+    const safecrowd::domain::ScenarioDraft& scenario,
+    const safecrowd::domain::FacilityLayout2D& layout) {
+    ScenarioAuthoringWidget::ScenarioState state;
+    state.draft = scenario;
+    state.events = scenario.control.events;
+    state.stagedForRun = true;
+
+    if (const auto* startZone = firstStartZone(layout); startZone != nullptr) {
+        state.startText = zoneLabel(*startZone);
+    }
+    if (const auto* destinationZone = firstDestinationZone(layout); destinationZone != nullptr) {
+        state.destinationText = zoneLabel(*destinationZone);
+    }
+
+    for (const auto& placement : scenario.population.initialPlacements) {
+        ScenarioCrowdPlacement uiPlacement;
+        uiPlacement.id = QString::fromStdString(placement.id);
+        uiPlacement.name = uiPlacement.id;
+        uiPlacement.kind = (placement.targetAgentCount <= 1 && placement.area.outline.size() <= 1)
+            ? ScenarioCrowdPlacementKind::Individual
+            : ScenarioCrowdPlacementKind::Group;
+        uiPlacement.zoneId = QString::fromStdString(placement.zoneId);
+        uiPlacement.area = placement.area.outline;
+        uiPlacement.occupantCount = static_cast<int>(placement.targetAgentCount);
+        uiPlacement.velocity = placement.initialVelocity;
+        state.crowdPlacements.push_back(std::move(uiPlacement));
+    }
+
+    return state;
 }
 
 class EvacuationProgressWidget final : public QWidget {
@@ -159,6 +215,28 @@ QFrame* createMetricCard(const QString& title, const QString& value, QWidget* pa
     return card;
 }
 
+bool allAgentsEvacuated(const safecrowd::domain::SimulationFrame& frame) {
+    return frame.totalAgentCount > 0 && frame.evacuatedAgentCount >= frame.totalAgentCount;
+}
+
+QString completionOutcome(const safecrowd::domain::SimulationFrame& frame) {
+    if (!frame.complete) {
+        return "Stopped before completion";
+    }
+    return allAgentsEvacuated(frame) ? "Evacuation complete" : "Time limit reached";
+}
+
+QString bottleneckSummary(const safecrowd::domain::ScenarioRiskSnapshot& risk) {
+    if (risk.bottlenecks.empty()) {
+        return "None";
+    }
+    const auto& bottleneck = risk.bottlenecks.front();
+    return QString("%1\n%2 nearby, %3 stalled")
+        .arg(QString::fromStdString(bottleneck.label))
+        .arg(static_cast<int>(bottleneck.nearbyAgentCount))
+        .arg(static_cast<int>(bottleneck.stalledAgentCount));
+}
+
 QLabel* createReportSectionHeader(const QString& text, QWidget* parent) {
     auto* label = createLabel(text, parent, ui::FontRole::SectionTitle);
     label->setStyleSheet(ui::mutedTextStyleSheet());
@@ -235,59 +313,18 @@ QWidget* createHotspotLegend(QWidget* parent) {
     return legend;
 }
 
-QString zoneLabel(const safecrowd::domain::Zone2D& zone) {
-    const auto id = QString::fromStdString(zone.id);
-    const auto label = QString::fromStdString(zone.label);
-    return label.isEmpty() ? id : QString("%1  -  %2").arg(label, id);
-}
-
-const safecrowd::domain::Zone2D* firstStartZone(const safecrowd::domain::FacilityLayout2D& layout) {
-    const auto it = std::find_if(layout.zones.begin(), layout.zones.end(), [](const auto& zone) {
-        return zone.kind == safecrowd::domain::ZoneKind::Room || zone.kind == safecrowd::domain::ZoneKind::Unknown;
-    });
-    return it == layout.zones.end() ? nullptr : &(*it);
-}
-
-const safecrowd::domain::Zone2D* firstDestinationZone(const safecrowd::domain::FacilityLayout2D& layout) {
-    const auto exitIt = std::find_if(layout.zones.begin(), layout.zones.end(), [](const auto& zone) {
-        return zone.kind == safecrowd::domain::ZoneKind::Exit;
-    });
-    if (exitIt != layout.zones.end()) {
-        return &(*exitIt);
-    }
-    return layout.zones.empty() ? nullptr : &layout.zones.back();
-}
-
-ScenarioAuthoringWidget::ScenarioState scenarioStateFromDraft(
-    const safecrowd::domain::ScenarioDraft& scenario,
-    const safecrowd::domain::FacilityLayout2D& layout) {
-    ScenarioAuthoringWidget::ScenarioState state;
-    state.draft = scenario;
-    state.events = scenario.control.events;
-    state.stagedForRun = true;
-
-    if (const auto* startZone = firstStartZone(layout); startZone != nullptr) {
-        state.startText = zoneLabel(*startZone);
-    }
-    if (const auto* destinationZone = firstDestinationZone(layout); destinationZone != nullptr) {
-        state.destinationText = zoneLabel(*destinationZone);
+QString configuredEventSummary(const safecrowd::domain::ScenarioDraft& scenario) {
+    if (scenario.control.events.empty()) {
+        return "None";
     }
 
-    for (const auto& placement : scenario.population.initialPlacements) {
-        ScenarioCrowdPlacement uiPlacement;
-        uiPlacement.id = QString::fromStdString(placement.id);
-        uiPlacement.name = uiPlacement.id;
-        uiPlacement.kind = (placement.targetAgentCount <= 1 && placement.area.outline.size() <= 1)
-            ? ScenarioCrowdPlacementKind::Individual
-            : ScenarioCrowdPlacementKind::Group;
-        uiPlacement.zoneId = QString::fromStdString(placement.zoneId);
-        uiPlacement.area = placement.area.outline;
-        uiPlacement.occupantCount = static_cast<int>(placement.targetAgentCount);
-        uiPlacement.velocity = placement.initialVelocity;
-        state.crowdPlacements.push_back(std::move(uiPlacement));
+    QStringList names;
+    for (const auto& event : scenario.control.events) {
+        names << QString::fromStdString(event.name);
     }
-
-    return state;
+    return QString("%1 configured\n%2")
+        .arg(static_cast<int>(scenario.control.events.size()))
+        .arg(names.join(", "));
 }
 
 QWidget* createResultPanel(
@@ -304,38 +341,44 @@ QWidget* createResultPanel(
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(12);
 
-    layout->addWidget(shell != nullptr ? shell->createPanelHeader("Results", panel) : createLabel("Results", panel, ui::FontRole::Title));
-    auto* scenarioLabel = createLabel(QString("Scenario: %1").arg(QString::fromStdString(scenario.name)), panel);
+    layout->addWidget(shell != nullptr ? shell->createPanelHeader("Baseline Result", panel) : createLabel("Baseline Result", panel, ui::FontRole::Title));
+    auto* scenarioLabel = createLabel(QString("Staged baseline: %1").arg(QString::fromStdString(scenario.name)), panel);
     scenarioLabel->setStyleSheet(ui::mutedTextStyleSheet());
     layout->addWidget(scenarioLabel);
+    auto* outcomeLabel = createLabel(QString("Outcome: %1").arg(completionOutcome(frame)), panel);
+    outcomeLabel->setStyleSheet(ui::mutedTextStyleSheet());
+    layout->addWidget(outcomeLabel);
 
     auto* metricsGrid = new QGridLayout();
     metricsGrid->setContentsMargins(0, 0, 0, 0);
     metricsGrid->setSpacing(8);
     const auto total = static_cast<int>(frame.totalAgentCount);
     const auto evacuated = static_cast<int>(frame.evacuatedAgentCount);
-    metricsGrid->addWidget(createMetricCard("Evacuated", QString("%1 / %2").arg(evacuated).arg(total), panel), 0, 0);
-    metricsGrid->addWidget(createMetricCard("Time", QString("%1 sec").arg(frame.elapsedSeconds, 0, 'f', 1), panel), 0, 1);
+    const auto remaining = std::max(0, total - evacuated);
+    const auto active = static_cast<int>(frame.agents.size());
+    metricsGrid->addWidget(createMetricCard("Total", QString::number(total), panel), 0, 0);
+    metricsGrid->addWidget(createMetricCard("Evacuated", QString("%1 / %2").arg(evacuated).arg(total), panel), 0, 1);
+    metricsGrid->addWidget(createMetricCard("Remaining", QString("%1 / %2").arg(remaining).arg(total), panel), 1, 0);
     metricsGrid->addWidget(createMetricCard(
-        "Risk",
-        safecrowd::domain::scenarioRiskLevelLabel(risk.completionRisk),
-        panel,
-        safecrowd::domain::scenarioRiskDefinition()), 1, 0);
-    metricsGrid->addWidget(createMetricCard(
-        "Stalled",
-        QString::number(static_cast<int>(risk.stalledAgentCount)),
-        panel,
-        safecrowd::domain::scenarioStalledDefinition()), 1, 1);
+        "Elapsed / Time limit",
+        QString("%1 / %2 sec")
+            .arg(frame.elapsedSeconds, 0, 'f', 1)
+            .arg(scenario.execution.timeLimitSeconds, 0, 'f', 0),
+        panel), 1, 1);
+    metricsGrid->addWidget(createMetricCard("Active", QString::number(active), panel), 2, 0);
+    metricsGrid->addWidget(createMetricCard("Configured Events", configuredEventSummary(scenario), panel), 2, 1);
+    metricsGrid->addWidget(createMetricCard("Completion Risk", safecrowd::domain::scenarioRiskLevelLabel(risk.completionRisk), panel), 3, 0);
+    metricsGrid->addWidget(createMetricCard("Stalled", QString::number(static_cast<int>(risk.stalledAgentCount)), panel), 3, 1);
     metricsGrid->addWidget(createMetricCard(
         "T90",
         formatOptionalSeconds(artifacts.timingSummary.t90Seconds),
         panel,
-        "Time at which 90% of occupants completed evacuation."), 2, 0);
+        "Time at which 90% of occupants completed evacuation."), 4, 0);
     metricsGrid->addWidget(createMetricCard(
         "T95",
         formatOptionalSeconds(artifacts.timingSummary.t95Seconds),
         panel,
-        "Time at which 95% of occupants completed evacuation."), 2, 1);
+        "Time at which 95% of occupants completed evacuation."), 4, 1);
     layout->addLayout(metricsGrid);
     layout->addStretch(1);
 
@@ -470,6 +513,8 @@ ScenarioResultWidget::ScenarioResultWidget(
     std::function<void()> saveProjectHandler,
     std::function<void()> openProjectHandler,
     std::function<void()> backToLayoutReviewHandler,
+    std::function<void(bool)> returnToAuthoringHandler,
+    std::function<void()> rerunScenarioHandler,
     QWidget* parent)
     : QWidget(parent),
       projectName_(std::move(projectName)),
@@ -480,7 +525,9 @@ ScenarioResultWidget::ScenarioResultWidget(
       artifacts_(std::move(artifacts)),
       saveProjectHandler_(std::move(saveProjectHandler)),
       openProjectHandler_(std::move(openProjectHandler)),
-      backToLayoutReviewHandler_(std::move(backToLayoutReviewHandler)) {
+      backToLayoutReviewHandler_(std::move(backToLayoutReviewHandler)),
+      returnToAuthoringHandler_(std::move(returnToAuthoringHandler)),
+      rerunScenarioHandler_(std::move(rerunScenarioHandler)) {
     auto* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
@@ -537,6 +584,11 @@ ScenarioResultWidget::ScenarioResultWidget(
 }
 
 void ScenarioResultWidget::rerunScenario() {
+    if (rerunScenarioHandler_) {
+        rerunScenarioHandler_();
+        return;
+    }
+
     auto* rootLayout = qobject_cast<QVBoxLayout*>(layout());
     if (rootLayout == nullptr || shell_ == nullptr) {
         return;
@@ -549,6 +601,8 @@ void ScenarioResultWidget::rerunScenario() {
         saveProjectHandler_,
         openProjectHandler_,
         backToLayoutReviewHandler_,
+        returnToAuthoringHandler_,
+        rerunScenarioHandler_,
         this);
 
     rootLayout->replaceWidget(shell_, runWidget);
@@ -558,6 +612,11 @@ void ScenarioResultWidget::rerunScenario() {
 }
 
 void ScenarioResultWidget::navigateToAuthoring(bool showRunPanel) {
+    if (returnToAuthoringHandler_) {
+        returnToAuthoringHandler_(showRunPanel);
+        return;
+    }
+
     auto* rootLayout = qobject_cast<QVBoxLayout*>(layout());
     if (rootLayout == nullptr || shell_ == nullptr) {
         return;

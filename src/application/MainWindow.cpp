@@ -152,6 +152,11 @@ void MainWindow::saveCurrentProject() {
             QMessageBox::warning(this, "Save Project", errorMessage);
             return;
         }
+    } else if (auto* authoringWidget = dynamic_cast<ScenarioAuthoringWidget*>(centralWidget())) {
+        if (!ProjectPersistence::saveScenarioAuthoringState(currentProject_, authoringWidget->currentState(), &errorMessage)) {
+            QMessageBox::warning(this, "Save Project", errorMessage);
+            return;
+        }
     }
 
     currentProject_ = ProjectPersistence::loadProject(currentProject_.folderPath);
@@ -197,6 +202,13 @@ void MainWindow::showLayoutReview(const ProjectMetadata& metadata, safecrowd::do
             showProjectNavigator();
         },
         [this](const safecrowd::domain::ImportResult& approvedImportResult) {
+            if (!currentProject_.isBuiltInDemo()) {
+                QString errorMessage;
+                if (!ProjectPersistence::saveProjectReview(currentProject_, approvedImportResult, &errorMessage)) {
+                    QMessageBox::warning(this, "Approve Layout", errorMessage);
+                    return;
+                }
+            }
             lastApprovedImportResult_ = approvedImportResult;
             showScenarioAuthoring(approvedImportResult);
         },
@@ -209,26 +221,47 @@ void MainWindow::showScenarioAuthoring(const safecrowd::domain::ImportResult& im
         return;
     }
 
+    ScenarioAuthoringWidget::InitialState initialState;
+    const bool hasSavedScenarioState = ProjectPersistence::loadScenarioAuthoringState(
+        currentProject_,
+        *importResult.layout,
+        &initialState);
     lastApprovedImportResult_ = importResult;
+
+    auto saveHandler = [this]() {
+        saveCurrentProject();
+    };
+    auto openProjectHandler = [this]() {
+        hasCurrentProject_ = false;
+        currentProject_ = {};
+        showProjectNavigator();
+    };
+    auto backToLayoutReviewHandler = [this]() {
+        if (lastApprovedImportResult_.has_value()) {
+            showLayoutReview(currentProject_, *lastApprovedImportResult_);
+        } else {
+            showLayoutReview(currentProject_);
+        }
+    };
+
+    if (hasSavedScenarioState) {
+        setCentralWidget(new ScenarioAuthoringWidget(
+            currentProject_.name,
+            *importResult.layout,
+            std::move(initialState),
+            saveHandler,
+            openProjectHandler,
+            backToLayoutReviewHandler,
+            this));
+        return;
+    }
 
     setCentralWidget(new ScenarioAuthoringWidget(
         currentProject_.name,
         *importResult.layout,
-        [this]() {
-            saveCurrentProject();
-        },
-        [this]() {
-            hasCurrentProject_ = false;
-            currentProject_ = {};
-            showProjectNavigator();
-        },
-        [this]() {
-            if (lastApprovedImportResult_.has_value()) {
-                showLayoutReview(currentProject_, *lastApprovedImportResult_);
-            } else {
-                showLayoutReview(currentProject_);
-            }
-        },
+        saveHandler,
+        openProjectHandler,
+        backToLayoutReviewHandler,
         this));
 }
 

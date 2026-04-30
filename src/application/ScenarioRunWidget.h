@@ -28,6 +28,8 @@ public:
         std::function<void()> saveProjectHandler,
         std::function<void()> openProjectHandler,
         std::function<void()> backToLayoutReviewHandler,
+        std::function<void(bool)> returnToAuthoringHandler = {},
+        std::function<void()> rerunScenarioHandler = {},
         QWidget* parent = nullptr);
 
 private:
@@ -45,6 +47,8 @@ private:
     std::function<void()> saveProjectHandler_{};
     std::function<void()> openProjectHandler_{};
     std::function<void()> backToLayoutReviewHandler_{};
+    std::function<void(bool)> returnToAuthoringHandler_{};
+    std::function<void()> rerunScenarioHandler_{};
     WorkspaceShell* shell_{nullptr};
     SimulationCanvasWidget* canvas_{nullptr};
     QTimer* timer_{nullptr};
@@ -53,6 +57,7 @@ private:
     QLabel* elapsedLabel_{nullptr};
     QProgressBar* timeProgressBar_{nullptr};
     QLabel* agentCountLabel_{nullptr};
+    QLabel* eventLabel_{nullptr};
     QProgressBar* evacuationProgressBar_{nullptr};
     QLabel* riskLabel_{nullptr};
     QLabel* congestionLabel_{nullptr};
