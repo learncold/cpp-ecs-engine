@@ -48,7 +48,7 @@ private:
     void syncFrameFromRuntime();
     RoutePlan routePlan(const Point2D& start, const std::string& startZoneId) const;
     std::optional<std::vector<std::string>> zoneRouteToExit(const std::string& startZoneId) const;
-    std::string zoneAt(const Point2D& point) const;
+    std::string zoneAt(const Point2D& point, const std::string& floorId) const;
     Point2D placementPoint(const InitialPlacement2D& placement, std::size_t index) const;
 
     FacilityLayout2D layout_{};

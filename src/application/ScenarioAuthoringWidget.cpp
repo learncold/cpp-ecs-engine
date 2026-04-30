@@ -160,7 +160,8 @@ std::vector<NavigationTreeNode> buildCrowdTree(const ScenarioAuthoringWidget::Sc
             occupants.push_back({
                 .label = QString("Occupant %1").arg(index),
                 .id = QString("%1/occupant-%2").arg(placement.id).arg(index),
-                .detail = QString("Zone: %1\nVelocity: (%2, %3)")
+                .detail = QString("Floor: %1\nZone: %2\nVelocity: (%3, %4)")
+                              .arg(placement.floorId)
                               .arg(placement.zoneId)
                               .arg(placement.velocity.x, 0, 'f', 2)
                               .arg(placement.velocity.y, 0, 'f', 2),
@@ -601,6 +602,7 @@ void ScenarioAuthoringWidget::updateCurrentScenarioPlacements(const std::vector<
         safecrowd::domain::InitialPlacement2D initialPlacement;
         initialPlacement.id = placement.id.toStdString();
         initialPlacement.zoneId = placement.zoneId.toStdString();
+        initialPlacement.floorId = placement.floorId.toStdString();
         initialPlacement.area.outline = placement.area;
         initialPlacement.targetAgentCount = static_cast<std::size_t>(placement.occupantCount);
         initialPlacement.initialVelocity = placement.velocity;

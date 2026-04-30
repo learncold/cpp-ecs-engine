@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include <QPixmap>
@@ -60,6 +61,7 @@ private:
     std::optional<std::size_t> focusedBottleneckIndex_{};
     LayoutCanvasCamera camera_{};
     std::optional<LayoutCanvasBounds> layoutBounds_{};
+    std::string currentFloorId_{};
     QPixmap layoutCache_{};
     QSize layoutCacheSize_{};
     QPointF layoutCachePan_{};

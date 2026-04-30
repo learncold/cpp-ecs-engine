@@ -34,6 +34,7 @@ struct ScenarioCrowdPlacement {
     QString name{};
     ScenarioCrowdPlacementKind kind{ScenarioCrowdPlacementKind::Individual};
     QString zoneId{};
+    QString floorId{};
     std::vector<safecrowd::domain::Point2D> area{};
     int occupantCount{1};
     safecrowd::domain::Point2D velocity{};

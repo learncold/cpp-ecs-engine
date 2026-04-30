@@ -204,6 +204,12 @@ ScenarioCanvasWidget::~ScenarioCanvasWidget() {
 
 void ScenarioCanvasWidget::setPlacements(std::vector<ScenarioCrowdPlacement> placements) {
     placements_ = std::move(placements);
+    const auto fallbackFloorId = currentFloorId_.isEmpty() ? defaultFloorId(layout_) : currentFloorId_;
+    for (auto& placement : placements_) {
+        if (placement.floorId.isEmpty()) {
+            placement.floorId = fallbackFloorId;
+        }
+    }
     update();
 }
 
@@ -230,6 +236,13 @@ void ScenarioCanvasWidget::focusLayoutElement(const QString& elementId) {
 void ScenarioCanvasWidget::focusPlacement(const QString& placementId) {
     focusedPlacementId_ = placementId.section('/', 0, 0);
     focusedLayoutElementId_.clear();
+    const auto it = std::find_if(placements_.begin(), placements_.end(), [this](const auto& placement) {
+        return placement.id == focusedPlacementId_;
+    });
+    if (it != placements_.end() && !it->floorId.isEmpty() && it->floorId != currentFloorId_) {
+        currentFloorId_ = it->floorId;
+        camera_.reset();
+    }
     update();
 }
 
@@ -351,6 +364,9 @@ void ScenarioCanvasWidget::paintEvent(QPaintEvent* event) {
 
     painter.setPen(Qt::NoPen);
     for (const auto& placement : placements_) {
+        if (!currentFloorId_.isEmpty() && !placement.floorId.isEmpty() && placement.floorId != currentFloorId_) {
+            continue;
+        }
         if (placement.kind == ScenarioCrowdPlacementKind::Individual) {
             if (placement.area.empty()) {
                 continue;
@@ -484,6 +500,9 @@ void ScenarioCanvasWidget::drawFocusedPlacement(QPainter& painter, const LayoutC
         return placement.id == focusedPlacementId_;
     });
     if (it == placements_.end() || it->area.empty()) {
+        return;
+    }
+    if (!currentFloorId_.isEmpty() && !it->floorId.isEmpty() && it->floorId != currentFloorId_) {
         return;
     }
 
@@ -729,6 +748,7 @@ void ScenarioCanvasWidget::addGroupPlacement(const QPointF& start, const QPointF
         .name = QString("Group %1").arg(id.section('-', -1)),
         .kind = ScenarioCrowdPlacementKind::Group,
         .zoneId = zoneId,
+        .floorId = currentFloorId_,
         .area = area,
         .occupantCount = count,
         .velocity = defaultVelocityFrom(placementCenter(area)),
@@ -750,6 +770,7 @@ void ScenarioCanvasWidget::addIndividualPlacement(const QPointF& position) {
         .name = QString("Individual %1").arg(id.section('-', -1)),
         .kind = ScenarioCrowdPlacementKind::Individual,
         .zoneId = zoneId,
+        .floorId = currentFloorId_,
         .area = {point},
         .occupantCount = 1,
         .velocity = defaultVelocityFrom(point),

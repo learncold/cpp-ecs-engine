@@ -24,6 +24,17 @@ constexpr double kBottleneckFocusZoom = 2.4;
 constexpr int kHotspotMinCoreAlpha = 72;
 constexpr int kHotspotMaxCoreAlpha = 190;
 
+std::string defaultFloorId(const safecrowd::domain::FacilityLayout2D& layout) {
+    if (!layout.floors.empty() && !layout.floors.front().id.empty()) {
+        return layout.floors.front().id;
+    }
+    return layout.levelId;
+}
+
+bool matchesFloor(const std::string& elementFloorId, const std::string& floorId) {
+    return floorId.empty() || elementFloorId.empty() || elementFloorId == floorId;
+}
+
 }  // namespace
 
 SimulationCanvasWidget::SimulationCanvasWidget(safecrowd::domain::FacilityLayout2D layout, QWidget* parent)
@@ -33,7 +44,8 @@ SimulationCanvasWidget::SimulationCanvasWidget(safecrowd::domain::FacilityLayout
     setFocusPolicy(Qt::StrongFocus);
     setMinimumSize(520, 360);
     setStyleSheet("QWidget { background: #f4f7fb; }");
-    layoutBounds_ = collectLayoutCanvasBounds(layout_);
+    currentFloorId_ = defaultFloorId(layout_);
+    layoutBounds_ = collectLayoutCanvasBounds(layout_, currentFloorId_);
     QCoreApplication::instance()->installEventFilter(this);
 }
 
@@ -45,6 +57,18 @@ SimulationCanvasWidget::~SimulationCanvasWidget() {
 
 void SimulationCanvasWidget::setFrame(safecrowd::domain::SimulationFrame frame) {
     frame_ = std::move(frame);
+    const auto firstAgentFloor = std::find_if(frame_.agents.begin(), frame_.agents.end(), [](const auto& agent) {
+        return !agent.floorId.empty();
+    });
+    const auto hasAgentOnCurrentFloor = std::any_of(frame_.agents.begin(), frame_.agents.end(), [this](const auto& agent) {
+        return matchesFloor(agent.floorId, currentFloorId_);
+    });
+    if (!hasAgentOnCurrentFloor && firstAgentFloor != frame_.agents.end() && firstAgentFloor->floorId != currentFloorId_) {
+        currentFloorId_ = firstAgentFloor->floorId;
+        layoutBounds_ = collectLayoutCanvasBounds(layout_, currentFloorId_);
+        layoutCacheValid_ = false;
+        camera_.reset();
+    }
     update();
 }
 
@@ -163,6 +187,9 @@ void SimulationCanvasWidget::paintEvent(QPaintEvent* event) {
     drawHotspotOverlay(painter, transform);
     drawBottleneckOverlay(painter, transform);
     for (const auto& agent : frame_.agents) {
+        if (!matchesFloor(agent.floorId, currentFloorId_)) {
+            continue;
+        }
         const auto origin = transform.map(agent.position);
         const auto tip = transform.map({
             .x = agent.position.x + (agent.velocity.x * kVelocityIndicatorSeconds),
@@ -214,7 +241,7 @@ void SimulationCanvasWidget::refreshLayoutCache(const LayoutCanvasBounds& bounds
 
     const auto transform = currentTransform(bounds);
     drawLayoutCanvasSurface(painter, QRectF(rect()));
-    drawFacilityLayoutCanvas(painter, layout_, transform);
+    drawFacilityLayoutCanvas(painter, layout_, transform, currentFloorId_);
 
     layoutCacheSize_ = currentSize;
     layoutCacheZoom_ = camera_.zoom();
@@ -264,6 +291,9 @@ void SimulationCanvasWidget::drawHotspotOverlay(QPainter& painter, const LayoutC
     painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
     QPainterPath walkableClip;
     for (const auto& zone : layout_.zones) {
+        if (!matchesFloor(zone.floorId, currentFloorId_)) {
+            continue;
+        }
         walkableClip.addPath(layoutCanvasPolygonPath(zone.area, transform));
     }
     if (!walkableClip.isEmpty()) {

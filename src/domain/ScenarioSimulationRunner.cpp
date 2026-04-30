@@ -85,7 +85,23 @@ std::vector<ScenarioAgentSeed> ScenarioSimulationRunner::createAgentSeeds() cons
         seeds.reserve(seeds.size() + count);
         for (std::size_t index = 0; index < count; ++index) {
             const auto position = placementPoint(placement, index);
-            const auto startZoneId = !placement.zoneId.empty() ? placement.zoneId : zoneAt(position);
+            auto placementFloorId = placement.floorId;
+            if (placementFloorId.empty() && !placement.zoneId.empty()) {
+                placementFloorId = floorIdForZone(layout_, placement.zoneId);
+            }
+            auto startZoneId = placement.zoneId;
+            if (!startZoneId.empty() && !placementFloorId.empty()) {
+                const auto zoneFloorId = floorIdForZone(layout_, startZoneId);
+                if (!zoneFloorId.empty() && zoneFloorId != placementFloorId) {
+                    startZoneId.clear();
+                }
+            }
+            if (startZoneId.empty()) {
+                startZoneId = zoneAt(position, placementFloorId);
+            }
+            if (placementFloorId.empty()) {
+                placementFloorId = floorIdForZone(layout_, startZoneId);
+            }
             const auto route = routePlan(position, startZoneId);
             const auto speed = speedOf(placement.initialVelocity);
             auto evacuationRoute = EvacuationRoute{
@@ -101,7 +117,7 @@ std::vector<ScenarioAgentSeed> ScenarioSimulationRunner::createAgentSeeds() cons
                 .previousDistanceToWaypoint = 0.0,
                 .stalledSeconds = 0.0,
                 .destinationZoneId = route.destinationZoneId,
-                .currentFloorId = floorIdForZone(layout_, startZoneId),
+                .currentFloorId = placementFloorId,
             };
             evacuationRoute.displayFloorId = evacuationRoute.currentFloorId;
             evacuationRoute.previousDistanceToWaypoint = route.waypoints.empty()
@@ -295,8 +311,11 @@ std::optional<std::vector<std::string>> ScenarioSimulationRunner::zoneRouteToExi
     return std::nullopt;
 }
 
-std::string ScenarioSimulationRunner::zoneAt(const Point2D& point) const {
+std::string ScenarioSimulationRunner::zoneAt(const Point2D& point, const std::string& floorId) const {
     for (const auto& zone : layout_.zones) {
+        if (!floorId.empty() && !zone.floorId.empty() && zone.floorId != floorId) {
+            continue;
+        }
         if (pointInRing(zone.area.outline, point)) {
             return zone.id;
         }

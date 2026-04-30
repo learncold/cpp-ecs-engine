@@ -133,6 +133,61 @@ safecrowd::domain::FacilityLayout2D twoFloorStairExitLayout() {
     return layout;
 }
 
+safecrowd::domain::FacilityLayout2D overlappingTwoFloorExitLayout() {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.id = "overlapping-two-floor";
+    layout.levelId = "L1";
+    layout.floors.push_back({.id = "L1", .label = "Floor 1"});
+    layout.floors.push_back({.id = "L2", .label = "Floor 2", .elevationMeters = 3.5});
+    layout.zones.push_back({
+        .id = "room-l1",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Room L1",
+        .area = {.outline = {{0.0, 0.0}, {2.0, 0.0}, {2.0, 2.0}, {0.0, 2.0}}},
+    });
+    layout.zones.push_back({
+        .id = "exit-l1",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Exit,
+        .label = "Exit L1",
+        .area = {.outline = {{2.0, 0.0}, {4.0, 0.0}, {4.0, 2.0}, {2.0, 2.0}}},
+    });
+    layout.zones.push_back({
+        .id = "room-l2",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Room L2",
+        .area = {.outline = {{0.0, 0.0}, {2.0, 0.0}, {2.0, 2.0}, {0.0, 2.0}}},
+    });
+    layout.zones.push_back({
+        .id = "exit-l2",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ZoneKind::Exit,
+        .label = "Exit L2",
+        .area = {.outline = {{-2.0, 0.0}, {0.0, 0.0}, {0.0, 2.0}, {-2.0, 2.0}}},
+    });
+    layout.connections.push_back({
+        .id = "door-l1",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ConnectionKind::Exit,
+        .fromZoneId = "room-l1",
+        .toZoneId = "exit-l1",
+        .effectiveWidth = 1.2,
+        .centerSpan = {{2.0, 0.4}, {2.0, 1.6}},
+    });
+    layout.connections.push_back({
+        .id = "door-l2",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ConnectionKind::Exit,
+        .fromZoneId = "room-l2",
+        .toZoneId = "exit-l2",
+        .effectiveWidth = 1.2,
+        .centerSpan = {{0.0, 0.4}, {0.0, 1.6}},
+    });
+    return layout;
+}
+
 safecrowd::domain::FacilityLayout2D directedStairExitLayout(
     safecrowd::domain::StairEntryDirection lowerEntryDirection,
     safecrowd::domain::StairEntryDirection upperEntryDirection) {
@@ -429,6 +484,29 @@ SC_TEST(ScenarioSimulationRunnerTraversesStairConnectionBetweenFloors) {
     }
 
     SC_EXPECT_EQ(runner.frame().evacuatedAgentCount, std::size_t{1});
+}
+
+SC_TEST(ScenarioSimulationRunnerUsesPlacementFloorForOverlappingCoordinates) {
+    safecrowd::domain::InitialPlacement2D placement;
+    placement.id = "agent-1";
+    placement.floorId = "L2";
+    placement.targetAgentCount = 1;
+    placement.initialVelocity = {.x = 1.5, .y = 0.0};
+    placement.area.outline = {{.x = 1.0, .y = 1.0}};
+
+    safecrowd::domain::ScenarioDraft scenario;
+    scenario.population.initialPlacements.push_back(placement);
+    scenario.execution.timeLimitSeconds = 5.0;
+
+    safecrowd::domain::ScenarioSimulationRunner runner(overlappingTwoFloorExitLayout(), scenario);
+    SC_EXPECT_EQ(runner.frame().agents.size(), std::size_t{1});
+    SC_EXPECT_EQ(runner.frame().agents.front().floorId, std::string{"L2"});
+
+    runner.step(0.25);
+
+    SC_EXPECT_EQ(runner.frame().agents.size(), std::size_t{1});
+    SC_EXPECT_EQ(runner.frame().agents.front().floorId, std::string{"L2"});
+    SC_EXPECT_TRUE(runner.frame().agents.front().velocity.x < 0.0);
 }
 
 SC_TEST(ScenarioSimulationRunnerHonorsAllowedStairEntryDirection) {
