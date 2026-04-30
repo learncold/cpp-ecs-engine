@@ -537,6 +537,22 @@ ScenarioResultWidget::ScenarioResultWidget(
     rootLayout->addWidget(shell_);
 }
 
+const safecrowd::domain::ScenarioDraft& ScenarioResultWidget::scenario() const noexcept {
+    return scenario_;
+}
+
+const safecrowd::domain::SimulationFrame& ScenarioResultWidget::frame() const noexcept {
+    return frame_;
+}
+
+const safecrowd::domain::ScenarioRiskSnapshot& ScenarioResultWidget::risk() const noexcept {
+    return risk_;
+}
+
+const safecrowd::domain::ScenarioResultArtifacts& ScenarioResultWidget::artifacts() const noexcept {
+    return artifacts_;
+}
+
 void ScenarioResultWidget::rerunScenario() {
     auto* rootLayout = qobject_cast<QVBoxLayout*>(layout());
     if (rootLayout == nullptr || shell_ == nullptr) {

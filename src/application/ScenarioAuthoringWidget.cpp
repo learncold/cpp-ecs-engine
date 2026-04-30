@@ -333,6 +333,30 @@ QWidget* createEventsPanel(
         shell != nullptr ? shell->createPanelHeader("Events", parent, false) : nullptr);
 }
 
+SavedNavigationView savedNavigationView(ScenarioAuthoringWidget::NavigationView view) {
+    switch (view) {
+    case ScenarioAuthoringWidget::NavigationView::Crowd:
+        return SavedNavigationView::Crowd;
+    case ScenarioAuthoringWidget::NavigationView::Events:
+        return SavedNavigationView::Events;
+    case ScenarioAuthoringWidget::NavigationView::Layout:
+    default:
+        return SavedNavigationView::Layout;
+    }
+}
+
+SavedRightPanelMode savedRightPanelMode(ScenarioAuthoringWidget::RightPanelMode mode) {
+    switch (mode) {
+    case ScenarioAuthoringWidget::RightPanelMode::None:
+        return SavedRightPanelMode::None;
+    case ScenarioAuthoringWidget::RightPanelMode::Run:
+        return SavedRightPanelMode::Run;
+    case ScenarioAuthoringWidget::RightPanelMode::Scenario:
+    default:
+        return SavedRightPanelMode::Scenario;
+    }
+}
+
 }  // namespace
 
 ScenarioAuthoringWidget::ScenarioAuthoringWidget(
@@ -394,6 +418,24 @@ void ScenarioAuthoringWidget::initializeUi(bool promptForScenario) {
             ensureInitialScenarioPrompt();
         });
     }
+}
+
+SavedScenarioAuthoringState ScenarioAuthoringWidget::currentSavedState() const {
+    SavedScenarioAuthoringState state;
+    state.currentScenarioIndex = currentScenarioIndex_;
+    state.navigationView = savedNavigationView(navigationView_);
+    state.rightPanelMode = savedRightPanelMode(rightPanelMode_);
+    state.scenarios.reserve(scenarios_.size());
+    for (const auto& scenario : scenarios_) {
+        auto draft = scenario.draft;
+        draft.control.events = scenario.events;
+        state.scenarios.push_back({
+            .draft = std::move(draft),
+            .baseScenarioId = scenario.baseScenarioId.toStdString(),
+            .stagedForRun = scenario.stagedForRun,
+        });
+    }
+    return state;
 }
 
 void ScenarioAuthoringWidget::addEventDraft(const QString& name, const QString& trigger, const QString& target) {

@@ -7,6 +7,7 @@
 #include <QWidget>
 
 #include "application/ScenarioCanvasWidget.h"
+#include "application/ProjectWorkspaceState.h"
 #include "domain/FacilityLayout2D.h"
 #include "domain/ScenarioAuthoring.h"
 
@@ -65,6 +66,8 @@ public:
         std::function<void()> openProjectHandler,
         std::function<void()> backToLayoutReviewHandler,
         QWidget* parent = nullptr);
+
+    SavedScenarioAuthoringState currentSavedState() const;
 
 private:
     void initializeUi(bool promptForScenario);

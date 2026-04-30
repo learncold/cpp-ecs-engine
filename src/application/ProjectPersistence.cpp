@@ -19,11 +19,13 @@ namespace {
 constexpr auto kProjectFileName = "safecrowd-project.json";
 constexpr auto kLayoutFileName = "layout.dxf";
 constexpr auto kReviewFileName = "layout-review.json";
+constexpr auto kWorkspaceFileName = "workspace-state.json";
 
 bool isProjectManagedEntry(const QString& fileName) {
     return fileName.compare(kProjectFileName, Qt::CaseInsensitive) == 0
         || fileName.compare(kLayoutFileName, Qt::CaseInsensitive) == 0
-        || fileName.compare(kReviewFileName, Qt::CaseInsensitive) == 0;
+        || fileName.compare(kReviewFileName, Qt::CaseInsensitive) == 0
+        || fileName.compare(kWorkspaceFileName, Qt::CaseInsensitive) == 0;
 }
 
 QString projectFilePath(const QString& folderPath) {
@@ -32,6 +34,10 @@ QString projectFilePath(const QString& folderPath) {
 
 QString reviewFilePath(const QString& folderPath) {
     return QDir(folderPath).filePath(kReviewFileName);
+}
+
+QString workspaceFilePath(const QString& folderPath) {
+    return QDir(folderPath).filePath(kWorkspaceFileName);
 }
 
 QString recentProjectsPath() {
@@ -549,6 +555,451 @@ safecrowd::domain::FacilityLayout2D layoutFromJson(const QJsonObject& object) {
     return layout;
 }
 
+QJsonObject initialPlacementToJson(const safecrowd::domain::InitialPlacement2D& placement) {
+    QJsonObject object;
+    object["id"] = QString::fromStdString(placement.id);
+    object["zoneId"] = QString::fromStdString(placement.zoneId);
+    object["floorId"] = QString::fromStdString(placement.floorId);
+    object["area"] = polygonToJson(placement.area);
+    object["targetAgentCount"] = static_cast<qint64>(placement.targetAgentCount);
+    object["initialVelocity"] = pointArray(placement.initialVelocity);
+    return object;
+}
+
+safecrowd::domain::InitialPlacement2D initialPlacementFromJson(const QJsonObject& object) {
+    return {
+        .id = object.value("id").toString().toStdString(),
+        .zoneId = object.value("zoneId").toString().toStdString(),
+        .floorId = object.value("floorId").toString().toStdString(),
+        .area = polygonFromJson(object.value("area").toObject()),
+        .targetAgentCount = static_cast<std::size_t>(object.value("targetAgentCount").toInteger()),
+        .initialVelocity = pointFromJson(object.value("initialVelocity")),
+    };
+}
+
+QJsonObject populationToJson(const safecrowd::domain::PopulationSpec& population) {
+    QJsonObject object;
+    QJsonArray placements;
+    for (const auto& placement : population.initialPlacements) {
+        placements.append(initialPlacementToJson(placement));
+    }
+    object["initialPlacements"] = placements;
+    return object;
+}
+
+safecrowd::domain::PopulationSpec populationFromJson(const QJsonObject& object) {
+    safecrowd::domain::PopulationSpec population;
+    for (const auto& value : object.value("initialPlacements").toArray()) {
+        population.initialPlacements.push_back(initialPlacementFromJson(value.toObject()));
+    }
+    return population;
+}
+
+QJsonObject environmentToJson(const safecrowd::domain::EnvironmentState& environment) {
+    QJsonObject object;
+    object["reducedVisibility"] = environment.reducedVisibility;
+    object["familiarityProfile"] = QString::fromStdString(environment.familiarityProfile);
+    object["guidanceProfile"] = QString::fromStdString(environment.guidanceProfile);
+    return object;
+}
+
+safecrowd::domain::EnvironmentState environmentFromJson(const QJsonObject& object) {
+    return {
+        .reducedVisibility = object.value("reducedVisibility").toBool(false),
+        .familiarityProfile = object.value("familiarityProfile").toString().toStdString(),
+        .guidanceProfile = object.value("guidanceProfile").toString().toStdString(),
+    };
+}
+
+QJsonObject eventToJson(const safecrowd::domain::OperationalEventDraft& event) {
+    QJsonObject object;
+    object["id"] = QString::fromStdString(event.id);
+    object["name"] = QString::fromStdString(event.name);
+    object["triggerSummary"] = QString::fromStdString(event.triggerSummary);
+    object["targetSummary"] = QString::fromStdString(event.targetSummary);
+    return object;
+}
+
+safecrowd::domain::OperationalEventDraft eventFromJson(const QJsonObject& object) {
+    return {
+        .id = object.value("id").toString().toStdString(),
+        .name = object.value("name").toString().toStdString(),
+        .triggerSummary = object.value("triggerSummary").toString().toStdString(),
+        .targetSummary = object.value("targetSummary").toString().toStdString(),
+    };
+}
+
+QJsonObject connectionBlockIntervalToJson(const safecrowd::domain::ConnectionBlockIntervalDraft& interval) {
+    QJsonObject object;
+    object["startSeconds"] = interval.startSeconds;
+    object["endSeconds"] = interval.endSeconds;
+    return object;
+}
+
+safecrowd::domain::ConnectionBlockIntervalDraft connectionBlockIntervalFromJson(const QJsonObject& object) {
+    return {
+        .startSeconds = object.value("startSeconds").toDouble(),
+        .endSeconds = object.value("endSeconds").toDouble(),
+    };
+}
+
+QJsonObject connectionBlockToJson(const safecrowd::domain::ConnectionBlockDraft& block) {
+    QJsonObject object;
+    object["id"] = QString::fromStdString(block.id);
+    object["connectionId"] = QString::fromStdString(block.connectionId);
+    QJsonArray intervals;
+    for (const auto& interval : block.intervals) {
+        intervals.append(connectionBlockIntervalToJson(interval));
+    }
+    object["intervals"] = intervals;
+    return object;
+}
+
+safecrowd::domain::ConnectionBlockDraft connectionBlockFromJson(const QJsonObject& object) {
+    safecrowd::domain::ConnectionBlockDraft block;
+    block.id = object.value("id").toString().toStdString();
+    block.connectionId = object.value("connectionId").toString().toStdString();
+    for (const auto& value : object.value("intervals").toArray()) {
+        block.intervals.push_back(connectionBlockIntervalFromJson(value.toObject()));
+    }
+    return block;
+}
+
+QJsonObject controlPlanToJson(const safecrowd::domain::ControlPlan& control) {
+    QJsonObject object;
+    QJsonArray events;
+    for (const auto& event : control.events) {
+        events.append(eventToJson(event));
+    }
+    object["events"] = events;
+
+    QJsonArray connectionBlocks;
+    for (const auto& block : control.connectionBlocks) {
+        connectionBlocks.append(connectionBlockToJson(block));
+    }
+    object["connectionBlocks"] = connectionBlocks;
+    return object;
+}
+
+safecrowd::domain::ControlPlan controlPlanFromJson(const QJsonObject& object) {
+    safecrowd::domain::ControlPlan control;
+    for (const auto& value : object.value("events").toArray()) {
+        control.events.push_back(eventFromJson(value.toObject()));
+    }
+    for (const auto& value : object.value("connectionBlocks").toArray()) {
+        control.connectionBlocks.push_back(connectionBlockFromJson(value.toObject()));
+    }
+    return control;
+}
+
+QJsonObject executionToJson(const safecrowd::domain::ExecutionConfig& execution) {
+    QJsonObject object;
+    object["timeLimitSeconds"] = execution.timeLimitSeconds;
+    object["sampleIntervalSeconds"] = execution.sampleIntervalSeconds;
+    object["repeatCount"] = static_cast<int>(execution.repeatCount);
+    object["baseSeed"] = static_cast<int>(execution.baseSeed);
+    object["recordOccupantHistory"] = execution.recordOccupantHistory;
+    return object;
+}
+
+safecrowd::domain::ExecutionConfig executionFromJson(const QJsonObject& object) {
+    return {
+        .timeLimitSeconds = object.value("timeLimitSeconds").toDouble(),
+        .sampleIntervalSeconds = object.value("sampleIntervalSeconds").toDouble(),
+        .repeatCount = static_cast<std::uint32_t>(object.value("repeatCount").toInt(1)),
+        .baseSeed = static_cast<std::uint32_t>(object.value("baseSeed").toInt()),
+        .recordOccupantHistory = object.value("recordOccupantHistory").toBool(false),
+    };
+}
+
+QJsonObject scenarioDraftToJson(const safecrowd::domain::ScenarioDraft& scenario) {
+    QJsonObject object;
+    object["scenarioId"] = QString::fromStdString(scenario.scenarioId);
+    object["name"] = QString::fromStdString(scenario.name);
+    object["role"] = static_cast<int>(scenario.role);
+    object["population"] = populationToJson(scenario.population);
+    object["environment"] = environmentToJson(scenario.environment);
+    object["control"] = controlPlanToJson(scenario.control);
+    object["execution"] = executionToJson(scenario.execution);
+    object["sourceTemplateId"] = QString::fromStdString(scenario.sourceTemplateId);
+    object["variationDiffKeys"] = stringArray(scenario.variationDiffKeys);
+    object["blockingIssues"] = stringArray(scenario.blockingIssues);
+    return object;
+}
+
+safecrowd::domain::ScenarioDraft scenarioDraftFromJson(const QJsonObject& object) {
+    return {
+        .scenarioId = object.value("scenarioId").toString().toStdString(),
+        .name = object.value("name").toString().toStdString(),
+        .role = static_cast<safecrowd::domain::ScenarioRole>(object.value("role").toInt()),
+        .population = populationFromJson(object.value("population").toObject()),
+        .environment = environmentFromJson(object.value("environment").toObject()),
+        .control = controlPlanFromJson(object.value("control").toObject()),
+        .execution = executionFromJson(object.value("execution").toObject()),
+        .sourceTemplateId = object.value("sourceTemplateId").toString().toStdString(),
+        .variationDiffKeys = stringVectorFromJson(object.value("variationDiffKeys").toArray()),
+        .blockingIssues = stringVectorFromJson(object.value("blockingIssues").toArray()),
+    };
+}
+
+QJsonValue optionalDoubleToJson(const std::optional<double>& value) {
+    return value.has_value() ? QJsonValue(*value) : QJsonValue(QJsonValue::Null);
+}
+
+std::optional<double> optionalDoubleFromJson(const QJsonValue& value) {
+    if (value.isNull() || value.isUndefined()) {
+        return std::nullopt;
+    }
+    return value.toDouble();
+}
+
+QJsonObject simulationAgentFrameToJson(const safecrowd::domain::SimulationAgentFrame& agent) {
+    QJsonObject object;
+    object["id"] = QString::number(static_cast<qulonglong>(agent.id));
+    object["position"] = pointArray(agent.position);
+    object["velocity"] = pointArray(agent.velocity);
+    object["radius"] = agent.radius;
+    object["floorId"] = QString::fromStdString(agent.floorId);
+    return object;
+}
+
+safecrowd::domain::SimulationAgentFrame simulationAgentFrameFromJson(const QJsonObject& object) {
+    return {
+        .id = object.value("id").toString().toULongLong(),
+        .position = pointFromJson(object.value("position")),
+        .velocity = pointFromJson(object.value("velocity")),
+        .radius = object.value("radius").toDouble(0.25),
+        .floorId = object.value("floorId").toString().toStdString(),
+    };
+}
+
+QJsonObject simulationFrameToJson(const safecrowd::domain::SimulationFrame& frame) {
+    QJsonObject object;
+    object["elapsedSeconds"] = frame.elapsedSeconds;
+    object["complete"] = frame.complete;
+    object["totalAgentCount"] = static_cast<qint64>(frame.totalAgentCount);
+    object["evacuatedAgentCount"] = static_cast<qint64>(frame.evacuatedAgentCount);
+    QJsonArray agents;
+    for (const auto& agent : frame.agents) {
+        agents.append(simulationAgentFrameToJson(agent));
+    }
+    object["agents"] = agents;
+    return object;
+}
+
+safecrowd::domain::SimulationFrame simulationFrameFromJson(const QJsonObject& object) {
+    safecrowd::domain::SimulationFrame frame;
+    frame.elapsedSeconds = object.value("elapsedSeconds").toDouble();
+    frame.complete = object.value("complete").toBool(false);
+    frame.totalAgentCount = static_cast<std::size_t>(object.value("totalAgentCount").toInteger());
+    frame.evacuatedAgentCount = static_cast<std::size_t>(object.value("evacuatedAgentCount").toInteger());
+    for (const auto& value : object.value("agents").toArray()) {
+        frame.agents.push_back(simulationAgentFrameFromJson(value.toObject()));
+    }
+    return frame;
+}
+
+QJsonObject hotspotToJson(const safecrowd::domain::ScenarioCongestionHotspot& hotspot) {
+    QJsonObject object;
+    object["center"] = pointArray(hotspot.center);
+    object["cellMin"] = pointArray(hotspot.cellMin);
+    object["cellMax"] = pointArray(hotspot.cellMax);
+    object["agentCount"] = static_cast<qint64>(hotspot.agentCount);
+    return object;
+}
+
+safecrowd::domain::ScenarioCongestionHotspot hotspotFromJson(const QJsonObject& object) {
+    return {
+        .center = pointFromJson(object.value("center")),
+        .cellMin = pointFromJson(object.value("cellMin")),
+        .cellMax = pointFromJson(object.value("cellMax")),
+        .agentCount = static_cast<std::size_t>(object.value("agentCount").toInteger()),
+    };
+}
+
+QJsonObject bottleneckToJson(const safecrowd::domain::ScenarioBottleneckMetric& bottleneck) {
+    QJsonObject object;
+    object["connectionId"] = QString::fromStdString(bottleneck.connectionId);
+    object["label"] = QString::fromStdString(bottleneck.label);
+    object["passage"] = lineToJson(bottleneck.passage);
+    object["nearbyAgentCount"] = static_cast<qint64>(bottleneck.nearbyAgentCount);
+    object["stalledAgentCount"] = static_cast<qint64>(bottleneck.stalledAgentCount);
+    object["averageSpeed"] = bottleneck.averageSpeed;
+    return object;
+}
+
+safecrowd::domain::ScenarioBottleneckMetric bottleneckFromJson(const QJsonObject& object) {
+    return {
+        .connectionId = object.value("connectionId").toString().toStdString(),
+        .label = object.value("label").toString().toStdString(),
+        .passage = lineFromJson(object.value("passage").toObject()),
+        .nearbyAgentCount = static_cast<std::size_t>(object.value("nearbyAgentCount").toInteger()),
+        .stalledAgentCount = static_cast<std::size_t>(object.value("stalledAgentCount").toInteger()),
+        .averageSpeed = object.value("averageSpeed").toDouble(),
+    };
+}
+
+QJsonObject riskSnapshotToJson(const safecrowd::domain::ScenarioRiskSnapshot& risk) {
+    QJsonObject object;
+    object["completionRisk"] = static_cast<int>(risk.completionRisk);
+    object["stalledAgentCount"] = static_cast<qint64>(risk.stalledAgentCount);
+    QJsonArray hotspots;
+    for (const auto& hotspot : risk.hotspots) {
+        hotspots.append(hotspotToJson(hotspot));
+    }
+    object["hotspots"] = hotspots;
+    QJsonArray bottlenecks;
+    for (const auto& bottleneck : risk.bottlenecks) {
+        bottlenecks.append(bottleneckToJson(bottleneck));
+    }
+    object["bottlenecks"] = bottlenecks;
+    return object;
+}
+
+safecrowd::domain::ScenarioRiskSnapshot riskSnapshotFromJson(const QJsonObject& object) {
+    safecrowd::domain::ScenarioRiskSnapshot risk;
+    risk.completionRisk = static_cast<safecrowd::domain::ScenarioRiskLevel>(object.value("completionRisk").toInt());
+    risk.stalledAgentCount = static_cast<std::size_t>(object.value("stalledAgentCount").toInteger());
+    for (const auto& value : object.value("hotspots").toArray()) {
+        risk.hotspots.push_back(hotspotFromJson(value.toObject()));
+    }
+    for (const auto& value : object.value("bottlenecks").toArray()) {
+        risk.bottlenecks.push_back(bottleneckFromJson(value.toObject()));
+    }
+    return risk;
+}
+
+QJsonObject resultArtifactsToJson(const safecrowd::domain::ScenarioResultArtifacts& artifacts) {
+    QJsonObject object;
+    QJsonArray progress;
+    for (const auto& sample : artifacts.evacuationProgress) {
+        QJsonObject sampleObject;
+        sampleObject["timeSeconds"] = sample.timeSeconds;
+        sampleObject["evacuatedCount"] = static_cast<qint64>(sample.evacuatedCount);
+        sampleObject["totalCount"] = static_cast<qint64>(sample.totalCount);
+        sampleObject["evacuatedRatio"] = sample.evacuatedRatio;
+        progress.append(sampleObject);
+    }
+    object["evacuationProgress"] = progress;
+
+    QJsonObject timing;
+    timing["t50Seconds"] = optionalDoubleToJson(artifacts.timingSummary.t50Seconds);
+    timing["t90Seconds"] = optionalDoubleToJson(artifacts.timingSummary.t90Seconds);
+    timing["t95Seconds"] = optionalDoubleToJson(artifacts.timingSummary.t95Seconds);
+    timing["finalEvacuationTimeSeconds"] = optionalDoubleToJson(artifacts.timingSummary.finalEvacuationTimeSeconds);
+    object["timingSummary"] = timing;
+    return object;
+}
+
+safecrowd::domain::ScenarioResultArtifacts resultArtifactsFromJson(const QJsonObject& object) {
+    safecrowd::domain::ScenarioResultArtifacts artifacts;
+    for (const auto& value : object.value("evacuationProgress").toArray()) {
+        const auto sampleObject = value.toObject();
+        artifacts.evacuationProgress.push_back({
+            .timeSeconds = sampleObject.value("timeSeconds").toDouble(),
+            .evacuatedCount = static_cast<std::size_t>(sampleObject.value("evacuatedCount").toInteger()),
+            .totalCount = static_cast<std::size_t>(sampleObject.value("totalCount").toInteger()),
+            .evacuatedRatio = sampleObject.value("evacuatedRatio").toDouble(),
+        });
+    }
+
+    const auto timing = object.value("timingSummary").toObject();
+    artifacts.timingSummary.t50Seconds = optionalDoubleFromJson(timing.value("t50Seconds"));
+    artifacts.timingSummary.t90Seconds = optionalDoubleFromJson(timing.value("t90Seconds"));
+    artifacts.timingSummary.t95Seconds = optionalDoubleFromJson(timing.value("t95Seconds"));
+    artifacts.timingSummary.finalEvacuationTimeSeconds = optionalDoubleFromJson(timing.value("finalEvacuationTimeSeconds"));
+    return artifacts;
+}
+
+QJsonObject savedScenarioStateToJson(const SavedScenarioState& scenario) {
+    QJsonObject object;
+    object["draft"] = scenarioDraftToJson(scenario.draft);
+    object["baseScenarioId"] = QString::fromStdString(scenario.baseScenarioId);
+    object["stagedForRun"] = scenario.stagedForRun;
+    return object;
+}
+
+SavedScenarioState savedScenarioStateFromJson(const QJsonObject& object) {
+    return {
+        .draft = scenarioDraftFromJson(object.value("draft").toObject()),
+        .baseScenarioId = object.value("baseScenarioId").toString().toStdString(),
+        .stagedForRun = object.value("stagedForRun").toBool(false),
+    };
+}
+
+QJsonObject authoringStateToJson(const SavedScenarioAuthoringState& authoring) {
+    QJsonObject object;
+    QJsonArray scenarios;
+    for (const auto& scenario : authoring.scenarios) {
+        scenarios.append(savedScenarioStateToJson(scenario));
+    }
+    object["scenarios"] = scenarios;
+    object["currentScenarioIndex"] = authoring.currentScenarioIndex;
+    object["navigationView"] = static_cast<int>(authoring.navigationView);
+    object["rightPanelMode"] = static_cast<int>(authoring.rightPanelMode);
+    return object;
+}
+
+SavedScenarioAuthoringState authoringStateFromJson(const QJsonObject& object) {
+    SavedScenarioAuthoringState authoring;
+    for (const auto& value : object.value("scenarios").toArray()) {
+        authoring.scenarios.push_back(savedScenarioStateFromJson(value.toObject()));
+    }
+    authoring.currentScenarioIndex = object.value("currentScenarioIndex").toInt(-1);
+    authoring.navigationView = static_cast<SavedNavigationView>(object.value("navigationView").toInt());
+    authoring.rightPanelMode = static_cast<SavedRightPanelMode>(object.value("rightPanelMode").toInt(1));
+    return authoring;
+}
+
+QJsonObject resultStateToJson(const SavedScenarioResultState& result) {
+    QJsonObject object;
+    object["scenario"] = scenarioDraftToJson(result.scenario);
+    object["frame"] = simulationFrameToJson(result.frame);
+    object["risk"] = riskSnapshotToJson(result.risk);
+    object["artifacts"] = resultArtifactsToJson(result.artifacts);
+    return object;
+}
+
+SavedScenarioResultState resultStateFromJson(const QJsonObject& object) {
+    return {
+        .scenario = scenarioDraftFromJson(object.value("scenario").toObject()),
+        .frame = simulationFrameFromJson(object.value("frame").toObject()),
+        .risk = riskSnapshotFromJson(object.value("risk").toObject()),
+        .artifacts = resultArtifactsFromJson(object.value("artifacts").toObject()),
+    };
+}
+
+QJsonObject workspaceStateToJson(const ProjectWorkspaceState& state) {
+    QJsonObject object;
+    object["version"] = 1;
+    object["activeView"] = static_cast<int>(state.activeView);
+    if (state.authoring.has_value()) {
+        object["authoring"] = authoringStateToJson(*state.authoring);
+    }
+    if (state.runningScenario.has_value()) {
+        object["runningScenario"] = scenarioDraftToJson(*state.runningScenario);
+    }
+    if (state.result.has_value()) {
+        object["result"] = resultStateToJson(*state.result);
+    }
+    return object;
+}
+
+ProjectWorkspaceState workspaceStateFromJson(const QJsonObject& object) {
+    ProjectWorkspaceState state;
+    state.activeView = static_cast<ProjectWorkspaceView>(object.value("activeView").toInt());
+    if (object.value("authoring").isObject()) {
+        state.authoring = authoringStateFromJson(object.value("authoring").toObject());
+    }
+    if (object.value("runningScenario").isObject()) {
+        state.runningScenario = scenarioDraftFromJson(object.value("runningScenario").toObject());
+    }
+    if (object.value("result").isObject()) {
+        state.result = resultStateFromJson(object.value("result").toObject());
+    }
+    return state;
+}
+
 bool isLiveValidationIssue(safecrowd::domain::ImportIssueCode code) {
     using safecrowd::domain::ImportIssueCode;
 
@@ -692,6 +1143,20 @@ bool ProjectPersistence::loadProjectReview(const ProjectMetadata& metadata, safe
     return true;
 }
 
+bool ProjectPersistence::loadProjectWorkspace(const ProjectMetadata& metadata, ProjectWorkspaceState* state) {
+    if (metadata.isBuiltInDemo() || state == nullptr) {
+        return false;
+    }
+
+    const auto document = readJsonDocument(workspaceFilePath(metadata.folderPath));
+    if (!document.isObject()) {
+        return false;
+    }
+
+    *state = workspaceStateFromJson(document.object());
+    return true;
+}
+
 bool ProjectPersistence::saveProject(ProjectMetadata metadata, QString* errorMessage) {
     if (metadata.isBuiltInDemo()) {
         if (errorMessage != nullptr) {
@@ -750,6 +1215,20 @@ bool ProjectPersistence::saveProjectReview(
     root["reviewStatus"] = static_cast<int>(importResult.reviewStatus);
     root["layout"] = layoutToJson(*importResult.layout);
     return writeJsonDocument(reviewFilePath(metadata.folderPath), QJsonDocument(root), errorMessage);
+}
+
+bool ProjectPersistence::saveProjectWorkspace(
+    const ProjectMetadata& metadata,
+    const ProjectWorkspaceState& state,
+    QString* errorMessage) {
+    if (metadata.isBuiltInDemo()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = "Built-in demo projects do not need to be saved.";
+        }
+        return false;
+    }
+
+    return writeJsonDocument(workspaceFilePath(metadata.folderPath), QJsonDocument(workspaceStateToJson(state)), errorMessage);
 }
 
 }  // namespace safecrowd::application
