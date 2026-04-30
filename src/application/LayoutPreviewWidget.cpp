@@ -389,6 +389,127 @@ bool hasConnectionPairAtSpan(
     });
 }
 
+safecrowd::domain::LineSegment2D entrySpanForRectangle(
+    const QRectF& rectangle,
+    safecrowd::domain::StairEntryDirection direction);
+QPointF entryOutsideSample(const QRectF& rectangle, safecrowd::domain::StairEntryDirection direction);
+std::optional<std::vector<std::pair<safecrowd::domain::Point2D, safecrowd::domain::Point2D>>> barrierSegmentsAfterGap(
+    const safecrowd::domain::Barrier2D& barrier,
+    const safecrowd::domain::LineSegment2D& gap);
+
+bool isVerticalLink(const safecrowd::domain::Connection2D& connection) {
+    return connection.kind == safecrowd::domain::ConnectionKind::Stair
+        || connection.kind == safecrowd::domain::ConnectionKind::Ramp
+        || connection.isStair
+        || connection.isRamp;
+}
+
+bool isVerticalZone(const safecrowd::domain::Zone2D& zone) {
+    return zone.kind == safecrowd::domain::ZoneKind::Stair || zone.isStair || zone.isRamp;
+}
+
+const safecrowd::domain::Zone2D* findZoneById(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const std::string& zoneId) {
+    const auto it = std::find_if(layout.zones.begin(), layout.zones.end(), [&](const auto& zone) {
+        return zone.id == zoneId;
+    });
+    return it == layout.zones.end() ? nullptr : &(*it);
+}
+
+std::optional<std::size_t> findZoneIndexById(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const std::string& zoneId) {
+    const auto it = std::find_if(layout.zones.begin(), layout.zones.end(), [&](const auto& zone) {
+        return zone.id == zoneId;
+    });
+    if (it == layout.zones.end()) {
+        return std::nullopt;
+    }
+    return static_cast<std::size_t>(std::distance(layout.zones.begin(), it));
+}
+
+double floorElevation(const safecrowd::domain::FacilityLayout2D& layout, const std::string& floorId) {
+    const auto it = std::find_if(layout.floors.begin(), layout.floors.end(), [&](const auto& floor) {
+        return floor.id == floorId;
+    });
+    return it == layout.floors.end() ? 0.0 : it->elevationMeters;
+}
+
+std::optional<safecrowd::domain::StairEntryDirection> stairEntryDirectionForFloor(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const safecrowd::domain::Connection2D& connection,
+    const std::string& floorId) {
+    if (!isVerticalLink(connection)) {
+        return std::nullopt;
+    }
+
+    const auto* fromZone = findZoneById(layout, connection.fromZoneId);
+    const auto* toZone = findZoneById(layout, connection.toZoneId);
+    if (fromZone == nullptr || toZone == nullptr || fromZone->floorId == toZone->floorId) {
+        return std::nullopt;
+    }
+
+    const bool fromIsLower = floorElevation(layout, fromZone->floorId) <= floorElevation(layout, toZone->floorId);
+    if (floorId == fromZone->floorId) {
+        return fromIsLower ? connection.lowerEntryDirection : connection.upperEntryDirection;
+    }
+    if (floorId == toZone->floorId) {
+        return fromIsLower ? connection.upperEntryDirection : connection.lowerEntryDirection;
+    }
+    return std::nullopt;
+}
+
+std::optional<safecrowd::domain::LineSegment2D> stairEntrySpanForFloor(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const safecrowd::domain::Connection2D& connection,
+    const std::string& floorId) {
+    const auto direction = stairEntryDirectionForFloor(layout, connection, floorId);
+    if (!direction.has_value()) {
+        return std::nullopt;
+    }
+
+    const auto* fromZone = findZoneById(layout, connection.fromZoneId);
+    const auto* toZone = findZoneById(layout, connection.toZoneId);
+    const auto* stairZone = fromZone != nullptr && fromZone->floorId == floorId ? fromZone : toZone;
+    if (stairZone == nullptr || !isVerticalZone(*stairZone)) {
+        return std::nullopt;
+    }
+
+    const auto bounds = polygonBounds(stairZone->area);
+    if (!bounds.valid()) {
+        return std::nullopt;
+    }
+    return entrySpanForRectangle(
+        QRectF(QPointF(bounds.minX, bounds.minY), QPointF(bounds.maxX, bounds.maxY)).normalized(),
+        *direction);
+}
+
+std::optional<QPointF> stairEntryOutsideSampleForFloor(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const safecrowd::domain::Connection2D& connection,
+    const std::string& floorId) {
+    const auto direction = stairEntryDirectionForFloor(layout, connection, floorId);
+    if (!direction.has_value()) {
+        return std::nullopt;
+    }
+
+    const auto* fromZone = findZoneById(layout, connection.fromZoneId);
+    const auto* toZone = findZoneById(layout, connection.toZoneId);
+    const auto* stairZone = fromZone != nullptr && fromZone->floorId == floorId ? fromZone : toZone;
+    if (stairZone == nullptr || !isVerticalZone(*stairZone)) {
+        return std::nullopt;
+    }
+
+    const auto bounds = polygonBounds(stairZone->area);
+    if (!bounds.valid()) {
+        return std::nullopt;
+    }
+    return entryOutsideSample(
+        QRectF(QPointF(bounds.minX, bounds.minY), QPointF(bounds.maxX, bounds.maxY)).normalized(),
+        *direction);
+}
+
 QString nextConnectionId(const safecrowd::domain::FacilityLayout2D& layout) {
     int suffix = 1;
     for (const auto& connection : layout.connections) {
@@ -729,7 +850,8 @@ std::vector<std::pair<double, double>> subtractInterval(
 std::vector<std::pair<safecrowd::domain::Point2D, safecrowd::domain::Point2D>> subtractBarrierOverlaps(
     const safecrowd::domain::FacilityLayout2D& layout,
     const safecrowd::domain::Point2D& start,
-    const safecrowd::domain::Point2D& end) {
+    const safecrowd::domain::Point2D& end,
+    const std::string& floorId) {
     const bool vertical = nearlyEqual(start.x, end.x);
     const bool horizontal = nearlyEqual(start.y, end.y);
     if (!vertical && !horizontal) {
@@ -741,6 +863,9 @@ std::vector<std::pair<safecrowd::domain::Point2D, safecrowd::domain::Point2D>> s
     std::vector<std::pair<double, double>> remaining{{axisStart, axisEnd}};
 
     for (const auto& barrier : layout.barriers) {
+        if (!matchesFloor(barrier.floorId, QString::fromStdString(floorId))) {
+            continue;
+        }
         if (barrier.geometry.vertices.size() != 2) {
             continue;
         }
@@ -782,6 +907,35 @@ std::vector<std::pair<safecrowd::domain::Point2D, safecrowd::domain::Point2D>> s
     return segments;
 }
 
+std::vector<std::pair<safecrowd::domain::Point2D, safecrowd::domain::Point2D>> subtractStairEntryOverlaps(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    std::vector<std::pair<safecrowd::domain::Point2D, safecrowd::domain::Point2D>> segments,
+    const std::string& floorId) {
+    for (const auto& connection : layout.connections) {
+        const auto entrySpan = stairEntrySpanForFloor(layout, connection, floorId);
+        if (!entrySpan.has_value()) {
+            continue;
+        }
+
+        std::vector<std::pair<safecrowd::domain::Point2D, safecrowd::domain::Point2D>> next;
+        for (const auto& segment : segments) {
+            const safecrowd::domain::Barrier2D virtualBarrier{
+                .floorId = floorId,
+                .geometry = {.vertices = {segment.first, segment.second}},
+                .blocksMovement = true,
+            };
+            const auto remaining = barrierSegmentsAfterGap(virtualBarrier, *entrySpan);
+            if (remaining.has_value()) {
+                next.insert(next.end(), remaining->begin(), remaining->end());
+            } else {
+                next.push_back(segment);
+            }
+        }
+        segments = std::move(next);
+    }
+    return segments;
+}
+
 void appendAutoWallsForPolygon(
     safecrowd::domain::FacilityLayout2D& layout,
     const safecrowd::domain::Polygon2D& polygon,
@@ -793,7 +947,9 @@ void appendAutoWallsForPolygon(
     for (std::size_t i = 0; i < polygon.outline.size(); ++i) {
         const auto& start = polygon.outline[i];
         const auto& end = polygon.outline[(i + 1) % polygon.outline.size()];
-        for (const auto& segment : subtractBarrierOverlaps(layout, start, end)) {
+        auto segments = subtractBarrierOverlaps(layout, start, end, floorId);
+        segments = subtractStairEntryOverlaps(layout, std::move(segments), floorId);
+        for (const auto& segment : segments) {
             appendBarrierSegment(layout, segment.first, segment.second, floorId);
         }
     }
@@ -1085,6 +1241,139 @@ void replaceBarrierWithSegments(
             continue;
         }
         appendBarrierSegment(layout, segment.first, segment.second, floorId);
+    }
+}
+
+std::optional<std::vector<std::pair<safecrowd::domain::Point2D, safecrowd::domain::Point2D>>> barrierSegmentsAfterGap(
+    const safecrowd::domain::Barrier2D& barrier,
+    const safecrowd::domain::LineSegment2D& gap) {
+    if (barrier.geometry.vertices.size() != 2) {
+        return std::nullopt;
+    }
+
+    const auto& start = barrier.geometry.vertices[0];
+    const auto& end = barrier.geometry.vertices[1];
+    const bool barrierVertical = nearlyEqual(start.x, end.x);
+    const bool barrierHorizontal = nearlyEqual(start.y, end.y);
+    const bool gapVertical = nearlyEqual(gap.start.x, gap.end.x);
+    const bool gapHorizontal = nearlyEqual(gap.start.y, gap.end.y);
+    if ((!barrierVertical && !barrierHorizontal)
+        || (barrierVertical != gapVertical)
+        || (barrierHorizontal != gapHorizontal)) {
+        return std::nullopt;
+    }
+
+    std::vector<std::pair<safecrowd::domain::Point2D, safecrowd::domain::Point2D>> remaining;
+    if (barrierVertical) {
+        if (!nearlyEqual(start.x, gap.start.x)) {
+            return std::nullopt;
+        }
+        const auto sourceStart = std::min(start.y, end.y);
+        const auto sourceEnd = std::max(start.y, end.y);
+        const auto gapStart = std::max(sourceStart, std::min(gap.start.y, gap.end.y));
+        const auto gapEnd = std::min(sourceEnd, std::max(gap.start.y, gap.end.y));
+        if (gapEnd <= gapStart + kGeometryEpsilon) {
+            return std::nullopt;
+        }
+        if (gapStart - sourceStart > kGeometryEpsilon) {
+            remaining.push_back({{.x = start.x, .y = sourceStart}, {.x = start.x, .y = gapStart}});
+        }
+        if (sourceEnd - gapEnd > kGeometryEpsilon) {
+            remaining.push_back({{.x = start.x, .y = gapEnd}, {.x = start.x, .y = sourceEnd}});
+        }
+    } else {
+        if (!nearlyEqual(start.y, gap.start.y)) {
+            return std::nullopt;
+        }
+        const auto sourceStart = std::min(start.x, end.x);
+        const auto sourceEnd = std::max(start.x, end.x);
+        const auto gapStart = std::max(sourceStart, std::min(gap.start.x, gap.end.x));
+        const auto gapEnd = std::min(sourceEnd, std::max(gap.start.x, gap.end.x));
+        if (gapEnd <= gapStart + kGeometryEpsilon) {
+            return std::nullopt;
+        }
+        if (gapStart - sourceStart > kGeometryEpsilon) {
+            remaining.push_back({{.x = sourceStart, .y = start.y}, {.x = gapStart, .y = start.y}});
+        }
+        if (sourceEnd - gapEnd > kGeometryEpsilon) {
+            remaining.push_back({{.x = gapEnd, .y = start.y}, {.x = sourceEnd, .y = start.y}});
+        }
+    }
+
+    return remaining;
+}
+
+void cutBarriersAtSpan(
+    safecrowd::domain::FacilityLayout2D& layout,
+    const safecrowd::domain::LineSegment2D& gap,
+    const std::string& floorId) {
+    for (std::size_t index = layout.barriers.size(); index > 0; --index) {
+        const auto barrierIndex = index - 1;
+        const auto& barrier = layout.barriers[barrierIndex];
+        if (!matchesFloor(barrier.floorId, QString::fromStdString(floorId))) {
+            continue;
+        }
+        const auto remaining = barrierSegmentsAfterGap(barrier, gap);
+        if (remaining.has_value()) {
+            replaceBarrierWithSegments(layout, barrierIndex, *remaining, floorId);
+        }
+    }
+}
+
+void autoConnectRoomToStairEntries(
+    safecrowd::domain::FacilityLayout2D& layout,
+    const QString& roomZoneId,
+    const QString& floorId) {
+    if (roomZoneId.isEmpty() || floorId.isEmpty()) {
+        return;
+    }
+
+    const auto roomIndex = findZoneIndexById(layout, roomZoneId.toStdString());
+    if (!roomIndex.has_value()) {
+        return;
+    }
+
+    const auto connectionCount = layout.connections.size();
+    for (std::size_t index = 0; index < connectionCount; ++index) {
+        const auto connection = layout.connections[index];
+        const auto entrySpan = stairEntrySpanForFloor(layout, connection, floorId.toStdString());
+        const auto outsideSample = stairEntryOutsideSampleForFloor(layout, connection, floorId.toStdString());
+        if (!entrySpan.has_value() || !outsideSample.has_value()) {
+            continue;
+        }
+
+        const auto candidates = zonesContainingPoint(layout, *outsideSample, floorId, 0.35);
+        if (std::find(candidates.begin(), candidates.end(), *roomIndex) == candidates.end()) {
+            continue;
+        }
+
+        const auto* fromZone = findZoneById(layout, connection.fromZoneId);
+        const auto* toZone = findZoneById(layout, connection.toZoneId);
+        const auto* stairZone = fromZone != nullptr && fromZone->floorId == floorId.toStdString() ? fromZone : toZone;
+        if (stairZone == nullptr || !isVerticalZone(*stairZone)) {
+            continue;
+        }
+
+        const auto stairZoneId = QString::fromStdString(stairZone->id);
+        if (stairZoneId == roomZoneId
+            || hasConnectionPairAtSpan(layout, roomZoneId, stairZoneId, entrySpan->start, entrySpan->end)) {
+            continue;
+        }
+
+        cutBarriersAtSpan(layout, *entrySpan, floorId.toStdString());
+        const auto connectionId = nextConnectionId(layout);
+        layout.connections.push_back({
+            .id = connectionId.toStdString(),
+            .floorId = floorId.toStdString(),
+            .kind = safecrowd::domain::ConnectionKind::Opening,
+            .fromZoneId = roomZoneId.toStdString(),
+            .toZoneId = stairZoneId.toStdString(),
+            .effectiveWidth = std::max(0.9, std::hypot(
+                entrySpan->end.x - entrySpan->start.x,
+                entrySpan->end.y - entrySpan->start.y)),
+            .directionality = safecrowd::domain::TravelDirection::Bidirectional,
+            .centerSpan = *entrySpan,
+        });
     }
 }
 
@@ -1839,9 +2128,13 @@ void LayoutPreviewWidget::createRoomPolygon(const std::vector<QPointF>& points) 
     }
 
     auto& layout = *importResult_.layout;
+    const auto currentFloor = currentFloorId();
     QPainterPath candidatePath = worldPolygonPath(roomPolygon);
     QPainterPath occupiedRooms;
     for (const auto& zone : layout.zones) {
+        if (!matchesFloor(zone.floorId, currentFloor)) {
+            continue;
+        }
         if (zone.kind != safecrowd::domain::ZoneKind::Room) {
             continue;
         }
@@ -1870,6 +2163,7 @@ void LayoutPreviewWidget::createRoomPolygon(const std::vector<QPointF>& points) 
         if (roomAutoWallsEnabled_) {
             appendAutoWallsForPolygon(layout, polygon, floorId);
         }
+        autoConnectRoomToStairEntries(layout, zoneId, QString::fromStdString(floorId));
 
         lastZoneId = zoneId;
     }
@@ -1910,9 +2204,13 @@ void LayoutPreviewWidget::createZone(const QPointF& startWorld, const QPointF& e
     };
 
     if (kind == safecrowd::domain::ZoneKind::Room) {
+        const auto currentFloor = currentFloorId();
         QPainterPath candidatePath = worldPolygonPath(rectanglePolygon);
         QPainterPath occupiedRooms;
         for (const auto& zone : layout.zones) {
+            if (!matchesFloor(zone.floorId, currentFloor)) {
+                continue;
+            }
             if (zone.kind != safecrowd::domain::ZoneKind::Room) {
                 continue;
             }
@@ -1943,6 +2241,9 @@ void LayoutPreviewWidget::createZone(const QPointF& startWorld, const QPointF& e
 
         if (kind == safecrowd::domain::ZoneKind::Room && roomAutoWallsEnabled_) {
             appendAutoWallsForPolygon(layout, polygon, floorId);
+        }
+        if (kind == safecrowd::domain::ZoneKind::Room) {
+            autoConnectRoomToStairEntries(layout, zoneId, QString::fromStdString(floorId));
         }
 
         lastZoneId = zoneId;
@@ -2132,6 +2433,7 @@ void LayoutPreviewWidget::createVerticalLink(const QPointF& startWorld, const QP
     appendStairWallsExceptEntry(layout, rectangle, targetEntryDirection, targetFloorId.toStdString());
 
     if (sourceZone.has_value()) {
+        cutBarriersAtSpan(layout, sourceEntrySpan, sourceFloorId.toStdString());
         layout.connections.push_back({
             .id = nextConnectionId(layout).toStdString(),
             .floorId = sourceFloorId.toStdString(),
@@ -2161,6 +2463,7 @@ void LayoutPreviewWidget::createVerticalLink(const QPointF& startWorld, const QP
     });
 
     if (targetZone.has_value()) {
+        cutBarriersAtSpan(layout, targetEntrySpan, targetFloorId.toStdString());
         layout.connections.push_back({
             .id = nextConnectionId(layout).toStdString(),
             .floorId = targetFloorId.toStdString(),

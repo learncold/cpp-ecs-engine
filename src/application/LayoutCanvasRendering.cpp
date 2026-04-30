@@ -36,6 +36,23 @@ const safecrowd::domain::Zone2D* findZone(
     return it == layout.zones.end() ? nullptr : &(*it);
 }
 
+bool isVerticalZone(const safecrowd::domain::Zone2D* zone) {
+    return zone != nullptr
+        && (zone->kind == safecrowd::domain::ZoneKind::Stair
+            || zone->isStair
+            || zone->isRamp);
+}
+
+bool isStairAdjacentOpening(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const safecrowd::domain::Connection2D& connection) {
+    if (connection.kind != safecrowd::domain::ConnectionKind::Opening) {
+        return false;
+    }
+    return isVerticalZone(findZone(layout, connection.fromZoneId))
+        || isVerticalZone(findZone(layout, connection.toZoneId));
+}
+
 double floorElevation(const safecrowd::domain::FacilityLayout2D& layout, const std::string& floorId) {
     const auto it = std::find_if(layout.floors.begin(), layout.floors.end(), [&](const auto& floor) {
         return floor.id == floorId;
@@ -536,6 +553,9 @@ void drawFacilityLayoutCanvas(QPainter& painter, const safecrowd::domain::Facili
 
     painter.setPen(QPen(QColor(56, 122, 186), 2.5));
     for (const auto& connection : layout.connections) {
+        if (isVerticalConnection(connection) || isStairAdjacentOpening(layout, connection)) {
+            continue;
+        }
         drawLayoutCanvasLine(painter, connection.centerSpan, transform);
     }
 
@@ -570,8 +590,9 @@ void drawFacilityLayoutCanvas(
 
     painter.setPen(QPen(QColor(56, 122, 186), 2.5));
     for (const auto& connection : layout.connections) {
-        if (matchesFloor(connection.floorId, floorId)
-            || stairFloorView(layout, connection, floorId).has_value()) {
+        if (!isVerticalConnection(connection)
+            && !isStairAdjacentOpening(layout, connection)
+            && matchesFloor(connection.floorId, floorId)) {
             drawLayoutCanvasLine(painter, connection.centerSpan, transform);
         }
     }
