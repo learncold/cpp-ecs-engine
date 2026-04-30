@@ -494,6 +494,9 @@ void LayoutReviewWidget::refreshApprovalState() {
 
     if (approveButton_ != nullptr) {
         approveButton_->setEnabled(!hasBlocking);
+        approveButton_->setToolTip(hasBlocking
+            ? "Resolve all blocking issues in the Issues panel before approving"
+            : "Approve this layout and proceed to Scenario Authoring");
     }
 
     if (approvalStatusLabel_ == nullptr) {
@@ -501,7 +504,7 @@ void LayoutReviewWidget::refreshApprovalState() {
     }
 
     if (hasBlocking) {
-        approvalStatusLabel_->setText("Resolve blocking issues first");
+        approvalStatusLabel_->setText("Resolve blocking issues to approve");
         return;
     }
 

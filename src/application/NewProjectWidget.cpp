@@ -77,7 +77,7 @@ NewProjectWidget::NewProjectWidget(QWidget* parent)
     layoutRow->setSpacing(12);
     auto* layoutBrowseButton = createOutlinedButton("Browse", this);
     layoutPathEdit_ = createTextInput(this);
-    layoutPathEdit_->setPlaceholderText("DXF file");
+    layoutPathEdit_->setPlaceholderText("Select a DXF file using Browse");
     layoutPathEdit_->setReadOnly(true);
     layoutPathEdit_->setStyleSheet(ui::textFieldStyleSheet(true));
     layoutPathEdit_->setMaximumWidth(760);
@@ -113,6 +113,7 @@ NewProjectWidget::NewProjectWidget(QWidget* parent)
     auto* cancelButton = createOutlinedButton("Cancel", this);
     auto* doneButton = createOutlinedButton("Done", this);
     doneButton->setStyleSheet(ui::primaryButtonStyleSheet());
+    doneButton->setToolTip("Project name, DXF layout file, and folder are all required");
     actionLayout->addWidget(cancelButton);
     actionLayout->addWidget(doneButton);
     cardLayout->addLayout(actionLayout);

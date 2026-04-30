@@ -451,7 +451,16 @@ void ScenarioAuthoringWidget::refreshInspector() {
     }
     if (stageScenarioButton_ != nullptr) {
         stageScenarioButton_->setEnabled(hasScenario);
-        stageScenarioButton_->setText(hasScenario && scenario->stagedForRun ? "Staged for Run" : "Stage Scenario");
+        if (!hasScenario) {
+            stageScenarioButton_->setText("Stage Scenario");
+            stageScenarioButton_->setToolTip("Create a scenario first to enable staging");
+        } else if (scenario->stagedForRun) {
+            stageScenarioButton_->setText("Staged for Run");
+            stageScenarioButton_->setToolTip("Click to remove this scenario from the staged list");
+        } else {
+            stageScenarioButton_->setText("Stage Scenario");
+            stageScenarioButton_->setToolTip("Mark this scenario to be included in the next Run");
+        }
     }
 }
 
@@ -679,7 +688,8 @@ QWidget* ScenarioAuthoringWidget::createRunPanel() {
         return scenario.stagedForRun;
     });
     if (stagedCount == 0) {
-        lines << "No staged scenarios";
+        lines << "No scenarios staged for run.";
+        lines << "Select a scenario and click Stage Scenario to continue.";
     } else {
         lines << "Staged scenarios";
         for (const auto& scenario : scenarios_) {
@@ -698,6 +708,9 @@ QWidget* ScenarioAuthoringWidget::createRunPanel() {
     executeRunButton_->setFont(ui::font(ui::FontRole::Body));
     executeRunButton_->setStyleSheet(ui::primaryButtonStyleSheet());
     executeRunButton_->setEnabled(stagedCount > 0);
+    executeRunButton_->setToolTip(stagedCount > 0
+        ? "Start simulation for all staged scenarios"
+        : "Stage at least one baseline scenario before running");
     layout->addWidget(executeRunButton_);
     connect(executeRunButton_, &QPushButton::clicked, this, [this]() {
         runFirstStagedBaselineScenario();

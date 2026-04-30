@@ -65,6 +65,11 @@ ProjectListWidget::ProjectListWidget(const QList<ProjectMetadata>& projects, QWi
         emptyLabel->setFont(ui::font(ui::FontRole::Body));
         emptyLabel->setStyleSheet(ui::mutedTextStyleSheet());
         layout->addWidget(emptyLabel);
+        auto* hintLabel = new QLabel("Use + New Project to create your first project.", this);
+        hintLabel->setFont(ui::font(ui::FontRole::Caption));
+        hintLabel->setStyleSheet(ui::subtleTextStyleSheet());
+        hintLabel->setWordWrap(true);
+        layout->addWidget(hintLabel);
     } else {
         for (const auto& project : projects) {
             addProjectRow(project);
