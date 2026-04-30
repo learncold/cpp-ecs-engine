@@ -37,6 +37,9 @@ private:
         std::vector<LineSegment2D> waypointPassages{};
         std::vector<std::string> waypointFromZoneIds{};
         std::vector<std::string> waypointZoneIds{};
+        std::vector<std::string> waypointFloorIds{};
+        std::vector<std::string> waypointConnectionIds{};
+        std::vector<bool> waypointVerticalTransitions{};
         std::string destinationZoneId{};
     };
 

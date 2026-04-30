@@ -1,16 +1,191 @@
 #include "application/LayoutCanvasRendering.h"
 
 #include <algorithm>
+#include <cmath>
 
 #include <QColor>
 #include <QEvent>
+#include <QFont>
 #include <QKeyEvent>
+#include <QLineF>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPen>
 #include <QWheelEvent>
 
 namespace safecrowd::application {
+namespace {
+
+bool matchesFloor(const std::string& elementFloorId, const std::string& floorId) {
+    return floorId.empty() || elementFloorId.empty() || elementFloorId == floorId;
+}
+
+bool isVerticalConnection(const safecrowd::domain::Connection2D& connection) {
+    return connection.kind == safecrowd::domain::ConnectionKind::Stair
+        || connection.kind == safecrowd::domain::ConnectionKind::Ramp
+        || connection.isStair
+        || connection.isRamp;
+}
+
+const safecrowd::domain::Zone2D* findZone(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const std::string& zoneId) {
+    const auto it = std::find_if(layout.zones.begin(), layout.zones.end(), [&](const auto& zone) {
+        return zone.id == zoneId;
+    });
+    return it == layout.zones.end() ? nullptr : &(*it);
+}
+
+double floorElevation(const safecrowd::domain::FacilityLayout2D& layout, const std::string& floorId) {
+    const auto it = std::find_if(layout.floors.begin(), layout.floors.end(), [&](const auto& floor) {
+        return floor.id == floorId;
+    });
+    return it == layout.floors.end() ? 0.0 : it->elevationMeters;
+}
+
+LayoutCanvasBounds zoneBounds(const safecrowd::domain::Zone2D& zone) {
+    LayoutCanvasBounds bounds;
+    for (const auto& point : zone.area.outline) {
+        bounds.minX = std::min(bounds.minX, point.x);
+        bounds.minY = std::min(bounds.minY, point.y);
+        bounds.maxX = std::max(bounds.maxX, point.x);
+        bounds.maxY = std::max(bounds.maxY, point.y);
+    }
+    return bounds;
+}
+
+QPointF entrySideMidpoint(
+    const LayoutCanvasBounds& bounds,
+    safecrowd::domain::StairEntryDirection direction) {
+    switch (direction) {
+    case safecrowd::domain::StairEntryDirection::North:
+        return {(bounds.minX + bounds.maxX) * 0.5, bounds.maxY};
+    case safecrowd::domain::StairEntryDirection::East:
+        return {bounds.maxX, (bounds.minY + bounds.maxY) * 0.5};
+    case safecrowd::domain::StairEntryDirection::South:
+        return {(bounds.minX + bounds.maxX) * 0.5, bounds.minY};
+    case safecrowd::domain::StairEntryDirection::West:
+        return {bounds.minX, (bounds.minY + bounds.maxY) * 0.5};
+    case safecrowd::domain::StairEntryDirection::Unspecified:
+        return {(bounds.minX + bounds.maxX) * 0.5, (bounds.minY + bounds.maxY) * 0.5};
+    }
+    return {};
+}
+
+QPointF entryOutsidePoint(
+    const LayoutCanvasBounds& bounds,
+    safecrowd::domain::StairEntryDirection direction) {
+    const auto margin = std::max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) * 0.22;
+    auto point = entrySideMidpoint(bounds, direction);
+    switch (direction) {
+    case safecrowd::domain::StairEntryDirection::North:
+        point.ry() += margin;
+        break;
+    case safecrowd::domain::StairEntryDirection::East:
+        point.rx() += margin;
+        break;
+    case safecrowd::domain::StairEntryDirection::South:
+        point.ry() -= margin;
+        break;
+    case safecrowd::domain::StairEntryDirection::West:
+        point.rx() -= margin;
+        break;
+    case safecrowd::domain::StairEntryDirection::Unspecified:
+        break;
+    }
+    return point;
+}
+
+struct StairFloorView {
+    const safecrowd::domain::Zone2D* zone{nullptr};
+    safecrowd::domain::StairEntryDirection entryDirection{safecrowd::domain::StairEntryDirection::Unspecified};
+    QString label{};
+};
+
+std::optional<StairFloorView> stairFloorView(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const safecrowd::domain::Connection2D& connection,
+    const std::string& floorId) {
+    if (!isVerticalConnection(connection)) {
+        return std::nullopt;
+    }
+
+    const auto* fromZone = findZone(layout, connection.fromZoneId);
+    const auto* toZone = findZone(layout, connection.toZoneId);
+    if (fromZone == nullptr || toZone == nullptr || fromZone->floorId == toZone->floorId) {
+        return std::nullopt;
+    }
+
+    const auto fromElevation = floorElevation(layout, fromZone->floorId);
+    const auto toElevation = floorElevation(layout, toZone->floorId);
+    const bool fromIsLower = fromElevation <= toElevation;
+    const auto* currentZone = matchesFloor(fromZone->floorId, floorId) ? fromZone
+        : (matchesFloor(toZone->floorId, floorId) ? toZone : nullptr);
+    if (currentZone == nullptr) {
+        return std::nullopt;
+    }
+
+    const bool currentIsLower = currentZone == fromZone ? fromIsLower : !fromIsLower;
+    return StairFloorView{
+        .zone = currentZone,
+        .entryDirection = currentIsLower ? connection.lowerEntryDirection : connection.upperEntryDirection,
+        .label = currentIsLower ? QString("Up") : QString("Down"),
+    };
+}
+
+void drawArrowHead(QPainter& painter, const QPointF& start, const QPointF& end) {
+    const QLineF line(start, end);
+    if (line.length() <= 1.0) {
+        return;
+    }
+
+    const double angle = std::atan2(start.y() - end.y(), start.x() - end.x());
+    constexpr double arrowSize = 8.0;
+    const QPointF first = end + QPointF(std::cos(angle + 0.45) * arrowSize, std::sin(angle + 0.45) * arrowSize);
+    const QPointF second = end + QPointF(std::cos(angle - 0.45) * arrowSize, std::sin(angle - 0.45) * arrowSize);
+    painter.drawLine(end, first);
+    painter.drawLine(end, second);
+}
+
+void drawStairEntryOverlay(
+    QPainter& painter,
+    const StairFloorView& view,
+    const LayoutCanvasTransform& transform) {
+    if (view.zone == nullptr) {
+        return;
+    }
+
+    const auto bounds = zoneBounds(*view.zone);
+    if (!bounds.valid()) {
+        return;
+    }
+
+    const safecrowd::domain::Point2D center{
+        .x = (bounds.minX + bounds.maxX) * 0.5,
+        .y = (bounds.minY + bounds.maxY) * 0.5,
+    };
+    const auto centerScreen = transform.map(center);
+
+    painter.save();
+    painter.setFont(QFont("Segoe UI", 9, QFont::DemiBold));
+    painter.setPen(QPen(QColor("#5a4b9a"), 2.0));
+    painter.setBrush(Qt::NoBrush);
+
+    if (view.entryDirection != safecrowd::domain::StairEntryDirection::Unspecified) {
+        const auto outsideWorld = entryOutsidePoint(bounds, view.entryDirection);
+        const auto sideWorld = entrySideMidpoint(bounds, view.entryDirection);
+        const auto start = transform.map({.x = outsideWorld.x(), .y = outsideWorld.y()});
+        const auto end = transform.map({.x = (sideWorld.x() + center.x) * 0.5, .y = (sideWorld.y() + center.y) * 0.5});
+        painter.drawLine(start, end);
+        drawArrowHead(painter, start, end);
+    }
+
+    painter.setPen(QPen(QColor("#3f347b"), 1.0));
+    painter.drawText(QRectF(centerScreen.x() - 24.0, centerScreen.y() - 12.0, 48.0, 24.0), Qt::AlignCenter, view.label);
+    painter.restore();
+}
+
+}  // namespace
 
 LayoutCanvasTransform::LayoutCanvasTransform(
     const LayoutCanvasBounds& bounds,
@@ -200,6 +375,41 @@ std::optional<LayoutCanvasBounds> collectLayoutCanvasBounds(const safecrowd::dom
     return bounds;
 }
 
+std::optional<LayoutCanvasBounds> collectLayoutCanvasBounds(const safecrowd::domain::FacilityLayout2D& layout, const std::string& floorId) {
+    LayoutCanvasBounds bounds;
+
+    for (const auto& zone : layout.zones) {
+        if (matchesFloor(zone.floorId, floorId)) {
+            includeLayoutCanvasPolygon(bounds, zone.area);
+        }
+    }
+    for (const auto& barrier : layout.barriers) {
+        if (matchesFloor(barrier.floorId, floorId)) {
+            includeLayoutCanvasPolyline(bounds, barrier.geometry);
+        }
+    }
+    for (const auto& connection : layout.connections) {
+        if (matchesFloor(connection.floorId, floorId)) {
+            includeLayoutCanvasLine(bounds, connection.centerSpan);
+        }
+    }
+
+    if (!bounds.valid()) {
+        return std::nullopt;
+    }
+
+    if (bounds.maxX == bounds.minX) {
+        bounds.maxX += 1.0;
+        bounds.minX -= 1.0;
+    }
+    if (bounds.maxY == bounds.minY) {
+        bounds.maxY += 1.0;
+        bounds.minY -= 1.0;
+    }
+
+    return bounds;
+}
+
 std::optional<LayoutCanvasBounds> collectLayoutCanvasBounds(const safecrowd::domain::ImportResult& importResult) {
     LayoutCanvasBounds bounds;
 
@@ -329,10 +539,55 @@ void drawFacilityLayoutCanvas(QPainter& painter, const safecrowd::domain::Facili
         drawLayoutCanvasLine(painter, connection.centerSpan, transform);
     }
 
+    for (const auto& connection : layout.connections) {
+        if (const auto view = stairFloorView(layout, connection, std::string{}); view.has_value()) {
+            drawStairEntryOverlay(painter, *view, transform);
+        }
+    }
+
     painter.setPen(QPen(QColor(82, 92, 105), 2.5));
     painter.setBrush(Qt::NoBrush);
     for (const auto& barrier : layout.barriers) {
         drawLayoutCanvasPolyline(painter, barrier.geometry, transform);
+    }
+}
+
+void drawFacilityLayoutCanvas(
+    QPainter& painter,
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const LayoutCanvasTransform& transform,
+    const std::string& floorId) {
+    painter.setPen(Qt::NoPen);
+    for (const auto& zone : layout.zones) {
+        if (!matchesFloor(zone.floorId, floorId)) {
+            continue;
+        }
+        painter.setBrush(zone.kind == safecrowd::domain::ZoneKind::Exit
+                ? QColor(214, 239, 226)
+                : QColor(231, 238, 246));
+        painter.drawPath(layoutCanvasPolygonPath(zone.area, transform));
+    }
+
+    painter.setPen(QPen(QColor(56, 122, 186), 2.5));
+    for (const auto& connection : layout.connections) {
+        if (matchesFloor(connection.floorId, floorId)
+            || stairFloorView(layout, connection, floorId).has_value()) {
+            drawLayoutCanvasLine(painter, connection.centerSpan, transform);
+        }
+    }
+
+    for (const auto& connection : layout.connections) {
+        if (const auto view = stairFloorView(layout, connection, floorId); view.has_value()) {
+            drawStairEntryOverlay(painter, *view, transform);
+        }
+    }
+
+    painter.setPen(QPen(QColor(82, 92, 105), 2.5));
+    painter.setBrush(Qt::NoBrush);
+    for (const auto& barrier : layout.barriers) {
+        if (matchesFloor(barrier.floorId, floorId)) {
+            drawLayoutCanvasPolyline(painter, barrier.geometry, transform);
+        }
     }
 }
 

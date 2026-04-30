@@ -17,6 +17,7 @@ namespace safecrowd::domain::simulation_internal {
 inline constexpr double kDefaultTimeLimitSeconds = 60.0;
 inline constexpr double kDefaultAgentRadius = 0.25;
 inline constexpr double kDefaultAgentSpeed = 1.5;
+inline constexpr double kStairSpeedMultiplier = 0.55;
 inline constexpr double kArrivalEpsilon = 0.05;
 inline constexpr double kPersonalSpaceBuffer = 0.08;
 inline constexpr double kAvoidanceLateralStrength = 0.65;
@@ -102,6 +103,14 @@ bool pointInRing(const std::vector<Point2D>& ring, const Point2D& point);
 Point2D polygonCenter(const Polygon2D& polygon);
 const Zone2D* findZone(const FacilityLayout2D& layout, const std::string& zoneId);
 const Connection2D* findConnectionBetween(const FacilityLayout2D& layout, const std::string& from, const std::string& to);
+std::string floorIdForZone(const FacilityLayout2D& layout, const std::string& zoneId);
+bool isVerticalConnection(const Connection2D& connection);
+bool canTraverseConnection(const FacilityLayout2D& layout, const Connection2D& connection);
+StairEntryDirection stairEntryDirectionForFloor(
+    const FacilityLayout2D& layout,
+    const Connection2D& connection,
+    const std::string& floorId);
+FacilityLayout2D layoutForFloor(const FacilityLayout2D& layout, const std::string& floorId);
 bool routePassageCrossed(const FacilityLayout2D& layout, const EvacuationRoute& route, const Point2D& position, double agentRadius);
 double speedOf(const Point2D& velocity);
 std::vector<engine::Entity> simulationEntities(engine::WorldQuery& query);

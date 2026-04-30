@@ -2,6 +2,7 @@
 
 #include <limits>
 #include <optional>
+#include <string>
 
 #include <QPainterPath>
 #include <QPointF>
@@ -95,6 +96,7 @@ void includeLayoutCanvasPolyline(LayoutCanvasBounds& bounds, const safecrowd::do
 void includeLayoutCanvasLine(LayoutCanvasBounds& bounds, const safecrowd::domain::LineSegment2D& line);
 
 std::optional<LayoutCanvasBounds> collectLayoutCanvasBounds(const safecrowd::domain::FacilityLayout2D& layout);
+std::optional<LayoutCanvasBounds> collectLayoutCanvasBounds(const safecrowd::domain::FacilityLayout2D& layout, const std::string& floorId);
 std::optional<LayoutCanvasBounds> collectLayoutCanvasBounds(const safecrowd::domain::ImportResult& importResult);
 
 QRectF layoutCanvasViewport(const QRect& widgetRect, int leftInset, int topInset, int rightInset, int bottomInset);
@@ -105,5 +107,10 @@ void drawLayoutCanvasPolyline(QPainter& painter, const safecrowd::domain::Polyli
 void drawLayoutCanvasGrid(QPainter& painter, const QRectF& viewport);
 void drawLayoutCanvasSurface(QPainter& painter, const QRectF& viewport);
 void drawFacilityLayoutCanvas(QPainter& painter, const safecrowd::domain::FacilityLayout2D& layout, const LayoutCanvasTransform& transform);
+void drawFacilityLayoutCanvas(
+    QPainter& painter,
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const LayoutCanvasTransform& transform,
+    const std::string& floorId);
 
 }  // namespace safecrowd::application

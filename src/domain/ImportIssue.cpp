@@ -43,6 +43,8 @@ const char* toString(ImportIssueCode code) noexcept {
         return "WidthBelowMinimum";
     case ImportIssueCode::UnmappedElement:
         return "UnmappedElement";
+    case ImportIssueCode::InvalidFloorReference:
+        return "InvalidFloorReference";
     }
 
     return "Unknown";

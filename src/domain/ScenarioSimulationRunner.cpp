@@ -93,12 +93,17 @@ std::vector<ScenarioAgentSeed> ScenarioSimulationRunner::createAgentSeeds() cons
                 .waypointPassages = route.waypointPassages,
                 .waypointFromZoneIds = route.waypointFromZoneIds,
                 .waypointZoneIds = route.waypointZoneIds,
+                .waypointFloorIds = route.waypointFloorIds,
+                .waypointConnectionIds = route.waypointConnectionIds,
+                .waypointVerticalTransitions = route.waypointVerticalTransitions,
                 .nextWaypointIndex = 0,
                 .currentSegmentStart = position,
                 .previousDistanceToWaypoint = 0.0,
                 .stalledSeconds = 0.0,
                 .destinationZoneId = route.destinationZoneId,
+                .currentFloorId = floorIdForZone(layout_, startZoneId),
             };
+            evacuationRoute.displayFloorId = evacuationRoute.currentFloorId;
             evacuationRoute.previousDistanceToWaypoint = route.waypoints.empty()
                 ? 0.0
                 : distanceToRouteWaypoint(evacuationRoute, position);
@@ -179,30 +184,50 @@ ScenarioSimulationRunner::RoutePlan ScenarioSimulationRunner::routePlan(const Po
     auto appendSegment = [&](const std::vector<Point2D>& segment,
                              const LineSegment2D& finalPassage,
                              const std::string& finalFromZoneId,
-                             const std::string& finalZoneId) {
+                             const std::string& finalZoneId,
+                             const std::string& finalFloorId,
+                             const std::string& finalConnectionId,
+                             bool finalVerticalTransition) {
         for (std::size_t waypointIndex = 0; waypointIndex < segment.size(); ++waypointIndex) {
+            const bool isFinalWaypoint = waypointIndex + 1 == segment.size();
             plan.waypoints.push_back(segment[waypointIndex]);
-            plan.waypointPassages.push_back(
-                waypointIndex + 1 == segment.size() ? finalPassage : pointPassage(segment[waypointIndex]));
-            plan.waypointFromZoneIds.push_back(waypointIndex + 1 == segment.size() ? finalFromZoneId : std::string{});
-            plan.waypointZoneIds.push_back(waypointIndex + 1 == segment.size() ? finalZoneId : std::string{});
+            plan.waypointPassages.push_back(isFinalWaypoint ? finalPassage : pointPassage(segment[waypointIndex]));
+            plan.waypointFromZoneIds.push_back(isFinalWaypoint ? finalFromZoneId : std::string{});
+            plan.waypointZoneIds.push_back(isFinalWaypoint ? finalZoneId : std::string{});
+            plan.waypointFloorIds.push_back(isFinalWaypoint ? finalFloorId : std::string{});
+            plan.waypointConnectionIds.push_back(isFinalWaypoint ? finalConnectionId : std::string{});
+            plan.waypointVerticalTransitions.push_back(isFinalWaypoint && finalVerticalTransition);
         }
     };
 
     for (std::size_t index = 1; index < zoneRoute->size(); ++index) {
-        if (const auto* connection = findConnectionBetween(layout_, (*zoneRoute)[index - 1], (*zoneRoute)[index])) {
+        const auto& fromZoneId = (*zoneRoute)[index - 1];
+        const auto& toZoneId = (*zoneRoute)[index];
+        if (const auto* connection = findConnectionBetween(layout_, fromZoneId, toZoneId)) {
             const auto passage = passageWithClearance(*connection, kCandidateClearance);
+            const auto fromFloorId = floorIdForZone(layout_, fromZoneId);
+            const auto toFloorId = floorIdForZone(layout_, toZoneId);
+            const auto segmentLayout = layoutForFloor(layout_, fromFloorId);
             const auto target = closestPointOnSegment(segmentStart, passage.start, passage.end);
-            const auto segment = buildPath(layout_, segmentStart, target, kCandidateClearance);
-            appendSegment(segment, passage, (*zoneRoute)[index - 1], (*zoneRoute)[index]);
+            const auto segment = buildPath(segmentLayout, segmentStart, target, kCandidateClearance);
+            appendSegment(
+                segment,
+                passage,
+                fromZoneId,
+                toZoneId,
+                toFloorId.empty() ? fromFloorId : toFloorId,
+                connection->id,
+                isVerticalConnection(*connection));
             segmentStart = target;
         }
     }
     if (const auto* exitZone = findZone(layout_, zoneRoute->back())) {
         const auto exitCenter = polygonCenter(exitZone->area);
         if (distanceBetween(segmentStart, exitCenter) > kArrivalEpsilon) {
-            const auto segment = buildPath(layout_, segmentStart, exitCenter, kCandidateClearance);
-            appendSegment(segment, pointPassage(exitCenter), std::string{}, exitZone->id);
+            const auto exitFloorId = exitZone->floorId;
+            const auto segmentLayout = layoutForFloor(layout_, exitFloorId);
+            const auto segment = buildPath(segmentLayout, segmentStart, exitCenter, kCandidateClearance);
+            appendSegment(segment, pointPassage(exitCenter), std::string{}, exitZone->id, exitFloorId, std::string{}, false);
         }
     }
 
@@ -211,6 +236,9 @@ ScenarioSimulationRunner::RoutePlan ScenarioSimulationRunner::routePlan(const Po
         plan.waypointPassages.erase(plan.waypointPassages.begin());
         plan.waypointFromZoneIds.erase(plan.waypointFromZoneIds.begin());
         plan.waypointZoneIds.erase(plan.waypointZoneIds.begin());
+        plan.waypointFloorIds.erase(plan.waypointFloorIds.begin());
+        plan.waypointConnectionIds.erase(plan.waypointConnectionIds.begin());
+        plan.waypointVerticalTransitions.erase(plan.waypointVerticalTransitions.begin());
     }
     return plan;
 }
@@ -245,6 +273,9 @@ std::optional<std::vector<std::string>> ScenarioSimulationRunner::zoneRouteToExi
 
         for (const auto& connection : layout_.connections) {
             if (connection.directionality == TravelDirection::Closed) {
+                continue;
+            }
+            if (!canTraverseConnection(layout_, connection)) {
                 continue;
             }
             std::string next;

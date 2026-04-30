@@ -182,6 +182,11 @@ void ScenarioFrameSyncSystem::update(engine::EngineWorld& world, const engine::E
             .position = position.value,
             .velocity = velocity.value,
             .radius = agent.radius,
+            .floorId = query.contains<EvacuationRoute>(entity)
+                ? (!query.get<EvacuationRoute>(entity).displayFloorId.empty()
+                    ? query.get<EvacuationRoute>(entity).displayFloorId
+                    : query.get<EvacuationRoute>(entity).currentFloorId)
+                : std::string{},
         });
     }
 

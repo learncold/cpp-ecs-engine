@@ -61,7 +61,7 @@ safecrowd::domain::FacilityLayout2D wideDoorLayout() {
     return layout;
 }
 
-safecrowd::domain::FacilityLayout2D wideDoorToCorridorLayout() {
+safecrowd::domain::FacilityLayout2D wideDoorToPassageLayout() {
     safecrowd::domain::FacilityLayout2D layout;
     layout.zones.push_back({
         .id = "room",
@@ -70,9 +70,9 @@ safecrowd::domain::FacilityLayout2D wideDoorToCorridorLayout() {
         .area = {.outline = {{0.0, 0.0}, {4.0, 0.0}, {4.0, 4.0}, {0.0, 4.0}}},
     });
     layout.zones.push_back({
-        .id = "corridor",
-        .kind = safecrowd::domain::ZoneKind::Corridor,
-        .label = "Corridor",
+        .id = "passage",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Passage",
         .area = {.outline = {{4.0, 0.0}, {8.0, 0.0}, {8.0, 4.0}, {4.0, 4.0}}},
     });
     layout.zones.push_back({
@@ -85,17 +85,121 @@ safecrowd::domain::FacilityLayout2D wideDoorToCorridorLayout() {
         .id = "wide-door",
         .kind = safecrowd::domain::ConnectionKind::Doorway,
         .fromZoneId = "room",
-        .toZoneId = "corridor",
+        .toZoneId = "passage",
         .effectiveWidth = 3.0,
         .centerSpan = {{4.0, 0.5}, {4.0, 3.5}},
     });
     layout.connections.push_back({
         .id = "exit-door",
         .kind = safecrowd::domain::ConnectionKind::Exit,
-        .fromZoneId = "corridor",
+        .fromZoneId = "passage",
         .toZoneId = "exit",
         .effectiveWidth = 2.0,
         .centerSpan = {{8.0, 1.0}, {8.0, 3.0}},
+    });
+    return layout;
+}
+
+safecrowd::domain::FacilityLayout2D twoFloorStairExitLayout() {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.id = "two-floor";
+    layout.levelId = "L1";
+    layout.floors.push_back({.id = "L1", .label = "Floor 1"});
+    layout.floors.push_back({.id = "L2", .label = "Floor 2", .elevationMeters = 3.5});
+    layout.zones.push_back({
+        .id = "room-l1",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Room L1",
+        .area = {.outline = {{0.0, 0.0}, {2.0, 0.0}, {2.0, 2.0}, {0.0, 2.0}}},
+    });
+    layout.zones.push_back({
+        .id = "exit-l2",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ZoneKind::Exit,
+        .label = "Exit L2",
+        .area = {.outline = {{2.0, 0.0}, {4.0, 0.0}, {4.0, 2.0}, {2.0, 2.0}}},
+    });
+    layout.connections.push_back({
+        .id = "stair-l1-l2",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ConnectionKind::Stair,
+        .fromZoneId = "room-l1",
+        .toZoneId = "exit-l2",
+        .effectiveWidth = 1.2,
+        .isStair = true,
+        .centerSpan = {{2.0, 0.6}, {2.0, 1.4}},
+    });
+    return layout;
+}
+
+safecrowd::domain::FacilityLayout2D directedStairExitLayout(
+    safecrowd::domain::StairEntryDirection lowerEntryDirection,
+    safecrowd::domain::StairEntryDirection upperEntryDirection) {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.id = "directed-stair";
+    layout.levelId = "L1";
+    layout.floors.push_back({.id = "L1", .label = "Floor 1"});
+    layout.floors.push_back({.id = "L2", .label = "Floor 2", .elevationMeters = 3.5});
+    layout.zones.push_back({
+        .id = "room-l1",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Room L1",
+        .area = {.outline = {{0.0, 0.0}, {2.0, 0.0}, {2.0, 2.0}, {0.0, 2.0}}},
+    });
+    layout.zones.push_back({
+        .id = "stair-l1",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Stair,
+        .label = "Stair L1",
+        .area = {.outline = {{2.0, 0.0}, {4.0, 0.0}, {4.0, 2.0}, {2.0, 2.0}}},
+        .isStair = true,
+    });
+    layout.zones.push_back({
+        .id = "stair-l2",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ZoneKind::Stair,
+        .label = "Stair L2",
+        .area = {.outline = {{2.0, 0.0}, {4.0, 0.0}, {4.0, 2.0}, {2.0, 2.0}}},
+        .isStair = true,
+    });
+    layout.zones.push_back({
+        .id = "exit-l2",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ZoneKind::Exit,
+        .label = "Exit L2",
+        .area = {.outline = {{4.0, 0.0}, {6.0, 0.0}, {6.0, 2.0}, {4.0, 2.0}}},
+    });
+    layout.connections.push_back({
+        .id = "room-to-stair",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ConnectionKind::Opening,
+        .fromZoneId = "room-l1",
+        .toZoneId = "stair-l1",
+        .effectiveWidth = 1.2,
+        .centerSpan = {{2.0, 0.4}, {2.0, 1.6}},
+    });
+    layout.connections.push_back({
+        .id = "stair-l1-l2",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ConnectionKind::Stair,
+        .fromZoneId = "stair-l1",
+        .toZoneId = "stair-l2",
+        .effectiveWidth = 1.2,
+        .isStair = true,
+        .lowerEntryDirection = lowerEntryDirection,
+        .upperEntryDirection = upperEntryDirection,
+        .centerSpan = {{2.8, 1.0}, {3.2, 1.0}},
+    });
+    layout.connections.push_back({
+        .id = "stair-to-exit",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ConnectionKind::Exit,
+        .fromZoneId = "stair-l2",
+        .toZoneId = "exit-l2",
+        .effectiveWidth = 1.2,
+        .centerSpan = {{4.0, 0.4}, {4.0, 1.6}},
     });
     return layout;
 }
@@ -149,7 +253,7 @@ SC_TEST(ScenarioSimulationRunnerCompletesAtTimeLimit) {
 SC_TEST(ScenarioSimulationRunnerMarksEvacuationSuccessAtExitZone) {
     safecrowd::domain::InitialPlacement2D placement;
     placement.id = "agent-1";
-    placement.zoneId = safecrowd::domain::DemoLayouts::Sprint1FacilityIds::ExitCorridorZoneId;
+    placement.zoneId = safecrowd::domain::DemoLayouts::Sprint1FacilityIds::ExitPassageZoneId;
     placement.targetAgentCount = 1;
     placement.initialVelocity = {.x = 3.0, .y = 0.0};
     placement.area.outline = {{.x = 23.5, .y = 6.0}};
@@ -281,7 +385,7 @@ SC_TEST(ScenarioSimulationRunnerAdvancesWideDoorPassageAfterCrossingNearEndpoint
     scenario.execution.timeLimitSeconds = 5.0;
     scenario.population.initialPlacements.push_back(placement);
 
-    safecrowd::domain::ScenarioSimulationRunner runner(wideDoorToCorridorLayout(), scenario);
+    safecrowd::domain::ScenarioSimulationRunner runner(wideDoorToPassageLayout(), scenario);
     runner.step(0.1);
 
     SC_EXPECT_EQ(runner.frame().agents.size(), static_cast<std::size_t>(1));
@@ -300,11 +404,98 @@ SC_TEST(ScenarioSimulationRunnerSkipsPassedDoorwaysWhenAgentIsAlreadyInLaterZone
     scenario.execution.timeLimitSeconds = 5.0;
     scenario.population.initialPlacements.push_back(placement);
 
-    safecrowd::domain::ScenarioSimulationRunner runner(wideDoorToCorridorLayout(), scenario);
+    safecrowd::domain::ScenarioSimulationRunner runner(wideDoorToPassageLayout(), scenario);
     runner.step(0.1);
 
     SC_EXPECT_EQ(runner.frame().agents.size(), static_cast<std::size_t>(1));
     SC_EXPECT_TRUE(runner.frame().agents.front().velocity.x > 0.0);
+}
+
+SC_TEST(ScenarioSimulationRunnerTraversesStairConnectionBetweenFloors) {
+    safecrowd::domain::InitialPlacement2D placement;
+    placement.id = "agent-1";
+    placement.zoneId = "room-l1";
+    placement.targetAgentCount = 1;
+    placement.initialVelocity = {.x = 1.5, .y = 0.0};
+    placement.area.outline = {{.x = 0.5, .y = 1.0}};
+
+    safecrowd::domain::ScenarioDraft scenario;
+    scenario.population.initialPlacements.push_back(placement);
+    scenario.execution.timeLimitSeconds = 10.0;
+
+    safecrowd::domain::ScenarioSimulationRunner runner(twoFloorStairExitLayout(), scenario);
+    for (int i = 0; i < 80 && !runner.complete(); ++i) {
+        runner.step(0.1);
+    }
+
+    SC_EXPECT_EQ(runner.frame().evacuatedAgentCount, std::size_t{1});
+}
+
+SC_TEST(ScenarioSimulationRunnerHonorsAllowedStairEntryDirection) {
+    safecrowd::domain::InitialPlacement2D placement;
+    placement.id = "agent-1";
+    placement.zoneId = "room-l1";
+    placement.targetAgentCount = 1;
+    placement.initialVelocity = {.x = 1.5, .y = 0.0};
+    placement.area.outline = {{.x = 0.5, .y = 1.0}};
+
+    safecrowd::domain::ScenarioDraft scenario;
+    scenario.population.initialPlacements.push_back(placement);
+    scenario.execution.timeLimitSeconds = 12.0;
+
+    safecrowd::domain::ScenarioSimulationRunner runner(directedStairExitLayout(
+        safecrowd::domain::StairEntryDirection::West,
+        safecrowd::domain::StairEntryDirection::East), scenario);
+    for (int i = 0; i < 120 && !runner.complete(); ++i) {
+        runner.step(0.1);
+    }
+
+    SC_EXPECT_EQ(runner.frame().evacuatedAgentCount, std::size_t{1});
+}
+
+SC_TEST(ScenarioSimulationRunnerBlocksDisallowedStairEntryDirection) {
+    safecrowd::domain::InitialPlacement2D placement;
+    placement.id = "agent-1";
+    placement.zoneId = "room-l1";
+    placement.targetAgentCount = 1;
+    placement.initialVelocity = {.x = 1.5, .y = 0.0};
+    placement.area.outline = {{.x = 0.5, .y = 1.0}};
+
+    safecrowd::domain::ScenarioDraft scenario;
+    scenario.population.initialPlacements.push_back(placement);
+    scenario.execution.timeLimitSeconds = 4.0;
+
+    safecrowd::domain::ScenarioSimulationRunner runner(directedStairExitLayout(
+        safecrowd::domain::StairEntryDirection::East,
+        safecrowd::domain::StairEntryDirection::East), scenario);
+    for (int i = 0; i < 40 && !runner.complete(); ++i) {
+        runner.step(0.1);
+    }
+
+    SC_EXPECT_EQ(runner.frame().evacuatedAgentCount, std::size_t{0});
+    SC_EXPECT_EQ(runner.frame().agents.size(), std::size_t{1});
+    SC_EXPECT_TRUE(runner.frame().agents.front().position.x < 2.0);
+}
+
+SC_TEST(ScenarioSimulationRunnerDisplaysNextFloorAfterHalfStairTransition) {
+    safecrowd::domain::InitialPlacement2D placement;
+    placement.id = "agent-1";
+    placement.zoneId = "stair-l1";
+    placement.targetAgentCount = 1;
+    placement.initialVelocity = {.x = 1.5, .y = 0.0};
+    placement.area.outline = {{.x = 2.2, .y = 1.0}};
+
+    safecrowd::domain::ScenarioDraft scenario;
+    scenario.population.initialPlacements.push_back(placement);
+    scenario.execution.timeLimitSeconds = 4.0;
+
+    safecrowd::domain::ScenarioSimulationRunner runner(directedStairExitLayout(
+        safecrowd::domain::StairEntryDirection::Unspecified,
+        safecrowd::domain::StairEntryDirection::Unspecified), scenario);
+    runner.step(0.55);
+
+    SC_EXPECT_EQ(runner.frame().agents.size(), std::size_t{1});
+    SC_EXPECT_EQ(runner.frame().agents.front().floorId, std::string{"L2"});
 }
 
 SC_TEST(ScenarioSimulationRunnerBlocksMovementAcrossBarrierSegments) {

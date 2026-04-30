@@ -58,7 +58,8 @@ public:
                 continue;
             }
 
-            const auto* destinationZone = findZone(layout_, route.destinationZoneId);
+            const auto floorLayout = layoutForFloor(layout_, route.currentFloorId);
+            const auto* destinationZone = findZone(floorLayout, route.destinationZoneId);
             if (destinationZone != nullptr && pointInRing(destinationZone->area.outline, position.value)) {
                 status.evacuated = true;
                 status.completionTimeSeconds = clock.elapsedSeconds;
@@ -81,7 +82,8 @@ public:
             }
 
             const auto routeDirection = (target - position.value) * (1.0 / distance);
-            const auto desiredVelocity = routeDirection * static_cast<double>(agent.maxSpeed);
+            const auto maxSpeed = effectiveMaxSpeed(agent, route, position.value);
+            const auto desiredVelocity = routeDirection * maxSpeed;
             double speedScale = 1.0;
             const auto neighborRadius = static_cast<double>(agent.radius) + kDefaultAgentRadius + kPersonalSpaceBuffer;
             const auto neighborCandidates = resources.contains<ScenarioAgentSpatialIndexResource>()
@@ -89,7 +91,7 @@ public:
                 : nearbyAgents(query, localNeighborIndex, position.value, neighborRadius);
             const auto avoidanceVelocity =
                 forwardPreservingAgentAvoidanceVelocity(query, entity, neighborCandidates, desiredVelocity, speedScale);
-            const auto barrierVelocity = barrierSeparationVelocity(layout_, position, agent);
+            const auto barrierVelocity = barrierSeparationVelocity(floorLayout, position, agent);
             auto finalVelocity = (desiredVelocity * speedScale) + avoidanceVelocity + barrierVelocity;
             if (dot(finalVelocity, routeDirection) < 0.0) {
                 const auto lateral = perpendicularLeft(routeDirection);
@@ -98,7 +100,7 @@ public:
             }
             plans.push_back({
                 .entity = entity,
-                .velocity = clampedToLength(finalVelocity, static_cast<double>(agent.maxSpeed)),
+                .velocity = clampedToLength(finalVelocity, maxSpeed),
             });
         }
 
@@ -113,12 +115,17 @@ public:
 
             const auto target = routeWaypointTarget(route, position.value);
             const auto remainingDistance = distanceBetween(position.value, target);
+            const auto maxSpeed = effectiveMaxSpeed(agent, route, position.value);
             const auto stepVelocity =
-                clampedToLength(plan.velocity, std::min(static_cast<double>(agent.maxSpeed), remainingDistance / clampedDelta));
+                clampedToLength(plan.velocity, std::min(maxSpeed, remainingDistance / clampedDelta));
             const auto previousPosition = position.value;
-            const auto nextPosition = constrainedMove(layout_, previousPosition, previousPosition + (stepVelocity * clampedDelta));
+            const auto nextPosition = constrainedMove(
+                layoutForFloor(layout_, route.currentFloorId),
+                previousPosition,
+                previousPosition + (stepVelocity * clampedDelta));
             position.value = nextPosition;
             velocity.value = (nextPosition - previousPosition) * (1.0 / clampedDelta);
+            updateDisplayFloor(route, nextPosition);
         }
 
         resolveAgentOverlaps(query, entities);
@@ -134,6 +141,11 @@ private:
             return;
         }
 
+        const auto reachedIndex = route.nextWaypointIndex;
+        if (reachedIndex < route.waypointFloorIds.size() && !route.waypointFloorIds[reachedIndex].empty()) {
+            route.currentFloorId = route.waypointFloorIds[reachedIndex];
+        }
+        route.displayFloorId = route.currentFloorId;
         route.currentSegmentStart = reachedPoint;
         ++route.nextWaypointIndex;
         if (route.nextWaypointIndex < route.waypoints.size()) {
@@ -159,7 +171,8 @@ private:
             const auto& agent = query.get<Agent>(entity);
             auto& route = query.get<EvacuationRoute>(entity);
             while (route.nextWaypointIndex < route.waypoints.size()) {
-                if (routePassageCrossed(layout_, route, position.value, agent.radius)) {
+                const auto floorLayout = layoutForFloor(layout_, route.currentFloorId);
+                if (routePassageCrossed(floorLayout, route, position.value, agent.radius)) {
                     advanceRouteWaypoint(route, position.value);
                     continue;
                 }
@@ -218,7 +231,7 @@ private:
 
             const auto& position = query.get<Position>(entity);
             auto& route = query.get<EvacuationRoute>(entity);
-            const auto currentZoneId = zoneAt(position.value);
+            const auto currentZoneId = zoneAt(position.value, route.currentFloorId);
             while (!currentZoneId.empty() && route.nextWaypointIndex < route.waypointZoneIds.size()) {
                 auto matchedIndex = route.waypointZoneIds.size();
                 for (auto index = route.nextWaypointIndex; index < route.waypointZoneIds.size(); ++index) {
@@ -254,11 +267,12 @@ private:
 
             const auto target = routeWaypointTarget(route, position.value);
             const auto clearance = static_cast<double>(agent.radius) + kPathClearance;
-            if (lineOfSightClear(layout_, position.value, target, clearance)) {
+            const auto floorLayout = layoutForFloor(layout_, route.currentFloorId);
+            if (lineOfSightClear(floorLayout, position.value, target, clearance)) {
                 continue;
             }
 
-            const auto replacement = buildPath(layout_, position.value, target, clearance);
+            const auto replacement = buildPath(floorLayout, position.value, target, clearance);
             if (replacement.size() <= 1) {
                 continue;
             }
@@ -272,10 +286,30 @@ private:
             const auto originalFromZoneId = route.nextWaypointIndex < route.waypointFromZoneIds.size()
                 ? route.waypointFromZoneIds[route.nextWaypointIndex]
                 : std::string{};
+            const auto originalFloorId = route.nextWaypointIndex < route.waypointFloorIds.size()
+                ? route.waypointFloorIds[route.nextWaypointIndex]
+                : std::string{};
+            const auto originalConnectionId = route.nextWaypointIndex < route.waypointConnectionIds.size()
+                ? route.waypointConnectionIds[route.nextWaypointIndex]
+                : std::string{};
+            const auto originalVerticalTransition = route.nextWaypointIndex < route.waypointVerticalTransitions.size()
+                ? route.waypointVerticalTransitions[route.nextWaypointIndex]
+                : false;
             route.waypoints.erase(route.waypoints.begin() + static_cast<std::ptrdiff_t>(route.nextWaypointIndex));
             route.waypointPassages.erase(route.waypointPassages.begin() + static_cast<std::ptrdiff_t>(route.nextWaypointIndex));
             route.waypointFromZoneIds.erase(route.waypointFromZoneIds.begin() + static_cast<std::ptrdiff_t>(route.nextWaypointIndex));
             route.waypointZoneIds.erase(route.waypointZoneIds.begin() + static_cast<std::ptrdiff_t>(route.nextWaypointIndex));
+            if (route.nextWaypointIndex < route.waypointConnectionIds.size()) {
+                route.waypointConnectionIds.erase(
+                    route.waypointConnectionIds.begin() + static_cast<std::ptrdiff_t>(route.nextWaypointIndex));
+            }
+            if (route.nextWaypointIndex < route.waypointVerticalTransitions.size()) {
+                route.waypointVerticalTransitions.erase(
+                    route.waypointVerticalTransitions.begin() + static_cast<std::ptrdiff_t>(route.nextWaypointIndex));
+            }
+            if (route.nextWaypointIndex < route.waypointFloorIds.size()) {
+                route.waypointFloorIds.erase(route.waypointFloorIds.begin() + static_cast<std::ptrdiff_t>(route.nextWaypointIndex));
+            }
 
             std::vector<LineSegment2D> replacementPassages;
             replacementPassages.reserve(replacement.size());
@@ -288,6 +322,12 @@ private:
             replacementZoneIds.back() = originalTargetZoneId;
             std::vector<std::string> replacementFromZoneIds(replacement.size(), std::string{});
             replacementFromZoneIds.back() = originalFromZoneId;
+            std::vector<std::string> replacementFloorIds(replacement.size(), std::string{});
+            replacementFloorIds.back() = originalFloorId;
+            std::vector<std::string> replacementConnectionIds(replacement.size(), std::string{});
+            replacementConnectionIds.back() = originalConnectionId;
+            std::vector<bool> replacementVerticalTransitions(replacement.size(), false);
+            replacementVerticalTransitions.back() = originalVerticalTransition;
             route.waypoints.insert(
                 route.waypoints.begin() + static_cast<std::ptrdiff_t>(route.nextWaypointIndex),
                 replacement.begin(),
@@ -304,6 +344,27 @@ private:
                 route.waypointZoneIds.begin() + static_cast<std::ptrdiff_t>(route.nextWaypointIndex),
                 replacementZoneIds.begin(),
                 replacementZoneIds.end());
+            if (route.waypointConnectionIds.size() < route.nextWaypointIndex) {
+                route.waypointConnectionIds.resize(route.nextWaypointIndex);
+            }
+            route.waypointConnectionIds.insert(
+                route.waypointConnectionIds.begin() + static_cast<std::ptrdiff_t>(route.nextWaypointIndex),
+                replacementConnectionIds.begin(),
+                replacementConnectionIds.end());
+            if (route.waypointVerticalTransitions.size() < route.nextWaypointIndex) {
+                route.waypointVerticalTransitions.resize(route.nextWaypointIndex);
+            }
+            route.waypointVerticalTransitions.insert(
+                route.waypointVerticalTransitions.begin() + static_cast<std::ptrdiff_t>(route.nextWaypointIndex),
+                replacementVerticalTransitions.begin(),
+                replacementVerticalTransitions.end());
+            if (route.waypointFloorIds.size() < route.nextWaypointIndex) {
+                route.waypointFloorIds.resize(route.nextWaypointIndex);
+            }
+            route.waypointFloorIds.insert(
+                route.waypointFloorIds.begin() + static_cast<std::ptrdiff_t>(route.nextWaypointIndex),
+                replacementFloorIds.begin(),
+                replacementFloorIds.end());
             route.currentSegmentStart = position.value;
             route.previousDistanceToWaypoint = distanceToRouteWaypoint(route, position.value);
             route.stalledSeconds = 0.0;
@@ -356,8 +417,16 @@ private:
 
                     const auto direction = normalizedOr(delta, deterministicFallbackDirection(first));
                     const auto push = std::min(0.08, (minimumDistance - distance) * 0.35);
-                    firstPosition.value = constrainedMove(layout_, firstPosition.value, firstPosition.value + (direction * push));
-                    secondPosition.value = constrainedMove(layout_, secondPosition.value, secondPosition.value - (direction * push));
+                    const auto& firstRoute = query.get<EvacuationRoute>(first);
+                    const auto& secondRoute = query.get<EvacuationRoute>(second);
+                    firstPosition.value = constrainedMove(
+                        layoutForFloor(layout_, firstRoute.currentFloorId),
+                        firstPosition.value,
+                        firstPosition.value + (direction * push));
+                    secondPosition.value = constrainedMove(
+                        layoutForFloor(layout_, secondRoute.currentFloorId),
+                        secondPosition.value,
+                        secondPosition.value - (direction * push));
                 }
             }
         }
@@ -386,13 +455,54 @@ private:
         clock.complete = totalAgentCount > 0 && evacuatedAgentCount >= totalAgentCount;
     }
 
-    std::string zoneAt(const Point2D& point) const {
+    std::string zoneAt(const Point2D& point, const std::string& floorId) const {
         for (const auto& zone : layout_.zones) {
+            if (!floorId.empty() && !zone.floorId.empty() && zone.floorId != floorId) {
+                continue;
+            }
             if (pointInRing(zone.area.outline, point)) {
                 return zone.id;
             }
         }
         return {};
+    }
+
+    bool currentWaypointIsVertical(const EvacuationRoute& route) const {
+        return route.nextWaypointIndex < route.waypointVerticalTransitions.size()
+            && route.waypointVerticalTransitions[route.nextWaypointIndex];
+    }
+
+    double effectiveMaxSpeed(const Agent& agent, const EvacuationRoute& route, const Point2D& position) const {
+        const auto currentZoneId = zoneAt(position, route.currentFloorId);
+        const auto* zone = findZone(layout_, currentZoneId);
+        const bool inStairZone = zone != nullptr
+            && (zone->kind == ZoneKind::Stair || zone->isStair || zone->isRamp);
+        const bool onVerticalTransition = currentWaypointIsVertical(route);
+        return static_cast<double>(agent.maxSpeed) * (inStairZone || onVerticalTransition ? kStairSpeedMultiplier : 1.0);
+    }
+
+    void updateDisplayFloor(EvacuationRoute& route, const Point2D& position) const {
+        route.displayFloorId = route.currentFloorId;
+        if (!currentWaypointIsVertical(route)
+            || route.nextWaypointIndex >= route.waypoints.size()
+            || route.nextWaypointIndex >= route.waypointFloorIds.size()
+            || route.waypointFloorIds[route.nextWaypointIndex].empty()) {
+            return;
+        }
+
+        const auto segment = route.waypoints[route.nextWaypointIndex] - route.currentSegmentStart;
+        const auto segmentLengthSquared = dot(segment, segment);
+        if (segmentLengthSquared <= 1e-9) {
+            return;
+        }
+
+        const auto progress = std::clamp(
+            dot(position - route.currentSegmentStart, segment) / segmentLengthSquared,
+            0.0,
+            1.0);
+        if (progress >= 0.5) {
+            route.displayFloorId = route.waypointFloorIds[route.nextWaypointIndex];
+        }
     }
 
     FacilityLayout2D layout_{};

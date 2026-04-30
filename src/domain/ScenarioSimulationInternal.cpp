@@ -285,6 +285,155 @@ const Zone2D* findZone(const FacilityLayout2D& layout, const std::string& zoneId
     return it == layout.zones.end() ? nullptr : &(*it);
 }
 
+std::string floorIdForZone(const FacilityLayout2D& layout, const std::string& zoneId) {
+    const auto* zone = findZone(layout, zoneId);
+    return zone == nullptr ? std::string{} : zone->floorId;
+}
+
+bool isVerticalConnection(const Connection2D& connection) {
+    return connection.kind == ConnectionKind::Stair || connection.kind == ConnectionKind::Ramp
+        || connection.isStair || connection.isRamp;
+}
+
+bool canTraverseConnection(const FacilityLayout2D& layout, const Connection2D& connection) {
+    const auto fromFloorId = floorIdForZone(layout, connection.fromZoneId);
+    const auto toFloorId = floorIdForZone(layout, connection.toZoneId);
+    if (fromFloorId.empty() || toFloorId.empty() || fromFloorId == toFloorId) {
+        return true;
+    }
+    return isVerticalConnection(connection);
+}
+
+double floorElevation(const FacilityLayout2D& layout, const std::string& floorId) {
+    const auto it = std::find_if(layout.floors.begin(), layout.floors.end(), [&](const auto& floor) {
+        return floor.id == floorId;
+    });
+    return it == layout.floors.end() ? 0.0 : it->elevationMeters;
+}
+
+StairEntryDirection stairEntryDirectionForFloor(
+    const FacilityLayout2D& layout,
+    const Connection2D& connection,
+    const std::string& floorId) {
+    if (!isVerticalConnection(connection)) {
+        return StairEntryDirection::Unspecified;
+    }
+
+    const auto fromFloorId = floorIdForZone(layout, connection.fromZoneId);
+    const auto toFloorId = floorIdForZone(layout, connection.toZoneId);
+    if (fromFloorId.empty() || toFloorId.empty() || fromFloorId == toFloorId) {
+        return StairEntryDirection::Unspecified;
+    }
+
+    const auto fromElevation = floorElevation(layout, fromFloorId);
+    const auto toElevation = floorElevation(layout, toFloorId);
+    const bool fromIsLower = fromElevation <= toElevation;
+    if (floorId == fromFloorId) {
+        return fromIsLower ? connection.lowerEntryDirection : connection.upperEntryDirection;
+    }
+    if (floorId == toFloorId) {
+        return fromIsLower ? connection.upperEntryDirection : connection.lowerEntryDirection;
+    }
+    return StairEntryDirection::Unspecified;
+}
+
+bool matchesFloor(const std::string& elementFloorId, const std::string& floorId) {
+    return floorId.empty() || elementFloorId.empty() || elementFloorId == floorId;
+}
+
+bool zoneMatchesFloor(const Zone2D& zone, const std::string& floorId) {
+    return matchesFloor(zone.floorId, floorId);
+}
+
+std::vector<LineSegment2D> stairEntryBarrierSegments(const Zone2D& zone, StairEntryDirection entryDirection) {
+    std::vector<LineSegment2D> segments;
+    if (entryDirection == StairEntryDirection::Unspecified || zone.area.outline.empty()) {
+        return segments;
+    }
+
+    const auto bounds = boundsOf(zone.area);
+    const LineSegment2D north{{bounds.minX, bounds.maxY}, {bounds.maxX, bounds.maxY}};
+    const LineSegment2D east{{bounds.maxX, bounds.maxY}, {bounds.maxX, bounds.minY}};
+    const LineSegment2D south{{bounds.maxX, bounds.minY}, {bounds.minX, bounds.minY}};
+    const LineSegment2D west{{bounds.minX, bounds.minY}, {bounds.minX, bounds.maxY}};
+
+    if (entryDirection != StairEntryDirection::North) {
+        segments.push_back(north);
+    }
+    if (entryDirection != StairEntryDirection::East) {
+        segments.push_back(east);
+    }
+    if (entryDirection != StairEntryDirection::South) {
+        segments.push_back(south);
+    }
+    if (entryDirection != StairEntryDirection::West) {
+        segments.push_back(west);
+    }
+    return segments;
+}
+
+void appendStairEntryBarriers(FacilityLayout2D& filtered, const FacilityLayout2D& source, const std::string& floorId) {
+    int suffix = 1;
+    for (const auto& connection : source.connections) {
+        const auto direction = stairEntryDirectionForFloor(source, connection, floorId);
+        if (direction == StairEntryDirection::Unspecified) {
+            continue;
+        }
+
+        const auto* fromZone = findZone(source, connection.fromZoneId);
+        const auto* toZone = findZone(source, connection.toZoneId);
+        const auto* stairZone = fromZone != nullptr && zoneMatchesFloor(*fromZone, floorId)
+            ? fromZone
+            : (toZone != nullptr && zoneMatchesFloor(*toZone, floorId) ? toZone : nullptr);
+        if (stairZone == nullptr || (!stairZone->isStair && !stairZone->isRamp && stairZone->kind != ZoneKind::Stair)) {
+            continue;
+        }
+
+        for (const auto& segment : stairEntryBarrierSegments(*stairZone, direction)) {
+            filtered.barriers.push_back({
+                .id = connection.id + "-entry-wall-" + std::to_string(suffix++),
+                .floorId = stairZone->floorId,
+                .geometry = {.vertices = {segment.start, segment.end}},
+                .blocksMovement = true,
+            });
+        }
+    }
+}
+
+FacilityLayout2D layoutForFloor(const FacilityLayout2D& layout, const std::string& floorId) {
+    if (floorId.empty()) {
+        return layout;
+    }
+
+    FacilityLayout2D filtered;
+    filtered.id = layout.id;
+    filtered.name = layout.name;
+    filtered.levelId = layout.levelId;
+    filtered.floors = layout.floors;
+    for (const auto& zone : layout.zones) {
+        if (matchesFloor(zone.floorId, floorId)) {
+            filtered.zones.push_back(zone);
+        }
+    }
+    for (const auto& connection : layout.connections) {
+        if (matchesFloor(connection.floorId, floorId)) {
+            filtered.connections.push_back(connection);
+        }
+    }
+    for (const auto& barrier : layout.barriers) {
+        if (matchesFloor(barrier.floorId, floorId)) {
+            filtered.barriers.push_back(barrier);
+        }
+    }
+    for (const auto& control : layout.controls) {
+        if (matchesFloor(control.floorId, floorId)) {
+            filtered.controls.push_back(control);
+        }
+    }
+    appendStairEntryBarriers(filtered, layout, floorId);
+    return filtered;
+}
+
 Point2D passageNormalToward(const LineSegment2D& passage, const Zone2D& fromZone, const Zone2D& toZone) {
     const auto passageDirection = passage.end - passage.start;
     const auto firstNormal = normalizedOr(perpendicularLeft(passageDirection), {});
@@ -338,6 +487,9 @@ bool routePassageCrossed(
 const Connection2D* findConnectionBetween(const FacilityLayout2D& layout, const std::string& from, const std::string& to) {
     const auto it = std::find_if(layout.connections.begin(), layout.connections.end(), [&](const auto& connection) {
         if (connection.directionality == TravelDirection::Closed) {
+            return false;
+        }
+        if (!canTraverseConnection(layout, connection)) {
             return false;
         }
         const bool forward = connection.fromZoneId == from && connection.toZoneId == to;

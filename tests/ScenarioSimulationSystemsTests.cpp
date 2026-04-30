@@ -373,9 +373,9 @@ SC_TEST(ScenarioRoutePassageCrossed_UsesDoorPlaneNearEndpoint) {
         .area = {.outline = {{0.0, 0.0}, {1.0, 0.0}, {1.0, 1.0}, {0.0, 1.0}}},
     });
     layout.zones.push_back({
-        .id = "corridor",
-        .kind = safecrowd::domain::ZoneKind::Corridor,
-        .label = "Corridor",
+        .id = "passage",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Passage",
         .area = {.outline = {{1.0, 0.2}, {2.0, 0.2}, {2.0, 4.0}, {1.0, 4.0}}},
     });
 
@@ -383,7 +383,7 @@ SC_TEST(ScenarioRoutePassageCrossed_UsesDoorPlaneNearEndpoint) {
     route.waypoints = {{.x = 1.0, .y = 0.9}};
     route.waypointPassages = {{{.x = 1.0, .y = 0.8}, {.x = 1.0, .y = 1.0}}};
     route.waypointFromZoneIds = {"room"};
-    route.waypointZoneIds = {"corridor"};
+    route.waypointZoneIds = {"passage"};
     route.nextWaypointIndex = 0;
 
     const safecrowd::domain::Point2D crossedNearEndpoint{.x = 1.05, .y = 0.75};

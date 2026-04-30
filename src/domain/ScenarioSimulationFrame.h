@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "domain/Geometry2D.h"
@@ -13,6 +14,7 @@ struct SimulationAgentFrame {
     Point2D position{};
     Point2D velocity{};
     double radius{0.25};
+    std::string floorId{};
 };
 
 struct SimulationFrame {

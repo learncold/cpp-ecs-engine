@@ -60,11 +60,16 @@ SC_TEST(DemoFixtureServiceBuildsSprint1Fixture) {
     SC_EXPECT_EQ(layout.id, std::string(safecrowd::domain::DemoLayouts::Sprint1FacilityIds::LayoutId));
     SC_EXPECT_EQ(layout.name, std::string("Sprint 1 Demo Layout"));
     SC_EXPECT_EQ(layout.levelId, std::string("L1"));
+    SC_EXPECT_EQ(layout.floors.size(), std::size_t{1});
+    SC_EXPECT_EQ(layout.floors.front().id, std::string("L1"));
     SC_EXPECT_EQ(layout.zones.size(), std::size_t{4});
     SC_EXPECT_EQ(layout.zones.at(0).kind, safecrowd::domain::ZoneKind::Room);
     SC_EXPECT_EQ(layout.zones.at(1).kind, safecrowd::domain::ZoneKind::Room);
-    SC_EXPECT_EQ(layout.zones.at(2).kind, safecrowd::domain::ZoneKind::Corridor);
+    SC_EXPECT_EQ(layout.zones.at(2).kind, safecrowd::domain::ZoneKind::Room);
     SC_EXPECT_EQ(layout.zones.at(3).kind, safecrowd::domain::ZoneKind::Exit);
+    SC_EXPECT_TRUE(std::all_of(layout.zones.begin(), layout.zones.end(), [](const auto& zone) {
+        return zone.floorId == "L1";
+    }));
 
     SC_EXPECT_EQ(layout.connections.size(), std::size_t{3});
     SC_EXPECT_TRUE(containsConnectionKind(layout.connections, safecrowd::domain::ConnectionKind::Opening));
@@ -97,14 +102,14 @@ SC_TEST(DemoLayoutsProvidesRuntimeFacilityLayout) {
     SC_EXPECT_EQ(layout.barriers.size(), std::size_t{14});
     SC_EXPECT_TRUE(containsZoneId(layout.zones, safecrowd::domain::DemoLayouts::Sprint1FacilityIds::MainRoomZoneId));
     SC_EXPECT_TRUE(containsZoneId(layout.zones, safecrowd::domain::DemoLayouts::Sprint1FacilityIds::SideRoomZoneId));
-    SC_EXPECT_TRUE(containsZoneId(layout.zones, safecrowd::domain::DemoLayouts::Sprint1FacilityIds::ExitCorridorZoneId));
+    SC_EXPECT_TRUE(containsZoneId(layout.zones, safecrowd::domain::DemoLayouts::Sprint1FacilityIds::ExitPassageZoneId));
     SC_EXPECT_TRUE(containsZoneId(layout.zones, safecrowd::domain::DemoLayouts::Sprint1FacilityIds::ExitZoneId));
     SC_EXPECT_TRUE(containsConnectionId(layout.connections, safecrowd::domain::DemoLayouts::Sprint1FacilityIds::OpeningConnectionId));
     SC_EXPECT_TRUE(containsConnectionId(layout.connections, safecrowd::domain::DemoLayouts::Sprint1FacilityIds::DoorwayConnectionId));
     SC_EXPECT_TRUE(containsConnectionId(layout.connections, safecrowd::domain::DemoLayouts::Sprint1FacilityIds::ExitConnectionId));
     SC_EXPECT_TRUE(containsBarrierId(layout.barriers, safecrowd::domain::DemoLayouts::Sprint1FacilityIds::MainRoomNorthWallId));
     SC_EXPECT_TRUE(containsBarrierId(layout.barriers, safecrowd::domain::DemoLayouts::Sprint1FacilityIds::SideRoomNorthWallId));
-    SC_EXPECT_TRUE(containsBarrierId(layout.barriers, safecrowd::domain::DemoLayouts::Sprint1FacilityIds::CorridorNorthWallId));
+    SC_EXPECT_TRUE(containsBarrierId(layout.barriers, safecrowd::domain::DemoLayouts::Sprint1FacilityIds::PassageNorthWallId));
     for (const auto& connection : layout.connections) {
         SC_EXPECT_NEAR(connection.effectiveWidth, spanLength(connection.centerSpan), 1e-9);
     }

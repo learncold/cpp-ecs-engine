@@ -26,11 +26,16 @@ struct EvacuationRoute {
     std::vector<LineSegment2D> waypointPassages{};
     std::vector<std::string> waypointFromZoneIds{};
     std::vector<std::string> waypointZoneIds{};
+    std::vector<std::string> waypointFloorIds{};
+    std::vector<std::string> waypointConnectionIds{};
+    std::vector<bool> waypointVerticalTransitions{};
     std::size_t nextWaypointIndex{0};
     Point2D currentSegmentStart{};
     double previousDistanceToWaypoint{0.0};
     double stalledSeconds{0.0};
     std::string destinationZoneId{};
+    std::string currentFloorId{};
+    std::string displayFloorId{};
 };
 
 struct EvacuationStatus {

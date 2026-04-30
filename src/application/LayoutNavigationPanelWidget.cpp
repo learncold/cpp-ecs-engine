@@ -54,18 +54,12 @@ std::vector<NavigationTreeNode> buildLayoutTree(const safecrowd::domain::Facilit
     std::vector<NavigationTreeNode> nodes;
 
     auto rooms = collectZones(*facilityLayout, [](const auto& zone) {
-        return zone.kind == safecrowd::domain::ZoneKind::Room || zone.kind == safecrowd::domain::ZoneKind::Unknown;
+        return zone.kind == safecrowd::domain::ZoneKind::Room
+            || zone.kind == safecrowd::domain::ZoneKind::Intersection
+            || zone.kind == safecrowd::domain::ZoneKind::Unknown;
     });
     if (!rooms.empty()) {
         nodes.push_back(makeSection("Rooms", std::move(rooms)));
-    }
-
-    auto corridors = collectZones(*facilityLayout, [](const auto& zone) {
-        return zone.kind == safecrowd::domain::ZoneKind::Corridor
-            || zone.kind == safecrowd::domain::ZoneKind::Intersection;
-    });
-    if (!corridors.empty()) {
-        nodes.push_back(makeSection("Corridors", std::move(corridors)));
     }
 
     auto exits = collectZones(*facilityLayout, [](const auto& zone) {
