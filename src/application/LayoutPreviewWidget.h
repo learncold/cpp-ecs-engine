@@ -118,6 +118,7 @@ private:
     void selectZone(const QString& zoneId);
     void addFloor();
     QString currentFloorId() const;
+    bool switchFloorByWheel(QWheelEvent* event);
     QString verticalTargetFloorId() const;
     void setToolMode(ToolMode mode);
     void showSelectionContextMenu(const QPoint& globalPosition);

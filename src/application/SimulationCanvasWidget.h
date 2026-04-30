@@ -58,6 +58,7 @@ private:
     void drawBottleneckOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void setCurrentFloorId(std::string floorId, bool manualSelection);
     void setupFloorSelector();
+    bool switchFloorByWheel(QWheelEvent* event);
     void repositionFloorSelector();
 
     safecrowd::domain::FacilityLayout2D layout_{};

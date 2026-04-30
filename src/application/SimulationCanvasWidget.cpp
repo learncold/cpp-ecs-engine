@@ -217,6 +217,10 @@ void SimulationCanvasWidget::resizeEvent(QResizeEvent* event) {
 }
 
 void SimulationCanvasWidget::wheelEvent(QWheelEvent* event) {
+    if (switchFloorByWheel(event)) {
+        return;
+    }
+
     const auto bounds = collectBounds();
     if (!bounds.has_value()) {
         QWidget::wheelEvent(event);
@@ -446,6 +450,37 @@ void SimulationCanvasWidget::setupFloorSelector() {
     floorSelectorFrame_->adjustSize();
     repositionFloorSelector();
     floorSelectorFrame_->raise();
+}
+
+bool SimulationCanvasWidget::switchFloorByWheel(QWheelEvent* event) {
+    if (event == nullptr || !(event->modifiers() & Qt::ControlModifier) || layout_.floors.size() <= 1) {
+        return false;
+    }
+
+    const auto delta = event->angleDelta().y() != 0 ? event->angleDelta().y() : event->pixelDelta().y();
+    if (delta == 0) {
+        return false;
+    }
+
+    int currentIndex = 0;
+    for (std::size_t index = 0; index < layout_.floors.size(); ++index) {
+        if (layout_.floors[index].id == currentFloorId_) {
+            currentIndex = static_cast<int>(index);
+            break;
+        }
+    }
+
+    const auto nextIndex = std::clamp(
+        currentIndex + (delta > 0 ? 1 : -1),
+        0,
+        static_cast<int>(layout_.floors.size() - 1));
+    const auto& nextFloorId = layout_.floors[static_cast<std::size_t>(nextIndex)].id;
+    if (!nextFloorId.empty()) {
+        setCurrentFloorId(nextFloorId, true);
+    }
+
+    event->accept();
+    return true;
 }
 
 void SimulationCanvasWidget::repositionFloorSelector() {

@@ -89,6 +89,7 @@ private:
     void repositionToolbars();
     void setToolMode(ToolMode mode);
     void setupToolbars();
+    bool switchFloorByWheel(QWheelEvent* event);
 
     safecrowd::domain::FacilityLayout2D layout_{};
     std::vector<ScenarioCrowdPlacement> placements_{};

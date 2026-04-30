@@ -2119,6 +2119,10 @@ void LayoutPreviewWidget::resizeEvent(QResizeEvent* event) {
 }
 
 void LayoutPreviewWidget::wheelEvent(QWheelEvent* event) {
+    if (switchFloorByWheel(event)) {
+        return;
+    }
+
     const auto bounds = collectBounds(importResult_, currentFloorId());
     if (!bounds.has_value()) {
         QWidget::wheelEvent(event);
@@ -3127,6 +3131,46 @@ QString LayoutPreviewWidget::currentFloorId() const {
         return defaultFloorId(*importResult_.layout);
     }
     return {};
+}
+
+bool LayoutPreviewWidget::switchFloorByWheel(QWheelEvent* event) {
+    if (event == nullptr
+        || !(event->modifiers() & Qt::ControlModifier)
+        || !importResult_.layout.has_value()
+        || importResult_.layout->floors.size() <= 1) {
+        return false;
+    }
+
+    const auto delta = event->angleDelta().y() != 0 ? event->angleDelta().y() : event->pixelDelta().y();
+    if (delta == 0) {
+        return false;
+    }
+
+    auto& layout = *importResult_.layout;
+    int currentIndex = 0;
+    const auto activeFloorId = currentFloorId();
+    for (std::size_t index = 0; index < layout.floors.size(); ++index) {
+        if (QString::fromStdString(layout.floors[index].id) == activeFloorId) {
+            currentIndex = static_cast<int>(index);
+            break;
+        }
+    }
+
+    const auto nextIndex = std::clamp(
+        currentIndex + (delta > 0 ? 1 : -1),
+        0,
+        static_cast<int>(layout.floors.size() - 1));
+    const auto nextFloorId = QString::fromStdString(layout.floors[static_cast<std::size_t>(nextIndex)].id);
+    if (!nextFloorId.isEmpty() && nextFloorId != currentFloorId_) {
+        currentFloorId_ = nextFloorId;
+        clearSelection();
+        refreshFloorSelector();
+        camera_.reset();
+        update();
+    }
+
+    event->accept();
+    return true;
 }
 
 QString LayoutPreviewWidget::verticalTargetFloorId() const {
