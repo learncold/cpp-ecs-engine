@@ -175,6 +175,7 @@ if (SAFECROWD_BUILD_APP)
     add_executable(safecrowd_app
         src/application/IssueCardWidget.h
         src/application/LayoutCanvasRendering.h
+        src/application/LayoutCanvasSnapping.h
         src/application/LayoutNavigationPanelWidget.h
         src/application/LayoutPreviewWidget.h
         src/application/LayoutReviewWidget.h
@@ -196,6 +197,7 @@ if (SAFECROWD_BUILD_APP)
         src/application/WorkspaceShell.h
         src/application/IssueCardWidget.cpp
         src/application/LayoutCanvasRendering.cpp
+        src/application/LayoutCanvasSnapping.cpp
         src/application/LayoutNavigationPanelWidget.cpp
         src/application/LayoutPreviewWidget.cpp
         src/application/LayoutReviewWidget.cpp

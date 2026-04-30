@@ -6,6 +6,7 @@
 #include <optional>
 
 #include "application/LayoutCanvasRendering.h"
+#include "application/LayoutCanvasSnapping.h"
 
 #include <QCoreApplication>
 #include <QCheckBox>
@@ -1399,7 +1400,7 @@ void LayoutPreviewWidget::mouseMoveEvent(QMouseEvent* event) {
         if (bounds.has_value()) {
             const LayoutTransform transform(*bounds, previewViewport(rect()), camera_.zoom(), camera_.panOffset());
             const auto world = transform.unmap(event->position());
-            draftCurrentWorld_ = QPointF(world.x, world.y);
+            draftCurrentWorld_ = snapWorldPoint(QPointF(world.x, world.y), transform);
             update();
             event->accept();
             return;
@@ -1438,7 +1439,7 @@ void LayoutPreviewWidget::mousePressEvent(QMouseEvent* event) {
             const LayoutTransform transform(*bounds, previewViewport(rect()), camera_.zoom(), camera_.panOffset());
             const auto world = transform.unmap(event->position());
             drafting_ = true;
-            draftStartWorld_ = QPointF(world.x, world.y);
+            draftStartWorld_ = snapWorldPoint(QPointF(world.x, world.y), transform);
             draftCurrentWorld_ = draftStartWorld_;
             event->accept();
             return;
@@ -1463,7 +1464,7 @@ void LayoutPreviewWidget::mouseReleaseEvent(QMouseEvent* event) {
         if (bounds.has_value()) {
             const LayoutTransform transform(*bounds, previewViewport(rect()), camera_.zoom(), camera_.panOffset());
             const auto world = transform.unmap(event->position());
-            draftCurrentWorld_ = QPointF(world.x, world.y);
+            draftCurrentWorld_ = snapWorldPoint(QPointF(world.x, world.y), transform);
         }
 
         switch (toolMode_) {
@@ -1671,9 +1672,15 @@ void LayoutPreviewWidget::applyToolAt(const QPointF& position) {
 
     const LayoutTransform transform(*bounds, previewViewport(rect()), camera_.zoom(), camera_.panOffset());
     const auto floorId = currentFloorId();
-    const auto zoneId = hitTestZone(*importResult_.layout, position, transform, floorId);
-    const auto connectionId = hitTestConnection(*importResult_.layout, position, transform, floorId);
-    const auto barrierId = hitTestBarrier(*importResult_.layout, position, transform, floorId);
+    QPointF testPosition = position;
+    if (toolMode_ == ToolMode::DrawDoor) {
+        const auto world = transform.unmap(position);
+        const auto snappedWorld = snapWorldPoint(QPointF(world.x, world.y), transform);
+        testPosition = transform.map({.x = snappedWorld.x(), .y = snappedWorld.y()});
+    }
+    const auto zoneId = hitTestZone(*importResult_.layout, testPosition, transform, floorId);
+    const auto connectionId = hitTestConnection(*importResult_.layout, testPosition, transform, floorId);
+    const auto barrierId = hitTestBarrier(*importResult_.layout, testPosition, transform, floorId);
 
     switch (toolMode_) {
     case ToolMode::Select:
@@ -1703,7 +1710,7 @@ void LayoutPreviewWidget::applyToolAt(const QPointF& position) {
         if (!barrierId.has_value()) {
             return;
         }
-        const auto world = transform.unmap(position);
+        const auto world = transform.unmap(testPosition);
         createDoorAt(*barrierId, QPointF(world.x, world.y));
         return;
     }
@@ -2211,6 +2218,19 @@ void LayoutPreviewWidget::emitCurrentSelection() {
     if (selectionChangedHandler_) {
         selectionChangedHandler_(currentSelection());
     }
+}
+
+QPointF LayoutPreviewWidget::snapWorldPoint(const QPointF& worldPoint, const LayoutCanvasTransform& transform) const {
+    if (!importResult_.layout.has_value()) {
+        return worldPoint;
+    }
+
+    const auto snapped = snapLayoutPoint(
+        *importResult_.layout,
+        currentFloorId().toStdString(),
+        {.x = worldPoint.x(), .y = worldPoint.y()},
+        transform);
+    return QPointF(snapped.point.x, snapped.point.y);
 }
 
 void LayoutPreviewWidget::notifyLayoutEdited() {

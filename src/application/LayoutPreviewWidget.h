@@ -84,6 +84,7 @@ private:
     void deleteConnection(const QString& connectionId);
     void deleteBarrier(const QString& barrierId);
     void emitCurrentSelection();
+    QPointF snapWorldPoint(const QPointF& worldPoint, const LayoutCanvasTransform& transform) const;
     void notifyLayoutEdited();
     void repositionToolbars();
     void refreshFloorSelector();
