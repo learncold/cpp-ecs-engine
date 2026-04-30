@@ -557,9 +557,12 @@ void ScenarioAuthoringWidget::refreshInspector() {
         }
     }
     if (stageScenarioButton_ != nullptr) {
-        stageScenarioButton_->setEnabled(readiness.missingStageItems.isEmpty());
-        stageScenarioButton_->setText(hasScenario && scenario->stagedForRun ? "Staged for Run" : "Stage Scenario");
-        stageScenarioButton_->setToolTip(readinessListText("This scenario can be staged for run.", readiness.missingStageItems));
+        const bool alreadyStaged = hasScenario && scenario->stagedForRun;
+        stageScenarioButton_->setEnabled(readiness.missingStageItems.isEmpty() && !alreadyStaged);
+        stageScenarioButton_->setText(alreadyStaged ? "Already Staged" : "Stage Scenario");
+        stageScenarioButton_->setToolTip(alreadyStaged
+            ? "This scenario is already staged. Open the Run panel to run it."
+            : readinessListText("This scenario can be staged for run.", readiness.missingStageItems));
     }
     if (executeRunButton_ != nullptr) {
         executeRunButton_->setEnabled(readiness.missingRunItems.isEmpty());
@@ -749,6 +752,9 @@ void ScenarioAuthoringWidget::stageCurrentScenario() {
 
     auto* scenario = currentScenario();
     if (scenario == nullptr) {
+        return;
+    }
+    if (scenario->stagedForRun) {
         return;
     }
 
