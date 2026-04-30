@@ -218,6 +218,8 @@ ScenarioRunWidget::ScenarioRunWidget(
     std::function<void()> saveProjectHandler,
     std::function<void()> openProjectHandler,
     std::function<void()> backToLayoutReviewHandler,
+    std::function<void(bool)> returnToAuthoringHandler,
+    std::function<void()> rerunScenarioHandler,
     QWidget* parent)
     : QWidget(parent),
       projectName_(projectName),
@@ -226,7 +228,9 @@ ScenarioRunWidget::ScenarioRunWidget(
       runner_(layout_, scenario_),
       saveProjectHandler_(std::move(saveProjectHandler)),
       openProjectHandler_(std::move(openProjectHandler)),
-      backToLayoutReviewHandler_(std::move(backToLayoutReviewHandler)) {
+      backToLayoutReviewHandler_(std::move(backToLayoutReviewHandler)),
+      returnToAuthoringHandler_(std::move(returnToAuthoringHandler)),
+      rerunScenarioHandler_(std::move(rerunScenarioHandler)) {
     auto* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
@@ -344,6 +348,11 @@ void ScenarioRunWidget::returnToAuthoring() {
         timer_->stop();
     }
 
+    if (returnToAuthoringHandler_) {
+        returnToAuthoringHandler_(true);
+        return;
+    }
+
     auto* rootLayout = qobject_cast<QVBoxLayout*>(layout());
     if (rootLayout == nullptr || shell_ == nullptr) {
         return;
@@ -413,15 +422,17 @@ void ScenarioRunWidget::refreshStatus() {
     if (bottleneckLabel_ != nullptr) {
         if (risk.bottlenecks.empty()) {
             bottleneckLabel_->setText("Bottlenecks: 0");
+            bottleneckLabel_->setToolTip({});
         } else {
             const auto& bottleneck = risk.bottlenecks.front();
             const auto label = QString::fromStdString(bottleneck.label);
             const auto id = QString::fromStdString(bottleneck.connectionId);
-            const auto idLine = (!id.isEmpty() && id != label) ? QString("\nID: %1").arg(id) : QString{};
-            bottleneckLabel_->setText(QString("Worst Bottleneck: %1%2\nNearby: %3, Stalled: %4")
-                .arg(label, idLine)
+            bottleneckLabel_->setText(QString("Worst Bottleneck\nNearby: %1, Stalled: %2")
                 .arg(static_cast<int>(bottleneck.nearbyAgentCount))
                 .arg(static_cast<int>(bottleneck.stalledAgentCount)));
+            bottleneckLabel_->setToolTip(QString("%1%2")
+                .arg(label)
+                .arg((!id.isEmpty() && id != label) ? QString("\nID: %1").arg(id) : QString{}));
         }
     }
     if (pauseButton_ != nullptr) {
@@ -485,6 +496,8 @@ void ScenarioRunWidget::showResults() {
             }
         },
         backToLayoutReviewHandler_,
+        returnToAuthoringHandler_,
+        rerunScenarioHandler_,
         this);
     rootLayout->replaceWidget(shell_, resultWidget);
     shell_->hide();

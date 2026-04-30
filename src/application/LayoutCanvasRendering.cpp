@@ -85,7 +85,8 @@ bool LayoutCanvasCamera::handleKeyRelease(QKeyEvent* event) {
 }
 
 bool LayoutCanvasCamera::beginPan(QMouseEvent* event) {
-    if (event->button() != Qt::MiddleButton && !(event->button() == Qt::LeftButton && spacePressed_)) {
+    const auto primaryPan = event->button() == Qt::LeftButton && (spacePressed_ || primaryButtonPanEnabled_);
+    if (event->button() != Qt::MiddleButton && !primaryPan) {
         return false;
     }
 

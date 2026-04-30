@@ -1,6 +1,8 @@
 #include "application/MainWindow.h"
 
+#include <algorithm>
 #include <filesystem>
+#include <string>
 
 #include <QMessageBox>
 
@@ -9,6 +11,7 @@
 #include "application/ProjectPersistence.h"
 #include "application/ProjectNavigatorWidget.h"
 #include "application/ScenarioAuthoringWidget.h"
+#include "domain/DemoFixtureService.h"
 #include "domain/DemoLayouts.h"
 #include "domain/DxfImportService.h"
 #include "domain/ImportIssue.h"
@@ -28,8 +31,11 @@ void applySavedReviewState(const ProjectMetadata& metadata, safecrowd::domain::I
 }
 
 safecrowd::domain::ImportResult makeDemoImportResult() {
+    safecrowd::domain::DemoFixtureService fixtureService;
+    const auto fixture = fixtureService.createSprint1DemoFixture();
+
     safecrowd::domain::ImportResult result;
-    result.layout = safecrowd::domain::DemoLayouts::demoFacility();
+    result.layout = fixture.layout;
 
     safecrowd::domain::ImportValidationService validator;
     result.issues = validator.validate(*result.layout);
@@ -37,6 +43,66 @@ safecrowd::domain::ImportResult makeDemoImportResult() {
         ? safecrowd::domain::ImportReviewStatus::Pending
         : safecrowd::domain::ImportReviewStatus::NotRequired;
     return result;
+}
+
+QString zoneLabel(const safecrowd::domain::Zone2D& zone) {
+    const auto id = QString::fromStdString(zone.id);
+    const auto label = QString::fromStdString(zone.label);
+    return label.isEmpty() ? id : QString("%1  -  %2").arg(label, id);
+}
+
+const safecrowd::domain::Zone2D* findZone(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const std::string& id) {
+    const auto it = std::find_if(layout.zones.begin(), layout.zones.end(), [&](const auto& zone) {
+        return zone.id == id;
+    });
+    return it == layout.zones.end() ? nullptr : &(*it);
+}
+
+ScenarioCrowdPlacement makeUiPlacement(const safecrowd::domain::InitialPlacement2D& placement) {
+    ScenarioCrowdPlacement uiPlacement;
+    uiPlacement.id = QString::fromStdString(placement.id);
+    uiPlacement.name = QStringLiteral("Demo crowd group");
+    uiPlacement.kind = (placement.targetAgentCount <= 1 && placement.area.outline.size() <= 1)
+        ? ScenarioCrowdPlacementKind::Individual
+        : ScenarioCrowdPlacementKind::Group;
+    uiPlacement.zoneId = QString::fromStdString(placement.zoneId);
+    uiPlacement.area = placement.area.outline;
+    uiPlacement.occupantCount = static_cast<int>(placement.targetAgentCount);
+    uiPlacement.velocity = placement.initialVelocity;
+    return uiPlacement;
+}
+
+ScenarioAuthoringWidget::InitialState makeDemoScenarioAuthoringState(
+    const safecrowd::domain::FacilityLayout2D& approvedLayout) {
+    safecrowd::domain::DemoFixtureService fixtureService;
+    const auto fixture = fixtureService.createSprint1DemoFixture();
+
+    ScenarioAuthoringWidget::ScenarioState scenario;
+    scenario.draft = fixture.baselineScenario;
+    scenario.events = fixture.baselineScenario.control.events;
+    scenario.stagedForRun = false;
+
+    if (const auto* startZone = findZone(approvedLayout, safecrowd::domain::DemoLayouts::Sprint1FacilityIds::MainRoomZoneId);
+        startZone != nullptr) {
+        scenario.startText = zoneLabel(*startZone);
+    }
+    if (const auto* destinationZone = findZone(approvedLayout, safecrowd::domain::DemoLayouts::Sprint1FacilityIds::ExitZoneId);
+        destinationZone != nullptr) {
+        scenario.destinationText = zoneLabel(*destinationZone);
+    }
+
+    for (const auto& placement : fixture.baselineScenario.population.initialPlacements) {
+        scenario.crowdPlacements.push_back(makeUiPlacement(placement));
+    }
+
+    ScenarioAuthoringWidget::InitialState state;
+    state.scenarios.push_back(std::move(scenario));
+    state.currentScenarioIndex = 0;
+    state.navigationView = ScenarioAuthoringWidget::NavigationView::Layout;
+    state.rightPanelMode = ScenarioAuthoringWidget::RightPanelMode::Scenario;
+    return state;
 }
 
 }  // namespace
@@ -226,14 +292,19 @@ void MainWindow::showScenarioAuthoring(const safecrowd::domain::ImportResult& im
         currentProject_,
         *importResult.layout,
         &initialState);
+    if (currentProject_.isBuiltInDemo()) {
+        initialState = makeDemoScenarioAuthoringState(*importResult.layout);
+    }
+    lastApprovedImportResult_ = importResult;
+
     auto saveHandler = [this]() {
         saveCurrentProject();
     };
     auto openProjectHandler = [this]() {
         hasCurrentProject_ = false;
-            currentProject_ = {};
-            showProjectNavigator();
-        };
+        currentProject_ = {};
+        showProjectNavigator();
+    };
     auto backToLayoutReviewHandler = [this]() {
         if (lastApprovedImportResult_.has_value()) {
             showLayoutReview(currentProject_, *lastApprovedImportResult_);
@@ -242,7 +313,7 @@ void MainWindow::showScenarioAuthoring(const safecrowd::domain::ImportResult& im
         }
     };
 
-    if (hasSavedScenarioState) {
+    if (currentProject_.isBuiltInDemo() || hasSavedScenarioState) {
         setCentralWidget(new ScenarioAuthoringWidget(
             currentProject_.name,
             *importResult.layout,
@@ -253,7 +324,6 @@ void MainWindow::showScenarioAuthoring(const safecrowd::domain::ImportResult& im
             this));
         return;
     }
-    lastApprovedImportResult_ = importResult;
 
     setCentralWidget(new ScenarioAuthoringWidget(
         currentProject_.name,

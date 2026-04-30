@@ -8,6 +8,7 @@
 #include "domain/DemoFixtureService.h"
 #include "domain/ImportIssue.h"
 #include "domain/ImportValidationService.h"
+#include "domain/ScenarioSimulationRunner.h"
 
 namespace {
 
@@ -83,6 +84,13 @@ SC_TEST(DemoFixtureServiceBuildsSprint1Fixture) {
     SC_EXPECT_EQ(population.initialPlacements.front().targetAgentCount, std::size_t{100});
     SC_EXPECT_EQ(population.initialPlacements.front().area.outline.size(), std::size_t{4});
 
+    SC_EXPECT_EQ(fixture.baselineScenario.name, std::string("Baseline evacuation"));
+    SC_EXPECT_EQ(fixture.baselineScenario.role, safecrowd::domain::ScenarioRole::Baseline);
+    SC_EXPECT_EQ(fixture.baselineScenario.population.initialPlacements.size(), std::size_t{1});
+    SC_EXPECT_EQ(fixture.baselineScenario.control.events.size(), std::size_t{2});
+    SC_EXPECT_EQ(fixture.baselineScenario.execution.timeLimitSeconds, 180.0);
+    SC_EXPECT_EQ(fixture.baselineScenario.execution.sampleIntervalSeconds, 1.0);
+
     safecrowd::domain::ImportValidationService validator;
     const auto issues = validator.validate(layout);
     SC_EXPECT_TRUE(!safecrowd::domain::hasBlockingImportIssue(issues));
@@ -115,4 +123,20 @@ SC_TEST(DemoLayoutsProvidesRuntimeFacilityLayout) {
     safecrowd::domain::ImportValidationService validator;
     const auto issues = validator.validate(layout);
     SC_EXPECT_TRUE(!safecrowd::domain::hasBlockingImportIssue(issues));
+}
+
+SC_TEST(DemoFixtureBaselineScenarioRunsToResultArtifacts) {
+    safecrowd::domain::DemoFixtureService service;
+    const auto fixture = service.createSprint1DemoFixture();
+
+    safecrowd::domain::ScenarioSimulationRunner runner(fixture.layout, fixture.baselineScenario);
+    for (int i = 0; i < 720 && !runner.complete(); ++i) {
+        runner.step(0.25);
+    }
+
+    SC_EXPECT_TRUE(runner.complete());
+    SC_EXPECT_EQ(runner.frame().totalAgentCount, std::size_t{100});
+    SC_EXPECT_TRUE(!runner.resultArtifacts().evacuationProgress.empty());
+    SC_EXPECT_TRUE(runner.resultArtifacts().timingSummary.t90Seconds.has_value()
+        || runner.frame().elapsedSeconds >= fixture.baselineScenario.execution.timeLimitSeconds);
 }

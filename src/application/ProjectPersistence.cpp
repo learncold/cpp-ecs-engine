@@ -26,7 +26,8 @@ constexpr auto kScenarioAuthoringFileName = "scenario-authoring.json";
 bool isProjectManagedEntry(const QString& fileName) {
     return fileName.compare(kProjectFileName, Qt::CaseInsensitive) == 0
         || fileName.compare(kLayoutFileName, Qt::CaseInsensitive) == 0
-        || fileName.compare(kReviewFileName, Qt::CaseInsensitive) == 0;
+        || fileName.compare(kReviewFileName, Qt::CaseInsensitive) == 0
+        || fileName.compare(kScenarioAuthoringFileName, Qt::CaseInsensitive) == 0;
 }
 
 QString projectFilePath(const QString& folderPath) {
@@ -503,12 +504,24 @@ QJsonObject executionToJson(const safecrowd::domain::ExecutionConfig& execution)
 
 safecrowd::domain::ExecutionConfig executionFromJson(const QJsonObject& object) {
     return {
-        .timeLimitSeconds = object.value("timeLimitSeconds").toDouble(),
-        .sampleIntervalSeconds = object.value("sampleIntervalSeconds").toDouble(),
-        .repeatCount = static_cast<std::uint32_t>(object.value("repeatCount").toInt(1)),
+        .timeLimitSeconds = std::max(1.0, object.value("timeLimitSeconds").toDouble(600.0)),
+        .sampleIntervalSeconds = std::max(0.1, object.value("sampleIntervalSeconds").toDouble(1.0)),
+        .repeatCount = static_cast<std::uint32_t>(std::max(1, object.value("repeatCount").toInt(1))),
         .baseSeed = static_cast<std::uint32_t>(object.value("baseSeed").toInt()),
         .recordOccupantHistory = object.value("recordOccupantHistory").toBool(false),
     };
+}
+
+safecrowd::domain::ScenarioRole scenarioRoleFromJson(const QJsonValue& value) {
+    switch (value.toInt(static_cast<int>(safecrowd::domain::ScenarioRole::Alternative))) {
+    case static_cast<int>(safecrowd::domain::ScenarioRole::Baseline):
+        return safecrowd::domain::ScenarioRole::Baseline;
+    case static_cast<int>(safecrowd::domain::ScenarioRole::Recommended):
+        return safecrowd::domain::ScenarioRole::Recommended;
+    case static_cast<int>(safecrowd::domain::ScenarioRole::Alternative):
+    default:
+        return safecrowd::domain::ScenarioRole::Alternative;
+    }
 }
 
 QJsonObject eventToJson(const safecrowd::domain::OperationalEventDraft& event) {
@@ -559,13 +572,18 @@ QJsonObject placementToJson(const ScenarioCrowdPlacement& placement) {
 }
 
 ScenarioCrowdPlacement placementFromJson(const QJsonObject& object) {
+    const auto kindValue = object.value("kind").toInt(static_cast<int>(ScenarioCrowdPlacementKind::Individual));
+    const auto kind = kindValue == static_cast<int>(ScenarioCrowdPlacementKind::Group)
+        ? ScenarioCrowdPlacementKind::Group
+        : ScenarioCrowdPlacementKind::Individual;
+
     return {
         .id = object.value("id").toString(),
         .name = object.value("name").toString(),
-        .kind = static_cast<ScenarioCrowdPlacementKind>(object.value("kind").toInt()),
+        .kind = kind,
         .zoneId = object.value("zoneId").toString(),
         .area = placementAreaFromJson(object.value("area").toArray()),
-        .occupantCount = object.value("occupantCount").toInt(1),
+        .occupantCount = std::max(1, object.value("occupantCount").toInt(1)),
         .velocity = pointFromJson(object.value("velocity")),
     };
 }
@@ -659,7 +677,7 @@ ScenarioAuthoringWidget::ScenarioState scenarioStateFromJson(const QJsonObject& 
     ScenarioAuthoringWidget::ScenarioState scenario;
     scenario.draft.scenarioId = object.value("scenarioId").toString().toStdString();
     scenario.draft.name = object.value("name").toString().toStdString();
-    scenario.draft.role = static_cast<safecrowd::domain::ScenarioRole>(object.value("role").toInt());
+    scenario.draft.role = scenarioRoleFromJson(object.value("role"));
     scenario.draft.sourceTemplateId = object.value("sourceTemplateId").toString().toStdString();
     scenario.draft.variationDiffKeys = stringVectorFromJson(object.value("variationDiffKeys").toArray());
     scenario.draft.execution = executionFromJson(object.value("execution").toObject());
@@ -671,6 +689,30 @@ ScenarioAuthoringWidget::ScenarioState scenarioStateFromJson(const QJsonObject& 
     scenario.stagedForRun = object.value("stagedForRun").toBool(false);
     syncDraftFromScenarioState(&scenario);
     return scenario;
+}
+
+ScenarioAuthoringWidget::NavigationView navigationViewFromJson(const QJsonValue& value) {
+    switch (value.toInt(static_cast<int>(ScenarioAuthoringWidget::NavigationView::Layout))) {
+    case static_cast<int>(ScenarioAuthoringWidget::NavigationView::Crowd):
+        return ScenarioAuthoringWidget::NavigationView::Crowd;
+    case static_cast<int>(ScenarioAuthoringWidget::NavigationView::Events):
+        return ScenarioAuthoringWidget::NavigationView::Events;
+    case static_cast<int>(ScenarioAuthoringWidget::NavigationView::Layout):
+    default:
+        return ScenarioAuthoringWidget::NavigationView::Layout;
+    }
+}
+
+ScenarioAuthoringWidget::RightPanelMode rightPanelModeFromJson(const QJsonValue& value) {
+    switch (value.toInt(static_cast<int>(ScenarioAuthoringWidget::RightPanelMode::Scenario))) {
+    case static_cast<int>(ScenarioAuthoringWidget::RightPanelMode::None):
+        return ScenarioAuthoringWidget::RightPanelMode::None;
+    case static_cast<int>(ScenarioAuthoringWidget::RightPanelMode::Run):
+        return ScenarioAuthoringWidget::RightPanelMode::Run;
+    case static_cast<int>(ScenarioAuthoringWidget::RightPanelMode::Scenario):
+    default:
+        return ScenarioAuthoringWidget::RightPanelMode::Scenario;
+    }
 }
 
 }  // namespace
@@ -855,10 +897,8 @@ bool ProjectPersistence::loadScenarioAuthoringState(
     const auto root = document.object();
     ScenarioAuthoringWidget::InitialState loaded;
     loaded.currentScenarioIndex = root.value("currentScenarioIndex").toInt(-1);
-    loaded.navigationView = static_cast<ScenarioAuthoringWidget::NavigationView>(
-        root.value("navigationView").toInt(static_cast<int>(ScenarioAuthoringWidget::NavigationView::Layout)));
-    loaded.rightPanelMode = static_cast<ScenarioAuthoringWidget::RightPanelMode>(
-        root.value("rightPanelMode").toInt(static_cast<int>(ScenarioAuthoringWidget::RightPanelMode::Scenario)));
+    loaded.navigationView = navigationViewFromJson(root.value("navigationView"));
+    loaded.rightPanelMode = rightPanelModeFromJson(root.value("rightPanelMode"));
 
     for (const auto& value : root.value("scenarios").toArray()) {
         loaded.scenarios.push_back(scenarioStateFromJson(value.toObject()));

@@ -240,7 +240,8 @@ QWidget* WorkspaceShell::createPanelHeader(const QString& title, QWidget* parent
 
     auto* label = new QLabel(title, header);
     label->setFont(ui::font(ui::FontRole::Title));
-    label->setWordWrap(false);
+    label->setWordWrap(true);
+    label->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
     layout->addWidget(label, 1, Qt::AlignVCenter);
     return header;
 }

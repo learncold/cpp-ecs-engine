@@ -38,6 +38,61 @@ QString formatOptionalSeconds(const std::optional<double>& seconds) {
     return seconds.has_value() ? QString("%1 sec").arg(*seconds, 0, 'f', 1) : QString("Pending");
 }
 
+QString zoneLabel(const safecrowd::domain::Zone2D& zone) {
+    const auto id = QString::fromStdString(zone.id);
+    const auto label = QString::fromStdString(zone.label);
+    return label.isEmpty() ? id : QString("%1  -  %2").arg(label, id);
+}
+
+const safecrowd::domain::Zone2D* firstStartZone(const safecrowd::domain::FacilityLayout2D& layout) {
+    const auto it = std::find_if(layout.zones.begin(), layout.zones.end(), [](const auto& zone) {
+        return zone.kind == safecrowd::domain::ZoneKind::Room || zone.kind == safecrowd::domain::ZoneKind::Unknown;
+    });
+    return it == layout.zones.end() ? nullptr : &(*it);
+}
+
+const safecrowd::domain::Zone2D* firstDestinationZone(const safecrowd::domain::FacilityLayout2D& layout) {
+    const auto exitIt = std::find_if(layout.zones.begin(), layout.zones.end(), [](const auto& zone) {
+        return zone.kind == safecrowd::domain::ZoneKind::Exit;
+    });
+    if (exitIt != layout.zones.end()) {
+        return &(*exitIt);
+    }
+    return layout.zones.empty() ? nullptr : &layout.zones.back();
+}
+
+ScenarioAuthoringWidget::ScenarioState scenarioStateFromDraft(
+    const safecrowd::domain::ScenarioDraft& scenario,
+    const safecrowd::domain::FacilityLayout2D& layout) {
+    ScenarioAuthoringWidget::ScenarioState state;
+    state.draft = scenario;
+    state.events = scenario.control.events;
+    state.stagedForRun = true;
+
+    if (const auto* startZone = firstStartZone(layout); startZone != nullptr) {
+        state.startText = zoneLabel(*startZone);
+    }
+    if (const auto* destinationZone = firstDestinationZone(layout); destinationZone != nullptr) {
+        state.destinationText = zoneLabel(*destinationZone);
+    }
+
+    for (const auto& placement : scenario.population.initialPlacements) {
+        ScenarioCrowdPlacement uiPlacement;
+        uiPlacement.id = QString::fromStdString(placement.id);
+        uiPlacement.name = uiPlacement.id;
+        uiPlacement.kind = (placement.targetAgentCount <= 1 && placement.area.outline.size() <= 1)
+            ? ScenarioCrowdPlacementKind::Individual
+            : ScenarioCrowdPlacementKind::Group;
+        uiPlacement.zoneId = QString::fromStdString(placement.zoneId);
+        uiPlacement.area = placement.area.outline;
+        uiPlacement.occupantCount = static_cast<int>(placement.targetAgentCount);
+        uiPlacement.velocity = placement.initialVelocity;
+        state.crowdPlacements.push_back(std::move(uiPlacement));
+    }
+
+    return state;
+}
+
 class EvacuationProgressWidget final : public QWidget {
 public:
     explicit EvacuationProgressWidget(
@@ -194,18 +249,18 @@ QPushButton* createBottleneckRowButton(
     QWidget* parent) {
     const auto label = QString::fromStdString(bottleneck.label);
     const auto id = QString::fromStdString(bottleneck.connectionId);
-    const auto idLine = (!id.isEmpty() && id != label) ? QString("\nID: %1").arg(id) : QString{};
     auto* button = new QPushButton(
-        QString("%1. %2%3\n%4 nearby, %5 stalled")
+        QString("Bottleneck %1\n%2 nearby, %3 stalled")
             .arg(static_cast<int>(index + 1))
-            .arg(label, idLine)
             .arg(static_cast<int>(bottleneck.nearbyAgentCount))
             .arg(static_cast<int>(bottleneck.stalledAgentCount)),
         parent);
     button->setFont(ui::font(ui::FontRole::Body));
     button->setCursor(Qt::PointingHandCursor);
     button->setStyleSheet(ui::ghostRowStyleSheet());
-    button->setToolTip(QString("%1\nClick to focus this bottleneck on the canvas.")
+    button->setToolTip(QString("%1%2\n\n%3\nClick to focus this bottleneck on the canvas.")
+        .arg(label)
+        .arg((!id.isEmpty() && id != label) ? QString("\nID: %1").arg(id) : QString{})
         .arg(safecrowd::domain::scenarioBottleneckDefinition()));
     return button;
 }
@@ -458,6 +513,8 @@ ScenarioResultWidget::ScenarioResultWidget(
     std::function<void()> saveProjectHandler,
     std::function<void()> openProjectHandler,
     std::function<void()> backToLayoutReviewHandler,
+    std::function<void(bool)> returnToAuthoringHandler,
+    std::function<void()> rerunScenarioHandler,
     QWidget* parent)
     : QWidget(parent),
       projectName_(std::move(projectName)),
@@ -468,7 +525,9 @@ ScenarioResultWidget::ScenarioResultWidget(
       artifacts_(std::move(artifacts)),
       saveProjectHandler_(std::move(saveProjectHandler)),
       openProjectHandler_(std::move(openProjectHandler)),
-      backToLayoutReviewHandler_(std::move(backToLayoutReviewHandler)) {
+      backToLayoutReviewHandler_(std::move(backToLayoutReviewHandler)),
+      returnToAuthoringHandler_(std::move(returnToAuthoringHandler)),
+      rerunScenarioHandler_(std::move(rerunScenarioHandler)) {
     auto* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
@@ -525,6 +584,11 @@ ScenarioResultWidget::ScenarioResultWidget(
 }
 
 void ScenarioResultWidget::rerunScenario() {
+    if (rerunScenarioHandler_) {
+        rerunScenarioHandler_();
+        return;
+    }
+
     auto* rootLayout = qobject_cast<QVBoxLayout*>(layout());
     if (rootLayout == nullptr || shell_ == nullptr) {
         return;
@@ -537,6 +601,8 @@ void ScenarioResultWidget::rerunScenario() {
         saveProjectHandler_,
         openProjectHandler_,
         backToLayoutReviewHandler_,
+        returnToAuthoringHandler_,
+        rerunScenarioHandler_,
         this);
 
     rootLayout->replaceWidget(shell_, runWidget);
@@ -546,6 +612,16 @@ void ScenarioResultWidget::rerunScenario() {
 }
 
 void ScenarioResultWidget::navigateToAuthoring(bool showRunPanel) {
+    if (returnToAuthoringHandler_) {
+        returnToAuthoringHandler_(showRunPanel);
+        return;
+    }
+
+    auto* rootLayout = qobject_cast<QVBoxLayout*>(layout());
+    if (rootLayout == nullptr || shell_ == nullptr) {
+        return;
+    }
+
     ScenarioAuthoringWidget::InitialState initial;
     initial.scenarios.push_back(scenarioStateFromDraft(scenario_, layout_));
     initial.currentScenarioIndex = 0;

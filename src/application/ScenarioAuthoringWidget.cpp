@@ -67,13 +67,13 @@ const std::vector<EventPreset>& sprint1EventPresets() {
     static const std::vector<EventPreset> presets{
         {
             .name = "Exit Closure",
-            .triggerSummary = "Configured trigger: operator command during run setup",
-            .targetSummary = "Configured target: primary exit route noted for review",
+            .triggerSummary = "Operator command",
+            .targetSummary = "Primary exit route",
         },
         {
             .name = "Staged Release",
-            .triggerSummary = "Configured trigger: release group after initial evacuation wave",
-            .targetSummary = "Configured target: queued occupants noted for the selected start area",
+            .triggerSummary = "After initial evacuation wave",
+            .targetSummary = "Selected start area occupants",
         },
     };
     return presets;
@@ -210,14 +210,13 @@ std::vector<NavigationTreeNode> buildCrowdTree(const ScenarioAuthoringWidget::Sc
         }
 
         placements.push_back({
-            .label = QString("%1  -  %2  -  %3 %4")
+            .label = QString("%1 (%2)")
                          .arg(
-                             placement.name.isEmpty() ? placement.id : placement.name,
-                             placement.zoneId)
-                         .arg(placement.occupantCount)
-                         .arg(placement.occupantCount == 1 ? "occupant" : "occupants"),
+                             placement.name.isEmpty() ? placement.id : placement.name)
+                         .arg(placement.occupantCount == 1 ? QString("1 occupant") : QString("%1 occupants").arg(placement.occupantCount)),
             .id = placement.id,
-            .detail = QString("Velocity: (%1, %2)")
+            .detail = QString("Zone: %1\nVelocity: (%2, %3)")
+                          .arg(placement.zoneId)
                           .arg(placement.velocity.x, 0, 'f', 2)
                           .arg(placement.velocity.y, 0, 'f', 2),
             .children = group ? std::move(occupants) : std::vector<NavigationTreeNode>{},
@@ -256,12 +255,14 @@ std::vector<NavigationTreeNode> buildEventsTree(const ScenarioAuthoringWidget::S
             .detail = QString::fromStdString(event.targetSummary),
             .children = {
                 {
-                    .label = QString("Trigger  -  %1").arg(QString::fromStdString(event.triggerSummary)),
+                    .label = "Trigger",
                     .id = QString("%1/trigger").arg(eventId),
+                    .detail = QString::fromStdString(event.triggerSummary),
                 },
                 {
-                    .label = QString("Target  -  %1").arg(QString::fromStdString(event.targetSummary)),
+                    .label = "Target",
                     .id = QString("%1/target").arg(eventId),
+                    .detail = QString::fromStdString(event.targetSummary),
                 },
             },
             .expanded = true,
@@ -269,7 +270,7 @@ std::vector<NavigationTreeNode> buildEventsTree(const ScenarioAuthoringWidget::S
     }
 
     return {{
-        .label = QString("Events (%1)").arg(static_cast<int>(scenario->events.size())),
+        .label = QString("Configured (%1)").arg(static_cast<int>(scenario->events.size())),
         .children = std::move(events),
         .expanded = true,
         .selectable = false,
@@ -295,23 +296,38 @@ QWidget* createEventsPanel(
         const auto name = preset.name;
         const auto triggerSummary = preset.triggerSummary;
         const auto targetSummary = preset.targetSummary;
-        auto* button = new QPushButton(
-            QString("%1\n%2\n%3")
-                .arg(name, triggerSummary, targetSummary),
-            content);
-        button->setFont(ui::font(ui::FontRole::Body));
-        button->setMinimumHeight(78);
+        auto* card = new QFrame(content);
+        card->setStyleSheet(ui::panelStyleSheet());
+        card->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+        auto* cardLayout = new QVBoxLayout(card);
+        cardLayout->setContentsMargins(12, 10, 12, 10);
+        cardLayout->setSpacing(6);
+
+        auto* title = createLabel(name, card, ui::FontRole::SectionTitle);
+        cardLayout->addWidget(title);
+
+        auto* detail = createLabel(
+            QString("Trigger: %1\nTarget: %2").arg(triggerSummary, targetSummary),
+            card,
+            ui::FontRole::Caption);
+        detail->setStyleSheet(ui::mutedTextStyleSheet());
+        cardLayout->addWidget(detail);
+
+        auto* button = new QPushButton("Add Event", card);
+        button->setFont(ui::font(ui::FontRole::Caption));
+        button->setMinimumHeight(34);
         button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         button->setStyleSheet(ui::secondaryButtonStyleSheet());
         button->setEnabled(scenario != nullptr);
         button->setToolTip(QString("Add another %1 event").arg(name));
         auto handler = addEventHandler;
-        QObject::connect(button, &QPushButton::clicked, content, [=]() {
+        QObject::connect(button, &QPushButton::clicked, card, [=]() {
             if (handler) {
                 handler(name, triggerSummary, targetSummary);
             }
         });
-        layout->addWidget(button);
+        cardLayout->addWidget(button);
+        layout->addWidget(card);
     };
 
     for (const auto& preset : sprint1EventPresets()) {
@@ -324,7 +340,7 @@ QWidget* createEventsPanel(
         "No configured scenario events yet",
         {},
         content,
-        nullptr), 1);
+        createLabel("Configured Events", content, ui::FontRole::SectionTitle)), 1);
     return content;
 }
 
@@ -669,6 +685,13 @@ void ScenarioAuthoringWidget::runFirstStagedBaselineScenario() {
         saveProjectHandler_,
         openProjectHandler_,
         backToLayoutReviewHandler_,
+        [this](bool showRunPanel) {
+            returnFromRun(showRunPanel);
+        },
+        [this]() {
+            returnFromRun(true);
+            runFirstStagedBaselineScenario();
+        },
         this);
     rootLayout->replaceWidget(shell_, runWidget);
     shell_->hide();
@@ -706,6 +729,7 @@ void ScenarioAuthoringWidget::returnFromRun(bool showRunPanel) {
     shell_->setTools({"Project"});
     shell_->setSaveProjectHandler(saveProjectHandler_);
     shell_->setOpenProjectHandler(openProjectHandler_);
+    shell_->setBackHandler(backToLayoutReviewHandler_);
     shell_->setTopBarTrailingWidget(createTopBarTogglePanel());
     refreshRightPanel();
     rootLayout->addWidget(shell_);

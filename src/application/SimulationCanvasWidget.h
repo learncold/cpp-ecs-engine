@@ -13,10 +13,12 @@
 #include "domain/ScenarioSimulationRunner.h"
 
 class QEvent;
+class QFrame;
 class QKeyEvent;
 class QMouseEvent;
 class QPainter;
 class QPaintEvent;
+class QResizeEvent;
 class QWheelEvent;
 
 namespace safecrowd::application {
@@ -41,9 +43,15 @@ protected:
     void mousePressEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
     void paintEvent(QPaintEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
 
 private:
+    void createViewControls();
+    void positionViewControls();
+    void resetView();
+    void zoomAtCanvasPoint(const QPointF& anchorPoint, double factor);
+    void invalidateLayoutCache();
     std::optional<LayoutCanvasBounds> collectBounds() const;
     LayoutCanvasTransform currentTransform(const LayoutCanvasBounds& bounds) const;
     void refreshLayoutCache(const LayoutCanvasBounds& bounds);
@@ -59,6 +67,7 @@ private:
     std::optional<std::size_t> focusedHotspotIndex_{};
     std::optional<std::size_t> focusedBottleneckIndex_{};
     LayoutCanvasCamera camera_{};
+    QFrame* viewControls_{nullptr};
     std::optional<LayoutCanvasBounds> layoutBounds_{};
     QPixmap layoutCache_{};
     QSize layoutCacheSize_{};
