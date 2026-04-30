@@ -33,6 +33,7 @@ struct EvacuationRoute {
     Point2D currentSegmentStart{};
     double previousDistanceToWaypoint{0.0};
     double stalledSeconds{0.0};
+    double replanCooldownSeconds{0.0};
     std::string destinationZoneId{};
     std::string currentFloorId{};
     std::string displayFloorId{};

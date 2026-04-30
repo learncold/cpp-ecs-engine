@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <optional>
 #include <unordered_set>
 #include <utility>
 
@@ -14,8 +15,16 @@ using namespace simulation_internal;
 
 class ScenarioSimulationMotionSystem final : public engine::EngineSystem {
 public:
+    ScenarioSimulationMotionSystem() = default;
+
     explicit ScenarioSimulationMotionSystem(FacilityLayout2D layout)
-        : layout_(std::move(layout)) {
+        : layoutCache_(buildScenarioLayoutCache(std::move(layout))) {
+    }
+
+    void configure(engine::EngineWorld& world) override {
+        if (layoutCache_.has_value() && !world.resources().contains<ScenarioLayoutCacheResource>()) {
+            world.resources().set(*layoutCache_);
+        }
     }
 
     void update(engine::EngineWorld& world, const engine::EngineStepContext& step) override {
@@ -25,6 +34,10 @@ public:
         if (!resources.contains<ScenarioSimulationStepResource>()) {
             return;
         }
+        if (!resources.contains<ScenarioLayoutCacheResource>()) {
+            return;
+        }
+        const auto& layoutCache = resources.get<ScenarioLayoutCacheResource>();
 
         auto& clock = resources.get<ScenarioSimulationClockResource>();
         if (clock.complete) {
@@ -44,9 +57,9 @@ public:
         std::vector<MovementPlan> plans;
         plans.reserve(entities.size());
 
-        advanceRoutesForCurrentZones(query, entities);
-        advanceRoutesForWaypointProgress(query, 0.0, entities);
-        replanBlockedRouteSegments(query, entities);
+        advanceRoutesForCurrentZones(query, entities, layoutCache);
+        advanceRoutesForWaypointProgress(query, 0.0, entities, layoutCache);
+        replanBlockedRouteSegments(query, entities, layoutCache, clampedDelta);
 
         for (const auto entity : entities) {
             auto& position = query.get<Position>(entity);
@@ -58,7 +71,7 @@ public:
                 continue;
             }
 
-            const auto floorLayout = layoutForFloor(layout_, route.currentFloorId);
+            const auto& floorLayout = cachedLayoutForFloor(layoutCache, route.currentFloorId);
             const auto* destinationZone = findZone(floorLayout, route.destinationZoneId);
             if (destinationZone != nullptr && pointInRing(destinationZone->area.outline, position.value)) {
                 status.evacuated = true;
@@ -82,7 +95,7 @@ public:
             }
 
             const auto routeDirection = (target - position.value) * (1.0 / distance);
-            const auto maxSpeed = effectiveMaxSpeed(agent, route, position.value);
+            const auto maxSpeed = effectiveMaxSpeed(layoutCache, agent, route, position.value);
             const auto desiredVelocity = routeDirection * maxSpeed;
             double speedScale = 1.0;
             const auto neighborRadius = static_cast<double>(agent.radius) + kDefaultAgentRadius + kPersonalSpaceBuffer;
@@ -115,12 +128,12 @@ public:
 
             const auto target = routeWaypointTarget(route, position.value);
             const auto remainingDistance = distanceBetween(position.value, target);
-            const auto maxSpeed = effectiveMaxSpeed(agent, route, position.value);
+            const auto maxSpeed = effectiveMaxSpeed(layoutCache, agent, route, position.value);
             const auto stepVelocity =
                 clampedToLength(plan.velocity, std::min(maxSpeed, remainingDistance / clampedDelta));
             const auto previousPosition = position.value;
             const auto nextPosition = constrainedMove(
-                layoutForFloor(layout_, route.currentFloorId),
+                cachedLayoutForFloor(layoutCache, route.currentFloorId),
                 previousPosition,
                 previousPosition + (stepVelocity * clampedDelta));
             position.value = nextPosition;
@@ -128,9 +141,9 @@ public:
             updateDisplayFloor(route, nextPosition);
         }
 
-        resolveAgentOverlaps(query, entities);
-        advanceRoutesForCurrentZones(query, entities);
-        advanceRoutesForWaypointProgress(query, clampedDelta, entities);
+        resolveAgentOverlaps(query, entities, layoutCache);
+        advanceRoutesForCurrentZones(query, entities, layoutCache);
+        advanceRoutesForWaypointProgress(query, clampedDelta, entities, layoutCache);
         advanceClock(query, clock, entities, clampedDelta);
         resources.set(ScenarioSimulationStepResource{});
     }
@@ -160,7 +173,8 @@ private:
     void advanceRoutesForWaypointProgress(
         engine::WorldQuery& query,
         double deltaSeconds,
-        const std::vector<engine::Entity>& entities) const {
+        const std::vector<engine::Entity>& entities,
+        const ScenarioLayoutCacheResource& layoutCache) const {
         for (const auto entity : entities) {
             const auto& status = query.get<EvacuationStatus>(entity);
             if (status.evacuated) {
@@ -171,7 +185,7 @@ private:
             const auto& agent = query.get<Agent>(entity);
             auto& route = query.get<EvacuationRoute>(entity);
             while (route.nextWaypointIndex < route.waypoints.size()) {
-                const auto floorLayout = layoutForFloor(layout_, route.currentFloorId);
+                const auto& floorLayout = cachedLayoutForFloor(layoutCache, route.currentFloorId);
                 if (routePassageCrossed(floorLayout, route, position.value, agent.radius)) {
                     advanceRouteWaypoint(route, position.value);
                     continue;
@@ -222,7 +236,10 @@ private:
         }
     }
 
-    void advanceRoutesForCurrentZones(engine::WorldQuery& query, const std::vector<engine::Entity>& entities) const {
+    void advanceRoutesForCurrentZones(
+        engine::WorldQuery& query,
+        const std::vector<engine::Entity>& entities,
+        const ScenarioLayoutCacheResource& layoutCache) const {
         for (const auto entity : entities) {
             const auto& status = query.get<EvacuationStatus>(entity);
             if (status.evacuated) {
@@ -231,7 +248,7 @@ private:
 
             const auto& position = query.get<Position>(entity);
             auto& route = query.get<EvacuationRoute>(entity);
-            const auto currentZoneId = zoneAt(position.value, route.currentFloorId);
+            const auto currentZoneId = zoneAt(layoutCache, position.value, route.currentFloorId);
             while (!currentZoneId.empty() && route.nextWaypointIndex < route.waypointZoneIds.size()) {
                 auto matchedIndex = route.waypointZoneIds.size();
                 for (auto index = route.nextWaypointIndex; index < route.waypointZoneIds.size(); ++index) {
@@ -251,7 +268,11 @@ private:
         }
     }
 
-    void replanBlockedRouteSegments(engine::WorldQuery& query, const std::vector<engine::Entity>& entities) const {
+    void replanBlockedRouteSegments(
+        engine::WorldQuery& query,
+        const std::vector<engine::Entity>& entities,
+        const ScenarioLayoutCacheResource& layoutCache,
+        double deltaSeconds) const {
         for (const auto entity : entities) {
             const auto& status = query.get<EvacuationStatus>(entity);
             if (status.evacuated) {
@@ -264,15 +285,20 @@ private:
             if (route.nextWaypointIndex >= route.waypoints.size()) {
                 continue;
             }
+            if (route.replanCooldownSeconds > 0.0) {
+                route.replanCooldownSeconds = std::max(0.0, route.replanCooldownSeconds - deltaSeconds);
+                continue;
+            }
 
             const auto target = routeWaypointTarget(route, position.value);
             const auto clearance = static_cast<double>(agent.radius) + kPathClearance;
-            const auto floorLayout = layoutForFloor(layout_, route.currentFloorId);
+            const auto& floorLayout = cachedLayoutForFloor(layoutCache, route.currentFloorId);
             if (lineOfSightClear(floorLayout, position.value, target, clearance)) {
                 continue;
             }
 
             const auto replacement = buildPath(floorLayout, position.value, target, clearance);
+            route.replanCooldownSeconds = kRouteReplanCooldownSeconds;
             if (replacement.size() <= 1) {
                 continue;
             }
@@ -371,7 +397,10 @@ private:
         }
     }
 
-    void resolveAgentOverlaps(engine::WorldQuery& query, const std::vector<engine::Entity>& entities) const {
+    void resolveAgentOverlaps(
+        engine::WorldQuery& query,
+        const std::vector<engine::Entity>& entities,
+        const ScenarioLayoutCacheResource& layoutCache) const {
         for (int iteration = 0; iteration < kOverlapRelaxationIterations; ++iteration) {
             const auto spatialIndex = buildAgentSpatialIndex(query, entities, 1.0);
             std::unordered_set<unsigned long long> checkedPairs;
@@ -420,11 +449,11 @@ private:
                     const auto& firstRoute = query.get<EvacuationRoute>(first);
                     const auto& secondRoute = query.get<EvacuationRoute>(second);
                     firstPosition.value = constrainedMove(
-                        layoutForFloor(layout_, firstRoute.currentFloorId),
+                        cachedLayoutForFloor(layoutCache, firstRoute.currentFloorId),
                         firstPosition.value,
                         firstPosition.value + (direction * push));
                     secondPosition.value = constrainedMove(
-                        layoutForFloor(layout_, secondRoute.currentFloorId),
+                        cachedLayoutForFloor(layoutCache, secondRoute.currentFloorId),
                         secondPosition.value,
                         secondPosition.value - (direction * push));
                 }
@@ -455,26 +484,18 @@ private:
         clock.complete = totalAgentCount > 0 && evacuatedAgentCount >= totalAgentCount;
     }
 
-    std::string zoneAt(const Point2D& point, const std::string& floorId) const {
-        for (const auto& zone : layout_.zones) {
-            if (!floorId.empty() && !zone.floorId.empty() && zone.floorId != floorId) {
-                continue;
-            }
-            if (pointInRing(zone.area.outline, point)) {
-                return zone.id;
-            }
-        }
-        return {};
-    }
-
     bool currentWaypointIsVertical(const EvacuationRoute& route) const {
         return route.nextWaypointIndex < route.waypointVerticalTransitions.size()
             && route.waypointVerticalTransitions[route.nextWaypointIndex];
     }
 
-    double effectiveMaxSpeed(const Agent& agent, const EvacuationRoute& route, const Point2D& position) const {
-        const auto currentZoneId = zoneAt(position, route.currentFloorId);
-        const auto* zone = findZone(layout_, currentZoneId);
+    double effectiveMaxSpeed(
+        const ScenarioLayoutCacheResource& layoutCache,
+        const Agent& agent,
+        const EvacuationRoute& route,
+        const Point2D& position) const {
+        const auto currentZoneId = zoneAt(layoutCache, position, route.currentFloorId);
+        const auto* zone = findCachedZone(layoutCache, currentZoneId);
         const bool inStairZone = zone != nullptr
             && (zone->kind == ZoneKind::Stair || zone->isStair || zone->isRamp);
         const bool onVerticalTransition = currentWaypointIsVertical(route);
@@ -505,12 +526,16 @@ private:
         }
     }
 
-    FacilityLayout2D layout_{};
+    std::optional<ScenarioLayoutCacheResource> layoutCache_{};
 };
 
 
 
 }  // namespace
+
+std::unique_ptr<engine::EngineSystem> makeScenarioSimulationMotionSystem() {
+    return std::make_unique<ScenarioSimulationMotionSystem>();
+}
 
 std::unique_ptr<engine::EngineSystem> makeScenarioSimulationMotionSystem(FacilityLayout2D layout) {
     return std::make_unique<ScenarioSimulationMotionSystem>(std::move(layout));

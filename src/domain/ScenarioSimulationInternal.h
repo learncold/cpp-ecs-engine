@@ -12,6 +12,11 @@
 #include "engine/Entity.h"
 #include "engine/WorldQuery.h"
 
+namespace safecrowd::domain {
+struct ScenarioConnectionTraversal;
+struct ScenarioLayoutCacheResource;
+}
+
 namespace safecrowd::domain::simulation_internal {
 
 inline constexpr double kDefaultTimeLimitSeconds = 60.0;
@@ -32,6 +37,7 @@ inline constexpr double kWaypointCrossingEpsilon = 0.08;
 inline constexpr double kWaypointProgressEpsilon = 0.02;
 inline constexpr double kWaypointStallSeconds = 0.75;
 inline constexpr double kPortalCrossingEpsilon = 0.02;
+inline constexpr double kRouteReplanCooldownSeconds = 0.35;
 
 struct Bounds {
     double minX{0.0};
@@ -111,6 +117,18 @@ StairEntryDirection stairEntryDirectionForFloor(
     const Connection2D& connection,
     const std::string& floorId);
 FacilityLayout2D layoutForFloor(const FacilityLayout2D& layout, const std::string& floorId);
+ScenarioLayoutCacheResource buildScenarioLayoutCache(FacilityLayout2D layout);
+const FacilityLayout2D& cachedLayoutForFloor(const ScenarioLayoutCacheResource& cache, const std::string& floorId);
+const Zone2D* findCachedZone(const ScenarioLayoutCacheResource& cache, const std::string& zoneId);
+const Connection2D* findCachedConnectionBetween(
+    const ScenarioLayoutCacheResource& cache,
+    const std::string& from,
+    const std::string& to);
+std::string cachedFloorIdForZone(const ScenarioLayoutCacheResource& cache, const std::string& zoneId);
+const std::vector<ScenarioConnectionTraversal>& cachedTraversalsForZone(
+    const ScenarioLayoutCacheResource& cache,
+    const std::string& zoneId);
+std::string zoneAt(const ScenarioLayoutCacheResource& cache, const Point2D& point, const std::string& floorId);
 bool routePassageCrossed(const FacilityLayout2D& layout, const EvacuationRoute& route, const Point2D& position, double agentRadius);
 double speedOf(const Point2D& velocity);
 std::vector<engine::Entity> simulationEntities(engine::WorldQuery& query);

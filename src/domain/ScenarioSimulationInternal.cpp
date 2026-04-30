@@ -1,5 +1,7 @@
 #include "domain/ScenarioSimulationInternal.h"
 
+#include "domain/ScenarioSimulationSystems.h"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -432,6 +434,120 @@ FacilityLayout2D layoutForFloor(const FacilityLayout2D& layout, const std::strin
     }
     appendStairEntryBarriers(filtered, layout, floorId);
     return filtered;
+}
+
+ScenarioLayoutCacheResource buildScenarioLayoutCache(FacilityLayout2D layout) {
+    ScenarioLayoutCacheResource cache;
+    cache.layout = std::move(layout);
+
+    std::vector<std::string> floorIds;
+    auto addFloorId = [&](const std::string& floorId) {
+        if (floorId.empty()) {
+            return;
+        }
+        if (std::find(floorIds.begin(), floorIds.end(), floorId) == floorIds.end()) {
+            floorIds.push_back(floorId);
+        }
+    };
+
+    for (const auto& floor : cache.layout.floors) {
+        addFloorId(floor.id);
+    }
+    for (std::size_t index = 0; index < cache.layout.zones.size(); ++index) {
+        const auto& zone = cache.layout.zones[index];
+        cache.zoneIndices[zone.id] = index;
+        cache.zoneFloorIds[zone.id] = zone.floorId;
+        addFloorId(zone.floorId);
+    }
+    for (const auto& connection : cache.layout.connections) {
+        addFloorId(connection.floorId);
+    }
+    for (const auto& barrier : cache.layout.barriers) {
+        addFloorId(barrier.floorId);
+    }
+    for (const auto& control : cache.layout.controls) {
+        addFloorId(control.floorId);
+    }
+
+    for (const auto& floorId : floorIds) {
+        cache.floorLayouts.emplace(floorId, layoutForFloor(cache.layout, floorId));
+    }
+
+    for (std::size_t index = 0; index < cache.layout.connections.size(); ++index) {
+        const auto& connection = cache.layout.connections[index];
+        if (connection.directionality == TravelDirection::Closed || !canTraverseConnection(cache.layout, connection)) {
+            continue;
+        }
+        if (connection.directionality != TravelDirection::ReverseOnly) {
+            cache.traversableConnectionsByZone[connection.fromZoneId].push_back({
+                .nextZoneId = connection.toZoneId,
+                .connectionIndex = index,
+            });
+        }
+        if (connection.directionality != TravelDirection::ForwardOnly) {
+            cache.traversableConnectionsByZone[connection.toZoneId].push_back({
+                .nextZoneId = connection.fromZoneId,
+                .connectionIndex = index,
+            });
+        }
+    }
+
+    return cache;
+}
+
+const FacilityLayout2D& cachedLayoutForFloor(const ScenarioLayoutCacheResource& cache, const std::string& floorId) {
+    if (floorId.empty()) {
+        return cache.layout;
+    }
+    const auto it = cache.floorLayouts.find(floorId);
+    return it == cache.floorLayouts.end() ? cache.layout : it->second;
+}
+
+const Zone2D* findCachedZone(const ScenarioLayoutCacheResource& cache, const std::string& zoneId) {
+    const auto it = cache.zoneIndices.find(zoneId);
+    if (it == cache.zoneIndices.end() || it->second >= cache.layout.zones.size()) {
+        return nullptr;
+    }
+    return &cache.layout.zones[it->second];
+}
+
+const Connection2D* findCachedConnectionBetween(
+    const ScenarioLayoutCacheResource& cache,
+    const std::string& from,
+    const std::string& to) {
+    const auto it = cache.traversableConnectionsByZone.find(from);
+    if (it == cache.traversableConnectionsByZone.end()) {
+        return nullptr;
+    }
+    for (const auto& traversal : it->second) {
+        if (traversal.nextZoneId == to && traversal.connectionIndex < cache.layout.connections.size()) {
+            return &cache.layout.connections[traversal.connectionIndex];
+        }
+    }
+    return nullptr;
+}
+
+std::string cachedFloorIdForZone(const ScenarioLayoutCacheResource& cache, const std::string& zoneId) {
+    const auto it = cache.zoneFloorIds.find(zoneId);
+    return it == cache.zoneFloorIds.end() ? std::string{} : it->second;
+}
+
+const std::vector<ScenarioConnectionTraversal>& cachedTraversalsForZone(
+    const ScenarioLayoutCacheResource& cache,
+    const std::string& zoneId) {
+    static const std::vector<ScenarioConnectionTraversal> empty;
+    const auto it = cache.traversableConnectionsByZone.find(zoneId);
+    return it == cache.traversableConnectionsByZone.end() ? empty : it->second;
+}
+
+std::string zoneAt(const ScenarioLayoutCacheResource& cache, const Point2D& point, const std::string& floorId) {
+    const auto& floorLayout = cachedLayoutForFloor(cache, floorId);
+    for (const auto& zone : floorLayout.zones) {
+        if (pointInRing(zone.area.outline, point)) {
+            return zone.id;
+        }
+    }
+    return {};
 }
 
 Point2D passageNormalToward(const LineSegment2D& passage, const Zone2D& fromZone, const Zone2D& toZone) {

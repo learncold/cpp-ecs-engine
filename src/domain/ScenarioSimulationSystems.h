@@ -33,6 +33,19 @@ struct ScenarioAgentSpatialIndexResource {
     std::unordered_map<long long, std::vector<engine::Entity>> cells{};
 };
 
+struct ScenarioConnectionTraversal {
+    std::string nextZoneId{};
+    std::size_t connectionIndex{0};
+};
+
+struct ScenarioLayoutCacheResource {
+    FacilityLayout2D layout{};
+    std::unordered_map<std::string, FacilityLayout2D> floorLayouts{};
+    std::unordered_map<std::string, std::size_t> zoneIndices{};
+    std::unordered_map<std::string, std::string> zoneFloorIds{};
+    std::unordered_map<std::string, std::vector<ScenarioConnectionTraversal>> traversableConnectionsByZone{};
+};
+
 struct ScenarioRiskMetricsResource {
     ScenarioRiskSnapshot snapshot{};
     ScenarioRiskSnapshot peakSnapshot{};
@@ -59,6 +72,7 @@ std::vector<engine::Entity> scenarioNearbyAgents(
     const Point2D& point,
     double radius);
 
+std::unique_ptr<engine::EngineSystem> makeScenarioSimulationMotionSystem();
 std::unique_ptr<engine::EngineSystem> makeScenarioSimulationMotionSystem(FacilityLayout2D layout);
 std::unique_ptr<engine::EngineSystem> makeScenarioRiskMetricsSystem(FacilityLayout2D layout);
 
