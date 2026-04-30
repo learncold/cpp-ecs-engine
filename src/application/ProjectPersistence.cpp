@@ -292,9 +292,92 @@ safecrowd::domain::ElementProvenance provenanceFromJson(const QJsonObject& objec
     };
 }
 
+safecrowd::domain::ZoneKind zoneKindFromJson(const QJsonObject& object) {
+    const int rawKind = object.value("kind").toInt();
+    switch (rawKind) {
+    case 1:
+        return safecrowd::domain::ZoneKind::Room;
+    case 2:
+        return safecrowd::domain::ZoneKind::Room;
+    case 3:
+        return safecrowd::domain::ZoneKind::Exit;
+    case 4:
+        return safecrowd::domain::ZoneKind::Intersection;
+    case 5:
+        return safecrowd::domain::ZoneKind::Stair;
+    case 0:
+    default:
+        return safecrowd::domain::ZoneKind::Unknown;
+    }
+}
+
+QJsonObject floorToJson(const safecrowd::domain::Floor2D& floor) {
+    QJsonObject object;
+    object["id"] = QString::fromStdString(floor.id);
+    object["label"] = QString::fromStdString(floor.label);
+    object["elevationMeters"] = floor.elevationMeters;
+    object["provenance"] = provenanceToJson(floor.provenance);
+    return object;
+}
+
+safecrowd::domain::Floor2D floorFromJson(const QJsonObject& object) {
+    return {
+        .id = object.value("id").toString().toStdString(),
+        .label = object.value("label").toString().toStdString(),
+        .elevationMeters = object.value("elevationMeters").toDouble(),
+        .provenance = provenanceFromJson(object.value("provenance").toObject()),
+    };
+}
+
+std::string defaultFloorId(const safecrowd::domain::FacilityLayout2D& layout) {
+    if (!layout.floors.empty() && !layout.floors.front().id.empty()) {
+        return layout.floors.front().id;
+    }
+    if (!layout.levelId.empty()) {
+        return layout.levelId;
+    }
+    return "L1";
+}
+
+void normalizeFloors(safecrowd::domain::FacilityLayout2D& layout) {
+    if (layout.floors.empty()) {
+        const auto floorId = layout.levelId.empty() ? std::string("L1") : layout.levelId;
+        layout.floors.push_back({
+            .id = floorId,
+            .label = floorId,
+        });
+    }
+
+    const auto floorId = defaultFloorId(layout);
+    if (layout.levelId.empty()) {
+        layout.levelId = floorId;
+    }
+    for (auto& zone : layout.zones) {
+        if (zone.floorId.empty()) {
+            zone.floorId = floorId;
+        }
+    }
+    for (auto& connection : layout.connections) {
+        if (connection.floorId.empty()) {
+            connection.floorId = floorId;
+        }
+    }
+    for (auto& barrier : layout.barriers) {
+        if (barrier.floorId.empty()) {
+            barrier.floorId = floorId;
+        }
+    }
+    for (auto& control : layout.controls) {
+        if (control.floorId.empty()) {
+            control.floorId = floorId;
+        }
+    }
+}
+
 QJsonObject zoneToJson(const safecrowd::domain::Zone2D& zone) {
     QJsonObject object;
     object["id"] = QString::fromStdString(zone.id);
+    object["floorId"] = QString::fromStdString(zone.floorId);
     object["kind"] = static_cast<int>(zone.kind);
     object["label"] = QString::fromStdString(zone.label);
     object["area"] = polygonToJson(zone.area);
@@ -308,7 +391,8 @@ QJsonObject zoneToJson(const safecrowd::domain::Zone2D& zone) {
 safecrowd::domain::Zone2D zoneFromJson(const QJsonObject& object) {
     return {
         .id = object.value("id").toString().toStdString(),
-        .kind = static_cast<safecrowd::domain::ZoneKind>(object.value("kind").toInt()),
+        .floorId = object.value("floorId").toString().toStdString(),
+        .kind = zoneKindFromJson(object),
         .label = object.value("label").toString().toStdString(),
         .area = polygonFromJson(object.value("area").toObject()),
         .defaultCapacity = static_cast<std::size_t>(object.value("defaultCapacity").toInteger()),
@@ -321,6 +405,7 @@ safecrowd::domain::Zone2D zoneFromJson(const QJsonObject& object) {
 QJsonObject connectionToJson(const safecrowd::domain::Connection2D& connection) {
     QJsonObject object;
     object["id"] = QString::fromStdString(connection.id);
+    object["floorId"] = QString::fromStdString(connection.floorId);
     object["kind"] = static_cast<int>(connection.kind);
     object["fromZoneId"] = QString::fromStdString(connection.fromZoneId);
     object["toZoneId"] = QString::fromStdString(connection.toZoneId);
@@ -328,6 +413,8 @@ QJsonObject connectionToJson(const safecrowd::domain::Connection2D& connection) 
     object["directionality"] = static_cast<int>(connection.directionality);
     object["isStair"] = connection.isStair;
     object["isRamp"] = connection.isRamp;
+    object["lowerEntryDirection"] = static_cast<int>(connection.lowerEntryDirection);
+    object["upperEntryDirection"] = static_cast<int>(connection.upperEntryDirection);
     object["centerSpan"] = lineToJson(connection.centerSpan);
     object["provenance"] = provenanceToJson(connection.provenance);
     return object;
@@ -336,6 +423,7 @@ QJsonObject connectionToJson(const safecrowd::domain::Connection2D& connection) 
 safecrowd::domain::Connection2D connectionFromJson(const QJsonObject& object) {
     return {
         .id = object.value("id").toString().toStdString(),
+        .floorId = object.value("floorId").toString().toStdString(),
         .kind = static_cast<safecrowd::domain::ConnectionKind>(object.value("kind").toInt()),
         .fromZoneId = object.value("fromZoneId").toString().toStdString(),
         .toZoneId = object.value("toZoneId").toString().toStdString(),
@@ -343,6 +431,12 @@ safecrowd::domain::Connection2D connectionFromJson(const QJsonObject& object) {
         .directionality = static_cast<safecrowd::domain::TravelDirection>(object.value("directionality").toInt()),
         .isStair = object.value("isStair").toBool(false),
         .isRamp = object.value("isRamp").toBool(false),
+        .lowerEntryDirection = static_cast<safecrowd::domain::StairEntryDirection>(
+            object.value("lowerEntryDirection").toInt(
+                static_cast<int>(safecrowd::domain::StairEntryDirection::Unspecified))),
+        .upperEntryDirection = static_cast<safecrowd::domain::StairEntryDirection>(
+            object.value("upperEntryDirection").toInt(
+                static_cast<int>(safecrowd::domain::StairEntryDirection::Unspecified))),
         .centerSpan = lineFromJson(object.value("centerSpan").toObject()),
         .provenance = provenanceFromJson(object.value("provenance").toObject()),
     };
@@ -351,6 +445,7 @@ safecrowd::domain::Connection2D connectionFromJson(const QJsonObject& object) {
 QJsonObject barrierToJson(const safecrowd::domain::Barrier2D& barrier) {
     QJsonObject object;
     object["id"] = QString::fromStdString(barrier.id);
+    object["floorId"] = QString::fromStdString(barrier.floorId);
     object["geometry"] = polylineToJson(barrier.geometry);
     object["blocksMovement"] = barrier.blocksMovement;
     object["provenance"] = provenanceToJson(barrier.provenance);
@@ -360,6 +455,7 @@ QJsonObject barrierToJson(const safecrowd::domain::Barrier2D& barrier) {
 safecrowd::domain::Barrier2D barrierFromJson(const QJsonObject& object) {
     return {
         .id = object.value("id").toString().toStdString(),
+        .floorId = object.value("floorId").toString().toStdString(),
         .geometry = polylineFromJson(object.value("geometry").toObject()),
         .blocksMovement = object.value("blocksMovement").toBool(true),
         .provenance = provenanceFromJson(object.value("provenance").toObject()),
@@ -369,6 +465,7 @@ safecrowd::domain::Barrier2D barrierFromJson(const QJsonObject& object) {
 QJsonObject controlToJson(const safecrowd::domain::ControlPoint2D& control) {
     QJsonObject object;
     object["id"] = QString::fromStdString(control.id);
+    object["floorId"] = QString::fromStdString(control.floorId);
     object["kind"] = static_cast<int>(control.kind);
     object["targetId"] = QString::fromStdString(control.targetId);
     object["defaultOpen"] = control.defaultOpen;
@@ -379,6 +476,7 @@ QJsonObject controlToJson(const safecrowd::domain::ControlPoint2D& control) {
 safecrowd::domain::ControlPoint2D controlFromJson(const QJsonObject& object) {
     return {
         .id = object.value("id").toString().toStdString(),
+        .floorId = object.value("floorId").toString().toStdString(),
         .kind = static_cast<safecrowd::domain::ControlKind>(object.value("kind").toInt()),
         .targetId = object.value("targetId").toString().toStdString(),
         .defaultOpen = object.value("defaultOpen").toBool(true),
@@ -391,6 +489,12 @@ QJsonObject layoutToJson(const safecrowd::domain::FacilityLayout2D& layout) {
     object["id"] = QString::fromStdString(layout.id);
     object["name"] = QString::fromStdString(layout.name);
     object["levelId"] = QString::fromStdString(layout.levelId);
+
+    QJsonArray floors;
+    for (const auto& floor : layout.floors) {
+        floors.append(floorToJson(floor));
+    }
+    object["floors"] = floors;
 
     QJsonArray zones;
     for (const auto& zone : layout.zones) {
@@ -425,6 +529,9 @@ safecrowd::domain::FacilityLayout2D layoutFromJson(const QJsonObject& object) {
     layout.name = object.value("name").toString().toStdString();
     layout.levelId = object.value("levelId").toString().toStdString();
 
+    for (const auto& value : object.value("floors").toArray()) {
+        layout.floors.push_back(floorFromJson(value.toObject()));
+    }
     for (const auto& value : object.value("zones").toArray()) {
         layout.zones.push_back(zoneFromJson(value.toObject()));
     }
@@ -438,6 +545,7 @@ safecrowd::domain::FacilityLayout2D layoutFromJson(const QJsonObject& object) {
         layout.controls.push_back(controlFromJson(value.toObject()));
     }
 
+    normalizeFloors(layout);
     return layout;
 }
 
@@ -448,6 +556,7 @@ bool isLiveValidationIssue(safecrowd::domain::ImportIssueCode code) {
     case ImportIssueCode::MissingExit:
     case ImportIssueCode::DisconnectedWalkableArea:
     case ImportIssueCode::WidthBelowMinimum:
+    case ImportIssueCode::InvalidFloorReference:
         return true;
     default:
         return false;

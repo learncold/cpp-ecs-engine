@@ -579,28 +579,6 @@ std::optional<InferredConnectionGeometry> inferZoneAdjacencyPortal(
     return inferOverlapPortal(lhs, rhs);
 }
 
-ZoneKind classifyWalkableZoneKind(const Polygon2D& polygon) {
-    const auto bounds = computeBounds(polygon);
-    const double width = std::max(0.0, bounds.maxX - bounds.minX);
-    const double height = std::max(0.0, bounds.maxY - bounds.minY);
-    const double shorterSide = std::min(width, height);
-    const double longerSide = std::max(width, height);
-
-    if (shorterSide <= kEpsilon) {
-        return ZoneKind::Unknown;
-    }
-
-    const double aspectRatio = longerSide / shorterSide;
-    const double boxArea = width * height;
-    const double occupancy = boxArea <= kEpsilon ? 0.0 : polygonArea(polygon) / boxArea;
-
-    if (aspectRatio >= 2.5 && occupancy >= 0.55) {
-        return ZoneKind::Corridor;
-    }
-
-    return ZoneKind::Room;
-}
-
 std::string makeLayoutId(const CanonicalGeometry& geometry) {
     if (geometry.levelId.empty()) {
         return "layout-import";
@@ -701,9 +679,13 @@ FacilityLayoutBuildResult FacilityLayoutBuilder::build(const CanonicalGeometry& 
     result.layout.id = makeLayoutId(geometry);
     result.layout.name = makeLayoutName(geometry);
     result.layout.levelId = geometry.levelId;
+    const std::string floorId = geometry.levelId.empty() ? "L1" : geometry.levelId;
+    result.layout.floors.push_back({
+        .id = floorId,
+        .label = floorId,
+    });
 
     std::size_t roomCounter = 0;
-    std::size_t corridorCounter = 0;
     std::size_t exitCounter = 0;
     std::size_t stairCounter = 0;
     std::size_t connectionCounter = 0;
@@ -711,24 +693,13 @@ FacilityLayoutBuildResult FacilityLayoutBuilder::build(const CanonicalGeometry& 
     std::size_t controlCounter = 0;
 
     for (const auto& walkable : geometry.walkableAreas) {
-        const auto kind = classifyWalkableZoneKind(walkable.polygon);
-        std::string label;
-        switch (kind) {
-        case ZoneKind::Corridor:
-            ++corridorCounter;
-            label = "Corridor " + std::to_string(corridorCounter);
-            break;
-        case ZoneKind::Room:
-        case ZoneKind::Unknown:
-        default:
-            ++roomCounter;
-            label = "Room " + std::to_string(roomCounter);
-            break;
-        }
+        ++roomCounter;
+        std::string label = "Room " + std::to_string(roomCounter);
 
         result.layout.zones.push_back({
             .id = "zone-" + std::to_string(result.layout.zones.size() + 1),
-            .kind = kind == ZoneKind::Unknown ? ZoneKind::Room : kind,
+            .floorId = floorId,
+            .kind = ZoneKind::Room,
             .label = std::move(label),
             .area = walkable.polygon,
             .defaultCapacity = estimateCapacity(walkable.polygon),
@@ -755,6 +726,7 @@ FacilityLayoutBuildResult FacilityLayoutBuilder::build(const CanonicalGeometry& 
         ++stairCounter;
         result.layout.zones.push_back({
             .id = "zone-" + std::to_string(result.layout.zones.size() + 1),
+            .floorId = floorId,
             .kind = ZoneKind::Stair,
             .label = isRamp ? "Ramp " + std::to_string(stairCounter) : "Stair " + std::to_string(stairCounter),
             .area = std::move(linkArea),
@@ -780,6 +752,7 @@ FacilityLayoutBuildResult FacilityLayoutBuilder::build(const CanonicalGeometry& 
         ++exitCounter;
         result.layout.zones.push_back({
             .id = "zone-" + std::to_string(result.layout.zones.size() + 1),
+            .floorId = floorId,
             .kind = ZoneKind::Exit,
             .label = "Exit " + std::to_string(exitCounter),
             .area = makeExitZoneArea(opening),
@@ -826,6 +799,7 @@ FacilityLayoutBuildResult FacilityLayoutBuilder::build(const CanonicalGeometry& 
             ++connectionCounter;
             result.layout.connections.push_back({
                 .id = "connection-" + std::to_string(connectionCounter),
+                .floorId = floorId,
                 .kind = ConnectionKind::Exit,
                 .fromZoneId = result.layout.zones[candidates.front()].id,
                 .toZoneId = result.layout.zones[exitZoneIndex].id,
@@ -853,6 +827,7 @@ FacilityLayoutBuildResult FacilityLayoutBuilder::build(const CanonicalGeometry& 
         ++connectionCounter;
         result.layout.connections.push_back({
             .id = "connection-" + std::to_string(connectionCounter),
+            .floorId = floorId,
             .kind = ConnectionKind::Doorway,
             .fromZoneId = result.layout.zones[candidates[0]].id,
             .toZoneId = result.layout.zones[candidates[1]].id,
@@ -893,6 +868,7 @@ FacilityLayoutBuildResult FacilityLayoutBuilder::build(const CanonicalGeometry& 
             ++connectionCounter;
             result.layout.connections.push_back({
                 .id = "connection-" + std::to_string(connectionCounter),
+                .floorId = floorId,
                 .kind = ConnectionKind::Opening,
                 .fromZoneId = result.layout.zones[lhsIndex].id,
                 .toZoneId = result.layout.zones[rhsIndex].id,
@@ -911,6 +887,7 @@ FacilityLayoutBuildResult FacilityLayoutBuilder::build(const CanonicalGeometry& 
         ++barrierCounter;
         result.layout.barriers.push_back({
             .id = "barrier-" + std::to_string(barrierCounter),
+            .floorId = floorId,
             .geometry = {
                 .vertices = {wall.segment.start, wall.segment.end},
                 .closed = false,
@@ -927,6 +904,7 @@ FacilityLayoutBuildResult FacilityLayoutBuilder::build(const CanonicalGeometry& 
         ++barrierCounter;
         result.layout.barriers.push_back({
             .id = "barrier-" + std::to_string(barrierCounter),
+            .floorId = floorId,
             .geometry = {
                 .vertices = obstacle.footprint.outline,
                 .closed = true,
@@ -956,6 +934,7 @@ FacilityLayoutBuildResult FacilityLayoutBuilder::build(const CanonicalGeometry& 
         ++controlCounter;
         result.layout.controls.push_back({
             .id = "control-" + std::to_string(controlCounter),
+            .floorId = floorId,
             .kind = verticalLink.kind == VerticalLinkKind::Elevator ? ControlKind::Gate : ControlKind::Unknown,
             .targetId = result.layout.zones[ordered.front()].id,
             .provenance = {

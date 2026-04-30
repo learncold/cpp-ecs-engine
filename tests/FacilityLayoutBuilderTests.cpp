@@ -69,10 +69,14 @@ SC_TEST(FacilityLayoutBuilderBuildsWalkableExitAndBarrierElements) {
     const auto buildResult = builder.build(geometry);
 
     SC_EXPECT_EQ(buildResult.layout.id, std::string("layout-L1"));
+    SC_EXPECT_EQ(buildResult.layout.floors.size(), std::size_t{1});
+    SC_EXPECT_EQ(buildResult.layout.floors.front().id, std::string("L1"));
     SC_EXPECT_EQ(buildResult.layout.zones.size(), std::size_t{2});
     SC_EXPECT_EQ(buildResult.layout.zones.front().kind, safecrowd::domain::ZoneKind::Room);
     SC_EXPECT_EQ(buildResult.layout.zones.back().kind, safecrowd::domain::ZoneKind::Exit);
+    SC_EXPECT_EQ(buildResult.layout.zones.front().floorId, std::string("L1"));
     SC_EXPECT_EQ(buildResult.layout.connections.size(), std::size_t{1});
+    SC_EXPECT_EQ(buildResult.layout.connections.front().floorId, std::string("L1"));
     SC_EXPECT_EQ(buildResult.layout.connections.front().kind, safecrowd::domain::ConnectionKind::Exit);
     SC_EXPECT_EQ(buildResult.layout.barriers.size(), std::size_t{2});
     SC_EXPECT_TRUE(buildResult.layout.barriers.back().geometry.closed);
@@ -123,6 +127,94 @@ SC_TEST(ImportValidationServiceReportsMissingExitDisconnectedAreaAndNarrowConnec
     SC_EXPECT_TRUE(containsIssueCode(issues, safecrowd::domain::ImportIssueCode::MissingExit));
     SC_EXPECT_TRUE(containsIssueCode(issues, safecrowd::domain::ImportIssueCode::DisconnectedWalkableArea));
     SC_EXPECT_TRUE(containsIssueCode(issues, safecrowd::domain::ImportIssueCode::WidthBelowMinimum));
+    SC_EXPECT_TRUE(safecrowd::domain::hasBlockingImportIssue(issues));
+}
+
+SC_TEST(ImportValidationServiceReportsInvalidFloorReferences) {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.id = "layout-L1";
+    layout.levelId = "L1";
+    layout.floors.push_back({
+        .id = "L1",
+        .label = "Floor 1",
+    });
+    layout.zones.push_back({
+        .id = "zone-room-1",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Room 1",
+        .area = {
+            .outline = {
+                {0.0, 0.0},
+                {4.0, 0.0},
+                {4.0, 4.0},
+                {0.0, 4.0},
+            },
+        },
+    });
+    layout.zones.push_back({
+        .id = "zone-exit-1",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Exit,
+        .label = "Exit 1",
+        .area = {
+            .outline = {
+                {4.0, 1.0},
+                {5.0, 1.0},
+                {5.0, 3.0},
+                {4.0, 3.0},
+            },
+        },
+    });
+    layout.connections.push_back({
+        .id = "connection-1",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ConnectionKind::Exit,
+        .fromZoneId = "zone-room-1",
+        .toZoneId = "zone-exit-1",
+        .effectiveWidth = 1.0,
+    });
+
+    safecrowd::domain::ImportValidationService validator;
+    const auto issues = validator.validate(layout);
+
+    SC_EXPECT_TRUE(containsIssueCode(issues, safecrowd::domain::ImportIssueCode::InvalidFloorReference));
+    SC_EXPECT_TRUE(safecrowd::domain::hasBlockingImportIssue(issues));
+}
+
+SC_TEST(ImportValidationServiceReportsNonVerticalInterFloorConnections) {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.id = "layout-multi";
+    layout.levelId = "L1";
+    layout.floors.push_back({.id = "L1", .label = "Floor 1"});
+    layout.floors.push_back({.id = "L2", .label = "Floor 2"});
+    layout.zones.push_back({
+        .id = "zone-room-1",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Room 1",
+        .area = {.outline = {{0.0, 0.0}, {4.0, 0.0}, {4.0, 4.0}, {0.0, 4.0}}},
+    });
+    layout.zones.push_back({
+        .id = "zone-exit-1",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ZoneKind::Exit,
+        .label = "Exit 1",
+        .area = {.outline = {{4.0, 1.0}, {5.0, 1.0}, {5.0, 3.0}, {4.0, 3.0}}},
+    });
+    layout.connections.push_back({
+        .id = "connection-1",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ConnectionKind::Doorway,
+        .fromZoneId = "zone-room-1",
+        .toZoneId = "zone-exit-1",
+        .effectiveWidth = 1.0,
+    });
+
+    safecrowd::domain::ImportValidationService validator;
+    const auto issues = validator.validate(layout);
+
+    SC_EXPECT_TRUE(containsIssueCode(issues, safecrowd::domain::ImportIssueCode::InvalidFloorReference));
     SC_EXPECT_TRUE(safecrowd::domain::hasBlockingImportIssue(issues));
 }
 

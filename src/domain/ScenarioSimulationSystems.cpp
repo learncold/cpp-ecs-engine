@@ -130,6 +130,7 @@ public:
                 blockedConnectionIds.insert(block.connectionId);
                 layout.barriers.push_back(Barrier2D{
                     .id = "control-block-" + block.connectionId,
+                    .floorId = connection->floorId,
                     .geometry = Polyline2D{.vertices = {connection->centerSpan.start, connection->centerSpan.end}, .closed = false},
                     .blocksMovement = true,
                 });
@@ -288,6 +289,11 @@ void ScenarioFrameSyncSystem::update(engine::EngineWorld& world, const engine::E
             .position = position.value,
             .velocity = velocity.value,
             .radius = agent.radius,
+            .floorId = query.contains<EvacuationRoute>(entity)
+                ? (!query.get<EvacuationRoute>(entity).displayFloorId.empty()
+                    ? query.get<EvacuationRoute>(entity).displayFloorId
+                    : query.get<EvacuationRoute>(entity).currentFloorId)
+                : std::string{},
         });
     }
 

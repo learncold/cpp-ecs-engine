@@ -9,12 +9,11 @@
 namespace safecrowd::domain {
 
 enum class ZoneKind {
-    Unknown,
-    Room,
-    Corridor,
-    Exit,
-    Intersection,
-    Stair,
+    Unknown = 0,
+    Room = 1,
+    Exit = 3,
+    Intersection = 4,
+    Stair = 5,
 };
 
 enum class ConnectionKind {
@@ -33,6 +32,14 @@ enum class TravelDirection {
     Closed,
 };
 
+enum class StairEntryDirection {
+    Unspecified,
+    North,
+    East,
+    South,
+    West,
+};
+
 enum class ControlKind {
     Unknown,
     Gate,
@@ -45,8 +52,16 @@ struct ElementProvenance {
     std::vector<std::string> canonicalIds{};
 };
 
+struct Floor2D {
+    std::string id{};
+    std::string label{};
+    double elevationMeters{0.0};
+    ElementProvenance provenance{};
+};
+
 struct Zone2D {
     std::string id{};
+    std::string floorId{};
     ZoneKind kind{ZoneKind::Unknown};
     std::string label{};
     Polygon2D area{};
@@ -58,6 +73,7 @@ struct Zone2D {
 
 struct Connection2D {
     std::string id{};
+    std::string floorId{};
     ConnectionKind kind{ConnectionKind::Unknown};
     std::string fromZoneId{};
     std::string toZoneId{};
@@ -65,12 +81,15 @@ struct Connection2D {
     TravelDirection directionality{TravelDirection::Bidirectional};
     bool isStair{false};
     bool isRamp{false};
+    StairEntryDirection lowerEntryDirection{StairEntryDirection::Unspecified};
+    StairEntryDirection upperEntryDirection{StairEntryDirection::Unspecified};
     LineSegment2D centerSpan{};
     ElementProvenance provenance{};
 };
 
 struct Barrier2D {
     std::string id{};
+    std::string floorId{};
     Polyline2D geometry{};
     bool blocksMovement{true};
     ElementProvenance provenance{};
@@ -78,6 +97,7 @@ struct Barrier2D {
 
 struct ControlPoint2D {
     std::string id{};
+    std::string floorId{};
     ControlKind kind{ControlKind::Unknown};
     std::string targetId{};
     bool defaultOpen{true};
@@ -88,6 +108,7 @@ struct FacilityLayout2D {
     std::string id{};
     std::string name{};
     std::string levelId{};
+    std::vector<Floor2D> floors{};
     std::vector<Zone2D> zones{};
     std::vector<Connection2D> connections{};
     std::vector<Barrier2D> barriers{};

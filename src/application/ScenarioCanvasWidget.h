@@ -35,6 +35,7 @@ struct ScenarioCrowdPlacement {
     QString name{};
     ScenarioCrowdPlacementKind kind{ScenarioCrowdPlacementKind::Individual};
     QString zoneId{};
+    QString floorId{};
     std::vector<safecrowd::domain::Point2D> area{};
     int occupantCount{1};
     safecrowd::domain::Point2D velocity{};
@@ -78,6 +79,7 @@ private:
     std::optional<LayoutCanvasBounds> collectBounds() const;
     LayoutCanvasTransform currentTransform(const LayoutCanvasBounds& bounds) const;
     QRectF previewViewport() const;
+    void selectFloorForElement(const QString& elementId);
     safecrowd::domain::Point2D unmapPoint(const QPointF& point) const;
     QString zoneAt(const safecrowd::domain::Point2D& point) const;
     const safecrowd::domain::Connection2D* connectionAt(const safecrowd::domain::Point2D& point, double toleranceWorldUnits) const;
@@ -104,6 +106,7 @@ private:
     safecrowd::domain::FacilityLayout2D layout_{};
     std::vector<ScenarioCrowdPlacement> placements_{};
     std::vector<safecrowd::domain::ConnectionBlockDraft> connectionBlocks_{};
+    QString currentFloorId_{};
     QString focusedLayoutElementId_{};
     QString focusedPlacementId_{};
     ToolMode toolMode_{ToolMode::Select};

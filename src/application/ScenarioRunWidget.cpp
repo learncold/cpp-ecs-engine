@@ -151,6 +151,7 @@ ScenarioAuthoringWidget::ScenarioState scenarioStateFromDraft(
             ? ScenarioCrowdPlacementKind::Individual
             : ScenarioCrowdPlacementKind::Group;
         uiPlacement.zoneId = QString::fromStdString(placement.zoneId);
+        uiPlacement.floorId = QString::fromStdString(placement.floorId);
         uiPlacement.area = placement.area.outline;
         uiPlacement.occupantCount = static_cast<int>(placement.targetAgentCount);
         uiPlacement.velocity = placement.initialVelocity;

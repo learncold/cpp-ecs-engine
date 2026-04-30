@@ -23,6 +23,7 @@ enum class ImportIssueCode {
     MissingExit,
     WidthBelowMinimum,
     UnmappedElement,
+    InvalidFloorReference,
 };
 
 struct ImportIssue {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <vector>
 
 #include <QString>
 #include <QWidget>
@@ -11,8 +12,10 @@
 
 class QFrame;
 class QCheckBox;
+class QComboBox;
 class QDoubleSpinBox;
 class QKeyEvent;
+class QLabel;
 class QMouseEvent;
 class QToolButton;
 class QWheelEvent;
@@ -65,11 +68,16 @@ private:
     enum class ToolMode {
         Select,
         DrawRoom,
-        DrawCorridor,
         DrawExit,
         DrawWall,
         DrawDoor,
+        DrawStair,
         Delete,
+    };
+
+    enum class RoomDrawMode {
+        Rectangle,
+        Polygon,
     };
 
     void applyToolAt(const QPointF& position);
@@ -77,16 +85,25 @@ private:
     void createBarrier(const QPointF& startWorld, const QPointF& endWorld);
     void createConnection(const QPointF& startWorld, const QPointF& endWorld);
     void createDoorAt(const QString& barrierId, const QPointF& position);
+    void createRoomPolygon(const std::vector<QPointF>& points);
+    void createVerticalLink(const QPointF& startWorld, const QPointF& endWorld);
     void createZone(const QPointF& startWorld, const QPointF& endWorld, safecrowd::domain::ZoneKind kind);
     void deleteConnection(const QString& connectionId);
     void deleteBarrier(const QString& barrierId);
     void emitCurrentSelection();
+    void finishRoomPolygonDraft();
+    QPointF snapWorldPoint(const QPointF& worldPoint, const LayoutCanvasTransform& transform) const;
     void notifyLayoutEdited();
     void repositionToolbars();
+    void refreshFloorSelector();
     void refreshPropertyPanel();
     void selectBarrier(const QString& barrierId);
     void selectConnection(const QString& connectionId);
+    void selectFloorForElement(const QString& elementId);
     void selectZone(const QString& zoneId);
+    void addFloor();
+    QString currentFloorId() const;
+    QString verticalTargetFloorId() const;
     void setToolMode(ToolMode mode);
     void setupToolbars();
     PreviewSelection currentSelection() const;
@@ -98,26 +115,41 @@ private:
     QString selectedZoneId_{};
     QPointF draftStartWorld_{};
     QPointF draftCurrentWorld_{};
+    std::vector<QPointF> roomPolygonDraftPoints_{};
     LayoutCanvasCamera camera_{};
     bool drafting_{false};
     ToolMode toolMode_{ToolMode::Select};
+    RoomDrawMode roomDrawMode_{RoomDrawMode::Rectangle};
     bool roomAutoWallsEnabled_{true};
     bool doorCreatesLeaf_{true};
+    bool verticalLinkCreatesRamp_{false};
+    safecrowd::domain::StairEntryDirection stairEntryDirection_{safecrowd::domain::StairEntryDirection::West};
+    safecrowd::domain::StairEntryDirection destinationStairEntryDirection_{safecrowd::domain::StairEntryDirection::East};
     double doorWidth_{1.2};
+    QString currentFloorId_{};
     QFrame* toolbarCorner_{nullptr};
     QFrame* topToolbar_{nullptr};
     QFrame* propertyPanel_{nullptr};
     QFrame* sideToolbar_{nullptr};
     QCheckBox* roomAutoWallsCheckBox_{nullptr};
+    QComboBox* roomDrawModeComboBox_{nullptr};
     QDoubleSpinBox* doorWidthSpinBox_{nullptr};
     QCheckBox* doorLeafCheckBox_{nullptr};
+    QComboBox* verticalTargetFloorComboBox_{nullptr};
+    QLabel* stairEntryLabel_{nullptr};
+    QComboBox* stairEntryComboBox_{nullptr};
+    QLabel* destinationStairEntryLabel_{nullptr};
+    QComboBox* destinationStairEntryComboBox_{nullptr};
+    QCheckBox* rampLinkCheckBox_{nullptr};
+    QComboBox* floorComboBox_{nullptr};
     QToolButton* selectToolButton_{nullptr};
     QToolButton* roomToolButton_{nullptr};
-    QToolButton* corridorToolButton_{nullptr};
     QToolButton* exitToolButton_{nullptr};
     QToolButton* wallToolButton_{nullptr};
     QToolButton* doorToolButton_{nullptr};
+    QToolButton* stairToolButton_{nullptr};
     QToolButton* deleteToolButton_{nullptr};
+    QToolButton* addFloorButton_{nullptr};
     QToolButton* resetViewButton_{nullptr};
     std::function<void(const PreviewSelection&)> selectionChangedHandler_{};
     std::function<void(const safecrowd::domain::FacilityLayout2D&)> layoutEditedHandler_{};
