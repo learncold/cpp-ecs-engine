@@ -249,18 +249,18 @@ QPushButton* createBottleneckRowButton(
     QWidget* parent) {
     const auto label = QString::fromStdString(bottleneck.label);
     const auto id = QString::fromStdString(bottleneck.connectionId);
-    const auto idLine = (!id.isEmpty() && id != label) ? QString("\nID: %1").arg(id) : QString{};
     auto* button = new QPushButton(
-        QString("%1. %2%3\n%4 nearby, %5 stalled")
+        QString("Bottleneck %1\n%2 nearby, %3 stalled")
             .arg(static_cast<int>(index + 1))
-            .arg(label, idLine)
             .arg(static_cast<int>(bottleneck.nearbyAgentCount))
             .arg(static_cast<int>(bottleneck.stalledAgentCount)),
         parent);
     button->setFont(ui::font(ui::FontRole::Body));
     button->setCursor(Qt::PointingHandCursor);
     button->setStyleSheet(ui::ghostRowStyleSheet());
-    button->setToolTip(QString("%1\nClick to focus this bottleneck on the canvas.")
+    button->setToolTip(QString("%1%2\n\n%3\nClick to focus this bottleneck on the canvas.")
+        .arg(label)
+        .arg((!id.isEmpty() && id != label) ? QString("\nID: %1").arg(id) : QString{})
         .arg(safecrowd::domain::scenarioBottleneckDefinition()));
     return button;
 }
