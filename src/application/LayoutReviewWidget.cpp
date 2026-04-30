@@ -491,10 +491,16 @@ void LayoutReviewWidget::handlePreviewSelectionChanged(const PreviewSelection& s
 }
 
 void LayoutReviewWidget::refreshApprovalState() {
-    const auto hasBlocking = safecrowd::domain::hasBlockingImportIssue(importResult_.issues);
+    const auto blockingCount = std::count_if(importResult_.issues.begin(), importResult_.issues.end(), [](const auto& issue) {
+        return issue.blocksSimulation();
+    });
+    const auto hasBlocking = blockingCount > 0;
 
     if (approveButton_ != nullptr) {
         approveButton_->setEnabled(!hasBlocking);
+        approveButton_->setToolTip(hasBlocking
+            ? QString("Resolve %1 blocking issue(s) before approval").arg(static_cast<int>(blockingCount))
+            : QString("Approve layout and continue to Scenario Authoring"));
     }
 
     if (approvalStatusLabel_ == nullptr) {
@@ -502,7 +508,7 @@ void LayoutReviewWidget::refreshApprovalState() {
     }
 
     if (hasBlocking) {
-        approvalStatusLabel_->setText("Resolve blocking issues first");
+        approvalStatusLabel_->setText(QString("Resolve %1 blocking issue(s) first").arg(static_cast<int>(blockingCount)));
         return;
     }
 
