@@ -24,6 +24,34 @@ constexpr double kBottleneckFocusZoom = 2.4;
 constexpr int kHotspotMinCoreAlpha = 72;
 constexpr int kHotspotMaxCoreAlpha = 190;
 
+bool intervalContains(const safecrowd::domain::ConnectionBlockIntervalDraft& interval, double timeSeconds) {
+    const auto start = std::max(0.0, interval.startSeconds);
+    const auto end = std::max(start, interval.endSeconds);
+    return timeSeconds + 1e-9 >= start && timeSeconds <= end + 1e-9;
+}
+
+bool connectionShouldBeBlocked(const safecrowd::domain::ConnectionBlockDraft& block, double timeSeconds) {
+    if (block.connectionId.empty()) {
+        return false;
+    }
+    if (block.intervals.empty()) {
+        return true;
+    }
+    for (const auto& interval : block.intervals) {
+        if (intervalContains(interval, timeSeconds)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+safecrowd::domain::Point2D connectionCenter(const safecrowd::domain::Connection2D& connection) {
+    return {
+        .x = (connection.centerSpan.start.x + connection.centerSpan.end.x) * 0.5,
+        .y = (connection.centerSpan.start.y + connection.centerSpan.end.y) * 0.5,
+    };
+}
+
 }  // namespace
 
 SimulationCanvasWidget::SimulationCanvasWidget(safecrowd::domain::FacilityLayout2D layout, QWidget* parent)
@@ -45,6 +73,11 @@ SimulationCanvasWidget::~SimulationCanvasWidget() {
 
 void SimulationCanvasWidget::setFrame(safecrowd::domain::SimulationFrame frame) {
     frame_ = std::move(frame);
+    update();
+}
+
+void SimulationCanvasWidget::setConnectionBlocks(std::vector<safecrowd::domain::ConnectionBlockDraft> blocks) {
+    connectionBlocks_ = std::move(blocks);
     update();
 }
 
@@ -160,6 +193,7 @@ void SimulationCanvasWidget::paintEvent(QPaintEvent* event) {
     painter.drawPixmap(0, 0, layoutCache_);
 
     const auto transform = currentTransform(*bounds);
+    drawConnectionBlockOverlay(painter, transform);
     drawHotspotOverlay(painter, transform);
     drawBottleneckOverlay(painter, transform);
     for (const auto& agent : frame_.agents) {
@@ -244,6 +278,38 @@ void SimulationCanvasWidget::focusWorldPoint(const safecrowd::domain::Point2D& p
     camera_.setPanOffset(viewport.center() - transform.map(point));
     layoutCacheValid_ = false;
     update();
+}
+
+void SimulationCanvasWidget::drawConnectionBlockOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const {
+    if (connectionBlocks_.empty()) {
+        return;
+    }
+
+    const auto elapsedSeconds = std::max(0.0, frame_.elapsedSeconds);
+
+    painter.save();
+    painter.setBrush(Qt::NoBrush);
+    painter.setPen(QPen(QColor("#c0392b"), 2.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+
+    for (const auto& block : connectionBlocks_) {
+        if (!connectionShouldBeBlocked(block, elapsedSeconds)) {
+            continue;
+        }
+
+        const auto it = std::find_if(layout_.connections.begin(), layout_.connections.end(), [&](const auto& connection) {
+            return connection.id == block.connectionId;
+        });
+        if (it == layout_.connections.end()) {
+            continue;
+        }
+
+        const auto center = transform.map(connectionCenter(*it));
+        const double r = 10.0;
+        painter.drawEllipse(center, r, r);
+        painter.drawLine(QPointF(center.x() - 6.5, center.y() + 6.5), QPointF(center.x() + 6.5, center.y() - 6.5));
+    }
+
+    painter.restore();
 }
 
 void SimulationCanvasWidget::drawHotspotOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const {

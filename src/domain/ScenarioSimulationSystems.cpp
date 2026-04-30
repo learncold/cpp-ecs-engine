@@ -2,7 +2,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 #include "engine/EngineWorld.h"
@@ -48,6 +51,109 @@ std::optional<double> percentileCompletionTime(
     std::sort(completionTimes.begin(), completionTimes.end());
     return completionTimes[targetCount - 1];
 }
+
+bool intervalContains(const ConnectionBlockIntervalDraft& interval, double timeSeconds) {
+    const auto start = std::max(0.0, interval.startSeconds);
+    const auto end = std::max(start, interval.endSeconds);
+    return timeSeconds + 1e-9 >= start && timeSeconds <= end + 1e-9;
+}
+
+bool connectionShouldBeBlocked(const ConnectionBlockDraft& block, double timeSeconds) {
+    if (block.intervals.empty()) {
+        return true;
+    }
+
+    for (const auto& interval : block.intervals) {
+        if (intervalContains(interval, timeSeconds)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+const Connection2D* findConnectionById(const FacilityLayout2D& layout, const std::string& connectionId) {
+    const auto it = std::find_if(layout.connections.begin(), layout.connections.end(), [&](const auto& connection) {
+        return connection.id == connectionId;
+    });
+    return it == layout.connections.end() ? nullptr : &(*it);
+}
+
+Connection2D* findConnectionById(FacilityLayout2D& layout, const std::string& connectionId) {
+    const auto it = std::find_if(layout.connections.begin(), layout.connections.end(), [&](const auto& connection) {
+        return connection.id == connectionId;
+    });
+    return it == layout.connections.end() ? nullptr : &(*it);
+}
+
+class ScenarioControlSystem final : public engine::EngineSystem {
+public:
+    ScenarioControlSystem(FacilityLayout2D baseLayout, std::vector<ConnectionBlockDraft> blocks)
+        : baseLayout_(std::move(baseLayout)),
+          blocks_(std::move(blocks)) {
+    }
+
+    void configure(engine::EngineWorld& world) override {
+        world.resources().set(ScenarioLayoutResource{.layout = baseLayout_});
+        world.resources().set(ScenarioLayoutRevisionResource{.revision = revision_});
+    }
+
+    void update(engine::EngineWorld& world, const engine::EngineStepContext& step) override {
+        (void)step;
+
+        auto& resources = world.resources();
+        if (!resources.contains<ScenarioLayoutResource>()) {
+            resources.set(ScenarioLayoutResource{.layout = baseLayout_});
+        }
+
+        double elapsedSeconds = 0.0;
+        if (resources.contains<ScenarioSimulationClockResource>()) {
+            elapsedSeconds = std::max(0.0, resources.get<ScenarioSimulationClockResource>().elapsedSeconds);
+        }
+
+        auto& layout = resources.get<ScenarioLayoutResource>().layout;
+        layout = baseLayout_;
+
+        std::unordered_set<std::string> blockedConnectionIds;
+        blockedConnectionIds.reserve(blocks_.size());
+        for (const auto& block : blocks_) {
+            if (block.connectionId.empty()) {
+                continue;
+            }
+
+            auto* connection = findConnectionById(layout, block.connectionId);
+            if (connection == nullptr) {
+                continue;
+            }
+
+            if (connectionShouldBeBlocked(block, elapsedSeconds)) {
+                connection->directionality = TravelDirection::Closed;
+                blockedConnectionIds.insert(block.connectionId);
+                layout.barriers.push_back(Barrier2D{
+                    .id = "control-block-" + block.connectionId,
+                    .geometry = Polyline2D{.vertices = {connection->centerSpan.start, connection->centerSpan.end}, .closed = false},
+                    .blocksMovement = true,
+                });
+            } else {
+                // Restored by layout reset from baseLayout_.
+            }
+        }
+
+        if (blockedConnectionIds != previousBlockedConnectionIds_) {
+            ++revision_;
+            previousBlockedConnectionIds_ = std::move(blockedConnectionIds);
+            resources.set(ScenarioLayoutRevisionResource{.revision = revision_});
+        } else if (!resources.contains<ScenarioLayoutRevisionResource>()
+            || resources.get<ScenarioLayoutRevisionResource>().revision != revision_) {
+            resources.set(ScenarioLayoutRevisionResource{.revision = revision_});
+        }
+    }
+
+private:
+    FacilityLayout2D baseLayout_{};
+    std::vector<ConnectionBlockDraft> blocks_{};
+    std::unordered_set<std::string> previousBlockedConnectionIds_{};
+    std::uint64_t revision_{0};
+};
 
 }  // namespace
 
@@ -268,6 +374,12 @@ void ScenarioResultArtifactsSystem::update(engine::EngineWorld& world, const eng
     while (result.nextSampleTimeSeconds <= elapsedSeconds + 1e-9) {
         result.nextSampleTimeSeconds += result.sampleIntervalSeconds;
     }
+}
+
+std::unique_ptr<engine::EngineSystem> makeScenarioControlSystem(
+    FacilityLayout2D baseLayout,
+    std::vector<ConnectionBlockDraft> blocks) {
+    return std::make_unique<ScenarioControlSystem>(std::move(baseLayout), std::move(blocks));
 }
 
 }  // namespace safecrowd::domain

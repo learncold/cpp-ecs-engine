@@ -1,9 +1,11 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <unordered_map>
 #include <vector>
 
+#include "domain/ScenarioAuthoring.h"
 #include "domain/AgentComponents.h"
 #include "domain/FacilityLayout2D.h"
 #include "domain/ScenarioResultArtifacts.h"
@@ -26,6 +28,14 @@ struct ScenarioSimulationFrameResource {
 
 struct ScenarioSimulationStepResource {
     double deltaSeconds{0.0};
+};
+
+struct ScenarioLayoutResource {
+    FacilityLayout2D layout{};
+};
+
+struct ScenarioLayoutRevisionResource {
+    std::uint64_t revision{0};
 };
 
 struct ScenarioAgentSpatialIndexResource {
@@ -59,6 +69,9 @@ std::vector<engine::Entity> scenarioNearbyAgents(
     const Point2D& point,
     double radius);
 
+std::unique_ptr<engine::EngineSystem> makeScenarioControlSystem(
+    FacilityLayout2D baseLayout,
+    std::vector<ConnectionBlockDraft> blocks);
 std::unique_ptr<engine::EngineSystem> makeScenarioSimulationMotionSystem(FacilityLayout2D layout);
 std::unique_ptr<engine::EngineSystem> makeScenarioRiskMetricsSystem(FacilityLayout2D layout);
 

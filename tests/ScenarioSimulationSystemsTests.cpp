@@ -231,6 +231,53 @@ SC_TEST(ScenarioSimulationMotionSystem_AdvancesAgentsFromStepResource) {
     SC_EXPECT_NEAR(frame.agents.front().velocity.x, 1.0, 1e-9);
 }
 
+SC_TEST(ScenarioControlSystem_BlocksConnectionsUsingScenarioClock) {
+    auto layout = straightExitLayout();
+    safecrowd::domain::ConnectionBlockDraft block;
+    block.id = "block-1";
+    block.connectionId = "room-exit";
+    block.intervals = {
+        {.startSeconds = 0.0, .endSeconds = 2.0},
+    };
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 21,
+    });
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioControlSystem(layout, {block}),
+        {.phase = safecrowd::engine::UpdatePhase::PreSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+
+    runtime.world().resources().set(safecrowd::domain::ScenarioSimulationClockResource{
+        .elapsedSeconds = 1.0,
+        .timeLimitSeconds = 10.0,
+        .complete = false,
+    });
+    runtime.stepFrame(0.0);
+
+    {
+        const auto& scenarioLayout = runtime.world().resources().get<safecrowd::domain::ScenarioLayoutResource>().layout;
+        SC_EXPECT_EQ(scenarioLayout.connections.size(), std::size_t{1});
+        SC_EXPECT_EQ(scenarioLayout.connections.front().directionality, safecrowd::domain::TravelDirection::Closed);
+        SC_EXPECT_EQ(scenarioLayout.barriers.size(), std::size_t{1});
+    }
+
+    auto& clock = runtime.world().resources().get<safecrowd::domain::ScenarioSimulationClockResource>();
+    clock.elapsedSeconds = 3.0;
+    runtime.stepFrame(0.0);
+
+    {
+        const auto& scenarioLayout = runtime.world().resources().get<safecrowd::domain::ScenarioLayoutResource>().layout;
+        SC_EXPECT_EQ(scenarioLayout.connections.size(), std::size_t{1});
+        SC_EXPECT_EQ(scenarioLayout.connections.front().directionality, safecrowd::domain::TravelDirection::Bidirectional);
+        SC_EXPECT_EQ(scenarioLayout.barriers.size(), std::size_t{0});
+    }
+}
+
 SC_TEST(ScenarioRiskMetricsSystem_PublishesStalledHotspotAndBottleneckMetrics) {
     std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
     for (int index = 0; index < 5; ++index) {

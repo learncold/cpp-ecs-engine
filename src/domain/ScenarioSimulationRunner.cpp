@@ -122,6 +122,10 @@ void ScenarioSimulationRunner::initializeRuntime() {
     });
     runtime_->addSystem(std::make_unique<ScenarioAgentSpawnSystem>(createAgentSeeds(), timeLimitSeconds_));
     runtime_->addSystem(
+        makeScenarioControlSystem(layout_, scenario_.control.connectionBlocks),
+        {.phase = engine::UpdatePhase::PreSimulation,
+         .triggerPolicy = engine::TriggerPolicy::EveryFrame});
+    runtime_->addSystem(
         std::make_unique<ScenarioSpatialIndexSystem>(1.0),
         {.phase = engine::UpdatePhase::PreSimulation,
          .triggerPolicy = engine::TriggerPolicy::EveryFrame});

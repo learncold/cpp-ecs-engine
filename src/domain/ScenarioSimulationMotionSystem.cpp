@@ -22,17 +22,23 @@ public:
         (void)step;
 
         auto& resources = world.resources();
+        activeLayout_ = resources.contains<ScenarioLayoutResource>()
+            ? &resources.get<ScenarioLayoutResource>().layout
+            : nullptr;
         if (!resources.contains<ScenarioSimulationStepResource>()) {
+            activeLayout_ = nullptr;
             return;
         }
 
         auto& clock = resources.get<ScenarioSimulationClockResource>();
         if (clock.complete) {
+            activeLayout_ = nullptr;
             return;
         }
 
         const auto clampedDelta = std::max(0.0, resources.get<ScenarioSimulationStepResource>().deltaSeconds);
         if (clampedDelta <= 0.0) {
+            activeLayout_ = nullptr;
             return;
         }
 
@@ -58,7 +64,7 @@ public:
                 continue;
             }
 
-            const auto* destinationZone = findZone(layout_, route.destinationZoneId);
+            const auto* destinationZone = findZone(layout(), route.destinationZoneId);
             if (destinationZone != nullptr && pointInRing(destinationZone->area.outline, position.value)) {
                 status.evacuated = true;
                 status.completionTimeSeconds = clock.elapsedSeconds;
@@ -89,7 +95,7 @@ public:
                 : nearbyAgents(query, localNeighborIndex, position.value, neighborRadius);
             const auto avoidanceVelocity =
                 forwardPreservingAgentAvoidanceVelocity(query, entity, neighborCandidates, desiredVelocity, speedScale);
-            const auto barrierVelocity = barrierSeparationVelocity(layout_, position, agent);
+            const auto barrierVelocity = barrierSeparationVelocity(layout(), position, agent);
             auto finalVelocity = (desiredVelocity * speedScale) + avoidanceVelocity + barrierVelocity;
             if (dot(finalVelocity, routeDirection) < 0.0) {
                 const auto lateral = perpendicularLeft(routeDirection);
@@ -116,7 +122,7 @@ public:
             const auto stepVelocity =
                 clampedToLength(plan.velocity, std::min(static_cast<double>(agent.maxSpeed), remainingDistance / clampedDelta));
             const auto previousPosition = position.value;
-            const auto nextPosition = constrainedMove(layout_, previousPosition, previousPosition + (stepVelocity * clampedDelta));
+            const auto nextPosition = constrainedMove(layout(), previousPosition, previousPosition + (stepVelocity * clampedDelta));
             position.value = nextPosition;
             velocity.value = (nextPosition - previousPosition) * (1.0 / clampedDelta);
         }
@@ -126,9 +132,14 @@ public:
         advanceRoutesForWaypointProgress(query, clampedDelta, entities);
         advanceClock(query, clock, entities, clampedDelta);
         resources.set(ScenarioSimulationStepResource{});
+        activeLayout_ = nullptr;
     }
 
 private:
+    const FacilityLayout2D& layout() const {
+        return activeLayout_ == nullptr ? layout_ : *activeLayout_;
+    }
+
     void advanceRouteWaypoint(EvacuationRoute& route, const Point2D& reachedPoint) const {
         if (route.nextWaypointIndex >= route.waypoints.size()) {
             return;
@@ -155,14 +166,14 @@ private:
                 continue;
             }
 
-            const auto& position = query.get<Position>(entity);
-            const auto& agent = query.get<Agent>(entity);
-            auto& route = query.get<EvacuationRoute>(entity);
-            while (route.nextWaypointIndex < route.waypoints.size()) {
-                if (routePassageCrossed(layout_, route, position.value, agent.radius)) {
-                    advanceRouteWaypoint(route, position.value);
-                    continue;
-                }
+                const auto& position = query.get<Position>(entity);
+                const auto& agent = query.get<Agent>(entity);
+                auto& route = query.get<EvacuationRoute>(entity);
+                while (route.nextWaypointIndex < route.waypoints.size()) {
+                    if (routePassageCrossed(layout(), route, position.value, agent.radius)) {
+                        advanceRouteWaypoint(route, position.value);
+                        continue;
+                    }
 
                 const auto target = routeWaypointTarget(route, position.value);
                 const auto segment = target - route.currentSegmentStart;
@@ -254,11 +265,11 @@ private:
 
             const auto target = routeWaypointTarget(route, position.value);
             const auto clearance = static_cast<double>(agent.radius) + kPathClearance;
-            if (lineOfSightClear(layout_, position.value, target, clearance)) {
+            if (lineOfSightClear(layout(), position.value, target, clearance)) {
                 continue;
             }
 
-            const auto replacement = buildPath(layout_, position.value, target, clearance);
+            const auto replacement = buildPath(layout(), position.value, target, clearance);
             if (replacement.size() <= 1) {
                 continue;
             }
@@ -356,8 +367,8 @@ private:
 
                     const auto direction = normalizedOr(delta, deterministicFallbackDirection(first));
                     const auto push = std::min(0.08, (minimumDistance - distance) * 0.35);
-                    firstPosition.value = constrainedMove(layout_, firstPosition.value, firstPosition.value + (direction * push));
-                    secondPosition.value = constrainedMove(layout_, secondPosition.value, secondPosition.value - (direction * push));
+                    firstPosition.value = constrainedMove(layout(), firstPosition.value, firstPosition.value + (direction * push));
+                    secondPosition.value = constrainedMove(layout(), secondPosition.value, secondPosition.value - (direction * push));
                 }
             }
         }
@@ -387,7 +398,7 @@ private:
     }
 
     std::string zoneAt(const Point2D& point) const {
-        for (const auto& zone : layout_.zones) {
+        for (const auto& zone : layout().zones) {
             if (pointInRing(zone.area.outline, point)) {
                 return zone.id;
             }
@@ -396,6 +407,7 @@ private:
     }
 
     FacilityLayout2D layout_{};
+    const FacilityLayout2D* activeLayout_{nullptr};
 };
 
 

@@ -150,6 +150,9 @@ public:
 
         auto& query = world.query();
         auto& resources = world.resources();
+        activeLayout_ = resources.contains<ScenarioLayoutResource>()
+            ? &resources.get<ScenarioLayoutResource>().layout
+            : &layout_;
         ScenarioRiskSnapshot snapshot;
         const auto entities = query.view<Position, Agent, Velocity, EvacuationRoute, EvacuationStatus>();
 
@@ -206,9 +209,14 @@ public:
             .snapshot = std::move(snapshot),
             .peakSnapshot = std::move(peakSnapshot),
         });
+        activeLayout_ = nullptr;
     }
 
 private:
+    const FacilityLayout2D& layout() const {
+        return activeLayout_ == nullptr ? layout_ : *activeLayout_;
+    }
+
     void mergePeakSnapshot(ScenarioRiskSnapshot& peak, const ScenarioRiskSnapshot& current) const {
         if (riskSeverity(current.completionRisk) > riskSeverity(peak.completionRisk)) {
             peak.completionRisk = current.completionRisk;
@@ -248,7 +256,7 @@ private:
     }
 
     std::string zoneDisplayName(const std::string& zoneId) const {
-        const auto* zone = findZone(layout_, zoneId);
+        const auto* zone = findZone(layout(), zoneId);
         if (zone == nullptr) {
             return zoneId;
         }
@@ -268,7 +276,7 @@ private:
         ScenarioRiskSnapshot& snapshot,
         engine::WorldQuery& query,
         const std::vector<engine::Entity>& entities) const {
-        for (const auto& connection : layout_.connections) {
+        for (const auto& connection : layout().connections) {
             if (connection.directionality == TravelDirection::Closed) {
                 continue;
             }
@@ -323,6 +331,7 @@ private:
     }
 
     FacilityLayout2D layout_{};
+    const FacilityLayout2D* activeLayout_{nullptr};
 };
 
 }  // namespace

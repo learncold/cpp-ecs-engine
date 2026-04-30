@@ -10,6 +10,7 @@
 
 #include "application/LayoutCanvasRendering.h"
 #include "domain/FacilityLayout2D.h"
+#include "domain/ScenarioAuthoring.h"
 
 class QFrame;
 class QEvent;
@@ -48,7 +49,10 @@ public:
 
     void setPlacements(std::vector<ScenarioCrowdPlacement> placements);
     void setPlacementsChangedHandler(std::function<void(const std::vector<ScenarioCrowdPlacement>&)> handler);
+    void setConnectionBlocks(std::vector<safecrowd::domain::ConnectionBlockDraft> blocks);
+    void setConnectionBlocksChangedHandler(std::function<void(const std::vector<safecrowd::domain::ConnectionBlockDraft>&)> handler);
     void focusLayoutElement(const QString& elementId);
+    void activateLayoutElement(const QString& elementId);
     void focusPlacement(const QString& placementId);
 
 protected:
@@ -68,6 +72,7 @@ private:
         Select,
         IndividualPlacement,
         GroupPlacement,
+        BlockDoor,
     };
 
     std::optional<LayoutCanvasBounds> collectBounds() const;
@@ -75,21 +80,30 @@ private:
     QRectF previewViewport() const;
     safecrowd::domain::Point2D unmapPoint(const QPointF& point) const;
     QString zoneAt(const safecrowd::domain::Point2D& point) const;
+    const safecrowd::domain::Connection2D* connectionAt(const safecrowd::domain::Point2D& point, double toleranceWorldUnits) const;
+    safecrowd::domain::Point2D connectionCenter(const safecrowd::domain::Connection2D& connection) const;
     bool placementAreaBlocked(const std::vector<safecrowd::domain::Point2D>& area, int occupantCount) const;
     bool placementPointBlocked(const safecrowd::domain::Point2D& point) const;
     safecrowd::domain::Point2D defaultVelocityFrom(const safecrowd::domain::Point2D& point) const;
     QString nextPlacementId(ScenarioCrowdPlacementKind kind) const;
+    QString nextConnectionBlockId() const;
     void addGroupPlacement(const QPointF& start, const QPointF& end);
     void addIndividualPlacement(const QPointF& position);
+    void addConnectionBlock(const QPointF& position);
+    void addConnectionBlockForConnection(const safecrowd::domain::Connection2D& connection);
+    void openConnectionBlockScheduleEditor(const QString& blockId, const QPoint& screenPosition);
     void drawFocusedLayoutElement(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawFocusedPlacement(QPainter& painter, const LayoutCanvasTransform& transform) const;
+    void drawConnectionBlocks(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void emitPlacementsChanged();
+    void emitConnectionBlocksChanged();
     void repositionToolbars();
     void setToolMode(ToolMode mode);
     void setupToolbars();
 
     safecrowd::domain::FacilityLayout2D layout_{};
     std::vector<ScenarioCrowdPlacement> placements_{};
+    std::vector<safecrowd::domain::ConnectionBlockDraft> connectionBlocks_{};
     QString focusedLayoutElementId_{};
     QString focusedPlacementId_{};
     ToolMode toolMode_{ToolMode::Select};
@@ -102,9 +116,11 @@ private:
     QToolButton* selectToolButton_{nullptr};
     QToolButton* individualToolButton_{nullptr};
     QToolButton* groupToolButton_{nullptr};
+    QToolButton* blockDoorToolButton_{nullptr};
     QLabel* groupCountLabel_{nullptr};
     QSpinBox* groupCountSpinBox_{nullptr};
     std::function<void(const std::vector<ScenarioCrowdPlacement>&)> placementsChangedHandler_{};
+    std::function<void(const std::vector<safecrowd::domain::ConnectionBlockDraft>&)> connectionBlocksChangedHandler_{};
 };
 
 }  // namespace safecrowd::application
