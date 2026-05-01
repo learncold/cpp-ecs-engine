@@ -82,14 +82,11 @@ private:
     void refreshRightPanel();
     void refreshScenarioSwitcher();
     void runFirstStagedBaselineScenario();
-    void setRightPanelMode(RightPanelMode mode);
     void stageCurrentScenario();
     void updateCurrentScenarioPlacements(const std::vector<ScenarioCrowdPlacement>& placements);
     void showEmptyCanvas();
     void showScenarioNameDialog(int sourceIndex);
-    QWidget* createRunPanel();
     QWidget* createScenarioPanel();
-    QWidget* createTopBarTogglePanel();
     ScenarioState* currentScenario();
     const ScenarioState* currentScenario() const;
     const ScenarioState* firstStagedBaselineScenario() const;
@@ -105,10 +102,10 @@ private:
     RightPanelMode rightPanelMode_{RightPanelMode::Scenario};
     QSet<QString> layoutExpandedNodeIds_{};
     QString selectedLayoutElementId_{};
+    QSet<QString> crowdExpandedNodeIds_{};
+    QString selectedCrowdElementId_{};
     WorkspaceShell* shell_{nullptr};
     ScenarioCanvasWidget* canvas_{nullptr};
-    QPushButton* scenarioPanelButton_{nullptr};
-    QPushButton* runPanelButton_{nullptr};
     QComboBox* scenarioSwitcher_{nullptr};
     QLabel* scenarioSummaryLabel_{nullptr};
     QLabel* changesLabel_{nullptr};

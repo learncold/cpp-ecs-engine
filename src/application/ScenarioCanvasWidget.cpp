@@ -36,6 +36,7 @@ constexpr double kOccupantMarkerRadius = 5.0;
 constexpr double kOccupantWorldRadius = 0.25;
 constexpr double kVelocityIndicatorSeconds = 0.75;
 constexpr double kGeometryEpsilon = 1e-9;
+constexpr double kSelectionDragThresholdPixels = 4.0;
 
 bool matchesFloor(const std::string& elementFloorId, const QString& floorId) {
     return floorId.isEmpty() || elementFloorId.empty() || QString::fromStdString(elementFloorId) == floorId;
@@ -154,6 +155,30 @@ safecrowd::domain::Point2D placementCenter(const std::vector<safecrowd::domain::
     }
     const auto count = static_cast<double>(area.size());
     return {.x = x / count, .y = y / count};
+}
+
+QRectF groupMarkerBounds(const ScenarioCrowdPlacement& placement, const LayoutCanvasTransform& transform) {
+    if (placement.area.size() < 4) {
+        return {};
+    }
+
+    QRectF bounds;
+    const int markerCount = std::min(20, std::max(1, placement.occupantCount));
+    const int columns = std::max(1, static_cast<int>(std::ceil(std::sqrt(markerCount))));
+    for (int index = 0; index < markerCount; ++index) {
+        const int row = index / columns;
+        const int column = index % columns;
+        const safecrowd::domain::Point2D worldPoint{
+            .x = placement.area[0].x + (column + 0.5) * (placement.area[2].x - placement.area[0].x) / columns,
+            .y = placement.area[0].y + (row + 0.5) * (placement.area[2].y - placement.area[0].y) / columns,
+        };
+        const auto point = transform.map(worldPoint);
+        const QRectF markerBounds(
+            point - QPointF(kOccupantMarkerRadius, kOccupantMarkerRadius),
+            QSizeF(kOccupantMarkerRadius * 2.0, kOccupantMarkerRadius * 2.0));
+        bounds = bounds.isNull() ? markerBounds : bounds.united(markerBounds);
+    }
+    return bounds.adjusted(-7.0, -7.0, 7.0, 7.0);
 }
 
 QIcon makeToolIcon(const QString& type, const QColor& color) {
@@ -420,11 +445,16 @@ void ScenarioCanvasWidget::setLayoutElementActivatedHandler(std::function<void(c
     layoutElementActivatedHandler_ = std::move(handler);
 }
 
+void ScenarioCanvasWidget::setCrowdSelectionChangedHandler(std::function<void(const QString&)> handler) {
+    crowdSelectionChangedHandler_ = std::move(handler);
+}
+
 void ScenarioCanvasWidget::focusLayoutElement(const QString& elementId) {
     if (elementId.startsWith("floor:")) {
         currentFloorId_ = elementId.mid(QString("floor:").size());
         focusedLayoutElementId_.clear();
         focusedPlacementId_.clear();
+        selectedPlacementIds_.clear();
         camera_.reset();
         update();
         return;
@@ -433,6 +463,7 @@ void ScenarioCanvasWidget::focusLayoutElement(const QString& elementId) {
     selectFloorForElement(elementId);
     focusedLayoutElementId_ = elementId;
     focusedPlacementId_.clear();
+    selectedPlacementIds_.clear();
     update();
 }
 
@@ -456,6 +487,7 @@ void ScenarioCanvasWidget::activateLayoutElement(const QString& elementId) {
 
 void ScenarioCanvasWidget::focusPlacement(const QString& placementId) {
     focusedPlacementId_ = placementId.section('/', 0, 0);
+    selectedPlacementIds_ = focusedPlacementId_.isEmpty() ? QStringList{} : QStringList{focusedPlacementId_};
     focusedLayoutElementId_.clear();
     const auto it = std::find_if(placements_.begin(), placements_.end(), [this](const auto& placement) {
         return placement.id == focusedPlacementId_;
@@ -505,6 +537,12 @@ void ScenarioCanvasWidget::mouseMoveEvent(QMouseEvent* event) {
 
     if (dragging_) {
         dragCurrent_ = event->position();
+        update();
+        event->accept();
+        return;
+    }
+    if (selectionDragging_) {
+        selectionDragCurrent_ = event->position();
         update();
         event->accept();
         return;
@@ -581,7 +619,10 @@ void ScenarioCanvasWidget::mousePressEvent(QMouseEvent* event) {
     }
 
     if (toolMode_ == ToolMode::Select) {
-        selectLayoutElementAt(event->position());
+        selectionDragging_ = true;
+        selectionDragStart_ = event->position();
+        selectionDragCurrent_ = selectionDragStart_;
+        update();
         event->accept();
         return;
     }
@@ -594,7 +635,34 @@ void ScenarioCanvasWidget::mouseReleaseEvent(QMouseEvent* event) {
         return;
     }
 
-    if (event->button() != Qt::LeftButton || !dragging_) {
+    if (event->button() != Qt::LeftButton) {
+        QWidget::mouseReleaseEvent(event);
+        return;
+    }
+
+    if (selectionDragging_) {
+        const auto start = selectionDragStart_;
+        const auto end = event->position();
+        selectionDragging_ = false;
+        selectionDragStart_ = {};
+        selectionDragCurrent_ = {};
+
+        const auto bounds = collectBounds();
+        if (bounds.has_value()) {
+            const auto transform = currentTransform(*bounds);
+            const auto dragDistance = QLineF(start, end).length();
+            if (dragDistance <= kSelectionDragThresholdPixels) {
+                selectSingleAt(end, transform);
+            } else {
+                selectPlacementsInRect(QRectF(start, end).normalized(), transform);
+            }
+        }
+        update();
+        event->accept();
+        return;
+    }
+
+    if (!dragging_) {
         QWidget::mouseReleaseEvent(event);
         return;
     }
@@ -685,10 +753,12 @@ void ScenarioCanvasWidget::paintEvent(QPaintEvent* event) {
     drawFocusedPlacement(painter, transform);
     drawConnectionBlocks(painter, transform);
 
-    if (dragging_) {
+    if (dragging_ || selectionDragging_) {
+        const auto start = dragging_ ? dragStart_ : selectionDragStart_;
+        const auto current = dragging_ ? dragCurrent_ : selectionDragCurrent_;
         painter.setPen(QPen(QColor("#1f5fae"), 1.5, Qt::DashLine));
         painter.setBrush(QColor(31, 95, 174, 36));
-        painter.drawRect(QRectF(dragStart_, dragCurrent_).normalized());
+        painter.drawRect(QRectF(start, current).normalized());
     }
 }
 
@@ -761,35 +831,32 @@ void ScenarioCanvasWidget::drawFocusedLayoutElement(QPainter& painter, const Lay
 }
 
 void ScenarioCanvasWidget::drawFocusedPlacement(QPainter& painter, const LayoutCanvasTransform& transform) const {
-    if (focusedPlacementId_.isEmpty()) {
-        return;
-    }
-
-    const auto it = std::find_if(placements_.begin(), placements_.end(), [this](const auto& placement) {
-        return placement.id == focusedPlacementId_;
-    });
-    if (it == placements_.end() || it->area.empty()) {
-        return;
-    }
-    if (!currentFloorId_.isEmpty() && !it->floorId.isEmpty() && it->floorId != currentFloorId_) {
+    if (focusedPlacementId_.isEmpty() && selectedPlacementIds_.empty()) {
         return;
     }
 
     painter.setPen(QPen(QColor("#f2a900"), 3.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
     painter.setBrush(QColor(242, 169, 0, 42));
 
-    if (it->kind == ScenarioCrowdPlacementKind::Individual || it->area.size() < 4) {
-        painter.drawEllipse(transform.map(it->area.front()), kOccupantMarkerRadius + 7.0, kOccupantMarkerRadius + 7.0);
-        return;
-    }
+    for (const auto& placement : placements_) {
+        const auto selected = selectedPlacementIds_.contains(placement.id) || placement.id == focusedPlacementId_;
+        if (!selected || placement.area.empty()) {
+            continue;
+        }
+        if (!currentFloorId_.isEmpty() && !placement.floorId.isEmpty() && placement.floorId != currentFloorId_) {
+            continue;
+        }
 
-    QPainterPath path;
-    path.moveTo(transform.map(it->area.front()));
-    for (std::size_t index = 1; index < it->area.size(); ++index) {
-        path.lineTo(transform.map(it->area[index]));
+        if (placement.kind == ScenarioCrowdPlacementKind::Individual || placement.area.size() < 4) {
+            painter.drawEllipse(transform.map(placement.area.front()), kOccupantMarkerRadius + 7.0, kOccupantMarkerRadius + 7.0);
+            continue;
+        }
+
+        const auto markerBounds = groupMarkerBounds(placement, transform);
+        if (!markerBounds.isNull()) {
+            painter.drawRoundedRect(markerBounds, 8.0, 8.0);
+        }
     }
-    path.closeSubpath();
-    painter.drawPath(path);
 }
 
 void ScenarioCanvasWidget::drawConnectionBlocks(QPainter& painter, const LayoutCanvasTransform& transform) const {
@@ -940,6 +1007,44 @@ safecrowd::domain::Point2D ScenarioCanvasWidget::connectionCenter(const safecrow
         .x = (connection.centerSpan.start.x + connection.centerSpan.end.x) * 0.5,
         .y = (connection.centerSpan.start.y + connection.centerSpan.end.y) * 0.5,
     };
+}
+
+QString ScenarioCanvasWidget::placementAt(const QPointF& position, const LayoutCanvasTransform& transform) const {
+    constexpr double kPickRadius = kOccupantMarkerRadius + 6.0;
+    for (auto it = placements_.rbegin(); it != placements_.rend(); ++it) {
+        const auto& placement = *it;
+        if (!currentFloorId_.isEmpty() && !placement.floorId.isEmpty() && placement.floorId != currentFloorId_) {
+            continue;
+        }
+        if (placement.area.empty()) {
+            continue;
+        }
+        if (placement.kind == ScenarioCrowdPlacementKind::Individual || placement.area.size() < 4) {
+            if (QLineF(position, transform.map(placement.area.front())).length() <= kPickRadius) {
+                return placement.id;
+            }
+            continue;
+        }
+
+        const int markerCount = std::min(20, std::max(1, placement.occupantCount));
+        const int columns = std::max(1, static_cast<int>(std::ceil(std::sqrt(markerCount))));
+        for (int index = 0; index < markerCount; ++index) {
+            const int row = index / columns;
+            const int column = index % columns;
+            const safecrowd::domain::Point2D worldPoint{
+                .x = placement.area[0].x + (column + 0.5) * (placement.area[2].x - placement.area[0].x) / columns,
+                .y = placement.area[0].y + (row + 0.5) * (placement.area[2].y - placement.area[0].y) / columns,
+            };
+            if (QLineF(position, transform.map(worldPoint)).length() <= kPickRadius) {
+                return QString("%1/occupant-%2").arg(placement.id).arg(index + 1);
+            }
+        }
+
+        if (groupMarkerBounds(placement, transform).contains(position)) {
+            return placement.id;
+        }
+    }
+    return {};
 }
 
 bool ScenarioCanvasWidget::placementPointBlocked(const safecrowd::domain::Point2D& point) const {
@@ -1107,6 +1212,12 @@ void ScenarioCanvasWidget::addGroupPlacement(const QPointF& start, const QPointF
         .occupantCount = count,
         .velocity = defaultVelocityFrom(placementCenter(area)),
     });
+    focusedPlacementId_ = id;
+    selectedPlacementIds_ = QStringList{id};
+    focusedLayoutElementId_.clear();
+    if (crowdSelectionChangedHandler_) {
+        crowdSelectionChangedHandler_(id);
+    }
     emitPlacementsChanged();
     update();
 }
@@ -1129,6 +1240,12 @@ void ScenarioCanvasWidget::addIndividualPlacement(const QPointF& position) {
         .occupantCount = 1,
         .velocity = defaultVelocityFrom(point),
     });
+    focusedPlacementId_ = id;
+    selectedPlacementIds_ = QStringList{id};
+    focusedLayoutElementId_.clear();
+    if (crowdSelectionChangedHandler_) {
+        crowdSelectionChangedHandler_(id);
+    }
     emitPlacementsChanged();
     update();
 }
@@ -1190,6 +1307,66 @@ void ScenarioCanvasWidget::addConnectionBlockForConnection(const safecrowd::doma
     update();
 }
 
+void ScenarioCanvasWidget::selectSingleAt(const QPointF& position, const LayoutCanvasTransform& transform) {
+    const auto crowdElementId = placementAt(position, transform);
+    if (!crowdElementId.isEmpty()) {
+        const auto placementId = crowdElementId.section('/', 0, 0);
+        focusedPlacementId_ = placementId;
+        selectedPlacementIds_ = QStringList{placementId};
+        focusedLayoutElementId_.clear();
+        if (layoutElementActivatedHandler_) {
+            layoutElementActivatedHandler_({});
+        }
+        if (crowdSelectionChangedHandler_) {
+            crowdSelectionChangedHandler_(crowdElementId);
+        }
+        return;
+    }
+
+    selectedPlacementIds_.clear();
+    focusedPlacementId_.clear();
+    selectLayoutElementAt(position);
+}
+
+void ScenarioCanvasWidget::selectPlacementsInRect(const QRectF& screenRect, const LayoutCanvasTransform& transform) {
+    selectedPlacementIds_.clear();
+    focusedPlacementId_.clear();
+    focusedLayoutElementId_.clear();
+
+    for (const auto& placement : placements_) {
+        if (!currentFloorId_.isEmpty() && !placement.floorId.isEmpty() && placement.floorId != currentFloorId_) {
+            continue;
+        }
+        if (placement.area.empty()) {
+            continue;
+        }
+
+        bool selected = false;
+        if (placement.kind == ScenarioCrowdPlacementKind::Individual || placement.area.size() < 4) {
+            const QRectF markerBounds(
+                transform.map(placement.area.front()) - QPointF(kOccupantMarkerRadius, kOccupantMarkerRadius),
+                QSizeF(kOccupantMarkerRadius * 2.0, kOccupantMarkerRadius * 2.0));
+            selected = screenRect.intersects(markerBounds);
+        } else {
+            selected = screenRect.intersects(groupMarkerBounds(placement, transform));
+        }
+
+        if (selected) {
+            selectedPlacementIds_.push_back(placement.id);
+        }
+    }
+
+    if (!selectedPlacementIds_.empty()) {
+        focusedPlacementId_ = selectedPlacementIds_.front();
+    }
+    if (layoutElementActivatedHandler_) {
+        layoutElementActivatedHandler_({});
+    }
+    if (crowdSelectionChangedHandler_) {
+        crowdSelectionChangedHandler_(focusedPlacementId_);
+    }
+}
+
 void ScenarioCanvasWidget::selectLayoutElementAt(const QPointF& position) {
     const auto point = unmapPoint(position);
     constexpr double kPickRadiusPixels = 14.0;
@@ -1209,8 +1386,12 @@ void ScenarioCanvasWidget::selectLayoutElementAt(const QPointF& position) {
 
     focusedLayoutElementId_ = selectedId;
     focusedPlacementId_.clear();
+    selectedPlacementIds_.clear();
     if (layoutElementActivatedHandler_) {
         layoutElementActivatedHandler_(selectedId);
+    }
+    if (crowdSelectionChangedHandler_) {
+        crowdSelectionChangedHandler_({});
     }
     update();
 }

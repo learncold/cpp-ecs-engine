@@ -316,6 +316,9 @@ NavigationTreeWidget::NavigationTreeWidget(
         }
         tree->setCurrentItem(selectedItem);
         selectedItem->setSelected(true);
+        if (expandedStateChangedHandler) {
+            expandedStateChangedHandler(collectExpandedIds(tree));
+        }
     }
 
     if (activateItemHandler) {
