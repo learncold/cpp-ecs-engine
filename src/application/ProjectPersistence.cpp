@@ -805,16 +805,25 @@ QJsonObject hotspotToJson(const safecrowd::domain::ScenarioCongestionHotspot& ho
     object["cellMin"] = pointArray(hotspot.cellMin);
     object["cellMax"] = pointArray(hotspot.cellMax);
     object["agentCount"] = static_cast<qint64>(hotspot.agentCount);
+    object["detectedAtSeconds"] = optionalDoubleToJson(hotspot.detectedAtSeconds);
+    if (hotspot.detectionFrame.has_value()) {
+        object["detectionFrame"] = simulationFrameToJson(*hotspot.detectionFrame);
+    }
     return object;
 }
 
 safecrowd::domain::ScenarioCongestionHotspot hotspotFromJson(const QJsonObject& object) {
-    return {
+    safecrowd::domain::ScenarioCongestionHotspot hotspot{
         .center = pointFromJson(object.value("center")),
         .cellMin = pointFromJson(object.value("cellMin")),
         .cellMax = pointFromJson(object.value("cellMax")),
         .agentCount = static_cast<std::size_t>(object.value("agentCount").toInteger()),
     };
+    hotspot.detectedAtSeconds = optionalDoubleFromJson(object.value("detectedAtSeconds"));
+    if (object.value("detectionFrame").isObject()) {
+        hotspot.detectionFrame = simulationFrameFromJson(object.value("detectionFrame").toObject());
+    }
+    return hotspot;
 }
 
 QJsonObject bottleneckToJson(const safecrowd::domain::ScenarioBottleneckMetric& bottleneck) {
@@ -825,11 +834,15 @@ QJsonObject bottleneckToJson(const safecrowd::domain::ScenarioBottleneckMetric& 
     object["nearbyAgentCount"] = static_cast<qint64>(bottleneck.nearbyAgentCount);
     object["stalledAgentCount"] = static_cast<qint64>(bottleneck.stalledAgentCount);
     object["averageSpeed"] = bottleneck.averageSpeed;
+    object["detectedAtSeconds"] = optionalDoubleToJson(bottleneck.detectedAtSeconds);
+    if (bottleneck.detectionFrame.has_value()) {
+        object["detectionFrame"] = simulationFrameToJson(*bottleneck.detectionFrame);
+    }
     return object;
 }
 
 safecrowd::domain::ScenarioBottleneckMetric bottleneckFromJson(const QJsonObject& object) {
-    return {
+    safecrowd::domain::ScenarioBottleneckMetric bottleneck{
         .connectionId = object.value("connectionId").toString().toStdString(),
         .label = object.value("label").toString().toStdString(),
         .passage = lineFromJson(object.value("passage").toObject()),
@@ -837,6 +850,11 @@ safecrowd::domain::ScenarioBottleneckMetric bottleneckFromJson(const QJsonObject
         .stalledAgentCount = static_cast<std::size_t>(object.value("stalledAgentCount").toInteger()),
         .averageSpeed = object.value("averageSpeed").toDouble(),
     };
+    bottleneck.detectedAtSeconds = optionalDoubleFromJson(object.value("detectedAtSeconds"));
+    if (object.value("detectionFrame").isObject()) {
+        bottleneck.detectionFrame = simulationFrameFromJson(object.value("detectionFrame").toObject());
+    }
+    return bottleneck;
 }
 
 QJsonObject riskSnapshotToJson(const safecrowd::domain::ScenarioRiskSnapshot& risk) {

@@ -1,10 +1,12 @@
 #pragma once
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "domain/Geometry2D.h"
+#include "domain/ScenarioSimulationFrame.h"
 
 namespace safecrowd::domain {
 
@@ -26,6 +28,8 @@ struct ScenarioCongestionHotspot {
     Point2D cellMin{};
     Point2D cellMax{};
     std::size_t agentCount{0};
+    std::optional<double> detectedAtSeconds{};
+    std::optional<SimulationFrame> detectionFrame{};
 };
 
 struct ScenarioBottleneckMetric {
@@ -35,6 +39,8 @@ struct ScenarioBottleneckMetric {
     std::size_t nearbyAgentCount{0};
     std::size_t stalledAgentCount{0};
     double averageSpeed{0.0};
+    std::optional<double> detectedAtSeconds{};
+    std::optional<SimulationFrame> detectionFrame{};
 };
 
 struct ScenarioRiskSnapshot {

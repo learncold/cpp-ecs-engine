@@ -135,6 +135,41 @@ ScenarioRiskLevel completionRiskLevel(
     return ScenarioRiskLevel::Low;
 }
 
+SimulationFrame captureSimulationFrame(
+    engine::WorldQuery& query,
+    const ScenarioSimulationClockResource& clock) {
+    SimulationFrame frame;
+    frame.elapsedSeconds = clock.elapsedSeconds;
+    frame.complete = clock.complete;
+
+    const auto entities = query.view<Position, Agent, Velocity, EvacuationStatus>();
+    frame.agents.reserve(entities.size());
+    for (const auto entity : entities) {
+        ++frame.totalAgentCount;
+        const auto& status = query.get<EvacuationStatus>(entity);
+        if (status.evacuated) {
+            ++frame.evacuatedAgentCount;
+            continue;
+        }
+
+        const auto& position = query.get<Position>(entity);
+        const auto& velocity = query.get<Velocity>(entity);
+        const auto& agent = query.get<Agent>(entity);
+        frame.agents.push_back({
+            .id = entity.index,
+            .position = position.value,
+            .velocity = velocity.value,
+            .radius = agent.radius,
+            .floorId = query.contains<EvacuationRoute>(entity)
+                ? (!query.get<EvacuationRoute>(entity).displayFloorId.empty()
+                    ? query.get<EvacuationRoute>(entity).displayFloorId
+                    : query.get<EvacuationRoute>(entity).currentFloorId)
+                : std::string{},
+        });
+    }
+    return frame;
+}
+
 class ScenarioRiskMetricsSystem final : public engine::EngineSystem {
 public:
     explicit ScenarioRiskMetricsSystem(FacilityLayout2D layout)
@@ -200,6 +235,9 @@ public:
             snapshot.stalledAgentCount,
             snapshot.hotspots.size(),
             snapshot.bottlenecks.size());
+        if (!snapshot.hotspots.empty() || !snapshot.bottlenecks.empty()) {
+            attachDetectionState(snapshot, captureSimulationFrame(query, clock), clock.elapsedSeconds);
+        }
 
         auto peakSnapshot = resources.contains<ScenarioRiskMetricsResource>()
             ? resources.get<ScenarioRiskMetricsResource>().peakSnapshot
@@ -222,6 +260,20 @@ private:
         }
         if (isBottleneckSetWorse(current.bottlenecks, peak.bottlenecks)) {
             peak.bottlenecks = current.bottlenecks;
+        }
+    }
+
+    void attachDetectionState(
+        ScenarioRiskSnapshot& snapshot,
+        const SimulationFrame& frame,
+        double elapsedSeconds) const {
+        for (auto& hotspot : snapshot.hotspots) {
+            hotspot.detectedAtSeconds = elapsedSeconds;
+            hotspot.detectionFrame = frame;
+        }
+        for (auto& bottleneck : snapshot.bottlenecks) {
+            bottleneck.detectedAtSeconds = elapsedSeconds;
+            bottleneck.detectionFrame = frame;
         }
     }
 

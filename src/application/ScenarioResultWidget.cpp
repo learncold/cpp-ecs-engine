@@ -1,6 +1,7 @@
 #include "application/ScenarioResultWidget.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <utility>
 
@@ -50,6 +51,11 @@ public:
         setMinimumHeight(150);
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         setToolTip("Cumulative evacuation curve. T90/T95 indicate when 90%/95% of occupants have evacuated.");
+    }
+
+    void setCurrentTimeSeconds(std::optional<double> seconds) {
+        currentTimeSeconds_ = seconds;
+        update();
     }
 
 protected:
@@ -108,6 +114,7 @@ protected:
 
         drawTimingMarker(painter, plot, maxTime, artifacts_.timingSummary.t90Seconds, "T90");
         drawTimingMarker(painter, plot, maxTime, artifacts_.timingSummary.t95Seconds, "T95");
+        drawCurrentTimeMarker(painter, plot, maxTime);
 
         painter.setPen(QColor("#687789"));
         const auto last = artifacts_.evacuationProgress.back();
@@ -137,7 +144,26 @@ private:
         painter.drawText(QRectF(x + 4, plot.top(), 46, 18), Qt::AlignLeft | Qt::AlignVCenter, label);
     }
 
+    void drawCurrentTimeMarker(
+        QPainter& painter,
+        const QRectF& plot,
+        double maxTime) const {
+        if (!currentTimeSeconds_.has_value()) {
+            return;
+        }
+
+        const auto x = plot.left() + (std::clamp(*currentTimeSeconds_ / maxTime, 0.0, 1.0) * plot.width());
+        painter.setPen(QPen(QColor("#111827"), 1.6));
+        painter.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()));
+        painter.setBrush(QColor("#111827"));
+        painter.setPen(Qt::NoPen);
+        painter.drawEllipse(QPointF(x, plot.top()), 3.5, 3.5);
+        painter.setPen(QColor("#111827"));
+        painter.drawText(QRectF(x + 5, plot.top() + 2, 76, 18), Qt::AlignLeft | Qt::AlignVCenter, QString("%1 sec").arg(*currentTimeSeconds_, 0, 'f', 1));
+    }
+
     safecrowd::domain::ScenarioResultArtifacts artifacts_{};
+    std::optional<double> currentTimeSeconds_{};
 };
 
 QFrame* createMetricCard(const QString& title, const QString& value, QWidget* parent, const QString& tooltip = {}) {
@@ -175,12 +201,16 @@ QPushButton* createBottleneckRowButton(
     const auto label = QString::fromStdString(bottleneck.label);
     const auto id = QString::fromStdString(bottleneck.connectionId);
     const auto idLine = (!id.isEmpty() && id != label) ? QString("\nID: %1").arg(id) : QString{};
+    const auto detectedLine = bottleneck.detectedAtSeconds.has_value()
+        ? QString("\nDetected: %1 sec").arg(*bottleneck.detectedAtSeconds, 0, 'f', 1)
+        : QString{};
     auto* button = new QPushButton(
-        QString("%1. %2%3\n%4 nearby, %5 stalled")
+        QString("%1. %2%3\n%4 nearby, %5 stalled%6")
             .arg(static_cast<int>(index + 1))
             .arg(label, idLine)
             .arg(static_cast<int>(bottleneck.nearbyAgentCount))
-            .arg(static_cast<int>(bottleneck.stalledAgentCount)),
+            .arg(static_cast<int>(bottleneck.stalledAgentCount))
+            .arg(detectedLine),
         parent);
     button->setFont(ui::font(ui::FontRole::Body));
     button->setCursor(Qt::PointingHandCursor);
@@ -194,12 +224,16 @@ QPushButton* createHotspotRowButton(
     const safecrowd::domain::ScenarioCongestionHotspot& hotspot,
     std::size_t index,
     QWidget* parent) {
+    const auto detectedLine = hotspot.detectedAtSeconds.has_value()
+        ? QString("\nDetected: %1 sec").arg(*hotspot.detectedAtSeconds, 0, 'f', 1)
+        : QString{};
     auto* button = new QPushButton(
-        QString("%1. (%2, %3)  -  %4 agents")
+        QString("%1. (%2, %3)  -  %4 agents%5")
             .arg(static_cast<int>(index + 1))
             .arg(hotspot.center.x, 0, 'f', 1)
             .arg(hotspot.center.y, 0, 'f', 1)
-            .arg(static_cast<int>(hotspot.agentCount)),
+            .arg(static_cast<int>(hotspot.agentCount))
+            .arg(detectedLine),
         parent);
     button->setFont(ui::font(ui::FontRole::Body));
     button->setCursor(Qt::PointingHandCursor);
@@ -243,10 +277,12 @@ public:
     ResultReplayControls(
         std::vector<safecrowd::domain::SimulationFrame> frames,
         SimulationCanvasWidget* canvas,
+        EvacuationProgressWidget* progressWidget,
         QWidget* parent = nullptr)
         : QWidget(parent),
           frames_(std::move(frames)),
-          canvas_(canvas) {
+          canvas_(canvas),
+          progressWidget_(progressWidget) {
         setStyleSheet(
             "QWidget { background: #ffffff; }"
             "QPushButton { border: 1px solid #c9d5e2; border-radius: 8px; padding: 6px 12px; background: #ffffff; color: #16202b; font-weight: 600; }"
@@ -308,7 +344,29 @@ public:
         });
     }
 
+    void showFrame(const safecrowd::domain::SimulationFrame& frame) {
+        pause();
+        currentIndex_ = nearestFrameIndex(frame.elapsedSeconds);
+        applyFrameData(frame, currentIndex_);
+    }
+
+    void showClosestFrameAtSeconds(double seconds) {
+        pause();
+        currentIndex_ = nearestFrameIndex(seconds);
+        applyFrame(currentIndex_);
+    }
+
 private:
+    int nearestFrameIndex(double seconds) const {
+        if (frames_.empty()) {
+            return 0;
+        }
+        const auto closest = std::min_element(frames_.begin(), frames_.end(), [seconds](const auto& lhs, const auto& rhs) {
+            return std::abs(lhs.elapsedSeconds - seconds) < std::abs(rhs.elapsedSeconds - seconds);
+        });
+        return static_cast<int>(std::distance(frames_.begin(), closest));
+    }
+
     void togglePlayback() {
         if (timer_ == nullptr || frames_.size() <= 1) {
             return;
@@ -340,15 +398,21 @@ private:
             return;
         }
         index = std::clamp(index, 0, static_cast<int>(frames_.size() - 1));
-        const auto& frame = frames_[static_cast<std::size_t>(index)];
+        applyFrameData(frames_[static_cast<std::size_t>(index)], index);
+    }
+
+    void applyFrameData(const safecrowd::domain::SimulationFrame& frame, int sliderIndex) {
         if (canvas_ != nullptr) {
             canvas_->setFrame(frame);
         }
-        if (slider_ != nullptr && slider_->value() != index) {
-            const QSignalBlocker blocker(slider_);
-            slider_->setValue(index);
+        if (progressWidget_ != nullptr) {
+            progressWidget_->setCurrentTimeSeconds(frame.elapsedSeconds);
         }
-        const auto totalSeconds = frames_.back().elapsedSeconds;
+        if (slider_ != nullptr && slider_->value() != sliderIndex) {
+            const QSignalBlocker blocker(slider_);
+            slider_->setValue(sliderIndex);
+        }
+        const auto totalSeconds = frames_.empty() ? frame.elapsedSeconds : frames_.back().elapsedSeconds;
         timeLabel_->setText(QString("%1 / %2 sec")
             .arg(frame.elapsedSeconds, 0, 'f', 1)
             .arg(totalSeconds, 0, 'f', 1));
@@ -356,6 +420,7 @@ private:
 
     std::vector<safecrowd::domain::SimulationFrame> frames_{};
     SimulationCanvasWidget* canvas_{nullptr};
+    EvacuationProgressWidget* progressWidget_{nullptr};
     QPushButton* playButton_{nullptr};
     QSlider* slider_{nullptr};
     QLabel* timeLabel_{nullptr};
@@ -374,6 +439,7 @@ std::vector<safecrowd::domain::SimulationFrame> replayFramesForResult(
 
 QWidget* createResultGraphPanel(
     const safecrowd::domain::ScenarioResultArtifacts& artifacts,
+    EvacuationProgressWidget** progressWidgetOut,
     QWidget* parent) {
     auto* panel = new QFrame(parent);
     panel->setStyleSheet(
@@ -406,7 +472,11 @@ QWidget* createResultGraphPanel(
     auto* bodyLayout = new QVBoxLayout(body);
     bodyLayout->setContentsMargins(0, 0, 0, 0);
     bodyLayout->setSpacing(8);
-    bodyLayout->addWidget(new EvacuationProgressWidget(artifacts, body), 1);
+    auto* progressWidget = new EvacuationProgressWidget(artifacts, body);
+    if (progressWidgetOut != nullptr) {
+        *progressWidgetOut = progressWidget;
+    }
+    bodyLayout->addWidget(progressWidget, 1);
     auto* timing = createLabel(
         QString("T90: %1    T95: %2")
             .arg(formatOptionalSeconds(artifacts.timingSummary.t90Seconds))
@@ -432,14 +502,21 @@ QWidget* createResultCanvasPanel(
     SimulationCanvasWidget* canvas,
     const safecrowd::domain::SimulationFrame& frame,
     const safecrowd::domain::ScenarioResultArtifacts& artifacts,
+    ResultReplayControls** replayControlsOut,
     QWidget* parent) {
     auto* panel = new QWidget(parent);
     auto* layout = new QVBoxLayout(panel);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
     layout->addWidget(canvas, 1);
-    layout->addWidget(new ResultReplayControls(replayFramesForResult(artifacts, frame), canvas, panel));
-    layout->addWidget(createResultGraphPanel(artifacts, panel), 1);
+    EvacuationProgressWidget* progressWidget = nullptr;
+    auto* graphPanel = createResultGraphPanel(artifacts, &progressWidget, panel);
+    auto* replayControls = new ResultReplayControls(replayFramesForResult(artifacts, frame), canvas, progressWidget, panel);
+    if (replayControlsOut != nullptr) {
+        *replayControlsOut = replayControls;
+    }
+    layout->addWidget(replayControls);
+    layout->addWidget(graphPanel, 1);
     return panel;
 }
 
@@ -697,13 +774,30 @@ ScenarioResultWidget::ScenarioResultWidget(
     canvas->setFrame(frame_);
     canvas->setHotspotOverlay(risk_.hotspots);
     canvas->setBottleneckOverlay(risk_.bottlenecks);
-    shell_->setCanvas(createResultCanvasPanel(canvas, frame_, artifacts_, shell_));
+    ResultReplayControls* replayControls = nullptr;
+    shell_->setCanvas(createResultCanvasPanel(canvas, frame_, artifacts_, &replayControls, shell_));
     shell_->setNavigationPanel(createResultFindingsPanel(
         risk_,
-        [canvas](std::size_t index) {
+        [this, canvas, replayControls](std::size_t index) {
+            if (index < risk_.bottlenecks.size() && replayControls != nullptr) {
+                const auto& bottleneck = risk_.bottlenecks[index];
+                if (bottleneck.detectionFrame.has_value()) {
+                    replayControls->showFrame(*bottleneck.detectionFrame);
+                } else if (bottleneck.detectedAtSeconds.has_value()) {
+                    replayControls->showClosestFrameAtSeconds(*bottleneck.detectedAtSeconds);
+                }
+            }
             canvas->focusBottleneck(index);
         },
-        [canvas](std::size_t index) {
+        [this, canvas, replayControls](std::size_t index) {
+            if (index < risk_.hotspots.size() && replayControls != nullptr) {
+                const auto& hotspot = risk_.hotspots[index];
+                if (hotspot.detectionFrame.has_value()) {
+                    replayControls->showFrame(*hotspot.detectionFrame);
+                } else if (hotspot.detectedAtSeconds.has_value()) {
+                    replayControls->showClosestFrameAtSeconds(*hotspot.detectedAtSeconds);
+                }
+            }
             canvas->focusHotspot(index);
         },
         shell_));
