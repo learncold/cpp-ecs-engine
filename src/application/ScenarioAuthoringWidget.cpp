@@ -533,6 +533,12 @@ void ScenarioAuthoringWidget::refreshCanvas() {
     canvas_->setPlacementsChangedHandler([this](const std::vector<ScenarioCrowdPlacement>& placements) {
         updateCurrentScenarioPlacements(placements);
     });
+    canvas_->setLayoutElementActivatedHandler([this](const QString& elementId) {
+        selectedLayoutElementId_ = elementId;
+        if (navigationView_ == NavigationView::Layout) {
+            refreshNavigationPanel();
+        }
+    });
     canvas_->setConnectionBlocks(scenario->draft.control.connectionBlocks);
     canvas_->setConnectionBlocksChangedHandler([this](const std::vector<safecrowd::domain::ConnectionBlockDraft>& blocks) {
         auto* current = currentScenario();
@@ -546,6 +552,9 @@ void ScenarioAuthoringWidget::refreshCanvas() {
             refreshRightPanel();
         }
     });
+    if (!selectedLayoutElementId_.isEmpty()) {
+        canvas_->focusLayoutElement(selectedLayoutElementId_);
+    }
     shell_->setCanvas(canvas_);
 }
 
@@ -620,12 +629,21 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
         shell_->setNavigationPanel(new LayoutNavigationPanelWidget(
             &layout_,
             [this](const QString& elementId) {
+                selectedLayoutElementId_ = elementId;
                 if (canvas_ != nullptr) {
                     canvas_->activateLayoutElement(elementId);
                 }
             },
             shell_,
-            shell_->createPanelHeader("Layout", shell_, false)));
+            shell_->createPanelHeader("Layout", shell_, false),
+            NavigationTreeState{
+                .expandedNodeIds = layoutExpandedNodeIds_,
+                .selectedId = selectedLayoutElementId_,
+                .restoreExpandedState = true,
+            },
+            [this](const QSet<QString>& expandedNodeIds) {
+                layoutExpandedNodeIds_ = expandedNodeIds;
+            }));
         return;
     }
     if (navigationView_ == NavigationView::Crowd) {

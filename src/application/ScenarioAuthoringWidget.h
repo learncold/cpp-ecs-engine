@@ -3,6 +3,7 @@
 #include <functional>
 #include <vector>
 
+#include <QSet>
 #include <QString>
 #include <QWidget>
 
@@ -102,6 +103,8 @@ private:
     int currentScenarioIndex_{-1};
     NavigationView navigationView_{NavigationView::Layout};
     RightPanelMode rightPanelMode_{RightPanelMode::Scenario};
+    QSet<QString> layoutExpandedNodeIds_{};
+    QString selectedLayoutElementId_{};
     WorkspaceShell* shell_{nullptr};
     ScenarioCanvasWidget* canvas_{nullptr};
     QPushButton* scenarioPanelButton_{nullptr};

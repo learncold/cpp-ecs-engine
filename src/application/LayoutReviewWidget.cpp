@@ -227,6 +227,8 @@ QWidget* createNavigationPanel(
     bool showIssues,
     std::function<void(const safecrowd::domain::ImportIssue&)> selectIssueHandler,
     std::function<void(const QString&)> selectLayoutElementHandler,
+    NavigationTreeState layoutNavigationState,
+    std::function<void(const QSet<QString>&)> layoutExpandedStateChangedHandler,
     const WorkspaceShell* shell,
     QWidget* parent) {
     auto* content = new QWidget(parent);
@@ -239,7 +241,9 @@ QWidget* createNavigationPanel(
             importResult.layout.has_value() ? &(*importResult.layout) : nullptr,
             std::move(selectLayoutElementHandler),
             content,
-            shell != nullptr ? shell->createPanelHeader("Layout", content, false) : nullptr));
+            shell != nullptr ? shell->createPanelHeader("Layout", content, false) : nullptr,
+            std::move(layoutNavigationState),
+            std::move(layoutExpandedStateChangedHandler)));
         return content;
     }
 
@@ -466,6 +470,7 @@ void LayoutReviewWidget::handleIssueSelected(const safecrowd::domain::ImportIssu
 }
 
 void LayoutReviewWidget::handleLayoutElementSelected(const QString& elementId) {
+    selectedLayoutElementId_ = elementId;
     selectedIssueTargetId_.clear();
     selectedIssueCode_.clear();
 
@@ -485,9 +490,13 @@ void LayoutReviewWidget::handleLayoutEdited(const safecrowd::domain::FacilityLay
 
 void LayoutReviewWidget::handlePreviewSelectionChanged(const PreviewSelection& selection) {
     lastSelection_ = selection;
+    selectedLayoutElementId_ = selection.empty() || selection.kind == PreviewSelectionKind::Multiple ? QString{} : selection.id;
     selectedIssueTargetId_.clear();
     selectedIssueCode_.clear();
     showSelectionInspector(selection);
+    if (navigationView_ == NavigationView::Layout) {
+        refreshNavigationPanel();
+    }
 }
 
 void LayoutReviewWidget::refreshApprovalState() {
@@ -541,6 +550,14 @@ void LayoutReviewWidget::refreshNavigationPanel() {
         },
         [this](const QString& elementId) {
             handleLayoutElementSelected(elementId);
+        },
+        NavigationTreeState{
+            .expandedNodeIds = layoutExpandedNodeIds_,
+            .selectedId = selectedLayoutElementId_,
+            .restoreExpandedState = true,
+        },
+        [this](const QSet<QString>& expandedNodeIds) {
+            layoutExpandedNodeIds_ = expandedNodeIds;
         },
         shell_,
         shell_));

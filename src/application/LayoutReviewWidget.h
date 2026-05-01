@@ -3,6 +3,7 @@
 #include <functional>
 #include <vector>
 
+#include <QSet>
 #include <QString>
 #include <QWidget>
 
@@ -60,6 +61,8 @@ private:
     QLabel* approvalStatusLabel_{nullptr};
     QPushButton* approveButton_{nullptr};
     NavigationView navigationView_{NavigationView::Issues};
+    QSet<QString> layoutExpandedNodeIds_{};
+    QString selectedLayoutElementId_{};
     QString selectedIssueTargetId_{};
     QString selectedIssueCode_{};
     PreviewSelection lastSelection_{};
