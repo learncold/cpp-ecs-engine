@@ -14,6 +14,9 @@
 namespace safecrowd::domain {
 namespace {
 
+constexpr double kReplaySampleIntervalSeconds = 0.5;
+constexpr std::size_t kMaxReplayFrames = 600;
+
 struct SpatialCell {
     int x{0};
     int y{0};
@@ -33,6 +36,25 @@ SpatialCell spatialCellFor(const Point2D& point, double cellSize) {
 
 double distanceBetween(const Point2D& lhs, const Point2D& rhs) {
     return std::hypot(lhs.x - rhs.x, lhs.y - rhs.y);
+}
+
+void appendReplayFrame(
+    ScenarioResultArtifactsResource& result,
+    const SimulationFrame& frame) {
+    auto& frames = result.artifacts.replayFrames;
+    if (!frames.empty() && std::abs(frames.back().elapsedSeconds - frame.elapsedSeconds) <= 1e-9) {
+        frames.back() = frame;
+        return;
+    }
+
+    if (frames.size() >= result.maxReplayFrames) {
+        if (frame.complete && !frames.empty()) {
+            frames.back() = frame;
+        }
+        return;
+    }
+
+    frames.push_back(frame);
 }
 
 std::optional<double> percentileCompletionTime(
@@ -306,6 +328,20 @@ void ScenarioFrameSyncSystem::update(engine::EngineWorld& world, const engine::E
         });
     }
 
+    if (resources.contains<ScenarioResultArtifactsResource>()) {
+        auto& result = resources.get<ScenarioResultArtifactsResource>();
+        const auto shouldRecordReplay =
+            result.artifacts.replayFrames.empty()
+            || frame.elapsedSeconds + 1e-9 >= result.nextReplaySampleTimeSeconds
+            || frame.complete;
+        if (shouldRecordReplay) {
+            appendReplayFrame(result, frame);
+            while (result.nextReplaySampleTimeSeconds <= frame.elapsedSeconds + 1e-9) {
+                result.nextReplaySampleTimeSeconds += result.replaySampleIntervalSeconds;
+            }
+        }
+    }
+
     resources.set(ScenarioSimulationFrameResource{.frame = std::move(frame)});
 }
 
@@ -319,6 +355,9 @@ void ScenarioResultArtifactsSystem::configure(engine::EngineWorld& world) {
         .lastRecordedEvacuatedCount = std::numeric_limits<std::size_t>::max(),
         .nextSampleTimeSeconds = 0.0,
         .sampleIntervalSeconds = sampleIntervalSeconds_,
+        .nextReplaySampleTimeSeconds = 0.0,
+        .replaySampleIntervalSeconds = kReplaySampleIntervalSeconds,
+        .maxReplayFrames = kMaxReplayFrames,
     });
 }
 

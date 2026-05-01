@@ -882,6 +882,12 @@ QJsonObject resultArtifactsToJson(const safecrowd::domain::ScenarioResultArtifac
     }
     object["evacuationProgress"] = progress;
 
+    QJsonArray replayFrames;
+    for (const auto& frame : artifacts.replayFrames) {
+        replayFrames.append(simulationFrameToJson(frame));
+    }
+    object["replayFrames"] = replayFrames;
+
     QJsonObject timing;
     timing["t50Seconds"] = optionalDoubleToJson(artifacts.timingSummary.t50Seconds);
     timing["t90Seconds"] = optionalDoubleToJson(artifacts.timingSummary.t90Seconds);
@@ -901,6 +907,9 @@ safecrowd::domain::ScenarioResultArtifacts resultArtifactsFromJson(const QJsonOb
             .totalCount = static_cast<std::size_t>(sampleObject.value("totalCount").toInteger()),
             .evacuatedRatio = sampleObject.value("evacuatedRatio").toDouble(),
         });
+    }
+    for (const auto& value : object.value("replayFrames").toArray()) {
+        artifacts.replayFrames.push_back(simulationFrameFromJson(value.toObject()));
     }
 
     const auto timing = object.value("timingSummary").toObject();

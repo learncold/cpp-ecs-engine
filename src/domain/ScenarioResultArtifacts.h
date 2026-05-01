@@ -4,6 +4,8 @@
 #include <optional>
 #include <vector>
 
+#include "domain/ScenarioSimulationFrame.h"
+
 namespace safecrowd::domain {
 
 struct EvacuationProgressSample {
@@ -22,6 +24,7 @@ struct EvacuationTimingSummary {
 
 struct ScenarioResultArtifacts {
     std::vector<EvacuationProgressSample> evacuationProgress{};
+    std::vector<SimulationFrame> replayFrames{};
     EvacuationTimingSummary timingSummary{};
 };
 

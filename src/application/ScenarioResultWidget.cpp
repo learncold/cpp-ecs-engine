@@ -14,6 +14,9 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSizePolicy>
+#include <QSlider>
+#include <QSignalBlocker>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include "application/ScenarioAuthoringWidget.h"
@@ -235,6 +238,140 @@ QWidget* createHotspotLegend(QWidget* parent) {
     return legend;
 }
 
+class ResultReplayControls final : public QWidget {
+public:
+    ResultReplayControls(
+        std::vector<safecrowd::domain::SimulationFrame> frames,
+        SimulationCanvasWidget* canvas,
+        QWidget* parent = nullptr)
+        : QWidget(parent),
+          frames_(std::move(frames)),
+          canvas_(canvas) {
+        setStyleSheet(
+            "QWidget { background: #ffffff; }"
+            "QPushButton { border: 1px solid #c9d5e2; border-radius: 8px; padding: 6px 12px; background: #ffffff; color: #16202b; font-weight: 600; }"
+            "QPushButton:hover { background: #eef3f8; }"
+            "QPushButton:disabled { color: #94a3b8; }"
+            "QSlider::groove:horizontal { height: 6px; background: #d7e0ea; border-radius: 3px; }"
+            "QSlider::handle:horizontal { width: 16px; margin: -5px 0; border-radius: 8px; background: #1f5fae; }"
+            "QLabel { background: transparent; }");
+
+        auto* layout = new QHBoxLayout(this);
+        layout->setContentsMargins(16, 8, 16, 8);
+        layout->setSpacing(10);
+
+        playButton_ = new QPushButton("Play", this);
+        playButton_->setCursor(Qt::PointingHandCursor);
+        layout->addWidget(playButton_);
+
+        slider_ = new QSlider(Qt::Horizontal, this);
+        slider_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        layout->addWidget(slider_, 1);
+
+        timeLabel_ = createLabel("", this, ui::FontRole::Caption);
+        timeLabel_->setMinimumWidth(110);
+        timeLabel_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        timeLabel_->setStyleSheet(ui::mutedTextStyleSheet());
+        layout->addWidget(timeLabel_);
+
+        timer_ = new QTimer(this);
+        timer_->setInterval(500);
+
+        const bool enabled = frames_.size() > 1 && canvas_ != nullptr;
+        playButton_->setEnabled(enabled);
+        slider_->setEnabled(enabled);
+        slider_->setRange(0, frames_.empty() ? 0 : static_cast<int>(frames_.size() - 1));
+        currentIndex_ = frames_.empty() ? 0 : static_cast<int>(frames_.size() - 1);
+        applyFrame(currentIndex_);
+
+        QObject::connect(playButton_, &QPushButton::clicked, this, [this]() {
+            togglePlayback();
+        });
+        QObject::connect(slider_, &QSlider::valueChanged, this, [this](int value) {
+            currentIndex_ = value;
+            applyFrame(currentIndex_);
+            if (currentIndex_ >= static_cast<int>(frames_.size()) - 1) {
+                pause();
+            }
+        });
+        QObject::connect(timer_, &QTimer::timeout, this, [this]() {
+            if (frames_.empty()) {
+                pause();
+                return;
+            }
+            if (currentIndex_ >= static_cast<int>(frames_.size()) - 1) {
+                pause();
+                return;
+            }
+            ++currentIndex_;
+            applyFrame(currentIndex_);
+        });
+    }
+
+private:
+    void togglePlayback() {
+        if (timer_ == nullptr || frames_.size() <= 1) {
+            return;
+        }
+        if (timer_->isActive()) {
+            pause();
+            return;
+        }
+        if (currentIndex_ >= static_cast<int>(frames_.size()) - 1) {
+            currentIndex_ = 0;
+            applyFrame(currentIndex_);
+        }
+        playButton_->setText("Pause");
+        timer_->start();
+    }
+
+    void pause() {
+        if (timer_ != nullptr) {
+            timer_->stop();
+        }
+        if (playButton_ != nullptr) {
+            playButton_->setText("Play");
+        }
+    }
+
+    void applyFrame(int index) {
+        if (frames_.empty()) {
+            timeLabel_->setText("No replay");
+            return;
+        }
+        index = std::clamp(index, 0, static_cast<int>(frames_.size() - 1));
+        const auto& frame = frames_[static_cast<std::size_t>(index)];
+        if (canvas_ != nullptr) {
+            canvas_->setFrame(frame);
+        }
+        if (slider_ != nullptr && slider_->value() != index) {
+            const QSignalBlocker blocker(slider_);
+            slider_->setValue(index);
+        }
+        const auto totalSeconds = frames_.back().elapsedSeconds;
+        timeLabel_->setText(QString("%1 / %2 sec")
+            .arg(frame.elapsedSeconds, 0, 'f', 1)
+            .arg(totalSeconds, 0, 'f', 1));
+    }
+
+    std::vector<safecrowd::domain::SimulationFrame> frames_{};
+    SimulationCanvasWidget* canvas_{nullptr};
+    QPushButton* playButton_{nullptr};
+    QSlider* slider_{nullptr};
+    QLabel* timeLabel_{nullptr};
+    QTimer* timer_{nullptr};
+    int currentIndex_{0};
+};
+
+std::vector<safecrowd::domain::SimulationFrame> replayFramesForResult(
+    const safecrowd::domain::ScenarioResultArtifacts& artifacts,
+    const safecrowd::domain::SimulationFrame& fallbackFrame) {
+    if (!artifacts.replayFrames.empty()) {
+        return artifacts.replayFrames;
+    }
+    return {fallbackFrame};
+}
+
 QWidget* createResultGraphPanel(
     const safecrowd::domain::ScenarioResultArtifacts& artifacts,
     QWidget* parent) {
@@ -293,6 +430,7 @@ QWidget* createResultGraphPanel(
 
 QWidget* createResultCanvasPanel(
     SimulationCanvasWidget* canvas,
+    const safecrowd::domain::SimulationFrame& frame,
     const safecrowd::domain::ScenarioResultArtifacts& artifacts,
     QWidget* parent) {
     auto* panel = new QWidget(parent);
@@ -300,6 +438,7 @@ QWidget* createResultCanvasPanel(
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
     layout->addWidget(canvas, 1);
+    layout->addWidget(new ResultReplayControls(replayFramesForResult(artifacts, frame), canvas, panel));
     layout->addWidget(createResultGraphPanel(artifacts, panel), 1);
     return panel;
 }
@@ -558,7 +697,7 @@ ScenarioResultWidget::ScenarioResultWidget(
     canvas->setFrame(frame_);
     canvas->setHotspotOverlay(risk_.hotspots);
     canvas->setBottleneckOverlay(risk_.bottlenecks);
-    shell_->setCanvas(createResultCanvasPanel(canvas, artifacts_, shell_));
+    shell_->setCanvas(createResultCanvasPanel(canvas, frame_, artifacts_, shell_));
     shell_->setNavigationPanel(createResultFindingsPanel(
         risk_,
         [canvas](std::size_t index) {

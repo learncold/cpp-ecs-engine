@@ -62,6 +62,9 @@ struct ScenarioResultArtifactsResource {
     std::size_t lastRecordedEvacuatedCount{static_cast<std::size_t>(-1)};
     double nextSampleTimeSeconds{0.0};
     double sampleIntervalSeconds{1.0};
+    double nextReplaySampleTimeSeconds{0.0};
+    double replaySampleIntervalSeconds{0.5};
+    std::size_t maxReplayFrames{600};
 };
 
 struct ScenarioAgentSeed {
