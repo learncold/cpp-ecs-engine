@@ -586,6 +586,8 @@ ScenarioAuthoringWidget::ScenarioState scenarioStateFromDraft(
         uiPlacement.area = placement.area.outline;
         uiPlacement.occupantCount = static_cast<int>(placement.targetAgentCount);
         uiPlacement.velocity = placement.initialVelocity;
+        uiPlacement.distribution = placement.distribution;
+        uiPlacement.generatedPositions = placement.explicitPositions;
         state.crowdPlacements.push_back(std::move(uiPlacement));
     }
 
@@ -606,7 +608,7 @@ QWidget* createResultPanel(
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(12);
 
-    layout->addWidget(shell != nullptr ? shell->createPanelHeader("Results", panel, false) : createLabel("Results", panel, ui::FontRole::Title));
+    layout->addWidget(shell != nullptr ? shell->createPanelHeader("Overview", panel, false) : createLabel("Overview", panel, ui::FontRole::Title));
     auto* scenarioLabel = createLabel(QString("Scenario: %1").arg(QString::fromStdString(scenario.name)), panel);
     scenarioLabel->setStyleSheet(ui::mutedTextStyleSheet());
     layout->addWidget(scenarioLabel);
@@ -680,7 +682,6 @@ QWidget* createResultFindingsPanel(
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(12);
 
-    layout->addWidget(createLabel("Result Reports", panel, ui::FontRole::Title));
     auto* caption = createLabel("Risk findings and spatial reports", panel, ui::FontRole::Caption);
     caption->setStyleSheet(ui::subtleTextStyleSheet());
     layout->addWidget(caption);
@@ -787,6 +788,15 @@ ScenarioResultWidget::ScenarioResultWidget(
     shell_->setBackHandler([this]() {
         navigateToAuthoring(true);
     });
+    shell_->setNavigationTabs(
+        {
+            {
+                .id = "reports",
+                .label = "Reports",
+            },
+        },
+        "reports",
+        [](const QString&) {});
 
     auto* canvas = new SimulationCanvasWidget(layout_, shell_);
     canvas->setFrame(frame_);

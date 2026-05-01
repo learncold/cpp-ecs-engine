@@ -82,7 +82,9 @@ bool ScenarioSimulationRunner::complete() const noexcept {
 std::vector<ScenarioAgentSeed> ScenarioSimulationRunner::createAgentSeeds() const {
     std::vector<ScenarioAgentSeed> seeds;
     for (const auto& placement : scenario_.population.initialPlacements) {
-        const auto count = placement.targetAgentCount;
+        const auto count = placement.explicitPositions.empty()
+            ? placement.targetAgentCount
+            : placement.explicitPositions.size();
         seeds.reserve(seeds.size() + count);
         for (std::size_t index = 0; index < count; ++index) {
             const auto position = placementPoint(placement, index);
@@ -273,6 +275,9 @@ std::string ScenarioSimulationRunner::zoneAt(const Point2D& point, const std::st
 }
 
 Point2D ScenarioSimulationRunner::placementPoint(const InitialPlacement2D& placement, std::size_t index) const {
+    if (index < placement.explicitPositions.size()) {
+        return placement.explicitPositions[index];
+    }
     if (placement.area.outline.empty()) {
         return {};
     }

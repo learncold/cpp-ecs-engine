@@ -1,7 +1,10 @@
 #pragma once
 
 #include <functional>
+#include <vector>
 
+#include <QIcon>
+#include <QString>
 #include <QStringList>
 #include <QWidget>
 
@@ -29,6 +32,12 @@ struct WorkspaceShellOptions {
     int reviewPanelWidth{280};
 };
 
+struct WorkspaceNavigationTab {
+    QString id{};
+    QString label{};
+    QIcon icon{};
+};
+
 class WorkspaceShell : public QWidget {
 public:
     explicit WorkspaceShell(QWidget* parent = nullptr);
@@ -38,6 +47,10 @@ public:
     void setBackHandler(std::function<void()> handler);
     QPushButton* createBackButton(QWidget* parent = nullptr) const;
     QWidget* createPanelHeader(const QString& title, QWidget* parent = nullptr, bool includeBackButton = true) const;
+    void setNavigationTabs(
+        std::vector<WorkspaceNavigationTab> tabs,
+        const QString& activeTabId,
+        std::function<void(const QString&)> tabChangedHandler);
     void setNavigationRail(QWidget* rail);
     void setNavigationPanel(QWidget* panel);
     void setNavigationVisible(bool visible);
@@ -53,7 +66,10 @@ private:
     void initialize(const WorkspaceShellOptions& options);
     void setFixedWidthVisible(QWidget* widget, bool visible, int width);
     QWidget* createDefaultNavigationRail();
+    QWidget* createNavigationTabRail();
     void rebuildDefaultNavigationRail();
+    void applyNavigationMode();
+    void handleNavigationTabClicked(const QString& tabId);
     void clearTopBar();
     void rebuildTopBar();
     QPushButton* createTopBarButton(const QString& text);
@@ -78,6 +94,11 @@ private:
     std::function<void()> saveProjectHandler_{};
     std::function<void()> backHandler_{};
     QStringList tools_{};
+    std::vector<WorkspaceNavigationTab> navigationTabs_{};
+    QString activeNavigationTabId_{};
+    std::function<void(const QString&)> navigationTabChangedHandler_{};
+    WorkspaceNavigationMode navigationMode_{WorkspaceNavigationMode::RailAndPanel};
+    bool navigationPanelCollapsed_{false};
     bool customNavigationRail_{false};
 };
 

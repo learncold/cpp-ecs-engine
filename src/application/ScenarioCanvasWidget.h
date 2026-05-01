@@ -20,6 +20,7 @@ class QMouseEvent;
 class QPaintEvent;
 class QResizeEvent;
 class QLabel;
+class QComboBox;
 class QSpinBox;
 class QToolButton;
 class QWheelEvent;
@@ -40,6 +41,9 @@ struct ScenarioCrowdPlacement {
     std::vector<safecrowd::domain::Point2D> area{};
     int occupantCount{1};
     safecrowd::domain::Point2D velocity{};
+    safecrowd::domain::InitialPlacementDistribution distribution{
+        safecrowd::domain::InitialPlacementDistribution::Uniform};
+    std::vector<safecrowd::domain::Point2D> generatedPositions{};
 };
 
 class ScenarioCanvasWidget : public QWidget {
@@ -134,6 +138,8 @@ private:
     QToolButton* blockDoorToolButton_{nullptr};
     QLabel* groupCountLabel_{nullptr};
     QSpinBox* groupCountSpinBox_{nullptr};
+    QLabel* groupDistributionLabel_{nullptr};
+    QComboBox* groupDistributionComboBox_{nullptr};
     std::function<void(const QString&)> layoutElementActivatedHandler_{};
     std::function<void(const QString&)> crowdSelectionChangedHandler_{};
     std::function<void(const std::vector<ScenarioCrowdPlacement>&)> placementsChangedHandler_{};

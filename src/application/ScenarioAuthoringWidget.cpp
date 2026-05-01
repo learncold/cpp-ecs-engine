@@ -15,7 +15,6 @@
 #include <QScrollArea>
 #include <QSizePolicy>
 #include <QTimer>
-#include <QToolButton>
 #include <QVBoxLayout>
 
 #include "application/LayoutNavigationPanelWidget.h"
@@ -167,48 +166,6 @@ QIcon makeLayoutIcon(const QColor& color) {
     painter.drawLine(QPointF(20, 15), QPointF(24, 15));
     painter.drawLine(QPointF(22, 20), QPointF(22, 24));
     return QIcon(pixmap);
-}
-
-QWidget* createNavigationRail(
-    ScenarioAuthoringWidget::NavigationView currentView,
-    std::function<void(ScenarioAuthoringWidget::NavigationView)> switchViewHandler,
-    const WorkspaceShell* shell,
-    QWidget* parent) {
-    auto* activityBar = new QFrame(parent);
-    activityBar->setFixedWidth(56);
-    activityBar->setStyleSheet(
-        "QFrame { background: #eef3f8; border: 0; border-right: 1px solid #d7e0ea; border-radius: 0px; }"
-        "QToolButton { background: transparent; border: 0; border-left: 3px solid transparent; border-radius: 0px; }"
-        "QToolButton:hover { background: #e3ebf4; }"
-        "QToolButton:checked { background: #ffffff; border-left-color: #1f5fae; }");
-
-    auto* layout = new QVBoxLayout(activityBar);
-    layout->setContentsMargins(0, 0, 0, 12);
-    layout->setSpacing(0);
-
-    const auto makeActivityButton = [&](const QIcon& icon, const QString& tooltip, ScenarioAuthoringWidget::NavigationView view) {
-        auto* button = new QToolButton(activityBar);
-        button->setIcon(icon);
-        button->setIconSize(QSize(22, 22));
-        button->setToolTip(tooltip);
-        button->setCheckable(true);
-        button->setChecked(currentView == view);
-        button->setCursor(Qt::PointingHandCursor);
-        button->setFixedSize(56, 56);
-        QObject::connect(button, &QToolButton::clicked, activityBar, [switchViewHandler, view]() {
-            switchViewHandler(view);
-        });
-        layout->addWidget(button);
-    };
-
-    makeActivityButton(makeLayoutIcon(QColor("#1f5fae")), "Layout", ScenarioAuthoringWidget::NavigationView::Layout);
-    makeActivityButton(makeCrowdIcon(QColor("#1f5fae")), "Crowd", ScenarioAuthoringWidget::NavigationView::Crowd);
-    makeActivityButton(makeEventsIcon(QColor("#1f5fae")), "Events", ScenarioAuthoringWidget::NavigationView::Events);
-    layout->addStretch(1);
-    if (shell != nullptr) {
-        layout->addWidget(shell->createBackButton(activityBar), 0, Qt::AlignHCenter);
-    }
-    return activityBar;
 }
 
 std::vector<NavigationTreeNode> buildCrowdTree(const ScenarioAuthoringWidget::ScenarioState* scenario) {
@@ -681,14 +638,46 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
         return;
     }
 
-    shell_->setNavigationRail(createNavigationRail(
-        navigationView_,
-        [this](NavigationView view) {
-            navigationView_ = view;
-            refreshNavigationPanel();
+    const auto activeTabId = [this]() {
+        switch (navigationView_) {
+        case NavigationView::Crowd:
+            return QString("crowd");
+        case NavigationView::Events:
+            return QString("events");
+        case NavigationView::Layout:
+        default:
+            return QString("layout");
+        }
+    }();
+    shell_->setNavigationTabs(
+        {
+            {
+                .id = "layout",
+                .label = "Layout",
+                .icon = makeLayoutIcon(QColor("#1f5fae")),
+            },
+            {
+                .id = "crowd",
+                .label = "Crowd",
+                .icon = makeCrowdIcon(QColor("#1f5fae")),
+            },
+            {
+                .id = "events",
+                .label = "Events",
+                .icon = makeEventsIcon(QColor("#1f5fae")),
+            },
         },
-        shell_,
-        shell_));
+        activeTabId,
+        [this](const QString& tabId) {
+            if (tabId == "crowd") {
+                navigationView_ = NavigationView::Crowd;
+            } else if (tabId == "events") {
+                navigationView_ = NavigationView::Events;
+            } else {
+                navigationView_ = NavigationView::Layout;
+            }
+            refreshNavigationPanel();
+        });
 
     if (navigationView_ == NavigationView::Layout) {
         shell_->setNavigationPanel(new LayoutNavigationPanelWidget(
@@ -836,6 +825,8 @@ void ScenarioAuthoringWidget::updateCurrentScenarioPlacements(const std::vector<
         initialPlacement.area.outline = placement.area;
         initialPlacement.targetAgentCount = static_cast<std::size_t>(placement.occupantCount);
         initialPlacement.initialVelocity = placement.velocity;
+        initialPlacement.distribution = placement.distribution;
+        initialPlacement.explicitPositions = placement.generatedPositions;
         scenario->draft.population.initialPlacements.push_back(std::move(initialPlacement));
     }
     if (!scenarioHasOccupants(*scenario)) {

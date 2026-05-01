@@ -8,6 +8,11 @@
 
 namespace safecrowd::domain {
 
+enum class InitialPlacementDistribution {
+    Uniform,
+    Random,
+};
+
 struct InitialPlacement2D {
     std::string id{};
     std::string zoneId{};
@@ -15,6 +20,8 @@ struct InitialPlacement2D {
     Polygon2D area{};
     std::size_t targetAgentCount{0};
     Point2D initialVelocity{};
+    InitialPlacementDistribution distribution{InitialPlacementDistribution::Uniform};
+    std::vector<Point2D> explicitPositions{};
 };
 
 struct PopulationSpec {

@@ -13,7 +13,6 @@
 #include <QScrollArea>
 #include <QStringList>
 #include <QKeySequence>
-#include <QToolButton>
 #include <QVBoxLayout>
 
 #include "application/IssueCardWidget.h"
@@ -148,78 +147,6 @@ QPushButton* createIssueFilterButton(const QString& label, int count, bool selec
     button->setFont(ui::font(ui::FontRole::Caption));
     button->setStyleSheet(ui::tagStyleSheet(selected));
     return button;
-}
-
-QWidget* createNavigationRail(
-    bool showIssues,
-    std::function<void(bool)> switchViewHandler,
-    const WorkspaceShell* shell,
-    QWidget* parent) {
-    auto* activityBar = new QFrame(parent);
-    activityBar->setFixedWidth(56);
-    activityBar->setStyleSheet(
-        "QFrame {"
-        " background: #eef3f8;"
-        " border: 0;"
-        " border-right: 1px solid #d7e0ea;"
-        " border-radius: 0px;"
-        "}"
-    );
-    auto* activityLayout = new QVBoxLayout(activityBar);
-    activityLayout->setContentsMargins(0, 0, 0, 12);
-    activityLayout->setSpacing(0);
-
-    const auto makeActivityButton = [&](const QIcon& icon, const QString& tooltip, bool checked, auto&& handler) {
-        auto* button = new QToolButton(activityBar);
-        button->setIcon(icon);
-        button->setIconSize(QSize(22, 22));
-        button->setCheckable(true);
-        button->setChecked(checked);
-        button->setToolTip(tooltip);
-        button->setCursor(Qt::PointingHandCursor);
-        button->setFixedSize(56, 56);
-        button->setStyleSheet(
-            "QToolButton {"
-            " background: transparent;"
-            " border: 0;"
-            " border-left: 3px solid transparent;"
-            " border-radius: 0px;"
-            " padding: 0px;"
-            "}"
-            "QToolButton:hover {"
-            " background: #e3ebf4;"
-            "}"
-            "QToolButton:checked {"
-            " background: #ffffff;"
-            " border-left-color: #1f5fae;"
-            "}"
-        );
-        QObject::connect(button, &QToolButton::clicked, activityBar, handler);
-        activityLayout->addWidget(button);
-        return button;
-    };
-
-    auto* issuesButton = makeActivityButton(
-        makeIssuesIcon(QColor("#1f5fae")),
-        "Issues",
-        showIssues,
-        [switchViewHandler]() {
-            switchViewHandler(true);
-        });
-    auto* layoutButton = makeActivityButton(
-        makeLayoutIcon(QColor("#1f5fae")),
-        "Layout",
-        !showIssues,
-        [switchViewHandler]() {
-            switchViewHandler(false);
-        });
-    (void)issuesButton;
-    (void)layoutButton;
-    activityLayout->addStretch(1);
-    if (shell != nullptr) {
-        activityLayout->addWidget(shell->createBackButton(activityBar), 0, Qt::AlignHCenter);
-    }
-    return activityBar;
 }
 
 QWidget* createNavigationPanel(
@@ -534,14 +461,24 @@ void LayoutReviewWidget::refreshNavigationPanel() {
         return;
     }
 
-    shell_->setNavigationRail(createNavigationRail(
-        navigationView_ == NavigationView::Issues,
-        [this](bool showIssues) {
-            navigationView_ = showIssues ? NavigationView::Issues : NavigationView::Layout;
-            refreshNavigationPanel();
+    shell_->setNavigationTabs(
+        {
+            {
+                .id = "issues",
+                .label = "Issues",
+                .icon = makeIssuesIcon(QColor("#1f5fae")),
+            },
+            {
+                .id = "layout",
+                .label = "Layout",
+                .icon = makeLayoutIcon(QColor("#1f5fae")),
+            },
         },
-        shell_,
-        shell_));
+        navigationView_ == NavigationView::Issues ? "issues" : "layout",
+        [this](const QString& tabId) {
+            navigationView_ = tabId == "issues" ? NavigationView::Issues : NavigationView::Layout;
+            refreshNavigationPanel();
+        });
     shell_->setNavigationPanel(createNavigationPanel(
         importResult_,
         navigationView_ == NavigationView::Issues,

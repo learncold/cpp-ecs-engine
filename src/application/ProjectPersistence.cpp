@@ -563,18 +563,26 @@ QJsonObject initialPlacementToJson(const safecrowd::domain::InitialPlacement2D& 
     object["area"] = polygonToJson(placement.area);
     object["targetAgentCount"] = static_cast<qint64>(placement.targetAgentCount);
     object["initialVelocity"] = pointArray(placement.initialVelocity);
+    object["distribution"] = placement.distribution == safecrowd::domain::InitialPlacementDistribution::Random
+        ? "random"
+        : "uniform";
+    object["explicitPositions"] = ringToJson(placement.explicitPositions);
     return object;
 }
 
 safecrowd::domain::InitialPlacement2D initialPlacementFromJson(const QJsonObject& object) {
-    return {
-        .id = object.value("id").toString().toStdString(),
-        .zoneId = object.value("zoneId").toString().toStdString(),
-        .floorId = object.value("floorId").toString().toStdString(),
-        .area = polygonFromJson(object.value("area").toObject()),
-        .targetAgentCount = static_cast<std::size_t>(object.value("targetAgentCount").toInteger()),
-        .initialVelocity = pointFromJson(object.value("initialVelocity")),
-    };
+    safecrowd::domain::InitialPlacement2D placement;
+    placement.id = object.value("id").toString().toStdString();
+    placement.zoneId = object.value("zoneId").toString().toStdString();
+    placement.floorId = object.value("floorId").toString().toStdString();
+    placement.area = polygonFromJson(object.value("area").toObject());
+    placement.targetAgentCount = static_cast<std::size_t>(object.value("targetAgentCount").toInteger());
+    placement.initialVelocity = pointFromJson(object.value("initialVelocity"));
+    placement.distribution = object.value("distribution").toString() == "random"
+        ? safecrowd::domain::InitialPlacementDistribution::Random
+        : safecrowd::domain::InitialPlacementDistribution::Uniform;
+    placement.explicitPositions = ringFromJson(object.value("explicitPositions").toArray());
+    return placement;
 }
 
 QJsonObject populationToJson(const safecrowd::domain::PopulationSpec& population) {

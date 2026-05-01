@@ -13,6 +13,7 @@
 #include <QPixmap>
 #include <QPushButton>
 #include <QSizePolicy>
+#include <QToolButton>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -232,6 +233,47 @@ QWidget* WorkspaceShell::createDefaultNavigationRail() {
     return rail;
 }
 
+QWidget* WorkspaceShell::createNavigationTabRail() {
+    auto* rail = new QFrame(navigationRail_);
+    rail->setFixedWidth(navigationRailWidth_);
+    rail->setStyleSheet(
+        "QFrame { background: #eef3f8; border: 0; border-right: 1px solid #d7e0ea; border-radius: 0px; }"
+        "QToolButton { background: transparent; border: 0; border-left: 3px solid transparent; border-radius: 0px; padding: 0px; }"
+        "QToolButton:hover { background: #e3ebf4; }"
+        "QToolButton:checked { background: #ffffff; border-left-color: #1f5fae; }");
+
+    auto* layout = new QVBoxLayout(rail);
+    layout->setContentsMargins(0, 0, 0, 12);
+    layout->setSpacing(0);
+
+    for (const auto& tab : navigationTabs_) {
+        auto* button = new QToolButton(rail);
+        button->setToolTip(tab.label);
+        button->setAccessibleName(tab.label);
+        button->setCheckable(true);
+        button->setChecked(tab.id == activeNavigationTabId_);
+        button->setCursor(Qt::PointingHandCursor);
+        button->setFixedSize(navigationRailWidth_, navigationRailWidth_);
+        button->setFont(ui::font(ui::FontRole::Caption));
+        if (!tab.icon.isNull()) {
+            button->setIcon(tab.icon);
+            button->setIconSize(QSize(22, 22));
+        } else {
+            button->setText(tab.label);
+        }
+        connect(button, &QToolButton::clicked, this, [this, tabId = tab.id]() {
+            handleNavigationTabClicked(tabId);
+        });
+        layout->addWidget(button);
+    }
+
+    layout->addStretch(1);
+    if (backHandler_) {
+        layout->addWidget(createBackButton(rail), 0, Qt::AlignHCenter);
+    }
+    return rail;
+}
+
 void WorkspaceShell::rebuildDefaultNavigationRail() {
     if (navigationRailLayout_ == nullptr || customNavigationRail_) {
         return;
@@ -325,6 +367,21 @@ void WorkspaceShell::setOpenProjectHandler(std::function<void()> handler) {
     openProjectHandler_ = std::move(handler);
 }
 
+void WorkspaceShell::setNavigationTabs(
+    std::vector<WorkspaceNavigationTab> tabs,
+    const QString& activeTabId,
+    std::function<void(const QString&)> tabChangedHandler) {
+    if (!activeNavigationTabId_.isEmpty() && activeNavigationTabId_ != activeTabId) {
+        navigationPanelCollapsed_ = false;
+    }
+    navigationTabs_ = std::move(tabs);
+    activeNavigationTabId_ = activeTabId;
+    navigationTabChangedHandler_ = std::move(tabChangedHandler);
+    customNavigationRail_ = true;
+    replaceSingleWidget(navigationRailLayout_, createNavigationTabRail());
+    applyNavigationMode();
+}
+
 void WorkspaceShell::setNavigationRail(QWidget* rail) {
     customNavigationRail_ = true;
     replaceSingleWidget(navigationRailLayout_, rail);
@@ -339,18 +396,42 @@ void WorkspaceShell::setNavigationVisible(bool visible) {
 }
 
 void WorkspaceShell::setNavigationMode(WorkspaceNavigationMode mode) {
+    navigationMode_ = mode;
+    if (mode == WorkspaceNavigationMode::None || mode == WorkspaceNavigationMode::RailOnly) {
+        navigationPanelCollapsed_ = false;
+    }
+    applyNavigationMode();
+}
+
+void WorkspaceShell::applyNavigationMode() {
     if (navigationCluster_ == nullptr || navigationRail_ == nullptr || navigationPanel_ == nullptr) {
         return;
     }
 
-    const auto showRail = mode == WorkspaceNavigationMode::RailOnly
-        || mode == WorkspaceNavigationMode::PanelOnly
-        || mode == WorkspaceNavigationMode::RailAndPanel;
-    const auto showPanel = mode == WorkspaceNavigationMode::PanelOnly
-        || mode == WorkspaceNavigationMode::RailAndPanel;
+    const auto showRail = navigationMode_ == WorkspaceNavigationMode::RailOnly
+        || navigationMode_ == WorkspaceNavigationMode::PanelOnly
+        || navigationMode_ == WorkspaceNavigationMode::RailAndPanel;
+    const auto modeShowsPanel = navigationMode_ == WorkspaceNavigationMode::PanelOnly
+        || navigationMode_ == WorkspaceNavigationMode::RailAndPanel;
+    const auto showPanel = modeShowsPanel && !navigationPanelCollapsed_;
     setFixedWidthVisible(navigationRail_, showRail, navigationRailWidth_);
     setFixedWidthVisible(navigationPanel_, showPanel, navigationPanelWidth_);
     navigationCluster_->setVisible(showRail || showPanel);
+}
+
+void WorkspaceShell::handleNavigationTabClicked(const QString& tabId) {
+    if (tabId == activeNavigationTabId_) {
+        navigationPanelCollapsed_ = !navigationPanelCollapsed_;
+        applyNavigationMode();
+        return;
+    }
+
+    activeNavigationTabId_ = tabId;
+    navigationPanelCollapsed_ = false;
+    applyNavigationMode();
+    if (navigationTabChangedHandler_) {
+        navigationTabChangedHandler_(tabId);
+    }
 }
 
 void WorkspaceShell::setReviewPanel(QWidget* panel) {

@@ -133,6 +133,8 @@ ScenarioAuthoringWidget::ScenarioState scenarioStateFromSaved(
         uiPlacement.area = placement.area.outline;
         uiPlacement.occupantCount = static_cast<int>(placement.targetAgentCount);
         uiPlacement.velocity = placement.initialVelocity;
+        uiPlacement.distribution = placement.distribution;
+        uiPlacement.generatedPositions = placement.explicitPositions;
         state.crowdPlacements.push_back(std::move(uiPlacement));
     }
 

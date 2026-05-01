@@ -2,7 +2,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <functional>
 #include <optional>
+#include <random>
 
 #include <QCoreApplication>
 #include <QComboBox>
@@ -34,9 +37,17 @@ constexpr double kViewportPadding = 24.0;
 constexpr double kDefaultInitialSpeed = 1.2;
 constexpr double kOccupantMarkerRadius = 5.0;
 constexpr double kOccupantWorldRadius = 0.25;
+constexpr double kOccupantMinSpacing = kOccupantWorldRadius * 2.0;
 constexpr double kVelocityIndicatorSeconds = 0.75;
 constexpr double kGeometryEpsilon = 1e-9;
 constexpr double kSelectionDragThresholdPixels = 4.0;
+
+struct PointBounds {
+    double minX{0.0};
+    double minY{0.0};
+    double maxX{0.0};
+    double maxY{0.0};
+};
 
 bool matchesFloor(const std::string& elementFloorId, const QString& floorId) {
     return floorId.isEmpty() || elementFloorId.empty() || QString::fromStdString(elementFloorId) == floorId;
@@ -68,45 +79,6 @@ bool pointInRing(const std::vector<safecrowd::domain::Point2D>& ring, const safe
         }
     }
     return inside;
-}
-
-double cross(
-    const safecrowd::domain::Point2D& a,
-    const safecrowd::domain::Point2D& b,
-    const safecrowd::domain::Point2D& c) {
-    return ((b.x - a.x) * (c.y - a.y)) - ((b.y - a.y) * (c.x - a.x));
-}
-
-bool pointOnSegment(
-    const safecrowd::domain::Point2D& point,
-    const safecrowd::domain::Point2D& start,
-    const safecrowd::domain::Point2D& end) {
-    return std::fabs(cross(start, end, point)) <= kGeometryEpsilon
-        && point.x >= std::min(start.x, end.x) - kGeometryEpsilon
-        && point.x <= std::max(start.x, end.x) + kGeometryEpsilon
-        && point.y >= std::min(start.y, end.y) - kGeometryEpsilon
-        && point.y <= std::max(start.y, end.y) + kGeometryEpsilon;
-}
-
-bool segmentsIntersect(
-    const safecrowd::domain::Point2D& firstStart,
-    const safecrowd::domain::Point2D& firstEnd,
-    const safecrowd::domain::Point2D& secondStart,
-    const safecrowd::domain::Point2D& secondEnd) {
-    const auto d1 = cross(firstStart, firstEnd, secondStart);
-    const auto d2 = cross(firstStart, firstEnd, secondEnd);
-    const auto d3 = cross(secondStart, secondEnd, firstStart);
-    const auto d4 = cross(secondStart, secondEnd, firstEnd);
-
-    if (((d1 > 0.0 && d2 < 0.0) || (d1 < 0.0 && d2 > 0.0))
-        && ((d3 > 0.0 && d4 < 0.0) || (d3 < 0.0 && d4 > 0.0))) {
-        return true;
-    }
-
-    return pointOnSegment(secondStart, firstStart, firstEnd)
-        || pointOnSegment(secondEnd, firstStart, firstEnd)
-        || pointOnSegment(firstStart, secondStart, secondEnd)
-        || pointOnSegment(firstEnd, secondStart, secondEnd);
 }
 
 double distancePointToSegment(
@@ -157,21 +129,182 @@ safecrowd::domain::Point2D placementCenter(const std::vector<safecrowd::domain::
     return {.x = x / count, .y = y / count};
 }
 
+PointBounds boundsOfPoints(const std::vector<safecrowd::domain::Point2D>& points) {
+    PointBounds bounds;
+    if (points.empty()) {
+        return bounds;
+    }
+
+    bounds.minX = points.front().x;
+    bounds.maxX = points.front().x;
+    bounds.minY = points.front().y;
+    bounds.maxY = points.front().y;
+    for (const auto& point : points) {
+        bounds.minX = std::min(bounds.minX, point.x);
+        bounds.maxX = std::max(bounds.maxX, point.x);
+        bounds.minY = std::min(bounds.minY, point.y);
+        bounds.maxY = std::max(bounds.maxY, point.y);
+    }
+    return bounds;
+}
+
+bool pointInsidePlacementArea(
+    const std::vector<safecrowd::domain::Point2D>& area,
+    const safecrowd::domain::Point2D& point) {
+    return area.size() < 3 || pointInRing(area, point) || std::any_of(area.begin(), area.end(), [&](const auto& vertex) {
+        return std::hypot(vertex.x - point.x, vertex.y - point.y) <= kGeometryEpsilon;
+    });
+}
+
+bool overlapsExistingPoint(
+    const safecrowd::domain::Point2D& point,
+    const std::vector<safecrowd::domain::Point2D>& points) {
+    return std::any_of(points.begin(), points.end(), [&](const auto& existing) {
+        return std::hypot(existing.x - point.x, existing.y - point.y) < kOccupantMinSpacing;
+    });
+}
+
+std::uint32_t placementSeed(
+    const QString& id,
+    const std::vector<safecrowd::domain::Point2D>& area,
+    int occupantCount) {
+    std::uint64_t seed = static_cast<std::uint64_t>(std::hash<std::string>{}(id.toStdString()));
+    seed ^= static_cast<std::uint64_t>(occupantCount + 0x9e3779b9) + (seed << 6) + (seed >> 2);
+    for (const auto& point : area) {
+        const auto x = static_cast<std::uint64_t>(std::llround(point.x * 1000.0));
+        const auto y = static_cast<std::uint64_t>(std::llround(point.y * 1000.0));
+        seed ^= x + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2);
+        seed ^= y + 0xbf58476d1ce4e5b9ULL + (seed << 6) + (seed >> 2);
+    }
+    return static_cast<std::uint32_t>(seed ^ (seed >> 32));
+}
+
+using PlacementBlockedPredicate = std::function<bool(const safecrowd::domain::Point2D&)>;
+
+bool appendGeneratedPoint(
+    const std::vector<safecrowd::domain::Point2D>& area,
+    const PlacementBlockedPredicate& blocked,
+    std::vector<safecrowd::domain::Point2D>& positions,
+    const safecrowd::domain::Point2D& point) {
+    if (!pointInsidePlacementArea(area, point) || blocked(point) || overlapsExistingPoint(point, positions)) {
+        return false;
+    }
+    positions.push_back(point);
+    return true;
+}
+
+std::vector<safecrowd::domain::Point2D> generateUniformPlacementPositions(
+    const std::vector<safecrowd::domain::Point2D>& area,
+    int occupantCount,
+    const PlacementBlockedPredicate& blocked) {
+    std::vector<safecrowd::domain::Point2D> positions;
+    if (occupantCount <= 0 || area.empty()) {
+        return positions;
+    }
+    positions.reserve(static_cast<std::size_t>(occupantCount));
+
+    if (occupantCount == 1) {
+        const auto center = placementCenter(area);
+        if (appendGeneratedPoint(area, blocked, positions, center)) {
+            return positions;
+        }
+    }
+
+    const auto bounds = boundsOfPoints(area);
+    const auto width = bounds.maxX - bounds.minX;
+    const auto height = bounds.maxY - bounds.minY;
+    if (width <= kGeometryEpsilon || height <= kGeometryEpsilon) {
+        return positions;
+    }
+
+    const auto idealSpacing = std::sqrt((width * height / std::max(1, occupantCount)) * (2.0 / std::sqrt(3.0)));
+    for (int attempt = 0; attempt < 32 && static_cast<int>(positions.size()) < occupantCount; ++attempt) {
+        positions.clear();
+        const auto spacing = std::max(kOccupantMinSpacing, idealSpacing * std::pow(0.92, attempt));
+        const auto rowSpacing = spacing * std::sqrt(3.0) / 2.0;
+        int row = 0;
+        for (double y = bounds.minY + kOccupantWorldRadius; y <= bounds.maxY - kOccupantWorldRadius + kGeometryEpsilon; y += rowSpacing, ++row) {
+            const auto stagger = (row % 2 == 0) ? 0.0 : spacing * 0.5;
+            for (double x = bounds.minX + kOccupantWorldRadius + stagger; x <= bounds.maxX - kOccupantWorldRadius + kGeometryEpsilon; x += spacing) {
+                appendGeneratedPoint(area, blocked, positions, {.x = x, .y = y});
+                if (static_cast<int>(positions.size()) >= occupantCount) {
+                    return positions;
+                }
+            }
+        }
+        if (spacing <= kOccupantMinSpacing + kGeometryEpsilon) {
+            break;
+        }
+    }
+
+    return positions;
+}
+
+std::vector<safecrowd::domain::Point2D> generateRandomPlacementPositions(
+    const QString& id,
+    const std::vector<safecrowd::domain::Point2D>& area,
+    int occupantCount,
+    const PlacementBlockedPredicate& blocked) {
+    std::vector<safecrowd::domain::Point2D> positions;
+    if (occupantCount <= 0 || area.empty()) {
+        return positions;
+    }
+    positions.reserve(static_cast<std::size_t>(occupantCount));
+
+    const auto bounds = boundsOfPoints(area);
+    if ((bounds.maxX - bounds.minX) <= kGeometryEpsilon || (bounds.maxY - bounds.minY) <= kGeometryEpsilon) {
+        return positions;
+    }
+    if ((bounds.maxX - bounds.minX) < kOccupantMinSpacing || (bounds.maxY - bounds.minY) < kOccupantMinSpacing) {
+        return positions;
+    }
+
+    std::mt19937 generator(placementSeed(id, area, occupantCount));
+    std::uniform_real_distribution<double> xDistribution(bounds.minX + kOccupantWorldRadius, bounds.maxX - kOccupantWorldRadius);
+    std::uniform_real_distribution<double> yDistribution(bounds.minY + kOccupantWorldRadius, bounds.maxY - kOccupantWorldRadius);
+    const auto maxAttempts = std::clamp(occupantCount * 800, 5000, 300000);
+    for (int attempt = 0; attempt < maxAttempts && static_cast<int>(positions.size()) < occupantCount; ++attempt) {
+        appendGeneratedPoint(
+            area,
+            blocked,
+            positions,
+            {.x = xDistribution(generator), .y = yDistribution(generator)});
+    }
+
+    return positions;
+}
+
+std::vector<safecrowd::domain::Point2D> fallbackDisplayPositions(const ScenarioCrowdPlacement& placement) {
+    if (!placement.generatedPositions.empty()) {
+        return placement.generatedPositions;
+    }
+    if (placement.kind == ScenarioCrowdPlacementKind::Individual || placement.area.size() < 4) {
+        return placement.area.empty() ? std::vector<safecrowd::domain::Point2D>{} : std::vector{safecrowd::domain::Point2D{placement.area.front()}};
+    }
+
+    std::vector<safecrowd::domain::Point2D> positions;
+    const int markerCount = std::min(20, std::max(1, placement.occupantCount));
+    const int columns = std::max(1, static_cast<int>(std::ceil(std::sqrt(markerCount))));
+    positions.reserve(static_cast<std::size_t>(markerCount));
+    for (int index = 0; index < markerCount; ++index) {
+        const int row = index / columns;
+        const int column = index % columns;
+        positions.push_back({
+            .x = placement.area[0].x + (column + 0.5) * (placement.area[2].x - placement.area[0].x) / columns,
+            .y = placement.area[0].y + (row + 0.5) * (placement.area[2].y - placement.area[0].y) / columns,
+        });
+    }
+    return positions;
+}
+
 QRectF groupMarkerBounds(const ScenarioCrowdPlacement& placement, const LayoutCanvasTransform& transform) {
-    if (placement.area.size() < 4) {
+    const auto positions = fallbackDisplayPositions(placement);
+    if (positions.empty()) {
         return {};
     }
 
     QRectF bounds;
-    const int markerCount = std::min(20, std::max(1, placement.occupantCount));
-    const int columns = std::max(1, static_cast<int>(std::ceil(std::sqrt(markerCount))));
-    for (int index = 0; index < markerCount; ++index) {
-        const int row = index / columns;
-        const int column = index % columns;
-        const safecrowd::domain::Point2D worldPoint{
-            .x = placement.area[0].x + (column + 0.5) * (placement.area[2].x - placement.area[0].x) / columns,
-            .y = placement.area[0].y + (row + 0.5) * (placement.area[2].y - placement.area[0].y) / columns,
-        };
+    for (const auto& worldPoint : positions) {
         const auto point = transform.map(worldPoint);
         const QRectF markerBounds(
             point - QPointF(kOccupantMarkerRadius, kOccupantMarkerRadius),
@@ -722,22 +855,9 @@ void ScenarioCanvasWidget::paintEvent(QPaintEvent* event) {
 
         if (placement.area.size() >= 4) {
             painter.setBrush(QColor("#1f5fae"));
-            const int markerCount = std::min(20, std::max(1, placement.occupantCount));
-            const QRectF rect(
-                transform.map(placement.area[0]),
-                transform.map(placement.area[2]));
             painter.setPen(QPen(QColor("#0f4c8f"), 1.2, Qt::SolidLine, Qt::RoundCap));
-            for (int index = 0; index < markerCount; ++index) {
-                const int columns = std::max(1, static_cast<int>(std::ceil(std::sqrt(markerCount))));
-                const int row = index / columns;
-                const int column = index % columns;
-                const QPointF point(
-                    rect.normalized().left() + (column + 0.5) * rect.normalized().width() / columns,
-                    rect.normalized().top() + (row + 0.5) * rect.normalized().height() / columns);
-                const safecrowd::domain::Point2D worldPoint{
-                    .x = placement.area[0].x + (column + 0.5) * (placement.area[2].x - placement.area[0].x) / columns,
-                    .y = placement.area[0].y + (row + 0.5) * (placement.area[2].y - placement.area[0].y) / columns,
-                };
+            for (const auto& worldPoint : fallbackDisplayPositions(placement)) {
+                const auto point = transform.map(worldPoint);
                 const auto tip = transform.map({
                     .x = worldPoint.x + (placement.velocity.x * kVelocityIndicatorSeconds),
                     .y = worldPoint.y + (placement.velocity.y * kVelocityIndicatorSeconds),
@@ -1026,15 +1146,9 @@ QString ScenarioCanvasWidget::placementAt(const QPointF& position, const LayoutC
             continue;
         }
 
-        const int markerCount = std::min(20, std::max(1, placement.occupantCount));
-        const int columns = std::max(1, static_cast<int>(std::ceil(std::sqrt(markerCount))));
-        for (int index = 0; index < markerCount; ++index) {
-            const int row = index / columns;
-            const int column = index % columns;
-            const safecrowd::domain::Point2D worldPoint{
-                .x = placement.area[0].x + (column + 0.5) * (placement.area[2].x - placement.area[0].x) / columns,
-                .y = placement.area[0].y + (row + 0.5) * (placement.area[2].y - placement.area[0].y) / columns,
-            };
+        const auto markers = fallbackDisplayPositions(placement);
+        for (int index = 0; index < static_cast<int>(markers.size()); ++index) {
+            const auto& worldPoint = markers[static_cast<std::size_t>(index)];
             if (QLineF(position, transform.map(worldPoint)).length() <= kPickRadius) {
                 return QString("%1/occupant-%2").arg(placement.id).arg(index + 1);
             }
@@ -1078,69 +1192,8 @@ bool ScenarioCanvasWidget::placementPointBlocked(const safecrowd::domain::Point2
 bool ScenarioCanvasWidget::placementAreaBlocked(
     const std::vector<safecrowd::domain::Point2D>& area,
     int occupantCount) const {
-    if (area.empty()) {
-        return true;
-    }
-
-    for (const auto& point : area) {
-        if (placementPointBlocked(point)) {
-            return true;
-        }
-    }
-
-    if (area.size() >= 4) {
-        for (const auto& barrier : layout_.barriers) {
-            if (!matchesFloor(barrier.floorId, currentFloorId_)) {
-                continue;
-            }
-            if (!barrier.blocksMovement || barrier.geometry.vertices.size() < 2) {
-                continue;
-            }
-
-            const auto& vertices = barrier.geometry.vertices;
-            const auto barrierSegmentCount = vertices.size() - 1 + (barrier.geometry.closed ? 1 : 0);
-            for (std::size_t areaIndex = 0; areaIndex < area.size(); ++areaIndex) {
-                const auto& areaStart = area[areaIndex];
-                const auto& areaEnd = area[(areaIndex + 1) % area.size()];
-                for (std::size_t barrierIndex = 0; barrierIndex < barrierSegmentCount; ++barrierIndex) {
-                    const auto& barrierStart = vertices[barrierIndex];
-                    const auto& barrierEnd = vertices[(barrierIndex + 1) % vertices.size()];
-                    if (segmentsIntersect(areaStart, areaEnd, barrierStart, barrierEnd)) {
-                        return true;
-                    }
-                }
-            }
-
-            if (barrier.geometry.closed) {
-                for (const auto& point : area) {
-                    if (pointInRing(vertices, point)) {
-                        return true;
-                    }
-                }
-                for (const auto& vertex : vertices) {
-                    if (pointInRing(area, vertex)) {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        const int markerCount = std::min(20, std::max(1, occupantCount));
-        const int columns = std::max(1, static_cast<int>(std::ceil(std::sqrt(markerCount))));
-        for (int index = 0; index < markerCount; ++index) {
-            const int row = index / columns;
-            const int column = index % columns;
-            const safecrowd::domain::Point2D marker{
-                .x = area[0].x + (column + 0.5) * (area[2].x - area[0].x) / columns,
-                .y = area[0].y + (row + 0.5) * (area[2].y - area[0].y) / columns,
-            };
-            if (placementPointBlocked(marker)) {
-                return true;
-            }
-        }
-    }
-
-    return false;
+    (void)occupantCount;
+    return area.empty();
 }
 
 safecrowd::domain::Point2D ScenarioCanvasWidget::defaultVelocityFrom(const safecrowd::domain::Point2D& point) const {
@@ -1201,6 +1254,36 @@ void ScenarioCanvasWidget::addGroupPlacement(const QPointF& start, const QPointF
     if (placementAreaBlocked(area, count)) {
         return;
     }
+    const auto distribution = groupDistributionComboBox_ == nullptr
+        ? safecrowd::domain::InitialPlacementDistribution::Uniform
+        : static_cast<safecrowd::domain::InitialPlacementDistribution>(groupDistributionComboBox_->currentData().toInt());
+
+    const auto pointOccupiedByExistingPlacement = [this](const safecrowd::domain::Point2D& point) {
+        for (const auto& placement : placements_) {
+            if (!currentFloorId_.isEmpty() && !placement.floorId.isEmpty() && placement.floorId != currentFloorId_) {
+                continue;
+            }
+            for (const auto& existing : fallbackDisplayPositions(placement)) {
+                if (std::hypot(existing.x - point.x, existing.y - point.y) < kOccupantMinSpacing) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+    const auto blocked = [this, zoneId, &pointOccupiedByExistingPlacement](const safecrowd::domain::Point2D& point) {
+        return zoneAt(point) != zoneId || placementPointBlocked(point) || pointOccupiedByExistingPlacement(point);
+    };
+    const auto generatedPositions = distribution == safecrowd::domain::InitialPlacementDistribution::Random
+        ? generateRandomPlacementPositions(id, area, count, blocked)
+        : generateUniformPlacementPositions(area, count, blocked);
+    if (static_cast<int>(generatedPositions.size()) < count) {
+        QMessageBox::warning(
+            this,
+            "Cannot place occupant group",
+            "The selected region is too small or blocked for the requested occupant count.");
+        return;
+    }
 
     placements_.push_back({
         .id = id,
@@ -1211,6 +1294,8 @@ void ScenarioCanvasWidget::addGroupPlacement(const QPointF& start, const QPointF
         .area = area,
         .occupantCount = count,
         .velocity = defaultVelocityFrom(placementCenter(area)),
+        .distribution = distribution,
+        .generatedPositions = generatedPositions,
     });
     focusedPlacementId_ = id;
     selectedPlacementIds_ = QStringList{id};
@@ -1471,6 +1556,12 @@ void ScenarioCanvasWidget::setToolMode(ToolMode mode) {
     if (groupCountSpinBox_ != nullptr) {
         groupCountSpinBox_->setVisible(mode == ToolMode::GroupPlacement);
     }
+    if (groupDistributionLabel_ != nullptr) {
+        groupDistributionLabel_->setVisible(mode == ToolMode::GroupPlacement);
+    }
+    if (groupDistributionComboBox_ != nullptr) {
+        groupDistributionComboBox_->setVisible(mode == ToolMode::GroupPlacement);
+    }
 }
 
 void ScenarioCanvasWidget::setupToolbars() {
@@ -1489,7 +1580,7 @@ void ScenarioCanvasWidget::setupToolbars() {
     propertyPanel_ = new QFrame(this);
     propertyPanel_->setStyleSheet(
         "QFrame { background: rgba(255, 255, 255, 245); border: 1px solid #d7e0ea; border-radius: 0px; }"
-        "QSpinBox { min-height: 24px; padding: 0 8px; border: 1px solid #c9d5e2; border-radius: 0px; background: #ffffff; color: #16202b; }");
+        "QSpinBox, QComboBox { min-height: 24px; padding: 0 8px; border: 1px solid #c9d5e2; border-radius: 0px; background: #ffffff; color: #16202b; }");
     auto* propertyLayout = new QHBoxLayout(propertyPanel_);
     propertyLayout->setContentsMargins(12, 0, 16, 0);
     propertyLayout->setSpacing(12);
@@ -1520,6 +1611,13 @@ void ScenarioCanvasWidget::setupToolbars() {
     groupCountSpinBox_->setValue(25);
     groupCountSpinBox_->setSuffix(" people");
     propertyLayout->addWidget(groupCountSpinBox_);
+    groupDistributionLabel_ = new QLabel("Placement", propertyPanel_);
+    groupDistributionLabel_->setStyleSheet("QLabel { color: #4f5d6b; background: transparent; border: 0; }");
+    propertyLayout->addWidget(groupDistributionLabel_);
+    groupDistributionComboBox_ = new QComboBox(propertyPanel_);
+    groupDistributionComboBox_->addItem("Uniform", static_cast<int>(safecrowd::domain::InitialPlacementDistribution::Uniform));
+    groupDistributionComboBox_->addItem("Random", static_cast<int>(safecrowd::domain::InitialPlacementDistribution::Random));
+    propertyLayout->addWidget(groupDistributionComboBox_);
     propertyLayout->addStretch(1);
 
     connect(selectToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::Select); });
