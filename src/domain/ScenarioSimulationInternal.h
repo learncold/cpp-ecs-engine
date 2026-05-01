@@ -27,6 +27,9 @@ inline constexpr double kArrivalEpsilon = 0.05;
 inline constexpr double kPersonalSpaceBuffer = 0.08;
 inline constexpr double kAvoidanceLateralStrength = 0.65;
 inline constexpr double kAvoidanceSlowdownStrength = 0.7;
+inline constexpr double kAvoidanceSideLockSeconds = 0.55;
+inline constexpr double kHeadOnLookAheadDistance = 1.2;
+inline constexpr double kHeadOnDirectionDotThreshold = -0.6;
 inline constexpr double kBarrierAvoidanceBuffer = 0.18;
 inline constexpr double kBarrierAvoidanceStrength = 1.1;
 inline constexpr int kOverlapRelaxationIterations = 4;
@@ -35,6 +38,8 @@ inline constexpr double kPathClearance = 0.08;
 inline constexpr double kCandidateClearance = kDefaultAgentRadius + kBarrierAvoidanceBuffer;
 inline constexpr double kWaypointCrossingEpsilon = 0.08;
 inline constexpr double kWaypointProgressEpsilon = 0.02;
+inline constexpr double kWaypointBypassLongitudinalTolerance = 0.5;
+inline constexpr double kWaypointBypassLateralTolerance = 0.65;
 inline constexpr double kWaypointStallSeconds = 0.75;
 inline constexpr double kPortalCrossingEpsilon = 0.02;
 inline constexpr double kRouteReplanCooldownSeconds = 0.35;
@@ -143,6 +148,7 @@ Point2D forwardPreservingAgentAvoidanceVelocity(
     engine::Entity entity,
     const std::vector<engine::Entity>& candidates,
     const Point2D& desiredVelocity,
+    double deltaSeconds,
     double& speedScale);
 Point2D barrierSeparationVelocity(const FacilityLayout2D& layout, const Position& position, const Agent& agent);
 bool movementCrossesBarrier(const FacilityLayout2D& layout, const Point2D& from, const Point2D& to);

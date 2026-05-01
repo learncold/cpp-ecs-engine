@@ -719,7 +719,7 @@ double speedOf(const Point2D& velocity) {
 }
 
 std::vector<engine::Entity> simulationEntities(engine::WorldQuery& query) {
-    return query.view<Position, Agent, Velocity, EvacuationRoute, EvacuationStatus>();
+    return query.view<Position, Agent, Velocity, AvoidanceState, EvacuationRoute, EvacuationStatus>();
 }
 
 AgentSpatialIndex buildAgentSpatialIndex(
@@ -771,24 +771,41 @@ Point2D deterministicFallbackDirection(engine::Entity entity) {
     return normalizedOr({.x = std::cos(seed * 1.37), .y = std::sin(seed * 1.37)}, {.x = 1.0, .y = 0.0});
 }
 
+int deterministicPairSide(engine::Entity first, engine::Entity second) {
+    const auto minIndex = std::min(first.index, second.index);
+    const auto maxIndex = std::max(first.index, second.index);
+    return ((minIndex + maxIndex) % 2U) == 0U ? -1 : 1;
+}
+
 Point2D forwardPreservingAgentAvoidanceVelocity(
     engine::WorldQuery& query,
     engine::Entity entity,
     const std::vector<engine::Entity>& candidates,
     const Point2D& desiredVelocity,
+    double deltaSeconds,
     double& speedScale) {
     const auto& position = query.get<Position>(entity);
     const auto& agent = query.get<Agent>(entity);
+    const auto& route = query.get<EvacuationRoute>(entity);
+    auto& avoidance = query.get<AvoidanceState>(entity);
     const auto desiredSpeed = lengthOf(desiredVelocity);
     if (desiredSpeed <= 1e-9) {
         speedScale = 1.0;
         return {};
     }
 
+    if (avoidance.sideLockSeconds > 0.0) {
+        avoidance.sideLockSeconds = std::max(0.0, avoidance.sideLockSeconds - std::max(0.0, deltaSeconds));
+        if (avoidance.sideLockSeconds <= 0.0) {
+            avoidance.preferredSide = 0;
+        }
+    }
+
     const auto forward = desiredVelocity * (1.0 / desiredSpeed);
     const auto lateral = perpendicularLeft(forward);
     Point2D lateralCorrection{};
     speedScale = 1.0;
+    bool lockedSideThisFrame = false;
 
     for (const auto other : candidates) {
         if (other == entity) {
@@ -803,25 +820,70 @@ Point2D forwardPreservingAgentAvoidanceVelocity(
         const auto offsetToOther = otherPosition.value - position.value;
         const auto distance = lengthOf(offsetToOther);
         const auto desiredDistance = static_cast<double>(agent.radius + otherAgent.radius) + kPersonalSpaceBuffer;
-        if (distance >= desiredDistance) {
+        const auto forwardDistance = dot(offsetToOther, forward);
+        const auto lateralDistance = dot(offsetToOther, lateral);
+
+        bool headOn = false;
+        if (route.nextWaypointIndex < route.waypoints.size() && distance <= kHeadOnLookAheadDistance) {
+            const auto& otherRoute = query.get<EvacuationRoute>(other);
+            if (otherRoute.currentFloorId == route.currentFloorId
+                && otherRoute.nextWaypointIndex < otherRoute.waypoints.size()) {
+                const auto otherTarget = routeWaypointTarget(otherRoute, otherPosition.value);
+                const auto otherTargetDistance = distanceBetween(otherPosition.value, otherTarget);
+                if (otherTargetDistance > kArrivalEpsilon) {
+                    const auto otherForward = (otherTarget - otherPosition.value) * (1.0 / otherTargetDistance);
+                    const auto otherForwardDistance = dot(position.value - otherPosition.value, otherForward);
+                    headOn = dot(forward, otherForward) <= kHeadOnDirectionDotThreshold
+                        && forwardDistance > 0.0
+                        && otherForwardDistance > 0.0;
+                }
+            }
+        }
+
+        if (distance >= desiredDistance && !headOn) {
             continue;
         }
 
-        const auto forwardDistance = dot(offsetToOther, forward);
-        const auto lateralDistance = dot(offsetToOther, lateral);
-        const auto pressure = (desiredDistance - distance) / desiredDistance;
+        const auto pressure = headOn
+            ? std::clamp((kHeadOnLookAheadDistance - distance) / kHeadOnLookAheadDistance, 0.15, 1.0)
+            : (desiredDistance - distance) / desiredDistance;
 
-        if (forwardDistance > -desiredDistance && forwardDistance < desiredDistance * 1.6) {
+        if (forwardDistance > -desiredDistance && forwardDistance < kHeadOnLookAheadDistance) {
             speedScale = std::min(speedScale, std::max(0.2, 1.0 - (pressure * kAvoidanceSlowdownStrength)));
         }
 
         double side = 0.0;
-        if (std::fabs(lateralDistance) > 1e-6) {
+        if (avoidance.preferredSide != 0 && avoidance.sideLockSeconds > 0.0) {
+            side = static_cast<double>(avoidance.preferredSide);
+        } else if (headOn) {
+            side = static_cast<double>(deterministicPairSide(entity, other));
+        } else if (std::fabs(lateralDistance) > 1e-6) {
             side = lateralDistance < 0.0 ? 1.0 : -1.0;
         } else {
             side = entity.index < other.index ? -1.0 : 1.0;
         }
-        lateralCorrection = lateralCorrection + (lateral * (side * pressure * kAvoidanceLateralStrength * static_cast<double>(agent.maxSpeed)));
+
+        if (headOn) {
+            avoidance.preferredSide = side < 0.0 ? -1 : 1;
+            avoidance.sideLockSeconds = kAvoidanceSideLockSeconds;
+            lockedSideThisFrame = true;
+            const bool shouldYield = entity.index > other.index;
+            speedScale = std::min(
+                speedScale,
+                shouldYield
+                    ? std::max(0.18, 1.0 - (pressure * 1.05))
+                    : std::max(0.55, 1.0 - (pressure * 0.35)));
+            const auto sideStepMultiplier = shouldYield ? 1.35 : 0.85;
+            lateralCorrection = lateralCorrection + (lateral * (
+                side * pressure * sideStepMultiplier * kAvoidanceLateralStrength * static_cast<double>(agent.maxSpeed)));
+        } else {
+            lateralCorrection = lateralCorrection + (lateral * (
+                side * pressure * kAvoidanceLateralStrength * static_cast<double>(agent.maxSpeed)));
+        }
+    }
+
+    if (!lockedSideThisFrame && avoidance.sideLockSeconds <= 0.0) {
+        avoidance.preferredSide = 0;
     }
 
     return clampedToLength(lateralCorrection, static_cast<double>(agent.maxSpeed) * 0.45);

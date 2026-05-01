@@ -231,6 +231,136 @@ SC_TEST(ScenarioSimulationMotionSystem_AdvancesAgentsFromStepResource) {
     SC_EXPECT_NEAR(frame.agents.front().velocity.x, 1.0, 1e-9);
 }
 
+SC_TEST(ScenarioSimulationMotionSystem_SkipsIntermediateWaypointWhenCrowdPushesAgentPastApproachArea) {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    seeds.push_back({
+        .position = {.value = {.x = 0.82, .y = 0.45}},
+        .agent = {.radius = 0.25f, .maxSpeed = 1.0f},
+        .velocity = {.value = {}},
+        .route = {
+            .waypoints = {{.x = 1.0, .y = 0.0}, {.x = 2.0, .y = 0.0}},
+            .waypointPassages = {
+                {{.x = 1.0, .y = 0.0}, {.x = 1.0, .y = 0.0}},
+                {{.x = 2.0, .y = 0.0}, {.x = 2.0, .y = 0.0}},
+            },
+            .waypointFromZoneIds = {"", ""},
+            .waypointZoneIds = {"", "missing"},
+            .nextWaypointIndex = 0,
+            .currentSegmentStart = {.x = 0.0, .y = 0.0},
+            .previousDistanceToWaypoint = 0.5,
+            .destinationZoneId = "missing",
+        },
+        .status = {},
+    });
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 14,
+    });
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    runtime.addSystem(
+        std::make_unique<safecrowd::domain::ScenarioSpatialIndexSystem>(1.0),
+        {.phase = safecrowd::engine::UpdatePhase::PreSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioSimulationMotionSystem({}),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.1});
+    runtime.stepFrame(0.0);
+
+    const auto entities = runtime.world().query().view<
+        safecrowd::domain::Position,
+        safecrowd::domain::Velocity,
+        safecrowd::domain::AvoidanceState,
+        safecrowd::domain::EvacuationRoute>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{1});
+    const auto entity = entities.front();
+    const auto& route = runtime.world().query().get<safecrowd::domain::EvacuationRoute>(entity);
+    const auto& velocity = runtime.world().query().get<safecrowd::domain::Velocity>(entity);
+
+    SC_EXPECT_EQ(route.nextWaypointIndex, std::size_t{1});
+    SC_EXPECT_TRUE(velocity.value.x > 0.0);
+}
+
+SC_TEST(ScenarioSimulationMotionSystem_UsesStableHeadOnAvoidance) {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    seeds.push_back({
+        .position = {.value = {.x = -0.4, .y = 0.0}},
+        .agent = {.radius = 0.25f, .maxSpeed = 1.0f},
+        .velocity = {.value = {}},
+        .route = {
+            .waypoints = {{.x = 1.0, .y = 0.0}},
+            .waypointPassages = {{{.x = 1.0, .y = 0.0}, {.x = 1.0, .y = 0.0}}},
+            .waypointFromZoneIds = {""},
+            .waypointZoneIds = {"missing"},
+            .nextWaypointIndex = 0,
+            .currentSegmentStart = {.x = -0.4, .y = 0.0},
+            .previousDistanceToWaypoint = 1.4,
+            .destinationZoneId = "missing",
+        },
+        .status = {},
+    });
+    seeds.push_back({
+        .position = {.value = {.x = 0.4, .y = 0.0}},
+        .agent = {.radius = 0.25f, .maxSpeed = 1.0f},
+        .velocity = {.value = {}},
+        .route = {
+            .waypoints = {{.x = -1.0, .y = 0.0}},
+            .waypointPassages = {{{.x = -1.0, .y = 0.0}, {.x = -1.0, .y = 0.0}}},
+            .waypointFromZoneIds = {""},
+            .waypointZoneIds = {"missing"},
+            .nextWaypointIndex = 0,
+            .currentSegmentStart = {.x = 0.4, .y = 0.0},
+            .previousDistanceToWaypoint = 1.4,
+            .destinationZoneId = "missing",
+        },
+        .status = {},
+    });
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 17,
+    });
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    runtime.addSystem(
+        std::make_unique<safecrowd::domain::ScenarioSpatialIndexSystem>(1.0),
+        {.phase = safecrowd::engine::UpdatePhase::PreSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioSimulationMotionSystem({}),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.2});
+    runtime.stepFrame(0.0);
+
+    const auto entities = runtime.world().query().view<
+        safecrowd::domain::Position,
+        safecrowd::domain::Velocity,
+        safecrowd::domain::AvoidanceState,
+        safecrowd::domain::EvacuationRoute>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{2});
+
+    const auto first = entities[0];
+    const auto second = entities[1];
+    const auto& firstVelocity = runtime.world().query().get<safecrowd::domain::Velocity>(first);
+    const auto& secondVelocity = runtime.world().query().get<safecrowd::domain::Velocity>(second);
+    const auto& firstAvoidance = runtime.world().query().get<safecrowd::domain::AvoidanceState>(first);
+    const auto& secondAvoidance = runtime.world().query().get<safecrowd::domain::AvoidanceState>(second);
+
+    SC_EXPECT_TRUE(firstVelocity.value.x > 0.0);
+    SC_EXPECT_TRUE(secondVelocity.value.x < 0.0);
+    SC_EXPECT_TRUE(firstVelocity.value.y * secondVelocity.value.y < 0.0);
+    SC_EXPECT_TRUE(firstAvoidance.preferredSide != 0);
+    SC_EXPECT_EQ(firstAvoidance.preferredSide, secondAvoidance.preferredSide);
+}
+
 SC_TEST(ScenarioControlSystem_BlocksConnectionsUsingScenarioClock) {
     auto layout = straightExitLayout();
     safecrowd::domain::ConnectionBlockDraft block;

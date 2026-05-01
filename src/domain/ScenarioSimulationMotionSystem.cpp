@@ -3,6 +3,7 @@
 #include "domain/ScenarioSimulationInternal.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -103,18 +104,33 @@ public:
             const auto maxSpeed = effectiveMaxSpeed(layoutCache, agent, route, position.value);
             const auto desiredVelocity = routeDirection * maxSpeed;
             double speedScale = 1.0;
-            const auto neighborRadius = static_cast<double>(agent.radius) + kDefaultAgentRadius + kPersonalSpaceBuffer;
+            const auto neighborRadius = std::max(
+                static_cast<double>(agent.radius) + kDefaultAgentRadius + kPersonalSpaceBuffer,
+                kHeadOnLookAheadDistance);
             const auto neighborCandidates = resources.contains<ScenarioAgentSpatialIndexResource>()
                 ? scenarioNearbyAgents(query, resources.get<ScenarioAgentSpatialIndexResource>(), position.value, neighborRadius)
                 : nearbyAgents(query, localNeighborIndex, position.value, neighborRadius);
             const auto avoidanceVelocity =
-                forwardPreservingAgentAvoidanceVelocity(query, entity, neighborCandidates, desiredVelocity, speedScale);
+                forwardPreservingAgentAvoidanceVelocity(
+                    query,
+                    entity,
+                    neighborCandidates,
+                    desiredVelocity,
+                    clampedDelta,
+                    speedScale);
             const auto barrierVelocity = barrierSeparationVelocity(floorLayout, position, agent);
             auto finalVelocity = (desiredVelocity * speedScale) + avoidanceVelocity + barrierVelocity;
+            const auto lateral = perpendicularLeft(routeDirection);
             if (dot(finalVelocity, routeDirection) < 0.0) {
-                const auto lateral = perpendicularLeft(routeDirection);
                 finalVelocity = (routeDirection * (static_cast<double>(agent.maxSpeed) * 0.15))
                     + (lateral * dot(finalVelocity, lateral));
+            }
+            const auto forwardComponent = dot(finalVelocity, routeDirection);
+            const auto lateralComponent = dot(finalVelocity, lateral);
+            const auto maxLateralComponent = maxSpeed * 0.55;
+            if (std::fabs(lateralComponent) > maxLateralComponent) {
+                finalVelocity = (routeDirection * std::max(0.0, forwardComponent))
+                    + (lateral * std::clamp(lateralComponent, -maxLateralComponent, maxLateralComponent));
             }
             plans.push_back({
                 .entity = entity,
@@ -299,6 +315,51 @@ private:
         route.nextSegmentReplanSeconds = 0.0;
     }
 
+    bool waypointHasTransition(const EvacuationRoute& route) const {
+        const auto index = route.nextWaypointIndex;
+        return (index < route.waypointFromZoneIds.size() && !route.waypointFromZoneIds[index].empty())
+            || (index < route.waypointZoneIds.size() && !route.waypointZoneIds[index].empty())
+            || (index < route.waypointFloorIds.size() && !route.waypointFloorIds[index].empty())
+            || (index < route.waypointConnectionIds.size() && !route.waypointConnectionIds[index].empty())
+            || (index < route.waypointVerticalTransitions.size() && route.waypointVerticalTransitions[index]);
+    }
+
+    bool shouldAdvanceByBypassingWaypoint(
+        const EvacuationRoute& route,
+        const Position& position,
+        const Agent& agent,
+        const Point2D& segment,
+        double segmentLengthSquared,
+        double projection) const {
+        if (waypointHasTransition(route) || route.nextWaypointIndex + 1 >= route.waypoints.size()) {
+            return false;
+        }
+        if (segmentLengthSquared <= 1e-9) {
+            return false;
+        }
+
+        const auto segmentLength = std::sqrt(segmentLengthSquared);
+        const auto remainingAlongSegment = (segmentLengthSquared - projection) / segmentLength;
+        if (remainingAlongSegment < -kWaypointCrossingEpsilon) {
+            return true;
+        }
+
+        const auto longitudinalTolerance = std::max(
+            kWaypointBypassLongitudinalTolerance,
+            static_cast<double>(agent.radius) * 2.0);
+        if (remainingAlongSegment > longitudinalTolerance) {
+            return false;
+        }
+
+        const auto progress = std::clamp(projection / segmentLengthSquared, 0.0, 1.0);
+        const auto closestOnSegment = route.currentSegmentStart + (segment * progress);
+        const auto lateralDistance = distanceBetween(position.value, closestOnSegment);
+        const auto lateralTolerance = std::max(
+            kWaypointBypassLateralTolerance,
+            static_cast<double>(agent.radius) * 2.5);
+        return lateralDistance <= lateralTolerance;
+    }
+
     void advanceRoutesForWaypointProgress(
         engine::WorldQuery& query,
         double deltaSeconds,
@@ -333,7 +394,17 @@ private:
                 if (segmentLengthSquared > 1e-9) {
                     const auto projection = dot(position.value - route.currentSegmentStart, segment);
                     if (projection >= segmentLengthSquared - kWaypointCrossingEpsilon) {
-                        advanceRouteWaypoint(route, target);
+                        advanceRouteWaypoint(route, position.value);
+                        continue;
+                    }
+                    if (shouldAdvanceByBypassingWaypoint(
+                            route,
+                            position,
+                            agent,
+                            segment,
+                            segmentLengthSquared,
+                            projection)) {
+                        advanceRouteWaypoint(route, position.value);
                         continue;
                     }
                 }
@@ -354,7 +425,7 @@ private:
                     && segmentLengthSquared > 1e-9) {
                     const auto projection = dot(position.value - route.currentSegmentStart, segment);
                     if (projection > segmentLengthSquared * 0.45) {
-                        advanceRouteWaypoint(route, target);
+                        advanceRouteWaypoint(route, position.value);
                         continue;
                     }
                 }
