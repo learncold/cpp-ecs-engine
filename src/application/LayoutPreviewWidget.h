@@ -74,21 +74,22 @@ private:
         Select,
         DrawRoom,
         DrawExit,
-        DrawWall,
+        DrawObstruction,
         DrawDoor,
         DrawStair,
     };
 
-    enum class RoomDrawMode {
+    enum class ShapeDrawMode {
         Rectangle,
         Polygon,
     };
 
     void applyToolAt(const QPointF& position);
     void clearSelection();
-    void createBarrier(const QPointF& startWorld, const QPointF& endWorld);
     void createConnection(const QPointF& startWorld, const QPointF& endWorld);
     void createDoorAt(const QString& barrierId, const QPointF& position);
+    void createObstructionPolygon(const std::vector<QPointF>& points);
+    void createObstructionRectangle(const QPointF& startWorld, const QPointF& endWorld);
     void createRoomPolygon(const std::vector<QPointF>& points);
     void createVerticalLink(const QPointF& startWorld, const QPointF& endWorld);
     void createZone(const QPointF& startWorld, const QPointF& endWorld, safecrowd::domain::ZoneKind kind);
@@ -96,7 +97,7 @@ private:
     void deleteBarrier(const QString& barrierId);
     void deleteSelectedElements();
     void emitCurrentSelection();
-    void finishRoomPolygonDraft();
+    void finishPolygonDraft();
     bool hasSelection() const;
     bool isSelected(PreviewSelectionKind kind, const QString& id) const;
     void pruneSelection();
@@ -137,12 +138,12 @@ private:
     QPointF draftCurrentWorld_{};
     QPointF selectionDragStart_{};
     QPointF selectionDragCurrent_{};
-    std::vector<QPointF> roomPolygonDraftPoints_{};
+    std::vector<QPointF> polygonDraftPoints_{};
     LayoutCanvasCamera camera_{};
     bool drafting_{false};
     bool selectionDragging_{false};
     ToolMode toolMode_{ToolMode::Select};
-    RoomDrawMode roomDrawMode_{RoomDrawMode::Rectangle};
+    ShapeDrawMode shapeDrawMode_{ShapeDrawMode::Rectangle};
     bool roomAutoWallsEnabled_{true};
     bool doorCreatesLeaf_{true};
     bool verticalLinkCreatesRamp_{false};
@@ -155,7 +156,7 @@ private:
     QFrame* propertyPanel_{nullptr};
     QFrame* sideToolbar_{nullptr};
     QCheckBox* roomAutoWallsCheckBox_{nullptr};
-    QComboBox* roomDrawModeComboBox_{nullptr};
+    QComboBox* shapeDrawModeComboBox_{nullptr};
     QDoubleSpinBox* doorWidthSpinBox_{nullptr};
     QCheckBox* doorLeafCheckBox_{nullptr};
     QComboBox* verticalTargetFloorComboBox_{nullptr};
@@ -168,7 +169,7 @@ private:
     QToolButton* selectToolButton_{nullptr};
     QToolButton* roomToolButton_{nullptr};
     QToolButton* exitToolButton_{nullptr};
-    QToolButton* wallToolButton_{nullptr};
+    QToolButton* obstructionToolButton_{nullptr};
     QToolButton* doorToolButton_{nullptr};
     QToolButton* stairToolButton_{nullptr};
     QToolButton* addFloorButton_{nullptr};

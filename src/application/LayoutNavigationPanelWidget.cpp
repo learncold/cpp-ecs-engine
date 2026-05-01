@@ -103,9 +103,44 @@ double distanceToPolygonBoundary(
     return best;
 }
 
-bool barrierTouchesZone(const safecrowd::domain::Barrier2D& barrier, const safecrowd::domain::Zone2D& zone) {
+bool pointInRing(
+    const std::vector<safecrowd::domain::Point2D>& ring,
+    const safecrowd::domain::Point2D& point) {
+    if (ring.size() < 3) {
+        return false;
+    }
+
+    bool inside = false;
+    for (std::size_t i = 0, j = ring.size() - 1; i < ring.size(); j = i++) {
+        const auto& a = ring[i];
+        const auto& b = ring[j];
+        const auto intersects = ((a.y > point.y) != (b.y > point.y))
+            && (point.x < ((b.x - a.x) * (point.y - a.y) / ((b.y - a.y) == 0.0 ? 1e-9 : (b.y - a.y)) + a.x));
+        if (intersects) {
+            inside = !inside;
+        }
+    }
+    return inside;
+}
+
+bool pointInPolygon(
+    const safecrowd::domain::Polygon2D& polygon,
+    const safecrowd::domain::Point2D& point) {
+    if (!pointInRing(polygon.outline, point)) {
+        return false;
+    }
+
+    for (const auto& hole : polygon.holes) {
+        if (pointInRing(hole, point)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool barrierBelongsToZone(const safecrowd::domain::Barrier2D& barrier, const safecrowd::domain::Zone2D& zone) {
     for (const auto& point : barrier.geometry.vertices) {
-        if (distanceToPolygonBoundary(zone.area, point) <= 0.08) {
+        if (pointInPolygon(zone.area, point) || distanceToPolygonBoundary(zone.area, point) <= 0.08) {
             return true;
         }
     }
@@ -126,13 +161,13 @@ std::vector<NavigationTreeNode> roomChildren(
     std::vector<NavigationTreeNode> children;
 
     for (const auto& barrier : layout.barriers) {
-        if (!matchesFloor(barrier.floorId, room.floorId) || !barrierTouchesZone(barrier, room)) {
+        if (!matchesFloor(barrier.floorId, room.floorId) || !barrierBelongsToZone(barrier, room)) {
             continue;
         }
         children.push_back({
-            .label = QString("Wall  -  %1").arg(barrierLabel(barrier)),
+            .label = QString("Obstruction  -  %1").arg(barrierLabel(barrier)),
             .id = QString::fromStdString(barrier.id),
-            .detail = QString("Wall: %1").arg(QString::fromStdString(barrier.id)),
+            .detail = QString("Obstruction: %1").arg(QString::fromStdString(barrier.id)),
         });
     }
 
