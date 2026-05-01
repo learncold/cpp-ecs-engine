@@ -185,7 +185,7 @@ ScenarioRunWidget::ScenarioRunWidget(
 
     shell_ = new WorkspaceShell(WorkspaceShellOptions{
         .showTopBar = true,
-        .navigationMode = WorkspaceNavigationMode::None,
+        .navigationMode = WorkspaceNavigationMode::RailOnly,
         .showReviewPanel = true,
         .reviewPanelWidth = 280,
     }, this);
@@ -229,7 +229,7 @@ QWidget* ScenarioRunWidget::createRunPanel() {
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(12);
 
-    layout->addWidget(shell_ != nullptr ? shell_->createPanelHeader("Run", panel) : createLabel("Run", panel, ui::FontRole::Title));
+    layout->addWidget(shell_ != nullptr ? shell_->createPanelHeader("Run", panel, false) : createLabel("Run", panel, ui::FontRole::Title));
     scenarioLabel_ = createLabel("", panel);
     scenarioLabel_->setStyleSheet(ui::mutedTextStyleSheet());
     statusLabel_ = createLabel("", panel);

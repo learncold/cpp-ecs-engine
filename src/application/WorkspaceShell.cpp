@@ -161,6 +161,7 @@ void WorkspaceShell::initialize(const WorkspaceShellOptions& options) {
     navigationRailLayout_ = new QVBoxLayout(navigationRail_);
     navigationRailLayout_->setContentsMargins(0, 0, 0, 0);
     navigationRailLayout_->setSpacing(0);
+    rebuildDefaultNavigationRail();
     leftClusterLayout->addWidget(navigationRail_);
 
     navigationPanel_ = createPanel(navigationCluster_);
@@ -209,6 +210,35 @@ void WorkspaceShell::setFixedWidthVisible(QWidget* widget, bool visible, int wid
     widget->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
 }
 
+QWidget* WorkspaceShell::createDefaultNavigationRail() {
+    auto* rail = new QFrame(navigationRail_);
+    rail->setFixedWidth(navigationRailWidth_);
+    rail->setStyleSheet(
+        "QFrame {"
+        " background: #eef3f8;"
+        " border: 0;"
+        " border-right: 1px solid #d7e0ea;"
+        " border-radius: 0px;"
+        "}"
+    );
+
+    auto* layout = new QVBoxLayout(rail);
+    layout->setContentsMargins(0, 0, 0, 12);
+    layout->setSpacing(0);
+    layout->addStretch(1);
+    if (backHandler_) {
+        layout->addWidget(createBackButton(rail), 0, Qt::AlignHCenter);
+    }
+    return rail;
+}
+
+void WorkspaceShell::rebuildDefaultNavigationRail() {
+    if (navigationRailLayout_ == nullptr || customNavigationRail_) {
+        return;
+    }
+    replaceSingleWidget(navigationRailLayout_, createDefaultNavigationRail());
+}
+
 void WorkspaceShell::setTools(const QStringList& tools) {
     tools_ = tools;
     rebuildTopBar();
@@ -216,6 +246,9 @@ void WorkspaceShell::setTools(const QStringList& tools) {
 
 void WorkspaceShell::setBackHandler(std::function<void()> handler) {
     backHandler_ = std::move(handler);
+    if (!customNavigationRail_) {
+        rebuildDefaultNavigationRail();
+    }
 }
 
 QPushButton* WorkspaceShell::createBackButton(QWidget* parent) const {
@@ -293,6 +326,7 @@ void WorkspaceShell::setOpenProjectHandler(std::function<void()> handler) {
 }
 
 void WorkspaceShell::setNavigationRail(QWidget* rail) {
+    customNavigationRail_ = true;
     replaceSingleWidget(navigationRailLayout_, rail);
 }
 
@@ -310,6 +344,7 @@ void WorkspaceShell::setNavigationMode(WorkspaceNavigationMode mode) {
     }
 
     const auto showRail = mode == WorkspaceNavigationMode::RailOnly
+        || mode == WorkspaceNavigationMode::PanelOnly
         || mode == WorkspaceNavigationMode::RailAndPanel;
     const auto showPanel = mode == WorkspaceNavigationMode::PanelOnly
         || mode == WorkspaceNavigationMode::RailAndPanel;

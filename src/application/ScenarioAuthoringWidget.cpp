@@ -9,6 +9,7 @@
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QPainter>
 #include <QPushButton>
 #include <QScrollArea>
@@ -82,6 +83,25 @@ QString blockScheduleSummary(const safecrowd::domain::ConnectionBlockDraft& bloc
         intervals << QString("%1s - %2s").arg(interval.startSeconds, 0, 'f', 1).arg(interval.endSeconds, 0, 'f', 1);
     }
     return intervals.join(", ");
+}
+
+int totalOccupantCount(const ScenarioAuthoringWidget::ScenarioState& scenario) {
+    int total = 0;
+    for (const auto& placement : scenario.crowdPlacements) {
+        total += std::max(0, placement.occupantCount);
+    }
+    if (total > 0 || !scenario.crowdPlacements.empty()) {
+        return total;
+    }
+
+    for (const auto& placement : scenario.draft.population.initialPlacements) {
+        total += static_cast<int>(placement.targetAgentCount);
+    }
+    return total;
+}
+
+bool scenarioHasOccupants(const ScenarioAuthoringWidget::ScenarioState& scenario) {
+    return totalOccupantCount(scenario) > 0;
 }
 
 const safecrowd::domain::Zone2D* firstStartZone(const safecrowd::domain::FacilityLayout2D& layout) {
@@ -163,7 +183,7 @@ QWidget* createNavigationRail(
         "QToolButton:checked { background: #ffffff; border-left-color: #1f5fae; }");
 
     auto* layout = new QVBoxLayout(activityBar);
-    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setContentsMargins(0, 0, 0, 12);
     layout->setSpacing(0);
 
     const auto makeActivityButton = [&](const QIcon& icon, const QString& tooltip, ScenarioAuthoringWidget::NavigationView view) {
@@ -385,6 +405,11 @@ ScenarioAuthoringWidget::ScenarioAuthoringWidget(
       currentScenarioIndex_(initialState.currentScenarioIndex),
       navigationView_(initialState.navigationView),
       rightPanelMode_(initialState.rightPanelMode) {
+    for (auto& scenario : scenarios_) {
+        if (!scenarioHasOccupants(scenario)) {
+            scenario.stagedForRun = false;
+        }
+    }
     rightPanelMode_ = RightPanelMode::Scenario;
     initializeUi(false);
 }
@@ -424,7 +449,7 @@ SavedScenarioAuthoringState ScenarioAuthoringWidget::currentSavedState() const {
         state.scenarios.push_back({
             .draft = std::move(draft),
             .baseScenarioId = scenario.baseScenarioId.toStdString(),
-            .stagedForRun = scenario.stagedForRun,
+            .stagedForRun = scenario.stagedForRun && scenarioHasOccupants(scenario),
         });
     }
     return state;
@@ -573,10 +598,7 @@ void ScenarioAuthoringWidget::refreshInspector() {
         if (!hasScenario) {
             scenarioSummaryLabel_->setText("No scenario selected");
         } else {
-            int people = 0;
-            for (const auto& placement : scenario->crowdPlacements) {
-                people += placement.occupantCount;
-            }
+            const int people = totalOccupantCount(*scenario);
             const auto blockCount = static_cast<int>(scenario->draft.control.connectionBlocks.size());
             scenarioSummaryLabel_->setText(QString("Name: %1\nRole: %2\nPopulation: %3\nStart: %4\nDestination: %5\nEvents: %6\nBlocked exits: %7")
                 .arg(
@@ -613,9 +635,13 @@ void ScenarioAuthoringWidget::refreshInspector() {
         newScenarioButton_->setText(hasScenario ? "New Scenario from Current" : "New Scenario");
     }
     if (stageScenarioButton_ != nullptr) {
-        stageScenarioButton_->setEnabled(hasScenario);
         const bool staged = hasScenario && scenario->stagedForRun;
+        const bool hasOccupants = hasScenario && scenarioHasOccupants(*scenario);
+        stageScenarioButton_->setEnabled(hasScenario && (staged || hasOccupants));
         stageScenarioButton_->setText(staged ? "Unstage" : "Stage Scenario");
+        stageScenarioButton_->setToolTip(hasScenario && !staged && !hasOccupants
+            ? "Add at least one occupant before staging this scenario."
+            : QString{});
         stageScenarioButton_->setStyleSheet(staged
             ? QString(
                 "QPushButton { background: #b42318; border: 1px solid #b42318; border-radius: 12px; color: white; font-weight: 600; padding: 10px 18px; }"
@@ -627,7 +653,7 @@ void ScenarioAuthoringWidget::refreshInspector() {
                 "QPushButton:disabled { background: #d7e0ea; border-color: #d7e0ea; color: #8a98a8; }"));
     }
     const auto stagedCount = std::count_if(scenarios_.begin(), scenarios_.end(), [](const auto& scenario) {
-        return scenario.stagedForRun;
+        return scenario.stagedForRun && scenarioHasOccupants(scenario);
     });
     if (stagedScenariosLabel_ != nullptr) {
         QStringList lines;
@@ -636,7 +662,7 @@ void ScenarioAuthoringWidget::refreshInspector() {
         } else {
             lines << "Staged scenarios";
             for (const auto& stagedScenario : scenarios_) {
-                if (!stagedScenario.stagedForRun) {
+                if (!stagedScenario.stagedForRun || !scenarioHasOccupants(stagedScenario)) {
                     continue;
                 }
                 const auto role = stagedScenario.draft.role == safecrowd::domain::ScenarioRole::Baseline ? "Baseline" : "Alternative";
@@ -781,6 +807,15 @@ void ScenarioAuthoringWidget::stageCurrentScenario() {
         return;
     }
 
+    if (!scenario->stagedForRun && !scenarioHasOccupants(*scenario)) {
+        QMessageBox::warning(
+            this,
+            "Cannot stage scenario",
+            "Add at least one occupant before staging this scenario.");
+        refreshInspector();
+        return;
+    }
+
     scenario->stagedForRun = !scenario->stagedForRun;
     refreshInspector();
 }
@@ -802,6 +837,9 @@ void ScenarioAuthoringWidget::updateCurrentScenarioPlacements(const std::vector<
         initialPlacement.targetAgentCount = static_cast<std::size_t>(placement.occupantCount);
         initialPlacement.initialVelocity = placement.velocity;
         scenario->draft.population.initialPlacements.push_back(std::move(initialPlacement));
+    }
+    if (!scenarioHasOccupants(*scenario)) {
+        scenario->stagedForRun = false;
     }
 
     refreshNavigationPanel();
@@ -899,14 +937,14 @@ QWidget* ScenarioAuthoringWidget::createScenarioPanel() {
     stagedScenariosLabel_->setStyleSheet(ui::mutedTextStyleSheet());
     QStringList lines;
     const auto stagedCount = std::count_if(scenarios_.begin(), scenarios_.end(), [](const auto& scenario) {
-        return scenario.stagedForRun;
+        return scenario.stagedForRun && scenarioHasOccupants(scenario);
     });
     if (stagedCount == 0) {
         lines << "No staged scenarios";
     } else {
         lines << "Staged scenarios";
         for (const auto& scenario : scenarios_) {
-            if (!scenario.stagedForRun) {
+            if (!scenario.stagedForRun || !scenarioHasOccupants(scenario)) {
                 continue;
             }
             const auto role = scenario.draft.role == safecrowd::domain::ScenarioRole::Baseline ? "Baseline" : "Alternative";
@@ -960,7 +998,9 @@ const ScenarioAuthoringWidget::ScenarioState* ScenarioAuthoringWidget::currentSc
 
 const ScenarioAuthoringWidget::ScenarioState* ScenarioAuthoringWidget::firstStagedBaselineScenario() const {
     const auto it = std::find_if(scenarios_.begin(), scenarios_.end(), [](const auto& scenario) {
-        return scenario.stagedForRun && scenario.draft.role == safecrowd::domain::ScenarioRole::Baseline;
+        return scenario.stagedForRun
+            && scenarioHasOccupants(scenario)
+            && scenario.draft.role == safecrowd::domain::ScenarioRole::Baseline;
     });
     return it == scenarios_.end() ? nullptr : &(*it);
 }

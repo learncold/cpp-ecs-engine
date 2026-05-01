@@ -166,7 +166,7 @@ QWidget* createNavigationRail(
         "}"
     );
     auto* activityLayout = new QVBoxLayout(activityBar);
-    activityLayout->setContentsMargins(0, 0, 0, 0);
+    activityLayout->setContentsMargins(0, 0, 0, 12);
     activityLayout->setSpacing(0);
 
     const auto makeActivityButton = [&](const QIcon& icon, const QString& tooltip, bool checked, auto&& handler) {

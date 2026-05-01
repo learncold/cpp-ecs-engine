@@ -52,6 +52,8 @@ public:
 private:
     void initialize(const WorkspaceShellOptions& options);
     void setFixedWidthVisible(QWidget* widget, bool visible, int width);
+    QWidget* createDefaultNavigationRail();
+    void rebuildDefaultNavigationRail();
     void clearTopBar();
     void rebuildTopBar();
     QPushButton* createTopBarButton(const QString& text);
@@ -76,6 +78,7 @@ private:
     std::function<void()> saveProjectHandler_{};
     std::function<void()> backHandler_{};
     QStringList tools_{};
+    bool customNavigationRail_{false};
 };
 
 }  // namespace safecrowd::application

@@ -17,6 +17,7 @@
 #include <QSizePolicy>
 #include <QSlider>
 #include <QSignalBlocker>
+#include <QStringList>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -194,27 +195,45 @@ QLabel* createReportSectionHeader(const QString& text, QWidget* parent) {
     return label;
 }
 
+QPushButton* createReportRowButton(const QStringList& lines, QWidget* parent) {
+    auto* button = new QPushButton(parent);
+    button->setFont(ui::font(ui::FontRole::Body));
+    button->setCursor(Qt::PointingHandCursor);
+    button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+    button->setMinimumWidth(0);
+    button->setStyleSheet(ui::ghostRowStyleSheet());
+
+    auto* layout = new QVBoxLayout(button);
+    layout->setContentsMargins(14, 12, 14, 12);
+    layout->setSpacing(4);
+    for (const auto& line : lines) {
+        auto* label = createLabel(line, button, ui::FontRole::Body);
+        label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        label->setStyleSheet("QLabel { background: transparent; border: 0; padding: 0; }");
+        layout->addWidget(label);
+    }
+    return button;
+}
+
 QPushButton* createBottleneckRowButton(
     const safecrowd::domain::ScenarioBottleneckMetric& bottleneck,
     std::size_t index,
     QWidget* parent) {
     const auto label = QString::fromStdString(bottleneck.label);
     const auto id = QString::fromStdString(bottleneck.connectionId);
-    const auto idLine = (!id.isEmpty() && id != label) ? QString("\nID: %1").arg(id) : QString{};
-    const auto detectedLine = bottleneck.detectedAtSeconds.has_value()
-        ? QString("\nDetected: %1 sec").arg(*bottleneck.detectedAtSeconds, 0, 'f', 1)
-        : QString{};
-    auto* button = new QPushButton(
-        QString("%1. %2%3\n%4 nearby, %5 stalled%6")
-            .arg(static_cast<int>(index + 1))
-            .arg(label, idLine)
-            .arg(static_cast<int>(bottleneck.nearbyAgentCount))
-            .arg(static_cast<int>(bottleneck.stalledAgentCount))
-            .arg(detectedLine),
-        parent);
-    button->setFont(ui::font(ui::FontRole::Body));
-    button->setCursor(Qt::PointingHandCursor);
-    button->setStyleSheet(ui::ghostRowStyleSheet());
+    QStringList lines{
+        QString("%1. %2").arg(static_cast<int>(index + 1)).arg(label),
+    };
+    if (!id.isEmpty() && id != label) {
+        lines.push_back(QString("ID: %1").arg(id));
+    }
+    lines.push_back(QString("%1 nearby, %2 stalled")
+        .arg(static_cast<int>(bottleneck.nearbyAgentCount))
+        .arg(static_cast<int>(bottleneck.stalledAgentCount)));
+    if (bottleneck.detectedAtSeconds.has_value()) {
+        lines.push_back(QString("Detected: %1 sec").arg(*bottleneck.detectedAtSeconds, 0, 'f', 1));
+    }
+    auto* button = createReportRowButton(lines, parent);
     button->setToolTip(QString("%1\nClick to focus this bottleneck on the canvas.")
         .arg(safecrowd::domain::scenarioBottleneckDefinition()));
     return button;
@@ -224,20 +243,17 @@ QPushButton* createHotspotRowButton(
     const safecrowd::domain::ScenarioCongestionHotspot& hotspot,
     std::size_t index,
     QWidget* parent) {
-    const auto detectedLine = hotspot.detectedAtSeconds.has_value()
-        ? QString("\nDetected: %1 sec").arg(*hotspot.detectedAtSeconds, 0, 'f', 1)
-        : QString{};
-    auto* button = new QPushButton(
-        QString("%1. (%2, %3)  -  %4 agents%5")
+    QStringList lines{
+        QString("%1. (%2, %3) - %4 agents")
             .arg(static_cast<int>(index + 1))
             .arg(hotspot.center.x, 0, 'f', 1)
             .arg(hotspot.center.y, 0, 'f', 1)
-            .arg(static_cast<int>(hotspot.agentCount))
-            .arg(detectedLine),
-        parent);
-    button->setFont(ui::font(ui::FontRole::Body));
-    button->setCursor(Qt::PointingHandCursor);
-    button->setStyleSheet(ui::ghostRowStyleSheet());
+            .arg(static_cast<int>(hotspot.agentCount)),
+    };
+    if (hotspot.detectedAtSeconds.has_value()) {
+        lines.push_back(QString("Detected: %1 sec").arg(*hotspot.detectedAtSeconds, 0, 'f', 1));
+    }
+    auto* button = createReportRowButton(lines, parent);
     button->setToolTip(QString("%1\nClick to focus this hotspot on the canvas.")
         .arg(safecrowd::domain::scenarioHotspotDefinition()));
     return button;
@@ -590,7 +606,7 @@ QWidget* createResultPanel(
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(12);
 
-    layout->addWidget(shell != nullptr ? shell->createPanelHeader("Results", panel) : createLabel("Results", panel, ui::FontRole::Title));
+    layout->addWidget(shell != nullptr ? shell->createPanelHeader("Results", panel, false) : createLabel("Results", panel, ui::FontRole::Title));
     auto* scenarioLabel = createLabel(QString("Scenario: %1").arg(QString::fromStdString(scenario.name)), panel);
     scenarioLabel->setStyleSheet(ui::mutedTextStyleSheet());
     layout->addWidget(scenarioLabel);
@@ -672,9 +688,11 @@ QWidget* createResultFindingsPanel(
     auto* area = new QScrollArea(panel);
     area->setWidgetResizable(true);
     area->setFrameShape(QFrame::NoFrame);
+    area->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     ui::polishScrollArea(area);
 
     auto* content = new QWidget(area);
+    content->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     auto* contentLayout = new QVBoxLayout(content);
     contentLayout->setContentsMargins(0, 0, 10, 0);
     contentLayout->setSpacing(12);
