@@ -222,6 +222,9 @@ void SimulationCanvasWidget::paintEvent(QPaintEvent* event) {
     }
 
     refreshLayoutCache(*bounds);
+    if (layoutCache_.isNull()) {
+        return;
+    }
     painter.drawPixmap(0, 0, layoutCache_);
 
     const auto transform = currentTransform(*bounds);
@@ -278,6 +281,13 @@ LayoutCanvasTransform SimulationCanvasWidget::currentTransform(const LayoutCanva
 
 void SimulationCanvasWidget::refreshLayoutCache(const LayoutCanvasBounds& bounds) {
     const auto currentSize = size();
+    if (currentSize.isEmpty()) {
+        layoutCache_ = QPixmap();
+        layoutCacheSize_ = currentSize;
+        layoutCacheValid_ = false;
+        return;
+    }
+
     if (layoutCacheValid_
         && layoutCacheSize_ == currentSize
         && layoutCacheZoom_ == camera_.zoom()

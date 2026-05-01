@@ -45,7 +45,7 @@ public:
         : QWidget(parent),
           artifacts_(std::move(artifacts)) {
         setMinimumHeight(150);
-        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         setToolTip("Cumulative evacuation curve. T90/T95 indicate when 90%/95% of occupants have evacuated.");
     }
 
@@ -235,6 +235,75 @@ QWidget* createHotspotLegend(QWidget* parent) {
     return legend;
 }
 
+QWidget* createResultGraphPanel(
+    const safecrowd::domain::ScenarioResultArtifacts& artifacts,
+    QWidget* parent) {
+    auto* panel = new QFrame(parent);
+    panel->setStyleSheet(
+        "QFrame { background: #ffffff; border-top: 1px solid #d7e0ea; }"
+        "QLabel { border: 0; }"
+        "QPushButton { border: 1px solid #c9d5e2; border-radius: 6px; padding: 4px 10px; background: #ffffff; color: #344256; }"
+        "QPushButton:hover { background: #eef3f8; }");
+    panel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    panel->setMinimumHeight(220);
+
+    auto* layout = new QVBoxLayout(panel);
+    layout->setContentsMargins(16, 10, 16, 16);
+    layout->setSpacing(10);
+
+    auto* header = new QWidget(panel);
+    auto* headerLayout = new QHBoxLayout(header);
+    headerLayout->setContentsMargins(0, 0, 0, 0);
+    headerLayout->setSpacing(8);
+    auto* title = createLabel("Evacuation Progress", header, ui::FontRole::SectionTitle);
+    title->setToolTip("Cumulative evacuation curve and percentile completion times.");
+    headerLayout->addWidget(title);
+    headerLayout->addStretch(1);
+    auto* toggleButton = new QPushButton(header);
+    toggleButton->setText("Hide graph");
+    toggleButton->setCursor(Qt::PointingHandCursor);
+    headerLayout->addWidget(toggleButton);
+    layout->addWidget(header);
+
+    auto* body = new QWidget(panel);
+    auto* bodyLayout = new QVBoxLayout(body);
+    bodyLayout->setContentsMargins(0, 0, 0, 0);
+    bodyLayout->setSpacing(8);
+    bodyLayout->addWidget(new EvacuationProgressWidget(artifacts, body), 1);
+    auto* timing = createLabel(
+        QString("T90: %1    T95: %2")
+            .arg(formatOptionalSeconds(artifacts.timingSummary.t90Seconds))
+            .arg(formatOptionalSeconds(artifacts.timingSummary.t95Seconds)),
+        body,
+        ui::FontRole::Caption);
+    timing->setStyleSheet(ui::mutedTextStyleSheet());
+    bodyLayout->addWidget(timing);
+    layout->addWidget(body, 1);
+
+    QObject::connect(toggleButton, &QPushButton::clicked, panel, [panel, body, toggleButton]() {
+        const bool nextVisible = !body->isVisible();
+        body->setVisible(nextVisible);
+        toggleButton->setText(nextVisible ? "Hide graph" : "Show graph");
+        panel->setMaximumHeight(nextVisible ? QWIDGETSIZE_MAX : 48);
+        panel->setMinimumHeight(nextVisible ? 220 : 48);
+    });
+
+    return panel;
+}
+
+QWidget* createResultCanvasPanel(
+    SimulationCanvasWidget* canvas,
+    const safecrowd::domain::ScenarioResultArtifacts& artifacts,
+    QWidget* parent) {
+    auto* panel = new QWidget(parent);
+    auto* layout = new QVBoxLayout(panel);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
+    layout->addWidget(canvas, 1);
+    layout->addWidget(createResultGraphPanel(artifacts, panel), 1);
+    return panel;
+}
+
 QString zoneLabel(const safecrowd::domain::Zone2D& zone) {
     const auto id = QString::fromStdString(zone.id);
     const auto label = QString::fromStdString(zone.label);
@@ -370,7 +439,6 @@ QWidget* createResultPanel(
 }
 
 QWidget* createResultFindingsPanel(
-    const safecrowd::domain::ScenarioResultArtifacts& artifacts,
     const safecrowd::domain::ScenarioRiskSnapshot& risk,
     std::function<void(std::size_t)> bottleneckFocusHandler,
     std::function<void(std::size_t)> hotspotFocusHandler,
@@ -394,19 +462,6 @@ QWidget* createResultFindingsPanel(
     auto* contentLayout = new QVBoxLayout(content);
     contentLayout->setContentsMargins(0, 0, 10, 0);
     contentLayout->setSpacing(12);
-
-    auto* progressHeader = createReportSectionHeader("Evacuation Progress", content);
-    progressHeader->setToolTip("Cumulative evacuation curve and percentile completion times.");
-    contentLayout->addWidget(progressHeader);
-    contentLayout->addWidget(new EvacuationProgressWidget(artifacts, content));
-    auto* timing = createLabel(
-        QString("T90: %1\nT95: %2")
-            .arg(formatOptionalSeconds(artifacts.timingSummary.t90Seconds))
-            .arg(formatOptionalSeconds(artifacts.timingSummary.t95Seconds)),
-        content,
-        ui::FontRole::Caption);
-    timing->setStyleSheet(ui::mutedTextStyleSheet());
-    contentLayout->addWidget(timing);
 
     auto* bottleneckHeader = createReportSectionHeader("Bottlenecks", content);
     bottleneckHeader->setToolTip(safecrowd::domain::scenarioBottleneckDefinition());
@@ -503,9 +558,8 @@ ScenarioResultWidget::ScenarioResultWidget(
     canvas->setFrame(frame_);
     canvas->setHotspotOverlay(risk_.hotspots);
     canvas->setBottleneckOverlay(risk_.bottlenecks);
-    shell_->setCanvas(canvas);
+    shell_->setCanvas(createResultCanvasPanel(canvas, artifacts_, shell_));
     shell_->setNavigationPanel(createResultFindingsPanel(
-        artifacts_,
         risk_,
         [canvas](std::size_t index) {
             canvas->focusBottleneck(index);
