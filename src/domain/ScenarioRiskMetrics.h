@@ -55,5 +55,6 @@ const char* scenarioRiskDefinition() noexcept;
 const char* scenarioStalledDefinition() noexcept;
 const char* scenarioHotspotDefinition() noexcept;
 const char* scenarioBottleneckDefinition() noexcept;
+bool scenarioAgentStalled(double speedMetersPerSecond, double routeStalledSeconds) noexcept;
 
 }  // namespace safecrowd::domain

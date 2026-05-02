@@ -15,6 +15,7 @@ struct SimulationAgentFrame {
     Point2D velocity{};
     double radius{0.25};
     std::string floorId{};
+    bool stalled{false};
 };
 
 struct SimulationFrame {

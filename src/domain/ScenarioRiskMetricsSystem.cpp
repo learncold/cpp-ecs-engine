@@ -58,8 +58,7 @@ Point2D riskCellMax(const RiskCellAddress& cell) {
 }
 
 bool isStalled(const Velocity& velocity, const EvacuationRoute& route) {
-    return lengthOf(velocity.value) <= kScenarioStalledSpeedThreshold
-        || route.stalledSeconds >= kScenarioStalledSecondsThreshold;
+    return scenarioAgentStalled(lengthOf(velocity.value), route.stalledSeconds);
 }
 
 int riskSeverity(ScenarioRiskLevel level) {
@@ -155,16 +154,18 @@ SimulationFrame captureSimulationFrame(
         const auto& position = query.get<Position>(entity);
         const auto& velocity = query.get<Velocity>(entity);
         const auto& agent = query.get<Agent>(entity);
+        const auto* route = query.contains<EvacuationRoute>(entity) ? &query.get<EvacuationRoute>(entity) : nullptr;
         frame.agents.push_back({
             .id = entity.index,
             .position = position.value,
             .velocity = velocity.value,
             .radius = agent.radius,
-            .floorId = query.contains<EvacuationRoute>(entity)
-                ? (!query.get<EvacuationRoute>(entity).displayFloorId.empty()
-                    ? query.get<EvacuationRoute>(entity).displayFloorId
-                    : query.get<EvacuationRoute>(entity).currentFloorId)
+            .floorId = route != nullptr
+                ? (!route->displayFloorId.empty()
+                    ? route->displayFloorId
+                    : route->currentFloorId)
                 : std::string{},
+            .stalled = route != nullptr && isStalled(velocity, *route),
         });
     }
     return frame;

@@ -768,6 +768,7 @@ QJsonObject simulationAgentFrameToJson(const safecrowd::domain::SimulationAgentF
     object["velocity"] = pointArray(agent.velocity);
     object["radius"] = agent.radius;
     object["floorId"] = QString::fromStdString(agent.floorId);
+    object["stalled"] = agent.stalled;
     return object;
 }
 
@@ -778,6 +779,7 @@ safecrowd::domain::SimulationAgentFrame simulationAgentFrameFromJson(const QJson
         .velocity = pointFromJson(object.value("velocity")),
         .radius = object.value("radius").toDouble(0.25),
         .floorId = object.value("floorId").toString().toStdString(),
+        .stalled = object.value("stalled").toBool(false),
     };
 }
 

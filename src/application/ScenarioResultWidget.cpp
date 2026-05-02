@@ -68,6 +68,16 @@ QString formatPercent(double ratio) {
     return QString("%1%").arg(std::clamp(ratio, 0.0, 1.0) * 100.0, 0, 'f', 0);
 }
 
+QString formatFinalStatus(const safecrowd::domain::SimulationFrame& frame) {
+    return frame.complete ? QString("Complete") : QString("Incomplete");
+}
+
+QString formatEvacuatedCount(const safecrowd::domain::SimulationFrame& frame) {
+    return QString("%1 / %2")
+        .arg(static_cast<int>(frame.evacuatedAgentCount))
+        .arg(static_cast<int>(frame.totalAgentCount));
+}
+
 double resultCompletionTime(
     const safecrowd::domain::SimulationFrame& frame,
     const safecrowd::domain::ScenarioResultArtifacts& artifacts) {
@@ -894,6 +904,12 @@ QWidget* createResultPanel(
     auto* scenarioLabel = createLabel(QString("Scenario: %1").arg(QString::fromStdString(scenario.name)), panel);
     scenarioLabel->setStyleSheet(ui::mutedTextStyleSheet());
     layout->addWidget(scenarioLabel);
+    auto* finalStatusLabel = createLabel(
+        QString("Final: %1\nEvacuated: %2").arg(formatFinalStatus(frame), formatEvacuatedCount(frame)),
+        panel);
+    finalStatusLabel->setStyleSheet(ui::mutedTextStyleSheet());
+    finalStatusLabel->setToolTip("Final run state at the end of the simulation.");
+    layout->addWidget(finalStatusLabel);
 
     auto* metricsGrid = new QGridLayout();
     metricsGrid->setContentsMargins(0, 0, 0, 0);
@@ -931,15 +947,15 @@ QWidget* createResultPanel(
         panel,
         "The source placement with the latest completion time."), 2, 0);
     metricsGrid->addWidget(createMetricCard(
-        "Risk",
+        "Peak Risk",
         safecrowd::domain::scenarioRiskLevelLabel(risk.completionRisk),
         panel,
-        safecrowd::domain::scenarioRiskDefinition()), 2, 1);
+        "Highest completion risk observed at any point during the run."), 2, 1);
     metricsGrid->addWidget(createMetricCard(
-        "Stalled",
+        "Max Stalled",
         QString::number(static_cast<int>(risk.stalledAgentCount)),
         panel,
-        safecrowd::domain::scenarioStalledDefinition()), 3, 0);
+        "Largest number of agents classified as stalled at the same time during the run."), 3, 0);
     metricsGrid->addWidget(createMetricCard(
         "T90",
         formatOptionalSeconds(artifacts.timingSummary.t90Seconds),

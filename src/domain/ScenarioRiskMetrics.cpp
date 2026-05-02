@@ -36,4 +36,9 @@ const char* scenarioBottleneckDefinition() noexcept {
            "are within 1.25 m and at least one is stalled or average speed is low.";
 }
 
+bool scenarioAgentStalled(double speedMetersPerSecond, double routeStalledSeconds) noexcept {
+    return speedMetersPerSecond <= kScenarioStalledSpeedThreshold
+        || routeStalledSeconds >= kScenarioStalledSecondsThreshold;
+}
+
 }  // namespace safecrowd::domain

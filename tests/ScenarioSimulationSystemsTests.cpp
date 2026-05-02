@@ -142,7 +142,7 @@ SC_TEST(ScenarioAgentSpawnSystem_ConfiguresClockAndSpawnsAgentSeeds) {
         .position = {.value = {.x = 2.0, .y = 3.0}},
         .agent = {.radius = 0.3f, .maxSpeed = 1.2f},
         .velocity = {.value = {.x = 0.2, .y = 0.1}},
-        .route = {},
+        .route = {.stalledSeconds = 1.0},
         .status = {},
     });
 
@@ -173,6 +173,7 @@ SC_TEST(ScenarioAgentSpawnSystem_ConfiguresClockAndSpawnsAgentSeeds) {
     SC_EXPECT_EQ(frame.totalAgentCount, std::size_t{1});
     SC_EXPECT_EQ(frame.agents.size(), std::size_t{1});
     SC_EXPECT_NEAR(frame.agents.front().position.x, 2.0, 1e-9);
+    SC_EXPECT_TRUE(frame.agents.front().stalled);
 }
 
 SC_TEST(ScenarioSpatialIndexSystem_BuildsNearbyAgentResource) {
@@ -275,6 +276,7 @@ SC_TEST(ScenarioSimulationMotionSystem_AdvancesAgentsFromStepResource) {
     SC_EXPECT_EQ(frame.agents.size(), std::size_t{1});
     SC_EXPECT_NEAR(frame.agents.front().position.x, 0.5, 1e-9);
     SC_EXPECT_NEAR(frame.agents.front().velocity.x, 1.0, 1e-9);
+    SC_EXPECT_TRUE(!frame.agents.front().stalled);
 }
 
 SC_TEST(ScenarioSimulationMotionSystem_SkipsIntermediateWaypointWhenCrowdPushesAgentPastApproachArea) {
