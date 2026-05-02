@@ -198,24 +198,38 @@ void MainWindow::showProjectNavigator() {
     });
     navigator->setDeleteProjectHandler([this](const ProjectMetadata& metadata) {
         if (metadata.isBuiltInDemo()) {
-            QMessageBox::information(this, "Delete Project", "The built-in demo project cannot be deleted.");
+            QMessageBox info(QMessageBox::Information,
+                             "Delete Project",
+                             "The built-in demo project cannot be deleted.",
+                             QMessageBox::Ok,
+                             this);
+            info.setTextFormat(Qt::PlainText);
+            info.exec();
             return;
         }
 
-        const auto choice = QMessageBox::question(
-            this,
-            "Delete Project",
-            QString("Delete \"%1\" and its project folder?\n\n%2")
-                .arg(metadata.name, metadata.folderPath),
-            QMessageBox::Yes | QMessageBox::No,
-            QMessageBox::No);
-        if (choice != QMessageBox::Yes) {
+        QMessageBox confirm(QMessageBox::Question,
+                            "Delete Project",
+                            QString("Move \"%1\" to the recycle bin?\n\n%2\n\n"
+                                    "You can restore it from the recycle bin if you change your mind.")
+                                .arg(metadata.name, metadata.folderPath),
+                            QMessageBox::Yes | QMessageBox::No,
+                            this);
+        confirm.setTextFormat(Qt::PlainText);
+        confirm.setDefaultButton(QMessageBox::No);
+        if (confirm.exec() != QMessageBox::Yes) {
             return;
         }
 
         QString errorMessage;
         if (!ProjectPersistence::deleteProject(metadata, &errorMessage)) {
-            QMessageBox::warning(this, "Delete Project", errorMessage);
+            QMessageBox warning(QMessageBox::Warning,
+                                "Delete Project",
+                                errorMessage,
+                                QMessageBox::Ok,
+                                this);
+            warning.setTextFormat(Qt::PlainText);
+            warning.exec();
             return;
         }
 
