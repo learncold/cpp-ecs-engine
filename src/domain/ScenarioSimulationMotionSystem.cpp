@@ -801,27 +801,8 @@ private:
     }
 
     void updateDisplayFloor(EvacuationRoute& route, const Point2D& position) const {
+        (void)position;
         route.displayFloorId = route.currentFloorId;
-        if (!currentWaypointIsVertical(route)
-            || route.nextWaypointIndex >= route.waypoints.size()
-            || route.nextWaypointIndex >= route.waypointFloorIds.size()
-            || route.waypointFloorIds[route.nextWaypointIndex].empty()) {
-            return;
-        }
-
-        const auto segment = route.waypoints[route.nextWaypointIndex] - route.currentSegmentStart;
-        const auto segmentLengthSquared = dot(segment, segment);
-        if (segmentLengthSquared <= 1e-9) {
-            return;
-        }
-
-        const auto progress = std::clamp(
-            dot(position - route.currentSegmentStart, segment) / segmentLengthSquared,
-            0.0,
-            1.0);
-        if (progress >= 0.5) {
-            route.displayFloorId = route.waypointFloorIds[route.nextWaypointIndex];
-        }
     }
 
     std::optional<ScenarioLayoutCacheResource> layoutCache_{};

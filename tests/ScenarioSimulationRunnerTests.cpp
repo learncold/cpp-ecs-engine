@@ -245,7 +245,10 @@ safecrowd::domain::FacilityLayout2D directedStairExitLayout(
         .isStair = true,
         .lowerEntryDirection = lowerEntryDirection,
         .upperEntryDirection = upperEntryDirection,
-        .centerSpan = {{2.8, 1.0}, {3.2, 1.0}},
+        .centerSpan = lowerEntryDirection == safecrowd::domain::StairEntryDirection::North
+                || lowerEntryDirection == safecrowd::domain::StairEntryDirection::South
+            ? safecrowd::domain::LineSegment2D{{2.8, 1.0}, {3.2, 1.0}}
+            : safecrowd::domain::LineSegment2D{{3.0, 0.4}, {3.0, 1.6}},
     });
     layout.connections.push_back({
         .id = "stair-to-exit",
@@ -590,7 +593,7 @@ SC_TEST(ScenarioSimulationRunnerBlocksDisallowedStairEntryDirection) {
     SC_EXPECT_TRUE(runner.frame().agents.front().position.x < 2.0);
 }
 
-SC_TEST(ScenarioSimulationRunnerDisplaysNextFloorAfterHalfStairTransition) {
+SC_TEST(ScenarioSimulationRunnerDisplaysNextFloorAfterCrossingStairMidpoint) {
     safecrowd::domain::InitialPlacement2D placement;
     placement.id = "agent-1";
     placement.zoneId = "stair-l1";
@@ -603,9 +606,14 @@ SC_TEST(ScenarioSimulationRunnerDisplaysNextFloorAfterHalfStairTransition) {
     scenario.execution.timeLimitSeconds = 4.0;
 
     safecrowd::domain::ScenarioSimulationRunner runner(directedStairExitLayout(
-        safecrowd::domain::StairEntryDirection::Unspecified,
-        safecrowd::domain::StairEntryDirection::Unspecified), scenario);
+        safecrowd::domain::StairEntryDirection::West,
+        safecrowd::domain::StairEntryDirection::East), scenario);
     runner.step(0.55);
+
+    SC_EXPECT_EQ(runner.frame().agents.size(), std::size_t{1});
+    SC_EXPECT_EQ(runner.frame().agents.front().floorId, std::string{"L1"});
+
+    runner.step(0.5);
 
     SC_EXPECT_EQ(runner.frame().agents.size(), std::size_t{1});
     SC_EXPECT_EQ(runner.frame().agents.front().floorId, std::string{"L2"});

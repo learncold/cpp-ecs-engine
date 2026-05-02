@@ -148,7 +148,6 @@ private:
     bool doorCreatesLeaf_{true};
     bool verticalLinkCreatesRamp_{false};
     safecrowd::domain::StairEntryDirection stairEntryDirection_{safecrowd::domain::StairEntryDirection::West};
-    safecrowd::domain::StairEntryDirection destinationStairEntryDirection_{safecrowd::domain::StairEntryDirection::East};
     double doorWidth_{1.2};
     QString currentFloorId_{};
     QFrame* toolbarCorner_{nullptr};
@@ -162,8 +161,6 @@ private:
     QComboBox* verticalTargetFloorComboBox_{nullptr};
     QLabel* stairEntryLabel_{nullptr};
     QComboBox* stairEntryComboBox_{nullptr};
-    QLabel* destinationStairEntryLabel_{nullptr};
-    QComboBox* destinationStairEntryComboBox_{nullptr};
     QCheckBox* rampLinkCheckBox_{nullptr};
     QComboBox* floorComboBox_{nullptr};
     QToolButton* selectToolButton_{nullptr};

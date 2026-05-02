@@ -1017,6 +1017,31 @@ safecrowd::domain::LineSegment2D centerSpanForRectangle(const QRectF& rectangle)
     };
 }
 
+safecrowd::domain::LineSegment2D verticalConnectionSpanForRectangle(
+    const QRectF& rectangle,
+    safecrowd::domain::StairEntryDirection entryDirection,
+    double passageWidth) {
+    const double halfWidth = std::max(0.0, passageWidth) * 0.5;
+    const auto center = rectangle.center();
+    switch (entryDirection) {
+    case safecrowd::domain::StairEntryDirection::North:
+    case safecrowd::domain::StairEntryDirection::South:
+        return {
+            .start = {.x = center.x() - halfWidth, .y = center.y()},
+            .end = {.x = center.x() + halfWidth, .y = center.y()},
+        };
+    case safecrowd::domain::StairEntryDirection::East:
+    case safecrowd::domain::StairEntryDirection::West:
+        return {
+            .start = {.x = center.x(), .y = center.y() + halfWidth},
+            .end = {.x = center.x(), .y = center.y() - halfWidth},
+        };
+    case safecrowd::domain::StairEntryDirection::Unspecified:
+        return centerSpanForRectangle(rectangle);
+    }
+    return centerSpanForRectangle(rectangle);
+}
+
 QPointF entrySideMidpoint(const QRectF& rectangle, safecrowd::domain::StairEntryDirection direction) {
     const double north = std::max(rectangle.top(), rectangle.bottom());
     const double south = std::min(rectangle.top(), rectangle.bottom());
@@ -1112,6 +1137,23 @@ void populateStairEntryCombo(QComboBox& comboBox, safecrowd::domain::StairEntryD
     if (index >= 0) {
         comboBox.setCurrentIndex(index);
     }
+}
+
+safecrowd::domain::StairEntryDirection oppositeStairEntryDirection(
+    safecrowd::domain::StairEntryDirection direction) {
+    switch (direction) {
+    case safecrowd::domain::StairEntryDirection::North:
+        return safecrowd::domain::StairEntryDirection::South;
+    case safecrowd::domain::StairEntryDirection::East:
+        return safecrowd::domain::StairEntryDirection::West;
+    case safecrowd::domain::StairEntryDirection::South:
+        return safecrowd::domain::StairEntryDirection::North;
+    case safecrowd::domain::StairEntryDirection::West:
+        return safecrowd::domain::StairEntryDirection::East;
+    case safecrowd::domain::StairEntryDirection::Unspecified:
+        return safecrowd::domain::StairEntryDirection::Unspecified;
+    }
+    return safecrowd::domain::StairEntryDirection::Unspecified;
 }
 
 bool pointNearSegmentWorld(
@@ -2558,7 +2600,7 @@ void LayoutPreviewWidget::createVerticalLink(const QPointF& startWorld, const QP
     };
     const bool sourceIsLower = floorElevation(sourceFloorId) <= floorElevation(targetFloorId);
     const auto sourceEntryDirection = stairEntryDirection_;
-    const auto targetEntryDirection = destinationStairEntryDirection_;
+    const auto targetEntryDirection = oppositeStairEntryDirection(sourceEntryDirection);
     const auto lowerEntryDirection = sourceIsLower ? sourceEntryDirection : targetEntryDirection;
     const auto upperEntryDirection = sourceIsLower ? targetEntryDirection : sourceEntryDirection;
     const auto sourceEntrySpan = entrySpanForRectangle(rectangle, sourceEntryDirection);
@@ -2576,8 +2618,8 @@ void LayoutPreviewWidget::createVerticalLink(const QPointF& startWorld, const QP
         ? safecrowd::domain::ConnectionKind::Ramp
         : safecrowd::domain::ConnectionKind::Stair;
     const auto zoneLabel = verticalLinkCreatesRamp_ ? QString("Ramp") : QString("Stair");
-    const auto span = centerSpanForRectangle(rectangle);
     const auto effectiveWidth = std::max(0.9, std::min(rectangle.width(), rectangle.height()));
+    const auto span = verticalConnectionSpanForRectangle(rectangle, sourceEntryDirection, effectiveWidth);
 
     layout.zones.push_back({
         .id = sourceStairZoneId.toStdString(),
@@ -3426,14 +3468,6 @@ void LayoutPreviewWidget::setupToolbars() {
     populateStairEntryCombo(*stairEntryComboBox_, stairEntryDirection_);
     propertyLayout->addWidget(stairEntryComboBox_);
 
-    destinationStairEntryLabel_ = new QLabel("Destination entry", propertyPanel_);
-    propertyLayout->addWidget(destinationStairEntryLabel_);
-    destinationStairEntryComboBox_ = new QComboBox(propertyPanel_);
-    destinationStairEntryComboBox_->setMinimumWidth(118);
-    destinationStairEntryComboBox_->setToolTip("Entry side on the destination floor");
-    populateStairEntryCombo(*destinationStairEntryComboBox_, destinationStairEntryDirection_);
-    propertyLayout->addWidget(destinationStairEntryComboBox_);
-
     rampLinkCheckBox_ = new QCheckBox("Ramp", propertyPanel_);
     rampLinkCheckBox_->setChecked(verticalLinkCreatesRamp_);
     propertyLayout->addWidget(rampLinkCheckBox_);
@@ -3522,13 +3556,6 @@ void LayoutPreviewWidget::setupToolbars() {
                 stairEntryComboBox_->itemData(index).toInt());
         }
     });
-    connect(destinationStairEntryComboBox_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int index) {
-        if (index >= 0 && destinationStairEntryComboBox_ != nullptr) {
-            destinationStairEntryDirection_ = static_cast<safecrowd::domain::StairEntryDirection>(
-                destinationStairEntryComboBox_->itemData(index).toInt());
-        }
-    });
-
     const auto visible = importResult_.layout.has_value();
     toolbarCorner_->setVisible(visible);
     topToolbar_->setVisible(visible);
@@ -3547,8 +3574,6 @@ void LayoutPreviewWidget::refreshPropertyPanel() {
         || verticalTargetFloorComboBox_ == nullptr
         || stairEntryLabel_ == nullptr
         || stairEntryComboBox_ == nullptr
-        || destinationStairEntryLabel_ == nullptr
-        || destinationStairEntryComboBox_ == nullptr
         || rampLinkCheckBox_ == nullptr) {
         return;
     }
@@ -3564,8 +3589,6 @@ void LayoutPreviewWidget::refreshPropertyPanel() {
     verticalTargetFloorComboBox_->setVisible(showVerticalOptions);
     stairEntryLabel_->setVisible(showVerticalOptions);
     stairEntryComboBox_->setVisible(showVerticalOptions);
-    destinationStairEntryLabel_->setVisible(showVerticalOptions);
-    destinationStairEntryComboBox_->setVisible(showVerticalOptions);
     rampLinkCheckBox_->setVisible(showVerticalOptions);
     propertyPanel_->setVisible(importResult_.layout.has_value() && (showShapeOptions || showDoorOptions || showVerticalOptions));
 }
