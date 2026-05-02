@@ -273,16 +273,18 @@ private:
 QFrame* createMetricCard(const QString& title, const QString& value, QWidget* parent, const QString& tooltip = {}) {
     auto* card = new QFrame(parent);
     card->setStyleSheet(ui::panelStyleSheet());
+    card->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
     if (!tooltip.isEmpty()) {
         card->setToolTip(tooltip);
     }
     auto* layout = new QVBoxLayout(card);
-    layout->setContentsMargins(14, 12, 14, 12);
-    layout->setSpacing(6);
+    layout->setContentsMargins(12, 10, 12, 10);
+    layout->setSpacing(4);
 
-    auto* titleLabel = createLabel(title, card);
+    auto* titleLabel = createLabel(title, card, ui::FontRole::Caption);
     titleLabel->setStyleSheet(ui::mutedTextStyleSheet());
     auto* valueLabel = createLabel(value, card, ui::FontRole::SectionTitle);
+    valueLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     if (!tooltip.isEmpty()) {
         titleLabel->setToolTip(tooltip);
         valueLabel->setToolTip(tooltip);
@@ -396,7 +398,9 @@ QTableWidget* createResultTable(const QStringList& headers, int rows, QWidget* p
     table->setHorizontalHeaderLabels(headers);
     table->verticalHeader()->setVisible(false);
     table->horizontalHeader()->setStretchLastSection(true);
-    table->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    table->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    table->setWordWrap(false);
     table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     table->setSelectionMode(QAbstractItemView::NoSelection);
     table->setFocusPolicy(Qt::NoFocus);
@@ -441,20 +445,6 @@ QWidget* createExitUsageTable(const safecrowd::domain::ScenarioResultArtifacts& 
     return container;
 }
 
-QWidget* createEmptyComparePanel(QWidget* parent) {
-    auto* panel = new QWidget(parent);
-    auto* layout = new QVBoxLayout(panel);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(6);
-    auto* title = createLabel("No comparison run selected", panel, ui::FontRole::SectionTitle);
-    auto* body = createLabel("Scenario comparison is reserved for the next analysis workflow.", panel);
-    body->setStyleSheet(ui::mutedTextStyleSheet());
-    layout->addWidget(title);
-    layout->addWidget(body);
-    layout->addStretch(1);
-    return panel;
-}
-
 QWidget* createDetailTabs(const safecrowd::domain::ScenarioResultArtifacts& artifacts, QWidget* parent) {
     auto* tabs = new QTabWidget(parent);
     tabs->setStyleSheet(
@@ -462,7 +452,7 @@ QWidget* createDetailTabs(const safecrowd::domain::ScenarioResultArtifacts& arti
         "QTabBar::tab { background: #ffffff; border: 1px solid #c9d5e2; padding: 5px 8px; margin-right: 3px; }"
         "QTabBar::tab:selected { background: #e6eef8; color: #1f5fae; }");
 
-    auto* zones = createResultTable({"Zone", "People", "Evacuated", "Last"}, static_cast<int>(artifacts.zoneCompletion.size()), tabs);
+    auto* zones = createResultTable({"Zone", "People", "Out", "Last"}, static_cast<int>(artifacts.zoneCompletion.size()), tabs);
     for (int row = 0; row < static_cast<int>(artifacts.zoneCompletion.size()); ++row) {
         const auto& zone = artifacts.zoneCompletion[static_cast<std::size_t>(row)];
         zones->setItem(row, 0, tableItem(QString::fromStdString(zone.zoneLabel)));
@@ -472,7 +462,7 @@ QWidget* createDetailTabs(const safecrowd::domain::ScenarioResultArtifacts& arti
     }
     tabs->addTab(zones, "Zones");
 
-    auto* groups = createResultTable({"Group", "People", "Evacuated", "Last"}, static_cast<int>(artifacts.placementCompletion.size()), tabs);
+    auto* groups = createResultTable({"Group", "People", "Out", "Last"}, static_cast<int>(artifacts.placementCompletion.size()), tabs);
     for (int row = 0; row < static_cast<int>(artifacts.placementCompletion.size()); ++row) {
         const auto& group = artifacts.placementCompletion[static_cast<std::size_t>(row)];
         groups->setItem(row, 0, tableItem(QString::fromStdString(group.placementId)));
@@ -762,7 +752,6 @@ QWidget* createResultGraphPanel(
     remainingLayout->addWidget(timing);
     tabs->addTab(remainingTab, "Remaining");
     tabs->addTab(createExitUsageTable(artifacts, tabs), "Exits");
-    tabs->addTab(createEmptyComparePanel(tabs), "Compare");
     layout->addWidget(tabs, 1);
 
     QObject::connect(toggleButton, &QPushButton::clicked, panel, [panel, tabs, toggleButton]() {
@@ -914,6 +903,8 @@ QWidget* createResultPanel(
     auto* metricsGrid = new QGridLayout();
     metricsGrid->setContentsMargins(0, 0, 0, 0);
     metricsGrid->setSpacing(8);
+    metricsGrid->setColumnStretch(0, 1);
+    metricsGrid->setColumnStretch(1, 1);
     const auto completionTime = resultCompletionTime(frame, artifacts);
     const auto worstBottleneck = risk.bottlenecks.empty()
         ? QString("None")
@@ -927,22 +918,23 @@ QWidget* createResultPanel(
         panel,
         "Final evacuation time when all occupants completed evacuation; otherwise elapsed run time."), 0, 0);
     metricsGrid->addWidget(createMetricCard(
-        "Time Margin",
+        "Margin",
         formatOptionalMargin(artifacts.timingSummary.marginSeconds),
         panel,
         "Scenario target time minus final or elapsed evacuation time."), 0, 1);
     metricsGrid->addWidget(createMetricCard(
-        "Peak Density",
+        "Density",
         formatDensity(artifacts.densitySummary.peakDensityPeoplePerSquareMeter),
         panel,
         "Highest density observed during the run. The map shows the peak density field as a heatmap."), 1, 0);
     metricsGrid->addWidget(createMetricCard(
-        "Worst Bottleneck",
+        "Bottleneck",
         worstBottleneck,
         panel,
-        safecrowd::domain::scenarioBottleneckDefinition()), 1, 1);
+        QString("Worst bottleneck observed during the run.\n\n%1")
+            .arg(safecrowd::domain::scenarioBottleneckDefinition())), 1, 1);
     metricsGrid->addWidget(createMetricCard(
-        "Slowest Group",
+        "Slowest",
         slowestGroup,
         panel,
         "The source placement with the latest completion time."), 2, 0);
@@ -1076,12 +1068,6 @@ QWidget* createResultFindingsPanel(
         }
     }
 
-    auto* futureHeader = createReportSectionHeader("Additional Reports", content);
-    contentLayout->addWidget(futureHeader);
-    auto* futureText = createLabel("Scenario comparison is available as a placeholder in the lower Compare tab.", content);
-    futureText->setStyleSheet(ui::subtleTextStyleSheet());
-    contentLayout->addWidget(futureText);
-
     contentLayout->addStretch(1);
     area->setWidget(content);
     layout->addWidget(area, 1);
@@ -1119,7 +1105,7 @@ ScenarioResultWidget::ScenarioResultWidget(
         .showTopBar = true,
         .navigationMode = WorkspaceNavigationMode::PanelOnly,
         .showReviewPanel = true,
-        .reviewPanelWidth = 280,
+        .reviewPanelWidth = 320,
     }, this);
     shell_->setTools({"Project"});
     shell_->setSaveProjectHandler(saveProjectHandler_);
