@@ -34,6 +34,32 @@ public:
     }
 };
 
+class ConfigureOverlappingFloorAgentsSystem final : public safecrowd::engine::EngineSystem {
+public:
+    void configure(safecrowd::engine::EngineWorld& world) override {
+        world.resources().set(safecrowd::domain::ScenarioSimulationClockResource{
+            .elapsedSeconds = 0.0,
+            .timeLimitSeconds = 10.0,
+            .complete = false,
+        });
+        world.commands().spawnEntity(
+            safecrowd::domain::Position{.value = {.x = 1.0, .y = 1.0}},
+            safecrowd::domain::Agent{.radius = 0.25f, .maxSpeed = 1.5f},
+            safecrowd::domain::Velocity{.value = {.x = 0.0, .y = 0.0}},
+            safecrowd::domain::EvacuationRoute{.currentFloorId = "L1", .displayFloorId = "L1"},
+            safecrowd::domain::EvacuationStatus{});
+        world.commands().spawnEntity(
+            safecrowd::domain::Position{.value = {.x = 1.0, .y = 1.0}},
+            safecrowd::domain::Agent{.radius = 0.25f, .maxSpeed = 1.5f},
+            safecrowd::domain::Velocity{.value = {.x = 0.0, .y = 0.0}},
+            safecrowd::domain::EvacuationRoute{.currentFloorId = "L2", .displayFloorId = "L2"},
+            safecrowd::domain::EvacuationStatus{});
+    }
+
+    void update(safecrowd::engine::EngineWorld&, const safecrowd::engine::EngineStepContext&) override {
+    }
+};
+
 class ConfigureEvacuatedAgentsSystem final : public safecrowd::engine::EngineSystem {
 public:
     void configure(safecrowd::engine::EngineWorld& world) override {
@@ -198,8 +224,43 @@ SC_TEST(ScenarioSpatialIndexSystem_BuildsNearbyAgentResource) {
         runtime.world().query(),
         index,
         {.x = 1.0, .y = 1.0},
+        std::string{},
         0.4);
     SC_EXPECT_EQ(nearby.size(), std::size_t{1});
+}
+
+SC_TEST(ScenarioSpatialIndexSystem_SeparatesNearbyAgentsByFloor) {
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 31,
+    });
+    runtime.addSystem(std::make_unique<ConfigureOverlappingFloorAgentsSystem>());
+    runtime.addSystem(
+        std::make_unique<safecrowd::domain::ScenarioSpatialIndexSystem>(1.0),
+        {.phase = safecrowd::engine::UpdatePhase::PreSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(1.0 / 30.0);
+
+    const auto& index = runtime.world().resources().get<safecrowd::domain::ScenarioAgentSpatialIndexResource>();
+    auto l1Nearby = safecrowd::domain::scenarioNearbyAgents(
+        runtime.world().query(),
+        index,
+        {.x = 1.0, .y = 1.0},
+        "L1",
+        0.4);
+    auto l2Nearby = safecrowd::domain::scenarioNearbyAgents(
+        runtime.world().query(),
+        index,
+        {.x = 1.0, .y = 1.0},
+        "L2",
+        0.4);
+
+    SC_EXPECT_EQ(l1Nearby.size(), std::size_t{1});
+    SC_EXPECT_EQ(l2Nearby.size(), std::size_t{1});
+    SC_EXPECT_TRUE(l1Nearby.front() != l2Nearby.front());
 }
 
 SC_TEST(ScenarioClockSystem_AdvancesClockResourceOnFixedSteps) {

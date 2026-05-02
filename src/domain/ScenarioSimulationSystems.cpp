@@ -291,14 +291,20 @@ std::vector<engine::Entity> scenarioNearbyAgents(
     engine::WorldQuery& query,
     const ScenarioAgentSpatialIndexResource& index,
     const Point2D& point,
+    const std::string& floorId,
     double radius) {
     std::vector<engine::Entity> candidates;
+    const auto floorIt = index.cellsByFloor.find(floorId);
+    if (floorIt == index.cellsByFloor.end()) {
+        return candidates;
+    }
+
     const auto center = spatialCellFor(point, index.cellSize);
     const auto range = std::max(1, static_cast<int>(std::ceil(radius / index.cellSize)));
     for (int dy = -range; dy <= range; ++dy) {
         for (int dx = -range; dx <= range; ++dx) {
-            const auto it = index.cells.find(spatialKey({.x = center.x + dx, .y = center.y + dy}));
-            if (it == index.cells.end()) {
+            const auto it = floorIt->second.find(spatialKey({.x = center.x + dx, .y = center.y + dy}));
+            if (it == floorIt->second.end()) {
                 continue;
             }
             for (const auto entity : it->second) {
@@ -325,14 +331,18 @@ void ScenarioSpatialIndexSystem::update(engine::EngineWorld& world, const engine
     index.cellSize = cellSize_;
 
     const auto entities = query.view<Position, Agent, EvacuationStatus>();
-    index.cells.reserve(entities.size() * 2);
+    index.cellsByFloor.reserve(4);
     for (const auto entity : entities) {
         const auto& status = query.get<EvacuationStatus>(entity);
         if (status.evacuated) {
             continue;
         }
         const auto& position = query.get<Position>(entity);
-        index.cells[spatialKey(spatialCellFor(position.value, index.cellSize))].push_back(entity);
+        const auto floorId = query.contains<EvacuationRoute>(entity)
+            ? simulation_internal::agentCollisionFloorId(query.get<EvacuationRoute>(entity))
+            : std::string{};
+        auto& floorCells = index.cellsByFloor[floorId];
+        floorCells[spatialKey(spatialCellFor(position.value, index.cellSize))].push_back(entity);
     }
 
     resources.set(std::move(index));

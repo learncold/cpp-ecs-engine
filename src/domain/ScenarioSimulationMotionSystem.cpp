@@ -107,9 +107,15 @@ public:
             const auto neighborRadius = std::max(
                 static_cast<double>(agent.radius) + kDefaultAgentRadius + kPersonalSpaceBuffer,
                 kHeadOnLookAheadDistance);
+            const auto collisionFloorId = agentCollisionFloorId(route);
             const auto neighborCandidates = resources.contains<ScenarioAgentSpatialIndexResource>()
-                ? scenarioNearbyAgents(query, resources.get<ScenarioAgentSpatialIndexResource>(), position.value, neighborRadius)
-                : nearbyAgents(query, localNeighborIndex, position.value, neighborRadius);
+                ? scenarioNearbyAgents(
+                    query,
+                    resources.get<ScenarioAgentSpatialIndexResource>(),
+                    position.value,
+                    collisionFloorId,
+                    neighborRadius)
+                : nearbyAgents(query, localNeighborIndex, position.value, collisionFloorId, neighborRadius);
             const auto avoidanceVelocity =
                 forwardPreservingAgentAvoidanceVelocity(
                     query,
@@ -700,10 +706,13 @@ private:
 
                 auto& firstPosition = query.get<Position>(first);
                 const auto& firstAgent = query.get<Agent>(first);
+                const auto& firstRoute = query.get<EvacuationRoute>(first);
+                const auto firstCollisionFloorId = agentCollisionFloorId(firstRoute);
                 const auto candidates = nearbyAgents(
                     query,
                     spatialIndex,
                     firstPosition.value,
+                    firstCollisionFloorId,
                     static_cast<double>(firstAgent.radius) + kDefaultAgentRadius);
                 for (const auto second : candidates) {
                     if (first == second) {
@@ -733,8 +742,10 @@ private:
 
                     const auto direction = normalizedOr(delta, deterministicFallbackDirection(first));
                     const auto push = std::min(0.08, (minimumDistance - distance) * 0.35);
-                    const auto& firstRoute = query.get<EvacuationRoute>(first);
                     const auto& secondRoute = query.get<EvacuationRoute>(second);
+                    if (agentCollisionFloorId(secondRoute) != firstCollisionFloorId) {
+                        continue;
+                    }
                     firstPosition.value = constrainedMove(
                         cachedLayoutForFloor(layoutCache, firstRoute.currentFloorId),
                         firstPosition.value,

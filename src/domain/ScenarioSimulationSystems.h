@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -32,7 +33,7 @@ struct ScenarioSimulationStepResource {
 
 struct ScenarioAgentSpatialIndexResource {
     double cellSize{1.0};
-    std::unordered_map<long long, std::vector<engine::Entity>> cells{};
+    std::unordered_map<std::string, std::unordered_map<long long, std::vector<engine::Entity>>> cellsByFloor{};
 };
 
 struct ScenarioConnectionTraversal {
@@ -82,6 +83,7 @@ std::vector<engine::Entity> scenarioNearbyAgents(
     engine::WorldQuery& query,
     const ScenarioAgentSpatialIndexResource& index,
     const Point2D& point,
+    const std::string& floorId,
     double radius);
 
 std::unique_ptr<engine::EngineSystem> makeScenarioSimulationMotionSystem();

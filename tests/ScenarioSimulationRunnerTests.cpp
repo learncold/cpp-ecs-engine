@@ -509,6 +509,41 @@ SC_TEST(ScenarioSimulationRunnerUsesPlacementFloorForOverlappingCoordinates) {
     SC_EXPECT_TRUE(runner.frame().agents.front().velocity.x < 0.0);
 }
 
+SC_TEST(ScenarioSimulationRunnerDoesNotSlowAgentsOnDifferentFloorsAtSameCoordinates) {
+    safecrowd::domain::InitialPlacement2D lower;
+    lower.id = "agent-l1";
+    lower.floorId = "L1";
+    lower.zoneId = "room-l1";
+    lower.targetAgentCount = 1;
+    lower.initialVelocity = {.x = 1.5, .y = 0.0};
+    lower.area.outline = {{.x = 1.0, .y = 1.0}};
+
+    safecrowd::domain::InitialPlacement2D upper;
+    upper.id = "agent-l2";
+    upper.floorId = "L2";
+    upper.zoneId = "room-l2";
+    upper.targetAgentCount = 1;
+    upper.initialVelocity = {.x = 1.5, .y = 0.0};
+    upper.area.outline = {{.x = 1.0, .y = 1.0}};
+
+    safecrowd::domain::ScenarioDraft scenario;
+    scenario.population.initialPlacements.push_back(lower);
+    scenario.population.initialPlacements.push_back(upper);
+    scenario.execution.timeLimitSeconds = 5.0;
+
+    safecrowd::domain::ScenarioSimulationRunner runner(overlappingTwoFloorExitLayout(), scenario);
+    runner.step(0.1);
+
+    const auto& agents = runner.frame().agents;
+    SC_EXPECT_EQ(agents.size(), std::size_t{2});
+    const auto& first = agents[0].floorId == "L1" ? agents[0] : agents[1];
+    const auto& second = agents[0].floorId == "L2" ? agents[0] : agents[1];
+    SC_EXPECT_EQ(first.floorId, std::string{"L1"});
+    SC_EXPECT_EQ(second.floorId, std::string{"L2"});
+    SC_EXPECT_TRUE(first.velocity.x > 1.0);
+    SC_EXPECT_TRUE(second.velocity.x < -1.0);
+}
+
 SC_TEST(ScenarioSimulationRunnerHonorsAllowedStairEntryDirection) {
     safecrowd::domain::InitialPlacement2D placement;
     placement.id = "agent-1";

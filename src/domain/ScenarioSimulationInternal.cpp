@@ -542,6 +542,10 @@ const std::vector<ScenarioConnectionTraversal>& cachedTraversalsForZone(
     return it == cache.traversableConnectionsByZone.end() ? empty : it->second;
 }
 
+std::string agentCollisionFloorId(const EvacuationRoute& route) {
+    return route.displayFloorId.empty() ? route.currentFloorId : route.displayFloorId;
+}
+
 std::string zoneAt(const ScenarioLayoutCacheResource& cache, const Point2D& point, const std::string& floorId) {
     const auto& floorLayout = cachedLayoutForFloor(cache, floorId);
     for (const auto& zone : floorLayout.zones) {
@@ -728,7 +732,7 @@ AgentSpatialIndex buildAgentSpatialIndex(
     double cellSize) {
     AgentSpatialIndex index;
     index.cellSize = cellSize;
-    index.cells.reserve(entities.size() * 2);
+    index.cellsByFloor.reserve(4);
 
     for (const auto entity : entities) {
         const auto& status = query.get<EvacuationStatus>(entity);
@@ -736,7 +740,11 @@ AgentSpatialIndex buildAgentSpatialIndex(
             continue;
         }
         const auto& position = query.get<Position>(entity);
-        index.cells[spatialKey(spatialCellFor(position.value, cellSize))].push_back(entity);
+        const auto floorId = query.contains<EvacuationRoute>(entity)
+            ? agentCollisionFloorId(query.get<EvacuationRoute>(entity))
+            : std::string{};
+        auto& floorCells = index.cellsByFloor[floorId];
+        floorCells[spatialKey(spatialCellFor(position.value, cellSize))].push_back(entity);
     }
     return index;
 }
@@ -745,14 +753,20 @@ std::vector<engine::Entity> nearbyAgents(
     engine::WorldQuery& query,
     const AgentSpatialIndex& index,
     const Point2D& point,
+    const std::string& floorId,
     double radius) {
     std::vector<engine::Entity> candidates;
+    const auto floorIt = index.cellsByFloor.find(floorId);
+    if (floorIt == index.cellsByFloor.end()) {
+        return candidates;
+    }
+
     const auto center = spatialCellFor(point, index.cellSize);
     const auto range = std::max(1, static_cast<int>(std::ceil(radius / index.cellSize)));
     for (int dy = -range; dy <= range; ++dy) {
         for (int dx = -range; dx <= range; ++dx) {
-            const auto it = index.cells.find(spatialKey({.x = center.x + dx, .y = center.y + dy}));
-            if (it == index.cells.end()) {
+            const auto it = floorIt->second.find(spatialKey({.x = center.x + dx, .y = center.y + dy}));
+            if (it == floorIt->second.end()) {
                 continue;
             }
             for (const auto entity : it->second) {
@@ -764,6 +778,14 @@ std::vector<engine::Entity> nearbyAgents(
         }
     }
     return candidates;
+}
+
+std::vector<engine::Entity> nearbyAgents(
+    engine::WorldQuery& query,
+    const AgentSpatialIndex& index,
+    const Point2D& point,
+    double radius) {
+    return nearbyAgents(query, index, point, std::string{}, radius);
 }
 
 Point2D deterministicFallbackDirection(engine::Entity entity) {
@@ -817,6 +839,10 @@ Point2D forwardPreservingAgentAvoidanceVelocity(
         }
         const auto& otherPosition = query.get<Position>(other);
         const auto& otherAgent = query.get<Agent>(other);
+        const auto& otherRoute = query.get<EvacuationRoute>(other);
+        if (agentCollisionFloorId(otherRoute) != agentCollisionFloorId(route)) {
+            continue;
+        }
         const auto offsetToOther = otherPosition.value - position.value;
         const auto distance = lengthOf(offsetToOther);
         const auto desiredDistance = static_cast<double>(agent.radius + otherAgent.radius) + kPersonalSpaceBuffer;
@@ -825,7 +851,6 @@ Point2D forwardPreservingAgentAvoidanceVelocity(
 
         bool headOn = false;
         if (route.nextWaypointIndex < route.waypoints.size() && distance <= kHeadOnLookAheadDistance) {
-            const auto& otherRoute = query.get<EvacuationRoute>(other);
             if (otherRoute.currentFloorId == route.currentFloorId
                 && otherRoute.nextWaypointIndex < otherRoute.waypoints.size()) {
                 const auto otherTarget = routeWaypointTarget(otherRoute, otherPosition.value);
