@@ -5,10 +5,13 @@
 #include <cstddef>
 #include <utility>
 
+#include <QAbstractItemView>
 #include <QColor>
+#include <QComboBox>
 #include <QFrame>
 #include <QGridLayout>
 #include <QHBoxLayout>
+#include <QHeaderView>
 #include <QLabel>
 #include <QPainter>
 #include <QPainterPath>
@@ -18,6 +21,9 @@
 #include <QSlider>
 #include <QSignalBlocker>
 #include <QStringList>
+#include <QTabWidget>
+#include <QTableWidget>
+#include <QTableWidgetItem>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -42,6 +48,31 @@ QString formatOptionalSeconds(const std::optional<double>& seconds) {
     return seconds.has_value() ? QString("%1 sec").arg(*seconds, 0, 'f', 1) : QString("Pending");
 }
 
+QString formatSecondsValue(double seconds) {
+    return QString("%1 sec").arg(seconds, 0, 'f', 1);
+}
+
+QString formatOptionalMargin(const std::optional<double>& seconds) {
+    if (!seconds.has_value()) {
+        return "No target";
+    }
+    return QString("%1%2 sec").arg(*seconds >= 0.0 ? "+" : "").arg(*seconds, 0, 'f', 1);
+}
+
+QString formatDensity(double density) {
+    return QString("%1 / m2").arg(density, 0, 'f', 1);
+}
+
+QString formatPercent(double ratio) {
+    return QString("%1%").arg(std::clamp(ratio, 0.0, 1.0) * 100.0, 0, 'f', 0);
+}
+
+double resultCompletionTime(
+    const safecrowd::domain::SimulationFrame& frame,
+    const safecrowd::domain::ScenarioResultArtifacts& artifacts) {
+    return artifacts.timingSummary.finalEvacuationTimeSeconds.value_or(frame.elapsedSeconds);
+}
+
 class EvacuationProgressWidget final : public QWidget {
 public:
     explicit EvacuationProgressWidget(
@@ -51,7 +82,7 @@ public:
           artifacts_(std::move(artifacts)) {
         setMinimumHeight(150);
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-        setToolTip("Cumulative evacuation curve. T90/T95 indicate when 90%/95% of occupants have evacuated.");
+        setToolTip("Remaining occupant curve. T90/T95 indicate when 90%/95% of occupants have evacuated.");
     }
 
     void setCurrentTimeSeconds(std::optional<double> seconds) {
@@ -94,8 +125,9 @@ protected:
         QPainterPath path;
         for (std::size_t index = 0; index < artifacts_.evacuationProgress.size(); ++index) {
             const auto& sample = artifacts_.evacuationProgress[index];
+            const auto remainingRatio = 1.0 - std::clamp(sample.evacuatedRatio, 0.0, 1.0);
             const auto x = plot.left() + (std::clamp(sample.timeSeconds / maxTime, 0.0, 1.0) * plot.width());
-            const auto y = plot.bottom() - (std::clamp(sample.evacuatedRatio, 0.0, 1.0) * plot.height());
+            const auto y = plot.bottom() - (remainingRatio * plot.height());
             if (index == 0) {
                 path.moveTo(x, y);
             } else {
@@ -108,8 +140,9 @@ protected:
         painter.setBrush(QColor("#1f5fae"));
         painter.setPen(Qt::NoPen);
         for (const auto& sample : artifacts_.evacuationProgress) {
+            const auto remainingRatio = 1.0 - std::clamp(sample.evacuatedRatio, 0.0, 1.0);
             const auto x = plot.left() + (std::clamp(sample.timeSeconds / maxTime, 0.0, 1.0) * plot.width());
-            const auto y = plot.bottom() - (std::clamp(sample.evacuatedRatio, 0.0, 1.0) * plot.height());
+            const auto y = plot.bottom() - (remainingRatio * plot.height());
             painter.drawEllipse(QPointF(x, y), 2.5, 2.5);
         }
 
@@ -119,11 +152,14 @@ protected:
 
         painter.setPen(QColor("#687789"));
         const auto last = artifacts_.evacuationProgress.back();
+        const auto remainingCount = last.totalCount >= last.evacuatedCount
+            ? last.totalCount - last.evacuatedCount
+            : std::size_t{0};
         painter.drawText(
             QRectF(plot.left(), plot.bottom() + 6, plot.width(), 18),
             Qt::AlignLeft | Qt::AlignVCenter,
-            QString("%1 / %2 evacuated by %3 sec")
-                .arg(static_cast<int>(last.evacuatedCount))
+            QString("%1 / %2 remaining by %3 sec")
+                .arg(static_cast<int>(remainingCount))
                 .arg(static_cast<int>(last.totalCount))
                 .arg(last.timeSeconds, 0, 'f', 1));
     }
@@ -286,6 +322,156 @@ QWidget* createHotspotLegend(QWidget* parent) {
     layout->addStretch(1);
     legend->setToolTip("Hotspot color intensity is relative to the largest hotspot in this result.");
     return legend;
+}
+
+QTableWidget* createResultTable(const QStringList& headers, int rows, QWidget* parent) {
+    auto* table = new QTableWidget(rows, headers.size(), parent);
+    table->setHorizontalHeaderLabels(headers);
+    table->verticalHeader()->setVisible(false);
+    table->horizontalHeader()->setStretchLastSection(true);
+    table->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    table->setSelectionMode(QAbstractItemView::NoSelection);
+    table->setFocusPolicy(Qt::NoFocus);
+    table->setAlternatingRowColors(true);
+    table->setStyleSheet(
+        "QTableWidget { background: #ffffff; border: 1px solid #d7e0ea; gridline-color: #e4ebf3; }"
+        "QHeaderView::section { background: #eef3f8; border: 0; border-bottom: 1px solid #d7e0ea; padding: 6px; color: #4f5d6b; }"
+        "QTableWidget::item { padding: 6px; }");
+    return table;
+}
+
+QTableWidgetItem* tableItem(const QString& text) {
+    auto* item = new QTableWidgetItem(text);
+    item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+    return item;
+}
+
+QWidget* createExitUsageTable(const safecrowd::domain::ScenarioResultArtifacts& artifacts, QWidget* parent) {
+    auto* container = new QWidget(parent);
+    auto* layout = new QVBoxLayout(container);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(8);
+
+    if (artifacts.exitUsage.empty()) {
+        auto* empty = createLabel("No exit usage data", container);
+        empty->setStyleSheet(ui::mutedTextStyleSheet());
+        layout->addWidget(empty);
+        layout->addStretch(1);
+        return container;
+    }
+
+    auto* table = createResultTable({"Exit", "People", "Share", "Last"}, static_cast<int>(artifacts.exitUsage.size()), container);
+    for (int row = 0; row < static_cast<int>(artifacts.exitUsage.size()); ++row) {
+        const auto& exit = artifacts.exitUsage[static_cast<std::size_t>(row)];
+        table->setItem(row, 0, tableItem(QString::fromStdString(exit.exitLabel)));
+        table->setItem(row, 1, tableItem(QString::number(static_cast<int>(exit.evacuatedCount))));
+        table->setItem(row, 2, tableItem(formatPercent(exit.usageRatio)));
+        table->setItem(row, 3, tableItem(formatOptionalSeconds(exit.lastExitTimeSeconds)));
+    }
+    table->resizeRowsToContents();
+    layout->addWidget(table);
+    return container;
+}
+
+QWidget* createEmptyComparePanel(QWidget* parent) {
+    auto* panel = new QWidget(parent);
+    auto* layout = new QVBoxLayout(panel);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(6);
+    auto* title = createLabel("No comparison run selected", panel, ui::FontRole::SectionTitle);
+    auto* body = createLabel("Scenario comparison is reserved for the next analysis workflow.", panel);
+    body->setStyleSheet(ui::mutedTextStyleSheet());
+    layout->addWidget(title);
+    layout->addWidget(body);
+    layout->addStretch(1);
+    return panel;
+}
+
+QWidget* createDetailTabs(const safecrowd::domain::ScenarioResultArtifacts& artifacts, QWidget* parent) {
+    auto* tabs = new QTabWidget(parent);
+    tabs->setStyleSheet(
+        "QTabWidget::pane { border: 0; }"
+        "QTabBar::tab { background: #ffffff; border: 1px solid #c9d5e2; padding: 5px 8px; margin-right: 3px; }"
+        "QTabBar::tab:selected { background: #e6eef8; color: #1f5fae; }");
+
+    auto* zones = createResultTable({"Zone", "People", "Evacuated", "Last"}, static_cast<int>(artifacts.zoneCompletion.size()), tabs);
+    for (int row = 0; row < static_cast<int>(artifacts.zoneCompletion.size()); ++row) {
+        const auto& zone = artifacts.zoneCompletion[static_cast<std::size_t>(row)];
+        zones->setItem(row, 0, tableItem(QString::fromStdString(zone.zoneLabel)));
+        zones->setItem(row, 1, tableItem(QString::number(static_cast<int>(zone.initialCount))));
+        zones->setItem(row, 2, tableItem(QString::number(static_cast<int>(zone.evacuatedCount))));
+        zones->setItem(row, 3, tableItem(formatOptionalSeconds(zone.lastCompletionTimeSeconds)));
+    }
+    tabs->addTab(zones, "Zones");
+
+    auto* groups = createResultTable({"Group", "People", "Evacuated", "Last"}, static_cast<int>(artifacts.placementCompletion.size()), tabs);
+    for (int row = 0; row < static_cast<int>(artifacts.placementCompletion.size()); ++row) {
+        const auto& group = artifacts.placementCompletion[static_cast<std::size_t>(row)];
+        groups->setItem(row, 0, tableItem(QString::fromStdString(group.placementId)));
+        groups->setItem(row, 1, tableItem(QString::number(static_cast<int>(group.initialCount))));
+        groups->setItem(row, 2, tableItem(QString::number(static_cast<int>(group.evacuatedCount))));
+        groups->setItem(row, 3, tableItem(formatOptionalSeconds(group.lastCompletionTimeSeconds)));
+    }
+    tabs->addTab(groups, "Groups");
+
+    auto* criteria = new QWidget(tabs);
+    auto* criteriaLayout = new QVBoxLayout(criteria);
+    criteriaLayout->setContentsMargins(0, 8, 0, 0);
+    criteriaLayout->setSpacing(6);
+    auto* density = createLabel(
+        QString("High density: %1 / m2 or higher for accumulated duration.")
+            .arg(artifacts.densitySummary.highDensityThresholdPeoplePerSquareMeter, 0, 'f', 1),
+        criteria);
+    auto* stalled = createLabel(safecrowd::domain::scenarioStalledDefinition(), criteria);
+    auto* bottleneck = createLabel(safecrowd::domain::scenarioBottleneckDefinition(), criteria);
+    density->setStyleSheet(ui::mutedTextStyleSheet());
+    stalled->setStyleSheet(ui::mutedTextStyleSheet());
+    bottleneck->setStyleSheet(ui::mutedTextStyleSheet());
+    criteriaLayout->addWidget(density);
+    criteriaLayout->addWidget(stalled);
+    criteriaLayout->addWidget(bottleneck);
+    criteriaLayout->addStretch(1);
+    tabs->addTab(criteria, "Criteria");
+
+    return tabs;
+}
+
+QStringList resultInterpretations(
+    const safecrowd::domain::SimulationFrame& frame,
+    const safecrowd::domain::ScenarioRiskSnapshot& risk,
+    const safecrowd::domain::ScenarioResultArtifacts& artifacts) {
+    QStringList lines;
+    if (artifacts.timingSummary.marginSeconds.has_value()) {
+        if (*artifacts.timingSummary.marginSeconds < 0.0) {
+            lines.push_back(QString("Evacuation exceeds the target by %1 sec; review the worst bottleneck first.")
+                .arg(std::abs(*artifacts.timingSummary.marginSeconds), 0, 'f', 1));
+        } else {
+            lines.push_back(QString("Evacuation remains within the target with %1 sec of margin.")
+                .arg(*artifacts.timingSummary.marginSeconds, 0, 'f', 1));
+        }
+    }
+    if (artifacts.densitySummary.peakDensityPeoplePerSquareMeter
+        >= artifacts.densitySummary.highDensityThresholdPeoplePerSquareMeter) {
+        lines.push_back(QString("Peak density reaches %1; apply staff guidance or entry control near the highlighted area.")
+            .arg(formatDensity(artifacts.densitySummary.peakDensityPeoplePerSquareMeter)));
+    }
+    if (!risk.bottlenecks.empty()) {
+        lines.push_back(QString("The strongest bottleneck is %1; opening capacity or redirecting people here is the first action.")
+            .arg(QString::fromStdString(risk.bottlenecks.front().label)));
+    }
+    if (!artifacts.exitUsage.empty() && artifacts.exitUsage.front().usageRatio >= 0.65) {
+        lines.push_back(QString("%1 handles %2 of evacuees; use signs or staff to distribute exits.")
+            .arg(QString::fromStdString(artifacts.exitUsage.front().exitLabel), formatPercent(artifacts.exitUsage.front().usageRatio)));
+    }
+    if (lines.empty()) {
+        lines.push_back(QString("No dominant risk is detected in this result; keep the current plan as the baseline."));
+    }
+    while (lines.size() > 3) {
+        lines.removeLast();
+    }
+    (void)frame;
+    return lines;
 }
 
 class ResultReplayControls final : public QWidget {
@@ -484,28 +670,37 @@ QWidget* createResultGraphPanel(
     headerLayout->addWidget(toggleButton);
     layout->addWidget(header);
 
-    auto* body = new QWidget(panel);
-    auto* bodyLayout = new QVBoxLayout(body);
-    bodyLayout->setContentsMargins(0, 0, 0, 0);
-    bodyLayout->setSpacing(8);
-    auto* progressWidget = new EvacuationProgressWidget(artifacts, body);
+    auto* tabs = new QTabWidget(panel);
+    tabs->setStyleSheet(
+        "QTabWidget::pane { border: 0; }"
+        "QTabBar::tab { background: #ffffff; border: 1px solid #c9d5e2; padding: 6px 12px; margin-right: 4px; }"
+        "QTabBar::tab:selected { background: #e6eef8; color: #1f5fae; }");
+
+    auto* remainingTab = new QWidget(tabs);
+    auto* remainingLayout = new QVBoxLayout(remainingTab);
+    remainingLayout->setContentsMargins(0, 8, 0, 0);
+    remainingLayout->setSpacing(8);
+    auto* progressWidget = new EvacuationProgressWidget(artifacts, remainingTab);
     if (progressWidgetOut != nullptr) {
         *progressWidgetOut = progressWidget;
     }
-    bodyLayout->addWidget(progressWidget, 1);
+    remainingLayout->addWidget(progressWidget, 1);
     auto* timing = createLabel(
         QString("T90: %1    T95: %2")
             .arg(formatOptionalSeconds(artifacts.timingSummary.t90Seconds))
             .arg(formatOptionalSeconds(artifacts.timingSummary.t95Seconds)),
-        body,
+        remainingTab,
         ui::FontRole::Caption);
     timing->setStyleSheet(ui::mutedTextStyleSheet());
-    bodyLayout->addWidget(timing);
-    layout->addWidget(body, 1);
+    remainingLayout->addWidget(timing);
+    tabs->addTab(remainingTab, "Remaining");
+    tabs->addTab(createExitUsageTable(artifacts, tabs), "Exits");
+    tabs->addTab(createEmptyComparePanel(tabs), "Compare");
+    layout->addWidget(tabs, 1);
 
-    QObject::connect(toggleButton, &QPushButton::clicked, panel, [panel, body, toggleButton]() {
-        const bool nextVisible = !body->isVisible();
-        body->setVisible(nextVisible);
+    QObject::connect(toggleButton, &QPushButton::clicked, panel, [panel, tabs, toggleButton]() {
+        const bool nextVisible = !tabs->isVisible();
+        tabs->setVisible(nextVisible);
         toggleButton->setText(nextVisible ? "Hide graph" : "Show graph");
         panel->setMaximumHeight(nextVisible ? QWIDGETSIZE_MAX : 48);
         panel->setMinimumHeight(nextVisible ? 220 : 48);
@@ -524,6 +719,32 @@ QWidget* createResultCanvasPanel(
     auto* layout = new QVBoxLayout(panel);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
+    auto* overlayBar = new QFrame(panel);
+    overlayBar->setStyleSheet(
+        "QFrame { background: #ffffff; border-bottom: 1px solid #d7e0ea; }"
+        "QLabel { background: transparent; border: 0; }"
+        "QComboBox { background: #ffffff; border: 1px solid #c9d5e2; border-radius: 7px; padding: 5px 24px 5px 8px; }");
+    auto* overlayLayout = new QHBoxLayout(overlayBar);
+    overlayLayout->setContentsMargins(16, 8, 16, 8);
+    overlayLayout->setSpacing(8);
+    auto* overlayLabel = createLabel("Map overlay", overlayBar, ui::FontRole::Caption);
+    overlayLabel->setStyleSheet(ui::mutedTextStyleSheet());
+    auto* overlayCombo = new QComboBox(overlayBar);
+    overlayCombo->addItem("Density", static_cast<int>(ResultOverlayMode::Density));
+    overlayCombo->addItem("Bottlenecks", static_cast<int>(ResultOverlayMode::Bottlenecks));
+    overlayCombo->addItem("Hotspots", static_cast<int>(ResultOverlayMode::Hotspots));
+    overlayCombo->addItem("None", static_cast<int>(ResultOverlayMode::None));
+    overlayCombo->setToolTip("Switch between result map overlays.");
+    overlayLayout->addWidget(overlayLabel);
+    overlayLayout->addWidget(overlayCombo);
+    overlayLayout->addStretch(1);
+    layout->addWidget(overlayBar);
+    canvas->setDensityOverlay(artifacts.densitySummary.peakCells);
+    canvas->setResultOverlayMode(ResultOverlayMode::Density);
+    QObject::connect(overlayCombo, &QComboBox::currentIndexChanged, panel, [canvas, overlayCombo](int index) {
+        const auto mode = static_cast<ResultOverlayMode>(overlayCombo->itemData(index).toInt());
+        canvas->setResultOverlayMode(mode);
+    });
     layout->addWidget(canvas, 1);
     EvacuationProgressWidget* progressWidget = nullptr;
     auto* graphPanel = createResultGraphPanel(artifacts, &progressWidget, panel);
@@ -616,31 +837,62 @@ QWidget* createResultPanel(
     auto* metricsGrid = new QGridLayout();
     metricsGrid->setContentsMargins(0, 0, 0, 0);
     metricsGrid->setSpacing(8);
-    const auto total = static_cast<int>(frame.totalAgentCount);
-    const auto evacuated = static_cast<int>(frame.evacuatedAgentCount);
-    metricsGrid->addWidget(createMetricCard("Evacuated", QString("%1 / %2").arg(evacuated).arg(total), panel), 0, 0);
-    metricsGrid->addWidget(createMetricCard("Time", QString("%1 sec").arg(frame.elapsedSeconds, 0, 'f', 1), panel), 0, 1);
+    const auto completionTime = resultCompletionTime(frame, artifacts);
+    const auto worstBottleneck = risk.bottlenecks.empty()
+        ? QString("None")
+        : QString::fromStdString(risk.bottlenecks.front().label);
+    const auto slowestGroup = artifacts.placementCompletion.empty()
+        ? QString("Pending")
+        : QString::fromStdString(artifacts.placementCompletion.front().placementId);
+    metricsGrid->addWidget(createMetricCard(
+        "Completion",
+        formatSecondsValue(completionTime),
+        panel,
+        "Final evacuation time when all occupants completed evacuation; otherwise elapsed run time."), 0, 0);
+    metricsGrid->addWidget(createMetricCard(
+        "Time Margin",
+        formatOptionalMargin(artifacts.timingSummary.marginSeconds),
+        panel,
+        "Scenario target time minus final or elapsed evacuation time."), 0, 1);
+    metricsGrid->addWidget(createMetricCard(
+        "Peak Density",
+        formatDensity(artifacts.densitySummary.peakDensityPeoplePerSquareMeter),
+        panel,
+        "Highest grid-cell density observed during the run."), 1, 0);
+    metricsGrid->addWidget(createMetricCard(
+        "Worst Bottleneck",
+        worstBottleneck,
+        panel,
+        safecrowd::domain::scenarioBottleneckDefinition()), 1, 1);
+    metricsGrid->addWidget(createMetricCard(
+        "Slowest Group",
+        slowestGroup,
+        panel,
+        "The source placement with the latest completion time."), 2, 0);
     metricsGrid->addWidget(createMetricCard(
         "Risk",
         safecrowd::domain::scenarioRiskLevelLabel(risk.completionRisk),
         panel,
-        safecrowd::domain::scenarioRiskDefinition()), 1, 0);
+        safecrowd::domain::scenarioRiskDefinition()), 2, 1);
     metricsGrid->addWidget(createMetricCard(
         "Stalled",
         QString::number(static_cast<int>(risk.stalledAgentCount)),
         panel,
-        safecrowd::domain::scenarioStalledDefinition()), 1, 1);
+        safecrowd::domain::scenarioStalledDefinition()), 3, 0);
     metricsGrid->addWidget(createMetricCard(
         "T90",
         formatOptionalSeconds(artifacts.timingSummary.t90Seconds),
         panel,
-        "Time at which 90% of occupants completed evacuation."), 2, 0);
+        "Time at which 90% of occupants completed evacuation."), 3, 1);
     metricsGrid->addWidget(createMetricCard(
         "T95",
         formatOptionalSeconds(artifacts.timingSummary.t95Seconds),
         panel,
-        "Time at which 95% of occupants completed evacuation."), 2, 1);
+        "Time at which 95% of occupants completed evacuation."), 4, 0);
     layout->addLayout(metricsGrid);
+    auto* detailsHeader = createReportSectionHeader("Details", panel);
+    layout->addWidget(detailsHeader);
+    layout->addWidget(createDetailTabs(artifacts, panel), 1);
     layout->addStretch(1);
 
     auto* actions = new QWidget(panel);
@@ -673,7 +925,9 @@ QWidget* createResultPanel(
 }
 
 QWidget* createResultFindingsPanel(
+    const safecrowd::domain::SimulationFrame& frame,
     const safecrowd::domain::ScenarioRiskSnapshot& risk,
+    const safecrowd::domain::ScenarioResultArtifacts& artifacts,
     std::function<void(std::size_t)> bottleneckFocusHandler,
     std::function<void(std::size_t)> hotspotFocusHandler,
     QWidget* parent) {
@@ -697,6 +951,14 @@ QWidget* createResultFindingsPanel(
     auto* contentLayout = new QVBoxLayout(content);
     contentLayout->setContentsMargins(0, 0, 10, 0);
     contentLayout->setSpacing(12);
+
+    auto* interpretationHeader = createReportSectionHeader("Decision Notes", content);
+    contentLayout->addWidget(interpretationHeader);
+    for (const auto& line : resultInterpretations(frame, risk, artifacts)) {
+        auto* row = createReportRowButton({line}, content);
+        row->setEnabled(false);
+        contentLayout->addWidget(row);
+    }
 
     auto* bottleneckHeader = createReportSectionHeader("Bottlenecks", content);
     bottleneckHeader->setToolTip(safecrowd::domain::scenarioBottleneckDefinition());
@@ -739,7 +1001,7 @@ QWidget* createResultFindingsPanel(
 
     auto* futureHeader = createReportSectionHeader("Additional Reports", content);
     contentLayout->addWidget(futureHeader);
-    auto* futureText = createLabel("Flow, capacity, exposure, and comparison reports can be added here.", content);
+    auto* futureText = createLabel("Scenario comparison is available as a placeholder in the lower Compare tab.", content);
     futureText->setStyleSheet(ui::subtleTextStyleSheet());
     contentLayout->addWidget(futureText);
 
@@ -805,7 +1067,9 @@ ScenarioResultWidget::ScenarioResultWidget(
     ResultReplayControls* replayControls = nullptr;
     shell_->setCanvas(createResultCanvasPanel(canvas, frame_, artifacts_, &replayControls, shell_));
     shell_->setNavigationPanel(createResultFindingsPanel(
+        frame_,
         risk_,
+        artifacts_,
         [this, canvas, replayControls](std::size_t index) {
             if (index < risk_.bottlenecks.size() && replayControls != nullptr) {
                 const auto& bottleneck = risk_.bottlenecks[index];
@@ -815,6 +1079,7 @@ ScenarioResultWidget::ScenarioResultWidget(
                     replayControls->showClosestFrameAtSeconds(*bottleneck.detectedAtSeconds);
                 }
             }
+            canvas->setResultOverlayMode(ResultOverlayMode::Bottlenecks);
             canvas->focusBottleneck(index);
         },
         [this, canvas, replayControls](std::size_t index) {
@@ -826,6 +1091,7 @@ ScenarioResultWidget::ScenarioResultWidget(
                     replayControls->showClosestFrameAtSeconds(*hotspot.detectedAtSeconds);
                 }
             }
+            canvas->setResultOverlayMode(ResultOverlayMode::Hotspots);
             canvas->focusHotspot(index);
         },
         shell_));
@@ -843,11 +1109,6 @@ ScenarioResultWidget::ScenarioResultWidget(
         shell_,
         shell_));
     shell_->setReviewPanelVisible(true);
-
-    auto* title = new QLabel(QString("%1  -  Result").arg(projectName_), shell_);
-    title->setFont(ui::font(ui::FontRole::Body));
-    title->setStyleSheet(ui::mutedTextStyleSheet());
-    shell_->setTopBarTrailingWidget(title);
 
     rootLayout->addWidget(shell_);
 }

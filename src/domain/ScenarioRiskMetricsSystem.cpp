@@ -14,8 +14,8 @@ namespace {
 
 using namespace simulation_internal;
 
-constexpr std::size_t kMaxReportedHotspots = 3;
-constexpr std::size_t kMaxReportedBottlenecks = 3;
+constexpr std::size_t kMaxReportedHotspots = 5;
+constexpr std::size_t kMaxReportedBottlenecks = 5;
 
 struct RiskCellAccumulator {
     Point2D positionSum{};

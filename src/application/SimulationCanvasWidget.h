@@ -10,6 +10,7 @@
 
 #include "application/LayoutCanvasRendering.h"
 #include "domain/FacilityLayout2D.h"
+#include "domain/ScenarioResultArtifacts.h"
 #include "domain/ScenarioRiskMetrics.h"
 #include "domain/ScenarioSimulationRunner.h"
 
@@ -25,6 +26,13 @@ class QWheelEvent;
 
 namespace safecrowd::application {
 
+enum class ResultOverlayMode {
+    None,
+    Density,
+    Hotspots,
+    Bottlenecks,
+};
+
 class SimulationCanvasWidget : public QWidget {
 public:
     explicit SimulationCanvasWidget(safecrowd::domain::FacilityLayout2D layout, QWidget* parent = nullptr);
@@ -32,8 +40,10 @@ public:
 
     void setFrame(safecrowd::domain::SimulationFrame frame);
     void setConnectionBlocks(std::vector<safecrowd::domain::ConnectionBlockDraft> blocks);
+    void setDensityOverlay(std::vector<safecrowd::domain::DensityCellMetric> densityCells);
     void setHotspotOverlay(std::vector<safecrowd::domain::ScenarioCongestionHotspot> hotspots);
     void setBottleneckOverlay(std::vector<safecrowd::domain::ScenarioBottleneckMetric> bottlenecks);
+    void setResultOverlayMode(ResultOverlayMode mode);
     void focusHotspot(std::size_t index);
     void focusBottleneck(std::size_t index);
 
@@ -56,6 +66,7 @@ private:
     QRectF previewViewport() const;
     void focusWorldPoint(const safecrowd::domain::Point2D& point, double zoom);
     void drawConnectionBlockOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
+    void drawDensityOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawHotspotOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawBottleneckOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     bool switchFloorByWheel(QWheelEvent* event);
@@ -66,8 +77,10 @@ private:
     safecrowd::domain::FacilityLayout2D layout_{};
     safecrowd::domain::SimulationFrame frame_{};
     std::vector<safecrowd::domain::ConnectionBlockDraft> connectionBlocks_{};
+    std::vector<safecrowd::domain::DensityCellMetric> densityOverlay_{};
     std::vector<safecrowd::domain::ScenarioCongestionHotspot> hotspotOverlay_{};
     std::vector<safecrowd::domain::ScenarioBottleneckMetric> bottleneckOverlay_{};
+    ResultOverlayMode overlayMode_{ResultOverlayMode::None};
     std::optional<std::size_t> focusedHotspotIndex_{};
     std::optional<std::size_t> focusedBottleneckIndex_{};
     LayoutCanvasCamera camera_{};

@@ -142,9 +142,19 @@ void WorkspaceShell::initialize(const WorkspaceShellOptions& options) {
     topBarRootLayout->addStretch(1);
 
     auto* topBarTrailing = new QWidget(topBar_);
-    topBarTrailingLayout_ = new QHBoxLayout(topBarTrailing);
+    auto* topBarTrailingRootLayout = new QHBoxLayout(topBarTrailing);
+    topBarTrailingRootLayout->setContentsMargins(0, 0, 0, 0);
+    topBarTrailingRootLayout->setSpacing(8);
+    auto* topBarSystemTrailing = new QWidget(topBarTrailing);
+    topBarSystemTrailingLayout_ = new QHBoxLayout(topBarSystemTrailing);
+    topBarSystemTrailingLayout_->setContentsMargins(0, 0, 0, 0);
+    topBarSystemTrailingLayout_->setSpacing(8);
+    auto* topBarCustomTrailing = new QWidget(topBarTrailing);
+    topBarTrailingLayout_ = new QHBoxLayout(topBarCustomTrailing);
     topBarTrailingLayout_->setContentsMargins(0, 0, 0, 0);
     topBarTrailingLayout_->setSpacing(8);
+    topBarTrailingRootLayout->addWidget(topBarSystemTrailing);
+    topBarTrailingRootLayout->addWidget(topBarCustomTrailing);
     topBarRootLayout->addWidget(topBarTrailing);
     rootLayout->addWidget(topBar_);
 
@@ -195,6 +205,31 @@ void WorkspaceShell::initialize(const WorkspaceShellOptions& options) {
     bodyLayout->addWidget(reviewPanel_);
 
     rootLayout->addLayout(bodyLayout, 1);
+    if (options.showReviewPanelToggle) {
+        reviewPanelToggleButton_ = new QPushButton(topBar_);
+        reviewPanelToggleButton_->setFont(ui::font(ui::FontRole::Body));
+        reviewPanelToggleButton_->setCursor(Qt::PointingHandCursor);
+        reviewPanelToggleButton_->setMinimumHeight(32);
+        reviewPanelToggleButton_->setStyleSheet(
+            "QPushButton {"
+            " background: #ffffff;"
+            " border: 1px solid #d7e0ea;"
+            " border-radius: 8px;"
+            " color: #16202b;"
+            " font-weight: 600;"
+            " padding: 4px 12px;"
+            "}"
+            "QPushButton:hover {"
+            " background: #eef3f8;"
+            " border-color: #b8c6d6;"
+            "}");
+        reviewPanelToggleButton_->setToolTip("Show or hide the right panel.");
+        reviewPanelToggleButton_->setAccessibleName("Toggle right panel");
+        topBarSystemTrailingLayout_->addWidget(reviewPanelToggleButton_);
+        connect(reviewPanelToggleButton_, &QPushButton::clicked, this, [this]() {
+            setReviewPanelVisible(!reviewPanelVisible_);
+        });
+    }
     setNavigationMode(options.navigationMode);
     setReviewPanelVisible(options.showReviewPanel);
 }
@@ -209,6 +244,13 @@ void WorkspaceShell::setFixedWidthVisible(QWidget* widget, bool visible, int wid
     widget->setMinimumWidth(visible ? clampedWidth : 0);
     widget->setMaximumWidth(visible ? clampedWidth : 0);
     widget->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
+}
+
+void WorkspaceShell::updateReviewPanelToggle() {
+    if (reviewPanelToggleButton_ == nullptr) {
+        return;
+    }
+    reviewPanelToggleButton_->setText(reviewPanelVisible_ ? "Hide Panel" : "Show Panel");
 }
 
 QWidget* WorkspaceShell::createDefaultNavigationRail() {
@@ -439,7 +481,9 @@ void WorkspaceShell::setReviewPanel(QWidget* panel) {
 }
 
 void WorkspaceShell::setReviewPanelVisible(bool visible) {
+    reviewPanelVisible_ = visible;
     setFixedWidthVisible(reviewPanel_, visible, reviewPanelWidth_);
+    updateReviewPanelToggle();
 }
 
 void WorkspaceShell::setTopBarTrailingWidget(QWidget* widget) {

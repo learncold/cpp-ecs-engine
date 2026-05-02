@@ -65,6 +65,8 @@ struct ScenarioResultArtifactsResource {
     double nextReplaySampleTimeSeconds{0.0};
     double replaySampleIntervalSeconds{0.5};
     std::size_t maxReplayFrames{600};
+    bool densityTrackingInitialized{false};
+    double lastDensitySampleTimeSeconds{0.0};
 };
 
 struct ScenarioAgentSeed {

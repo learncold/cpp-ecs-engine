@@ -5,7 +5,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <limits>
+#include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -16,10 +19,24 @@ namespace {
 
 constexpr double kReplaySampleIntervalSeconds = 0.5;
 constexpr std::size_t kMaxReplayFrames = 600;
+constexpr std::size_t kMaxResultDensityCells = 5;
+constexpr double kHighDensityThresholdPeoplePerSquareMeter = 4.0;
 
 struct SpatialCell {
     int x{0};
     int y{0};
+};
+
+struct DensityCellAddress {
+    SpatialCell cell{};
+    std::string floorId{};
+};
+
+struct DensityCellAccumulator {
+    Point2D positionSum{};
+    SpatialCell cell{};
+    std::string floorId{};
+    std::size_t agentCount{0};
 };
 
 long long spatialKey(const SpatialCell& cell) {
@@ -36,6 +53,26 @@ SpatialCell spatialCellFor(const Point2D& point, double cellSize) {
 
 double distanceBetween(const Point2D& lhs, const Point2D& rhs) {
     return std::hypot(lhs.x - rhs.x, lhs.y - rhs.y);
+}
+
+long long densitySpatialKey(const DensityCellAddress& address) {
+    const auto cellKey = spatialKey(address.cell);
+    return cellKey ^ (static_cast<long long>(std::hash<std::string>{}(address.floorId)) << 1);
+}
+
+Point2D cellMin(const SpatialCell& cell, double cellSize) {
+    return {
+        .x = static_cast<double>(cell.x) * cellSize,
+        .y = static_cast<double>(cell.y) * cellSize,
+    };
+}
+
+Point2D cellMax(const SpatialCell& cell, double cellSize) {
+    const auto min = cellMin(cell, cellSize);
+    return {
+        .x = min.x + cellSize,
+        .y = min.y + cellSize,
+    };
 }
 
 void appendReplayFrame(
@@ -73,6 +110,39 @@ std::optional<double> percentileCompletionTime(
 
     std::sort(completionTimes.begin(), completionTimes.end());
     return completionTimes[targetCount - 1];
+}
+
+std::string zoneLabel(const FacilityLayout2D& layout, const std::string& zoneId) {
+    const auto* zone = simulation_internal::findZone(layout, zoneId);
+    if (zone == nullptr) {
+        return zoneId;
+    }
+    return zone->label.empty() ? zone->id : zone->label;
+}
+
+std::string zoneFloorId(const FacilityLayout2D& layout, const std::string& zoneId) {
+    const auto* zone = simulation_internal::findZone(layout, zoneId);
+    return zone == nullptr ? std::string{} : zone->floorId;
+}
+
+DensityCellMetric densityMetricFromCell(
+    const DensityCellAccumulator& cell,
+    double cellSize) {
+    const auto count = static_cast<double>(cell.agentCount);
+    const auto min = cellMin(cell.cell, cellSize);
+    const auto max = cellMax(cell.cell, cellSize);
+    return {
+        .center = cell.agentCount == 0
+            ? Point2D{.x = (min.x + max.x) * 0.5, .y = (min.y + max.y) * 0.5}
+            : Point2D{.x = cell.positionSum.x / count, .y = cell.positionSum.y / count},
+        .cellMin = min,
+        .cellMax = max,
+        .floorId = cell.floorId,
+        .agentCount = cell.agentCount,
+        .densityPeoplePerSquareMeter = cellSize <= 0.0
+            ? 0.0
+            : count / (cellSize * cellSize),
+    };
 }
 
 bool intervalContains(const ConnectionBlockIntervalDraft& interval, double timeSeconds) {
@@ -379,20 +449,77 @@ void ScenarioResultArtifactsSystem::update(engine::EngineWorld& world, const eng
         elapsedSeconds = clock.elapsedSeconds;
         complete = clock.complete;
     }
+    const auto* activeLayout = resources.contains<ScenarioLayoutCacheResource>()
+        ? &resources.get<ScenarioLayoutCacheResource>().layout
+        : nullptr;
 
     std::size_t totalAgentCount = 0;
     std::size_t evacuatedCount = 0;
     std::vector<double> completionTimes;
+    std::unordered_map<std::string, ExitUsageMetric> exitUsageByZone;
+    std::unordered_map<std::string, ZoneCompletionMetric> zoneCompletionByZone;
+    std::unordered_map<std::string, PlacementCompletionMetric> placementCompletionById;
     const auto entities = query.view<EvacuationStatus>();
     completionTimes.reserve(entities.size());
     for (const auto entity : entities) {
         ++totalAgentCount;
         const auto& status = query.get<EvacuationStatus>(entity);
+        const auto* agent = query.contains<Agent>(entity) ? &query.get<Agent>(entity) : nullptr;
+        const auto* route = query.contains<EvacuationRoute>(entity) ? &query.get<EvacuationRoute>(entity) : nullptr;
+
+        if (agent != nullptr) {
+            const auto sourceZoneId = agent->sourceZoneId.empty() ? std::string{"Unassigned"} : agent->sourceZoneId;
+            auto& zone = zoneCompletionByZone[sourceZoneId];
+            if (zone.zoneId.empty()) {
+                zone.zoneId = sourceZoneId;
+                zone.zoneLabel = activeLayout == nullptr ? sourceZoneId : zoneLabel(*activeLayout, sourceZoneId);
+                zone.floorId = activeLayout == nullptr ? std::string{} : zoneFloorId(*activeLayout, sourceZoneId);
+            }
+            ++zone.initialCount;
+
+            const auto placementId = agent->sourcePlacementId.empty() ? sourceZoneId : agent->sourcePlacementId;
+            auto& placement = placementCompletionById[placementId];
+            if (placement.placementId.empty()) {
+                placement.placementId = placementId;
+                placement.zoneId = sourceZoneId;
+                placement.floorId = zone.floorId;
+            }
+            ++placement.initialCount;
+
+            if (status.evacuated) {
+                ++zone.evacuatedCount;
+                zone.lastCompletionTimeSeconds = zone.lastCompletionTimeSeconds.has_value()
+                    ? std::max(*zone.lastCompletionTimeSeconds, status.completionTimeSeconds)
+                    : status.completionTimeSeconds;
+                ++placement.evacuatedCount;
+                placement.lastCompletionTimeSeconds = placement.lastCompletionTimeSeconds.has_value()
+                    ? std::max(*placement.lastCompletionTimeSeconds, status.completionTimeSeconds)
+                    : status.completionTimeSeconds;
+            }
+        }
+
         if (!status.evacuated) {
             continue;
         }
         ++evacuatedCount;
         completionTimes.push_back(status.completionTimeSeconds);
+
+        if (route != nullptr && !route->destinationZoneId.empty()) {
+            auto& exit = exitUsageByZone[route->destinationZoneId];
+            if (exit.exitZoneId.empty()) {
+                exit.exitZoneId = route->destinationZoneId;
+                exit.exitLabel = activeLayout == nullptr
+                    ? route->destinationZoneId
+                    : zoneLabel(*activeLayout, route->destinationZoneId);
+                exit.floorId = activeLayout == nullptr
+                    ? std::string{}
+                    : zoneFloorId(*activeLayout, route->destinationZoneId);
+            }
+            ++exit.evacuatedCount;
+            exit.lastExitTimeSeconds = exit.lastExitTimeSeconds.has_value()
+                ? std::max(*exit.lastExitTimeSeconds, status.completionTimeSeconds)
+                : status.completionTimeSeconds;
+        }
     }
 
     result.artifacts.timingSummary.t50Seconds =
@@ -407,6 +534,112 @@ void ScenarioResultArtifactsSystem::update(engine::EngineWorld& world, const eng
     } else {
         result.artifacts.timingSummary.finalEvacuationTimeSeconds = std::nullopt;
     }
+    result.artifacts.timingSummary.targetTimeSeconds = elapsedSeconds;
+    if (resources.contains<ScenarioSimulationClockResource>()) {
+        result.artifacts.timingSummary.targetTimeSeconds =
+            resources.get<ScenarioSimulationClockResource>().timeLimitSeconds;
+    }
+    const auto timingBasis = result.artifacts.timingSummary.finalEvacuationTimeSeconds.value_or(elapsedSeconds);
+    result.artifacts.timingSummary.marginSeconds =
+        result.artifacts.timingSummary.targetTimeSeconds > 0.0
+            ? std::optional<double>{result.artifacts.timingSummary.targetTimeSeconds - timingBasis}
+            : std::nullopt;
+
+    result.artifacts.exitUsage.clear();
+    result.artifacts.exitUsage.reserve(exitUsageByZone.size());
+    for (auto& [_, exit] : exitUsageByZone) {
+        exit.usageRatio = evacuatedCount == 0
+            ? 0.0
+            : static_cast<double>(exit.evacuatedCount) / static_cast<double>(evacuatedCount);
+        result.artifacts.exitUsage.push_back(std::move(exit));
+    }
+    std::sort(result.artifacts.exitUsage.begin(), result.artifacts.exitUsage.end(), [](const auto& lhs, const auto& rhs) {
+        if (lhs.evacuatedCount != rhs.evacuatedCount) {
+            return lhs.evacuatedCount > rhs.evacuatedCount;
+        }
+        return lhs.exitLabel < rhs.exitLabel;
+    });
+
+    result.artifacts.zoneCompletion.clear();
+    result.artifacts.zoneCompletion.reserve(zoneCompletionByZone.size());
+    for (auto& [_, zone] : zoneCompletionByZone) {
+        result.artifacts.zoneCompletion.push_back(std::move(zone));
+    }
+    std::sort(result.artifacts.zoneCompletion.begin(), result.artifacts.zoneCompletion.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.lastCompletionTimeSeconds.value_or(std::numeric_limits<double>::infinity())
+            > rhs.lastCompletionTimeSeconds.value_or(std::numeric_limits<double>::infinity());
+    });
+
+    result.artifacts.placementCompletion.clear();
+    result.artifacts.placementCompletion.reserve(placementCompletionById.size());
+    for (auto& [_, placement] : placementCompletionById) {
+        result.artifacts.placementCompletion.push_back(std::move(placement));
+    }
+    std::sort(result.artifacts.placementCompletion.begin(), result.artifacts.placementCompletion.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.lastCompletionTimeSeconds.value_or(std::numeric_limits<double>::infinity())
+            > rhs.lastCompletionTimeSeconds.value_or(std::numeric_limits<double>::infinity());
+    });
+
+    std::unordered_map<long long, DensityCellAccumulator> densityCells;
+    const auto activeEntities = query.view<Position, Agent, EvacuationStatus>();
+    densityCells.reserve(activeEntities.size());
+    for (const auto entity : activeEntities) {
+        if (query.get<EvacuationStatus>(entity).evacuated) {
+            continue;
+        }
+        const auto& position = query.get<Position>(entity);
+        const auto floorId = query.contains<EvacuationRoute>(entity)
+            ? (!query.get<EvacuationRoute>(entity).displayFloorId.empty()
+                ? query.get<EvacuationRoute>(entity).displayFloorId
+                : query.get<EvacuationRoute>(entity).currentFloorId)
+            : std::string{};
+        const DensityCellAddress address{
+            .cell = spatialCellFor(position.value, kScenarioHotspotCellSize),
+            .floorId = floorId,
+        };
+        auto& cell = densityCells[densitySpatialKey(address)];
+        if (cell.agentCount == 0) {
+            cell.cell = address.cell;
+            cell.floorId = address.floorId;
+        }
+        cell.positionSum = {
+            .x = cell.positionSum.x + position.value.x,
+            .y = cell.positionSum.y + position.value.y,
+        };
+        ++cell.agentCount;
+    }
+
+    std::vector<DensityCellMetric> densityMetrics;
+    densityMetrics.reserve(densityCells.size());
+    for (const auto& [_, cell] : densityCells) {
+        densityMetrics.push_back(densityMetricFromCell(cell, kScenarioHotspotCellSize));
+    }
+    std::sort(densityMetrics.begin(), densityMetrics.end(), [](const auto& lhs, const auto& rhs) {
+        if (lhs.densityPeoplePerSquareMeter != rhs.densityPeoplePerSquareMeter) {
+            return lhs.densityPeoplePerSquareMeter > rhs.densityPeoplePerSquareMeter;
+        }
+        return lhs.agentCount > rhs.agentCount;
+    });
+    const auto currentPeakDensity = densityMetrics.empty() ? 0.0 : densityMetrics.front().densityPeoplePerSquareMeter;
+    result.artifacts.densitySummary.cellSizeMeters = kScenarioHotspotCellSize;
+    result.artifacts.densitySummary.highDensityThresholdPeoplePerSquareMeter =
+        kHighDensityThresholdPeoplePerSquareMeter;
+    if (currentPeakDensity > result.artifacts.densitySummary.peakDensityPeoplePerSquareMeter) {
+        result.artifacts.densitySummary.peakDensityPeoplePerSquareMeter = currentPeakDensity;
+        result.artifacts.densitySummary.peakAgentCount = densityMetrics.front().agentCount;
+        result.artifacts.densitySummary.peakAtSeconds = elapsedSeconds;
+        result.artifacts.densitySummary.peakCell = densityMetrics.front();
+        result.artifacts.densitySummary.peakCells = densityMetrics;
+        if (result.artifacts.densitySummary.peakCells.size() > kMaxResultDensityCells) {
+            result.artifacts.densitySummary.peakCells.resize(kMaxResultDensityCells);
+        }
+    }
+    if (result.densityTrackingInitialized && currentPeakDensity >= kHighDensityThresholdPeoplePerSquareMeter) {
+        result.artifacts.densitySummary.highDensityDurationSeconds +=
+            std::max(0.0, elapsedSeconds - result.lastDensitySampleTimeSeconds);
+    }
+    result.densityTrackingInitialized = true;
+    result.lastDensitySampleTimeSeconds = elapsedSeconds;
 
     const auto shouldRecordSample =
         result.artifacts.evacuationProgress.empty()

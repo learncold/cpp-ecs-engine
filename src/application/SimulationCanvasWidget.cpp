@@ -113,6 +113,11 @@ void SimulationCanvasWidget::setConnectionBlocks(std::vector<safecrowd::domain::
     update();
 }
 
+void SimulationCanvasWidget::setDensityOverlay(std::vector<safecrowd::domain::DensityCellMetric> densityCells) {
+    densityOverlay_ = std::move(densityCells);
+    update();
+}
+
 void SimulationCanvasWidget::setHotspotOverlay(std::vector<safecrowd::domain::ScenarioCongestionHotspot> hotspots) {
     hotspotOverlay_ = std::move(hotspots);
     if (focusedHotspotIndex_.has_value() && *focusedHotspotIndex_ >= hotspotOverlay_.size()) {
@@ -126,6 +131,11 @@ void SimulationCanvasWidget::setBottleneckOverlay(std::vector<safecrowd::domain:
     if (focusedBottleneckIndex_.has_value() && *focusedBottleneckIndex_ >= bottleneckOverlay_.size()) {
         focusedBottleneckIndex_.reset();
     }
+    update();
+}
+
+void SimulationCanvasWidget::setResultOverlayMode(ResultOverlayMode mode) {
+    overlayMode_ = mode;
     update();
 }
 
@@ -229,8 +239,13 @@ void SimulationCanvasWidget::paintEvent(QPaintEvent* event) {
 
     const auto transform = currentTransform(*bounds);
     drawConnectionBlockOverlay(painter, transform);
-    drawHotspotOverlay(painter, transform);
-    drawBottleneckOverlay(painter, transform);
+    if (overlayMode_ == ResultOverlayMode::Density) {
+        drawDensityOverlay(painter, transform);
+    } else if (overlayMode_ == ResultOverlayMode::Hotspots) {
+        drawHotspotOverlay(painter, transform);
+    } else if (overlayMode_ == ResultOverlayMode::Bottlenecks) {
+        drawBottleneckOverlay(painter, transform);
+    }
     for (const auto& agent : frame_.agents) {
         if (!matchesFloor(agent.floorId, currentFloorId_)) {
             continue;
@@ -366,6 +381,40 @@ void SimulationCanvasWidget::drawConnectionBlockOverlay(QPainter& painter, const
         painter.drawLine(QPointF(center.x() - 6.5, center.y() + 6.5), QPointF(center.x() + 6.5, center.y() - 6.5));
     }
 
+    painter.restore();
+}
+
+void SimulationCanvasWidget::drawDensityOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const {
+    if (densityOverlay_.empty()) {
+        return;
+    }
+
+    double maxDensity = 0.0;
+    for (const auto& cell : densityOverlay_) {
+        maxDensity = std::max(maxDensity, cell.densityPeoplePerSquareMeter);
+    }
+    if (maxDensity <= 0.0) {
+        return;
+    }
+
+    painter.save();
+    painter.setPen(Qt::NoPen);
+    for (const auto& cell : densityOverlay_) {
+        if (!matchesFloor(cell.floorId, currentFloorId_)) {
+            continue;
+        }
+        const auto min = transform.map(cell.cellMin);
+        const auto max = transform.map(cell.cellMax);
+        QRectF rect(QPointF(std::min(min.x(), max.x()), std::min(min.y(), max.y())),
+                    QPointF(std::max(min.x(), max.x()), std::max(min.y(), max.y())));
+        const auto intensity = std::clamp(cell.densityPeoplePerSquareMeter / maxDensity, 0.0, 1.0);
+        const auto alpha = 54 + static_cast<int>(150.0 * intensity);
+        const auto color = intensity >= 0.75
+            ? QColor(185, 28, 28, alpha)
+            : (intensity >= 0.45 ? QColor(220, 38, 38, alpha) : QColor(249, 115, 22, alpha));
+        painter.setBrush(color);
+        painter.drawRoundedRect(rect.adjusted(1.0, 1.0, -1.0, -1.0), 5.0, 5.0);
+    }
     painter.restore();
 }
 

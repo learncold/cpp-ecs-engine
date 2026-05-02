@@ -27,6 +27,7 @@ struct WorkspaceShellOptions {
     bool showTopBar{true};
     WorkspaceNavigationMode navigationMode{WorkspaceNavigationMode::RailAndPanel};
     bool showReviewPanel{true};
+    bool showReviewPanelToggle{true};
     int navigationRailWidth{56};
     int navigationPanelWidth{260};
     int reviewPanelWidth{280};
@@ -65,6 +66,7 @@ public:
 private:
     void initialize(const WorkspaceShellOptions& options);
     void setFixedWidthVisible(QWidget* widget, bool visible, int width);
+    void updateReviewPanelToggle();
     QWidget* createDefaultNavigationRail();
     QWidget* createNavigationTabRail();
     void rebuildDefaultNavigationRail();
@@ -76,6 +78,7 @@ private:
 
     QFrame* topBar_{nullptr};
     QBoxLayout* topBarLayout_{nullptr};
+    QBoxLayout* topBarSystemTrailingLayout_{nullptr};
     QBoxLayout* topBarTrailingLayout_{nullptr};
     QBoxLayout* navigationRailLayout_{nullptr};
     QBoxLayout* navigationLayout_{nullptr};
@@ -85,9 +88,11 @@ private:
     QWidget* navigationRail_{nullptr};
     QFrame* navigationPanel_{nullptr};
     QFrame* reviewPanel_{nullptr};
+    QPushButton* reviewPanelToggleButton_{nullptr};
     int navigationRailWidth_{56};
     int navigationPanelWidth_{260};
     int reviewPanelWidth_{280};
+    bool reviewPanelVisible_{true};
     QAction* openProjectAction_{nullptr};
     QAction* saveProjectAction_{nullptr};
     std::function<void()> openProjectHandler_{};
