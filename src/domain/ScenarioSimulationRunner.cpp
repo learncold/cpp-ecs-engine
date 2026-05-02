@@ -128,7 +128,12 @@ std::vector<ScenarioAgentSeed> ScenarioSimulationRunner::createAgentSeeds() cons
                 : distanceToRouteWaypoint(evacuationRoute, position);
             seeds.push_back({
                 .position = {.value = position},
-                .agent = {.radius = static_cast<float>(kDefaultAgentRadius), .maxSpeed = static_cast<float>(speed)},
+                .agent = {
+                    .radius = static_cast<float>(kDefaultAgentRadius),
+                    .maxSpeed = static_cast<float>(speed),
+                    .sourcePlacementId = placement.id,
+                    .sourceZoneId = startZoneId,
+                },
                 .velocity = {.value = {}},
                 .route = std::move(evacuationRoute),
                 .status = {},

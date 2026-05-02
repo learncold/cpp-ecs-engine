@@ -16,6 +16,8 @@ struct Position {
 struct Agent {
     float radius{0.25f};
     float maxSpeed{1.5f};
+    std::string sourcePlacementId{};
+    std::string sourceZoneId{};
 };
 
 struct Velocity {

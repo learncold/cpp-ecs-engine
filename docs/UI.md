@@ -36,6 +36,7 @@ Sprint 1 시연에서 가장 중요한 기준은 `도면 불러오기 -> 검토/
 - 우측 review/inspector/scenario/run/results 패널
 - 하단 상태/요약 패널
 - Workspace Shell 옵션에 따라 left rail, left panel, right panel을 숨기거나 표시하며, 숨긴 영역은 폭을 남기지 않는다.
+- Project Navigator를 제외한 Workspace Shell 기반 화면은 상단 오른쪽 `Hide Panel` / `Show Panel` 버튼으로 우측 패널을 접고 펼칠 수 있다.
 
 기본 레이아웃:
 
@@ -320,9 +321,22 @@ stage된 baseline 시나리오를 실제로 실행하고 진행 상태를 보는
 
 - 완료된 run의 final simulation frame 표시
 - Workspace Shell은 left reports panel, simulation canvas, right summary panel 구성 사용
+- 상단/우측 summary panel에 completion time, time margin, peak density, worst bottleneck, slowest group 표시
+- time margin은 v1에서 `scenario.execution.timeLimitSeconds` 기준 목표 시간 대비 여유로 계산
+- slowest group은 v1에서 보행자 배치 그룹별 마지막 완료시간을 표시하며, 별도 취약자 속성 모델이 들어오면 취약자 완료시간 카드로 확장
+- 중앙 simulation canvas에서 result overlay 선택 제공: peak density, bottleneck, hotspot, none
 - hotspot overlay 표시
 - bottleneck overlay 표시
+- peak density overlay는 peak 시점의 전체 density field를 사용해 보행 가능 영역 안에 부드러운 heatmap으로 표시
+- peak density heatmap 색상 범례 표시
 - 누적 대피 곡선 표시
+- 하단 graph panel에 Remaining, Exits, Compare 탭 제공
+- Exits 탭에 출구별 이용 인원, 비율, 마지막 통과 시각 표시
+- Compare 탭은 v1 placeholder이며 baseline/alternative 비교 계산은 후속 Analysis Workspace 범위
+- 상세 탭에 Zones, Groups, Criteria 표시
+- Zones 탭에 구역별 초기 인원, 대피 인원, 마지막 완료시각 표시
+- Groups 탭에 배치 그룹별 초기 인원, 대피 인원, 마지막 완료시각 표시
+- Criteria 탭에 고밀도, stalled, bottleneck 계산 기준 표시
 - T90/T95 대피 완료 시각 표시
 - evacuated count 표시
 - elapsed time 표시
@@ -339,15 +353,23 @@ stage된 baseline 시나리오를 실제로 실행하고 진행 상태를 보는
 
 - Evacuated
 - Time
+- Completion
+- Time Margin
+- Peak Density
+- Worst Bottleneck
+- Slowest Group
 - T90
 - T95
 - Risk
 - Stalled
 - Result Reports
 - Evacuation Progress
+- Remaining / Exits / Compare tabs
+- Zones / Groups / Criteria detail tabs
 - Bottlenecks
 - Hotspots
 - Hotspot intensity legend
+- Peak Density heatmap legend
 - `Run Again`
 - `Edit Scenario`
 - risk/stalled/hotspot/bottleneck 기준 툴팁
@@ -358,6 +380,8 @@ stage된 baseline 시나리오를 실제로 실행하고 진행 상태를 보는
 - baseline 대비 alternative 비교는 Sprint 2 범위다.
 - persisted result artifact 기반 analysis는 Sprint 2 이후 범위다.
 - export는 Sprint 3 범위다.
+- ASET/FED/연기 노출 기반 안전여유는 아직 없고, 현재 margin은 시나리오 목표시간 대비 여유다.
+- 이동약자/지원 필요자 전용 결과는 아직 없고, 현재는 가장 늦게 완료한 placement group을 표시한다.
 
 ## 4. 상태별 화면 흐름
 

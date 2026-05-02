@@ -54,12 +54,58 @@ private:
     static void spawnEvacuatedAgent(safecrowd::engine::EngineWorld& world, double completionTimeSeconds) {
         world.commands().spawnEntity(
             safecrowd::domain::Position{.value = {.x = completionTimeSeconds, .y = 0.0}},
-            safecrowd::domain::Agent{.radius = 0.25f, .maxSpeed = 1.5f},
+            safecrowd::domain::Agent{
+                .radius = 0.25f,
+                .maxSpeed = 1.5f,
+                .sourcePlacementId = "group-a",
+                .sourceZoneId = "room-a",
+            },
             safecrowd::domain::Velocity{.value = {}},
+            safecrowd::domain::EvacuationRoute{.destinationZoneId = "exit-a"},
             safecrowd::domain::EvacuationStatus{
                 .evacuated = true,
                 .completionTimeSeconds = completionTimeSeconds,
             });
+    }
+};
+
+class ConfigureDenseActiveAgentsSystem final : public safecrowd::engine::EngineSystem {
+public:
+    void configure(safecrowd::engine::EngineWorld& world) override {
+        world.resources().set(safecrowd::domain::ScenarioSimulationClockResource{
+            .elapsedSeconds = 1.0,
+            .timeLimitSeconds = 10.0,
+            .complete = false,
+        });
+        for (int index = 0; index < 10; ++index) {
+            world.commands().spawnEntity(
+                safecrowd::domain::Position{.value = {.x = 0.1 + (0.04 * static_cast<double>(index)), .y = 0.1}},
+                safecrowd::domain::Agent{
+                    .radius = 0.25f,
+                    .maxSpeed = 1.5f,
+                    .sourcePlacementId = "dense-group",
+                    .sourceZoneId = "room-a",
+                },
+                safecrowd::domain::Velocity{.value = {}},
+                safecrowd::domain::EvacuationRoute{.currentFloorId = "L1", .displayFloorId = "L1"},
+                safecrowd::domain::EvacuationStatus{});
+        }
+        for (int index = 0; index < 6; ++index) {
+            world.commands().spawnEntity(
+                safecrowd::domain::Position{.value = {.x = 3.0 + (2.0 * static_cast<double>(index)), .y = 0.1}},
+                safecrowd::domain::Agent{
+                    .radius = 0.25f,
+                    .maxSpeed = 1.5f,
+                    .sourcePlacementId = "spread-group",
+                    .sourceZoneId = "room-a",
+                },
+                safecrowd::domain::Velocity{.value = {}},
+                safecrowd::domain::EvacuationRoute{.currentFloorId = "L1", .displayFloorId = "L1"},
+                safecrowd::domain::EvacuationStatus{});
+        }
+    }
+
+    void update(safecrowd::engine::EngineWorld&, const safecrowd::engine::EngineStepContext&) override {
     }
 };
 
@@ -545,6 +591,49 @@ SC_TEST(ScenarioResultArtifactsSystem_PublishesEvacuationCurveAndPercentiles) {
     SC_EXPECT_NEAR(*artifacts.timingSummary.t90Seconds, 7.0, 1e-9);
     SC_EXPECT_NEAR(*artifacts.timingSummary.t95Seconds, 7.0, 1e-9);
     SC_EXPECT_NEAR(*artifacts.timingSummary.finalEvacuationTimeSeconds, 7.0, 1e-9);
+    SC_EXPECT_NEAR(artifacts.timingSummary.targetTimeSeconds, 10.0, 1e-9);
+    SC_EXPECT_TRUE(artifacts.timingSummary.marginSeconds.has_value());
+    SC_EXPECT_NEAR(*artifacts.timingSummary.marginSeconds, 3.0, 1e-9);
+    SC_EXPECT_EQ(artifacts.exitUsage.size(), std::size_t{1});
+    SC_EXPECT_EQ(artifacts.exitUsage.front().exitZoneId, std::string{"exit-a"});
+    SC_EXPECT_EQ(artifacts.exitUsage.front().evacuatedCount, std::size_t{3});
+    SC_EXPECT_NEAR(artifacts.exitUsage.front().usageRatio, 1.0, 1e-9);
+    SC_EXPECT_EQ(artifacts.zoneCompletion.size(), std::size_t{1});
+    SC_EXPECT_EQ(artifacts.zoneCompletion.front().zoneId, std::string{"room-a"});
+    SC_EXPECT_EQ(artifacts.zoneCompletion.front().evacuatedCount, std::size_t{3});
+    SC_EXPECT_EQ(artifacts.placementCompletion.size(), std::size_t{1});
+    SC_EXPECT_EQ(artifacts.placementCompletion.front().placementId, std::string{"group-a"});
+}
+
+SC_TEST(ScenarioResultArtifactsSystem_PublishesDensitySummary) {
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 24,
+    });
+    runtime.addSystem(std::make_unique<ConfigureDenseActiveAgentsSystem>());
+    runtime.addSystem(
+        std::make_unique<safecrowd::domain::ScenarioResultArtifactsSystem>(1.0),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(0.0);
+    auto& clock = runtime.world().resources().get<safecrowd::domain::ScenarioSimulationClockResource>();
+    clock.elapsedSeconds = 2.0;
+    runtime.stepFrame(0.0);
+
+    const auto& artifacts =
+        runtime.world().resources().get<safecrowd::domain::ScenarioResultArtifactsResource>().artifacts;
+    SC_EXPECT_TRUE(artifacts.densitySummary.peakCell.has_value());
+    SC_EXPECT_EQ(artifacts.densitySummary.peakAgentCount, std::size_t{10});
+    SC_EXPECT_TRUE(artifacts.densitySummary.peakDensityPeoplePerSquareMeter >= 4.0);
+    SC_EXPECT_TRUE(artifacts.densitySummary.highDensityDurationSeconds >= 1.0);
+    SC_EXPECT_TRUE(!artifacts.densitySummary.peakCells.empty());
+    SC_EXPECT_EQ(artifacts.densitySummary.peakCells.size(), std::size_t{5});
+    SC_EXPECT_TRUE(artifacts.densitySummary.peakField.cells.size() > artifacts.densitySummary.peakCells.size());
+    SC_EXPECT_NEAR(artifacts.densitySummary.peakField.timeSeconds, 1.0, 1e-9);
+    SC_EXPECT_NEAR(artifacts.densitySummary.peakField.cellSizeMeters, artifacts.densitySummary.cellSizeMeters, 1e-9);
 }
 
 SC_TEST(ScenarioRoutePassageCrossed_UsesDoorPlaneNearEndpoint) {

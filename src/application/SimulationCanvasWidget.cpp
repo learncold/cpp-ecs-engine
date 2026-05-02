@@ -27,6 +27,8 @@ constexpr double kAgentMarkerRadius = 5.0;
 constexpr double kDefaultHotspotCellSize = 1.5;
 constexpr double kHotspotFocusZoom = 2.8;
 constexpr double kBottleneckFocusZoom = 2.4;
+constexpr double kDensityInfluenceRadiusMultiplier = 1.75;
+constexpr double kDensityMinimumScreenRadius = 14.0;
 constexpr int kHotspotMinCoreAlpha = 72;
 constexpr int kHotspotMaxCoreAlpha = 190;
 constexpr int kFloorSelectorMargin = 14;
@@ -68,6 +70,26 @@ safecrowd::domain::Point2D connectionCenter(const safecrowd::domain::Connection2
         .x = (connection.centerSpan.start.x + connection.centerSpan.end.x) * 0.5,
         .y = (connection.centerSpan.start.y + connection.centerSpan.end.y) * 0.5,
     };
+}
+
+QColor densityHeatmapColor(double ratio, int alpha) {
+    const auto t = std::clamp(ratio, 0.0, 1.0);
+    if (t < 0.22) {
+        return QColor(29, 78, 216, alpha);
+    }
+    if (t < 0.45) {
+        return QColor(6, 182, 212, alpha);
+    }
+    if (t < 0.65) {
+        return QColor(34, 197, 94, alpha);
+    }
+    if (t < 0.82) {
+        return QColor(250, 204, 21, alpha);
+    }
+    if (t < 0.94) {
+        return QColor(249, 115, 22, alpha);
+    }
+    return QColor(220, 38, 38, alpha);
 }
 
 }  // namespace
@@ -113,6 +135,11 @@ void SimulationCanvasWidget::setConnectionBlocks(std::vector<safecrowd::domain::
     update();
 }
 
+void SimulationCanvasWidget::setDensityOverlay(std::vector<safecrowd::domain::DensityCellMetric> densityCells) {
+    densityOverlay_ = std::move(densityCells);
+    update();
+}
+
 void SimulationCanvasWidget::setHotspotOverlay(std::vector<safecrowd::domain::ScenarioCongestionHotspot> hotspots) {
     hotspotOverlay_ = std::move(hotspots);
     if (focusedHotspotIndex_.has_value() && *focusedHotspotIndex_ >= hotspotOverlay_.size()) {
@@ -126,6 +153,11 @@ void SimulationCanvasWidget::setBottleneckOverlay(std::vector<safecrowd::domain:
     if (focusedBottleneckIndex_.has_value() && *focusedBottleneckIndex_ >= bottleneckOverlay_.size()) {
         focusedBottleneckIndex_.reset();
     }
+    update();
+}
+
+void SimulationCanvasWidget::setResultOverlayMode(ResultOverlayMode mode) {
+    overlayMode_ = mode;
     update();
 }
 
@@ -229,8 +261,13 @@ void SimulationCanvasWidget::paintEvent(QPaintEvent* event) {
 
     const auto transform = currentTransform(*bounds);
     drawConnectionBlockOverlay(painter, transform);
-    drawHotspotOverlay(painter, transform);
-    drawBottleneckOverlay(painter, transform);
+    if (overlayMode_ == ResultOverlayMode::Density) {
+        drawDensityOverlay(painter, transform);
+    } else if (overlayMode_ == ResultOverlayMode::Hotspots) {
+        drawHotspotOverlay(painter, transform);
+    } else if (overlayMode_ == ResultOverlayMode::Bottlenecks) {
+        drawBottleneckOverlay(painter, transform);
+    }
     for (const auto& agent : frame_.agents) {
         if (!matchesFloor(agent.floorId, currentFloorId_)) {
             continue;
@@ -366,6 +403,77 @@ void SimulationCanvasWidget::drawConnectionBlockOverlay(QPainter& painter, const
         painter.drawLine(QPointF(center.x() - 6.5, center.y() + 6.5), QPointF(center.x() + 6.5, center.y() - 6.5));
     }
 
+    painter.restore();
+}
+
+void SimulationCanvasWidget::drawDensityOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const {
+    if (densityOverlay_.empty()) {
+        return;
+    }
+
+    double maxDensity = 0.0;
+    std::vector<const safecrowd::domain::DensityCellMetric*> visibleCells;
+    visibleCells.reserve(densityOverlay_.size());
+    for (const auto& cell : densityOverlay_) {
+        if (!matchesFloor(cell.floorId, currentFloorId_)) {
+            continue;
+        }
+        maxDensity = std::max(maxDensity, cell.densityPeoplePerSquareMeter);
+        visibleCells.push_back(&cell);
+    }
+    if (maxDensity <= 0.0 || visibleCells.empty()) {
+        return;
+    }
+    std::sort(visibleCells.begin(), visibleCells.end(), [](const auto* lhs, const auto* rhs) {
+        if (lhs->densityPeoplePerSquareMeter != rhs->densityPeoplePerSquareMeter) {
+            return lhs->densityPeoplePerSquareMeter < rhs->densityPeoplePerSquareMeter;
+        }
+        return lhs->agentCount < rhs->agentCount;
+    });
+
+    painter.save();
+    painter.setPen(Qt::NoPen);
+    painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+    QPainterPath walkableClip;
+    for (const auto& zone : layout_.zones) {
+        if (!matchesFloor(zone.floorId, currentFloorId_)) {
+            continue;
+        }
+        walkableClip.addPath(layoutCanvasPolygonPath(zone.area, transform));
+    }
+    if (!walkableClip.isEmpty()) {
+        painter.setClipPath(walkableClip);
+    }
+
+    for (const auto* cell : visibleCells) {
+        const auto center = transform.map(cell->center);
+        const auto cellWidth = cell->cellMax.x > cell->cellMin.x
+            ? cell->cellMax.x - cell->cellMin.x
+            : kDefaultHotspotCellSize;
+        const auto cellHeight = cell->cellMax.y > cell->cellMin.y
+            ? cell->cellMax.y - cell->cellMin.y
+            : kDefaultHotspotCellSize;
+        const auto influenceRadiusWorld =
+            std::max(cellWidth, cellHeight) * kDensityInfluenceRadiusMultiplier;
+        const auto radiusAnchor = transform.map({
+            .x = cell->center.x + influenceRadiusWorld,
+            .y = cell->center.y,
+        });
+        const auto radius = std::max(
+            kDensityMinimumScreenRadius,
+            std::hypot(radiusAnchor.x() - center.x(), radiusAnchor.y() - center.y()));
+        const auto intensity = std::clamp(cell->densityPeoplePerSquareMeter / maxDensity, 0.0, 1.0);
+        const auto coreAlpha = 58 + static_cast<int>(118.0 * intensity);
+        const auto coreColor = densityHeatmapColor(intensity, std::clamp(coreAlpha, 58, 176));
+        const auto middleColor = densityHeatmapColor(intensity, static_cast<int>(coreAlpha * 0.42));
+
+        QRadialGradient gradient(center, radius);
+        gradient.setColorAt(0.0, coreColor);
+        gradient.setColorAt(0.38, middleColor);
+        gradient.setColorAt(1.0, densityHeatmapColor(intensity, 0));
+        painter.setBrush(gradient);
+        painter.drawEllipse(center, radius, radius);
+    }
     painter.restore();
 }
 
