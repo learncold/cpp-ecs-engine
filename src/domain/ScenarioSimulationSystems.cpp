@@ -630,6 +630,11 @@ void ScenarioResultArtifactsSystem::update(engine::EngineWorld& world, const eng
         result.artifacts.densitySummary.peakAtSeconds = elapsedSeconds;
         result.artifacts.densitySummary.peakCell = densityMetrics.front();
         result.artifacts.densitySummary.peakCells = densityMetrics;
+        result.artifacts.densitySummary.peakField = {
+            .timeSeconds = elapsedSeconds,
+            .cellSizeMeters = kScenarioHotspotCellSize,
+            .cells = densityMetrics,
+        };
         if (result.artifacts.densitySummary.peakCells.size() > kMaxResultDensityCells) {
             result.artifacts.densitySummary.peakCells.resize(kMaxResultDensityCells);
         }

@@ -90,6 +90,19 @@ public:
                 safecrowd::domain::EvacuationRoute{.currentFloorId = "L1", .displayFloorId = "L1"},
                 safecrowd::domain::EvacuationStatus{});
         }
+        for (int index = 0; index < 6; ++index) {
+            world.commands().spawnEntity(
+                safecrowd::domain::Position{.value = {.x = 3.0 + (2.0 * static_cast<double>(index)), .y = 0.1}},
+                safecrowd::domain::Agent{
+                    .radius = 0.25f,
+                    .maxSpeed = 1.5f,
+                    .sourcePlacementId = "spread-group",
+                    .sourceZoneId = "room-a",
+                },
+                safecrowd::domain::Velocity{.value = {}},
+                safecrowd::domain::EvacuationRoute{.currentFloorId = "L1", .displayFloorId = "L1"},
+                safecrowd::domain::EvacuationStatus{});
+        }
     }
 
     void update(safecrowd::engine::EngineWorld&, const safecrowd::engine::EngineStepContext&) override {
@@ -617,6 +630,10 @@ SC_TEST(ScenarioResultArtifactsSystem_PublishesDensitySummary) {
     SC_EXPECT_TRUE(artifacts.densitySummary.peakDensityPeoplePerSquareMeter >= 4.0);
     SC_EXPECT_TRUE(artifacts.densitySummary.highDensityDurationSeconds >= 1.0);
     SC_EXPECT_TRUE(!artifacts.densitySummary.peakCells.empty());
+    SC_EXPECT_EQ(artifacts.densitySummary.peakCells.size(), std::size_t{5});
+    SC_EXPECT_TRUE(artifacts.densitySummary.peakField.cells.size() > artifacts.densitySummary.peakCells.size());
+    SC_EXPECT_NEAR(artifacts.densitySummary.peakField.timeSeconds, 1.0, 1e-9);
+    SC_EXPECT_NEAR(artifacts.densitySummary.peakField.cellSizeMeters, artifacts.densitySummary.cellSizeMeters, 1e-9);
 }
 
 SC_TEST(ScenarioRoutePassageCrossed_UsesDoorPlaneNearEndpoint) {

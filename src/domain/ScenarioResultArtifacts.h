@@ -35,6 +35,12 @@ struct DensityCellMetric {
     double densityPeoplePerSquareMeter{0.0};
 };
 
+struct DensityFieldSnapshot {
+    double timeSeconds{0.0};
+    double cellSizeMeters{0.0};
+    std::vector<DensityCellMetric> cells{};
+};
+
 struct DensitySummary {
     double cellSizeMeters{0.0};
     double highDensityThresholdPeoplePerSquareMeter{4.0};
@@ -44,6 +50,7 @@ struct DensitySummary {
     std::optional<DensityCellMetric> peakCell{};
     double highDensityDurationSeconds{0.0};
     std::vector<DensityCellMetric> peakCells{};
+    DensityFieldSnapshot peakField{};
 };
 
 struct ExitUsageMetric {

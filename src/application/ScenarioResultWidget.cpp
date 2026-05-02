@@ -13,6 +13,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QLinearGradient>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPushButton>
@@ -201,6 +202,62 @@ private:
 
     safecrowd::domain::ScenarioResultArtifacts artifacts_{};
     std::optional<double> currentTimeSeconds_{};
+};
+
+class DensityLegendWidget final : public QWidget {
+public:
+    explicit DensityLegendWidget(
+        const safecrowd::domain::DensitySummary& summary,
+        QWidget* parent = nullptr)
+        : QWidget(parent),
+          threshold_(summary.highDensityThresholdPeoplePerSquareMeter),
+          peakDensity_(summary.peakDensityPeoplePerSquareMeter) {
+        setFixedSize(230, 34);
+        setToolTip("Peak density heatmap scale in people per square meter.");
+    }
+
+protected:
+    void paintEvent(QPaintEvent* event) override {
+        (void)event;
+
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+
+        const QRectF ramp(0, 4, width(), 9);
+        QLinearGradient gradient(ramp.left(), ramp.center().y(), ramp.right(), ramp.center().y());
+        gradient.setColorAt(0.0, QColor("#1d4ed8"));
+        gradient.setColorAt(0.22, QColor("#06b6d4"));
+        gradient.setColorAt(0.45, QColor("#22c55e"));
+        gradient.setColorAt(0.65, QColor("#facc15"));
+        gradient.setColorAt(0.82, QColor("#f97316"));
+        gradient.setColorAt(1.0, QColor("#dc2626"));
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(gradient);
+        painter.drawRoundedRect(ramp, 4, 4);
+
+        painter.setFont(ui::font(ui::FontRole::Caption));
+        painter.setPen(QColor("#687789"));
+        if (peakDensity_ > 0.0) {
+            const auto thresholdX = ramp.left()
+                + (std::clamp(threshold_ / peakDensity_, 0.0, 1.0) * ramp.width());
+            painter.setPen(QPen(QColor("#405063"), 1));
+            painter.drawLine(QPointF(thresholdX, ramp.top() - 2), QPointF(thresholdX, ramp.bottom() + 2));
+            painter.setPen(QColor("#687789"));
+        }
+        painter.drawText(QRectF(0, 16, 40, 16), Qt::AlignLeft | Qt::AlignVCenter, "0");
+        painter.drawText(
+            QRectF(48, 16, 96, 16),
+            Qt::AlignCenter,
+            QString("%1 /m2").arg(threshold_, 0, 'f', 1));
+        painter.drawText(
+            QRectF(width() - 86, 16, 86, 16),
+            Qt::AlignRight | Qt::AlignVCenter,
+            QString("Peak %1").arg(peakDensity_, 0, 'f', 1));
+    }
+
+private:
+    double threshold_{0.0};
+    double peakDensity_{0.0};
 };
 
 QFrame* createMetricCard(const QString& title, const QString& value, QWidget* parent, const QString& tooltip = {}) {
@@ -730,16 +787,20 @@ QWidget* createResultCanvasPanel(
     auto* overlayLabel = createLabel("Map overlay", overlayBar, ui::FontRole::Caption);
     overlayLabel->setStyleSheet(ui::mutedTextStyleSheet());
     auto* overlayCombo = new QComboBox(overlayBar);
-    overlayCombo->addItem("Density", static_cast<int>(ResultOverlayMode::Density));
+    overlayCombo->addItem("Peak Density", static_cast<int>(ResultOverlayMode::Density));
     overlayCombo->addItem("Bottlenecks", static_cast<int>(ResultOverlayMode::Bottlenecks));
     overlayCombo->addItem("Hotspots", static_cast<int>(ResultOverlayMode::Hotspots));
     overlayCombo->addItem("None", static_cast<int>(ResultOverlayMode::None));
     overlayCombo->setToolTip("Switch between result map overlays.");
     overlayLayout->addWidget(overlayLabel);
     overlayLayout->addWidget(overlayCombo);
+    overlayLayout->addSpacing(10);
+    overlayLayout->addWidget(new DensityLegendWidget(artifacts.densitySummary, overlayBar));
     overlayLayout->addStretch(1);
     layout->addWidget(overlayBar);
-    canvas->setDensityOverlay(artifacts.densitySummary.peakCells);
+    canvas->setDensityOverlay(artifacts.densitySummary.peakField.cells.empty()
+            ? artifacts.densitySummary.peakCells
+            : artifacts.densitySummary.peakField.cells);
     canvas->setResultOverlayMode(ResultOverlayMode::Density);
     QObject::connect(overlayCombo, &QComboBox::currentIndexChanged, panel, [canvas, overlayCombo](int index) {
         const auto mode = static_cast<ResultOverlayMode>(overlayCombo->itemData(index).toInt());
@@ -858,7 +919,7 @@ QWidget* createResultPanel(
         "Peak Density",
         formatDensity(artifacts.densitySummary.peakDensityPeoplePerSquareMeter),
         panel,
-        "Highest grid-cell density observed during the run."), 1, 0);
+        "Highest density observed during the run. The map shows the peak density field as a heatmap."), 1, 0);
     metricsGrid->addWidget(createMetricCard(
         "Worst Bottleneck",
         worstBottleneck,

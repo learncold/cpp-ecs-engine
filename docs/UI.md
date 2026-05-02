@@ -324,10 +324,11 @@ stage된 baseline 시나리오를 실제로 실행하고 진행 상태를 보는
 - 상단/우측 summary panel에 completion time, time margin, peak density, worst bottleneck, slowest group 표시
 - time margin은 v1에서 `scenario.execution.timeLimitSeconds` 기준 목표 시간 대비 여유로 계산
 - slowest group은 v1에서 보행자 배치 그룹별 마지막 완료시간을 표시하며, 별도 취약자 속성 모델이 들어오면 취약자 완료시간 카드로 확장
-- 중앙 simulation canvas에서 result overlay 선택 제공: density, bottleneck, hotspot, none
+- 중앙 simulation canvas에서 result overlay 선택 제공: peak density, bottleneck, hotspot, none
 - hotspot overlay 표시
 - bottleneck overlay 표시
-- density overlay 표시
+- peak density overlay는 peak 시점의 전체 density field를 사용해 보행 가능 영역 안에 부드러운 heatmap으로 표시
+- peak density heatmap 색상 범례 표시
 - 누적 대피 곡선 표시
 - 하단 graph panel에 Remaining, Exits, Compare 탭 제공
 - Exits 탭에 출구별 이용 인원, 비율, 마지막 통과 시각 표시
@@ -368,6 +369,7 @@ stage된 baseline 시나리오를 실제로 실행하고 진행 상태를 보는
 - Bottlenecks
 - Hotspots
 - Hotspot intensity legend
+- Peak Density heatmap legend
 - `Run Again`
 - `Edit Scenario`
 - risk/stalled/hotspot/bottleneck 기준 툴팁
