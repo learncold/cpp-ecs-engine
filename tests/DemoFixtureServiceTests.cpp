@@ -121,3 +121,43 @@ SC_TEST(DemoLayoutsProvidesRuntimeFacilityLayout) {
     const auto issues = validator.validate(layout);
     SC_EXPECT_TRUE(!safecrowd::domain::hasBlockingImportIssue(issues));
 }
+
+SC_TEST(DemoFixtureServiceBuildsTwoFloorFixture) {
+    safecrowd::domain::DemoFixtureService service;
+    const auto fixture = service.create2FDemoFixture();
+    const auto& layout = fixture.layout;
+    const auto& population = fixture.population;
+
+    SC_EXPECT_EQ(layout.id, std::string(safecrowd::domain::DemoLayouts::TwoFloorFacilityIds::LayoutId));
+    SC_EXPECT_EQ(layout.name, std::string("2F demo"));
+    SC_EXPECT_EQ(layout.levelId, std::string(safecrowd::domain::DemoLayouts::TwoFloorFacilityIds::Floor1Id));
+    SC_EXPECT_EQ(layout.floors.size(), std::size_t{2});
+    SC_EXPECT_TRUE(containsZoneId(layout.zones, safecrowd::domain::DemoLayouts::TwoFloorFacilityIds::HallZoneL1Id));
+    SC_EXPECT_TRUE(containsZoneId(layout.zones, safecrowd::domain::DemoLayouts::TwoFloorFacilityIds::HallZoneL2Id));
+    SC_EXPECT_TRUE(containsConnectionKind(layout.connections, safecrowd::domain::ConnectionKind::Stair));
+
+    SC_EXPECT_EQ(population.initialPlacements.size(), std::size_t{1});
+    SC_EXPECT_EQ(population.initialPlacements.front().zoneId, std::string(safecrowd::domain::DemoLayouts::TwoFloorFacilityIds::HallZoneL2Id));
+
+    safecrowd::domain::ImportValidationService validator;
+    const auto issues = validator.validate(layout);
+    SC_EXPECT_TRUE(!safecrowd::domain::hasBlockingImportIssue(issues));
+}
+
+SC_TEST(DemoLayoutsProvidesTwoFloorDemoLayout) {
+    const auto layout = safecrowd::domain::DemoLayouts::demoTwoFloorFacility();
+
+    SC_EXPECT_EQ(layout.id, std::string(safecrowd::domain::DemoLayouts::TwoFloorFacilityIds::LayoutId));
+    SC_EXPECT_EQ(layout.name, std::string("2F demo"));
+    SC_EXPECT_EQ(layout.floors.size(), std::size_t{2});
+    SC_EXPECT_TRUE(containsZoneId(layout.zones, safecrowd::domain::DemoLayouts::TwoFloorFacilityIds::ExitZoneL1Id));
+    SC_EXPECT_TRUE(containsConnectionId(layout.connections, safecrowd::domain::DemoLayouts::TwoFloorFacilityIds::LeftStairLinkId));
+    SC_EXPECT_TRUE(containsConnectionId(layout.connections, safecrowd::domain::DemoLayouts::TwoFloorFacilityIds::RightStairLinkId));
+    for (const auto& connection : layout.connections) {
+        SC_EXPECT_NEAR(connection.effectiveWidth, spanLength(connection.centerSpan), 1e-9);
+    }
+
+    safecrowd::domain::ImportValidationService validator;
+    const auto issues = validator.validate(layout);
+    SC_EXPECT_TRUE(!safecrowd::domain::hasBlockingImportIssue(issues));
+}

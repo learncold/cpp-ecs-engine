@@ -1,5 +1,7 @@
 #include "domain/ScenarioSimulationInternal.h"
 
+#include "domain/ScenarioSimulationSystems.h"
+
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -437,6 +439,120 @@ FacilityLayout2D layoutForFloor(const FacilityLayout2D& layout, const std::strin
     return filtered;
 }
 
+ScenarioLayoutCacheResource buildScenarioLayoutCache(FacilityLayout2D layout) {
+    ScenarioLayoutCacheResource cache;
+    cache.layout = std::move(layout);
+
+    std::vector<std::string> floorIds;
+    auto addFloorId = [&](const std::string& floorId) {
+        if (floorId.empty()) {
+            return;
+        }
+        if (std::find(floorIds.begin(), floorIds.end(), floorId) == floorIds.end()) {
+            floorIds.push_back(floorId);
+        }
+    };
+
+    for (const auto& floor : cache.layout.floors) {
+        addFloorId(floor.id);
+    }
+    for (std::size_t index = 0; index < cache.layout.zones.size(); ++index) {
+        const auto& zone = cache.layout.zones[index];
+        cache.zoneIndices[zone.id] = index;
+        cache.zoneFloorIds[zone.id] = zone.floorId;
+        addFloorId(zone.floorId);
+    }
+    for (const auto& connection : cache.layout.connections) {
+        addFloorId(connection.floorId);
+    }
+    for (const auto& barrier : cache.layout.barriers) {
+        addFloorId(barrier.floorId);
+    }
+    for (const auto& control : cache.layout.controls) {
+        addFloorId(control.floorId);
+    }
+
+    for (const auto& floorId : floorIds) {
+        cache.floorLayouts.emplace(floorId, layoutForFloor(cache.layout, floorId));
+    }
+
+    for (std::size_t index = 0; index < cache.layout.connections.size(); ++index) {
+        const auto& connection = cache.layout.connections[index];
+        if (connection.directionality == TravelDirection::Closed || !canTraverseConnection(cache.layout, connection)) {
+            continue;
+        }
+        if (connection.directionality != TravelDirection::ReverseOnly) {
+            cache.traversableConnectionsByZone[connection.fromZoneId].push_back({
+                .nextZoneId = connection.toZoneId,
+                .connectionIndex = index,
+            });
+        }
+        if (connection.directionality != TravelDirection::ForwardOnly) {
+            cache.traversableConnectionsByZone[connection.toZoneId].push_back({
+                .nextZoneId = connection.fromZoneId,
+                .connectionIndex = index,
+            });
+        }
+    }
+
+    return cache;
+}
+
+const FacilityLayout2D& cachedLayoutForFloor(const ScenarioLayoutCacheResource& cache, const std::string& floorId) {
+    if (floorId.empty()) {
+        return cache.layout;
+    }
+    const auto it = cache.floorLayouts.find(floorId);
+    return it == cache.floorLayouts.end() ? cache.layout : it->second;
+}
+
+const Zone2D* findCachedZone(const ScenarioLayoutCacheResource& cache, const std::string& zoneId) {
+    const auto it = cache.zoneIndices.find(zoneId);
+    if (it == cache.zoneIndices.end() || it->second >= cache.layout.zones.size()) {
+        return nullptr;
+    }
+    return &cache.layout.zones[it->second];
+}
+
+const Connection2D* findCachedConnectionBetween(
+    const ScenarioLayoutCacheResource& cache,
+    const std::string& from,
+    const std::string& to) {
+    const auto it = cache.traversableConnectionsByZone.find(from);
+    if (it == cache.traversableConnectionsByZone.end()) {
+        return nullptr;
+    }
+    for (const auto& traversal : it->second) {
+        if (traversal.nextZoneId == to && traversal.connectionIndex < cache.layout.connections.size()) {
+            return &cache.layout.connections[traversal.connectionIndex];
+        }
+    }
+    return nullptr;
+}
+
+std::string cachedFloorIdForZone(const ScenarioLayoutCacheResource& cache, const std::string& zoneId) {
+    const auto it = cache.zoneFloorIds.find(zoneId);
+    return it == cache.zoneFloorIds.end() ? std::string{} : it->second;
+}
+
+const std::vector<ScenarioConnectionTraversal>& cachedTraversalsForZone(
+    const ScenarioLayoutCacheResource& cache,
+    const std::string& zoneId) {
+    static const std::vector<ScenarioConnectionTraversal> empty;
+    const auto it = cache.traversableConnectionsByZone.find(zoneId);
+    return it == cache.traversableConnectionsByZone.end() ? empty : it->second;
+}
+
+std::string zoneAt(const ScenarioLayoutCacheResource& cache, const Point2D& point, const std::string& floorId) {
+    const auto& floorLayout = cachedLayoutForFloor(cache, floorId);
+    for (const auto& zone : floorLayout.zones) {
+        if (pointInRing(zone.area.outline, point)) {
+            return zone.id;
+        }
+    }
+    return {};
+}
+
 Point2D passageNormalToward(const LineSegment2D& passage, const Zone2D& fromZone, const Zone2D& toZone) {
     const auto passageDirection = passage.end - passage.start;
     const auto firstNormal = normalizedOr(perpendicularLeft(passageDirection), {});
@@ -508,18 +624,23 @@ const Connection2D* findConnectionBetween(const FacilityLayout2D& layout, const 
     return it == layout.connections.end() ? nullptr : &(*it);
 }
 
-std::optional<std::vector<std::string>> zoneRouteToNearestExit(const FacilityLayout2D& layout, const std::string& startZoneId) {
+std::optional<std::vector<std::string>> zoneRouteToNearestExit(
+    const ScenarioLayoutCacheResource& cache,
+    const std::string& startZoneId) {
     if (startZoneId.empty()) {
         return std::nullopt;
     }
 
-    if (const auto* startZone = findZone(layout, startZoneId); startZone != nullptr && startZone->kind == ZoneKind::Exit) {
+    if (const auto* startZone = findCachedZone(cache, startZoneId); startZone != nullptr && startZone->kind == ZoneKind::Exit) {
         return std::vector<std::string>{startZoneId};
     }
 
     std::unordered_set<std::string> exitZoneIds;
-    exitZoneIds.reserve(layout.zones.size());
-    for (const auto& zone : layout.zones) {
+    exitZoneIds.reserve(cache.layout.zones.size());
+    std::unordered_map<std::string, Point2D> centers;
+    centers.reserve(cache.layout.zones.size());
+    for (const auto& zone : cache.layout.zones) {
+        centers.emplace(zone.id, polygonCenter(zone.area));
         if (zone.kind == ZoneKind::Exit) {
             exitZoneIds.insert(zone.id);
         }
@@ -528,41 +649,10 @@ std::optional<std::vector<std::string>> zoneRouteToNearestExit(const FacilityLay
         return std::nullopt;
     }
 
-    std::unordered_map<std::string, Point2D> centers;
-    centers.reserve(layout.zones.size());
-    for (const auto& zone : layout.zones) {
-        centers.emplace(zone.id, polygonCenter(zone.area));
-    }
-    const auto zoneCenter = [&](const std::string& zoneId) -> Point2D {
+    auto zoneCenter = [&](const std::string& zoneId) -> Point2D {
         const auto it = centers.find(zoneId);
         return it == centers.end() ? Point2D{} : it->second;
     };
-
-    std::unordered_map<std::string, std::vector<std::pair<std::string, double>>> adjacency;
-    adjacency.reserve(layout.zones.size() * 2);
-    for (const auto& connection : layout.connections) {
-        if (connection.directionality == TravelDirection::Closed) {
-            continue;
-        }
-        if (!canTraverseConnection(layout, connection)) {
-            continue;
-        }
-
-        const auto portal = midpoint(connection.centerSpan);
-        const auto fromCenter = zoneCenter(connection.fromZoneId);
-        const auto toCenter = zoneCenter(connection.toZoneId);
-        const auto forwardWeight =
-            distanceBetween(fromCenter, portal) + distanceBetween(portal, toCenter);
-        const auto reverseWeight =
-            distanceBetween(toCenter, portal) + distanceBetween(portal, fromCenter);
-
-        if (connection.directionality != TravelDirection::ReverseOnly) {
-            adjacency[connection.fromZoneId].push_back({connection.toZoneId, forwardWeight});
-        }
-        if (connection.directionality != TravelDirection::ForwardOnly) {
-            adjacency[connection.toZoneId].push_back({connection.fromZoneId, reverseWeight});
-        }
-    }
 
     struct QueueItem {
         double distance{0.0};
@@ -573,21 +663,21 @@ std::optional<std::vector<std::string>> zoneRouteToNearestExit(const FacilityLay
         }
     };
 
-    std::unordered_map<std::string, double> dist;
-    dist.reserve(layout.zones.size());
-    std::unordered_map<std::string, std::string> prev;
-    prev.reserve(layout.zones.size());
-    std::priority_queue<QueueItem, std::vector<QueueItem>, std::greater<QueueItem>> pq;
+    std::unordered_map<std::string, double> distances;
+    distances.reserve(cache.layout.zones.size());
+    std::unordered_map<std::string, std::string> previous;
+    previous.reserve(cache.layout.zones.size());
+    std::priority_queue<QueueItem, std::vector<QueueItem>, std::greater<QueueItem>> queue;
 
-    dist[startZoneId] = 0.0;
-    pq.push({.distance = 0.0, .zoneId = startZoneId});
+    distances[startZoneId] = 0.0;
+    queue.push({.distance = 0.0, .zoneId = startZoneId});
 
-    while (!pq.empty()) {
-        const auto current = pq.top();
-        pq.pop();
+    while (!queue.empty()) {
+        const auto current = queue.top();
+        queue.pop();
 
-        const auto bestIt = dist.find(current.zoneId);
-        if (bestIt == dist.end() || current.distance > bestIt->second + 1e-12) {
+        const auto bestIt = distances.find(current.zoneId);
+        if (bestIt == distances.end() || current.distance > bestIt->second + 1e-12) {
             continue;
         }
 
@@ -595,28 +685,28 @@ std::optional<std::vector<std::string>> zoneRouteToNearestExit(const FacilityLay
             std::vector<std::string> route;
             for (auto zoneId = current.zoneId; !zoneId.empty();) {
                 route.push_back(zoneId);
-                const auto it = prev.find(zoneId);
-                zoneId = it == prev.end() ? std::string{} : it->second;
+                const auto it = previous.find(zoneId);
+                zoneId = it == previous.end() ? std::string{} : it->second;
             }
             std::reverse(route.begin(), route.end());
             return route;
         }
 
-        const auto adjIt = adjacency.find(current.zoneId);
-        if (adjIt == adjacency.end()) {
-            continue;
-        }
-
-        for (const auto& [next, cost] : adjIt->second) {
-            if (next.empty()) {
+        for (const auto& traversal : cachedTraversalsForZone(cache, current.zoneId)) {
+            if (traversal.nextZoneId.empty() || traversal.connectionIndex >= cache.layout.connections.size()) {
                 continue;
             }
-            const auto nextDistance = current.distance + std::max(0.0, cost);
-            const auto distIt = dist.find(next);
-            if (distIt == dist.end() || nextDistance + 1e-12 < distIt->second) {
-                dist[next] = nextDistance;
-                prev[next] = current.zoneId;
-                pq.push({.distance = nextDistance, .zoneId = next});
+
+            const auto& connection = cache.layout.connections[traversal.connectionIndex];
+            const auto portal = midpoint(connection.centerSpan);
+            const auto nextDistance = current.distance
+                + distanceBetween(zoneCenter(current.zoneId), portal)
+                + distanceBetween(portal, zoneCenter(traversal.nextZoneId));
+            const auto distanceIt = distances.find(traversal.nextZoneId);
+            if (distanceIt == distances.end() || nextDistance + 1e-12 < distanceIt->second) {
+                distances[traversal.nextZoneId] = nextDistance;
+                previous[traversal.nextZoneId] = current.zoneId;
+                queue.push({.distance = nextDistance, .zoneId = traversal.nextZoneId});
             }
         }
     }

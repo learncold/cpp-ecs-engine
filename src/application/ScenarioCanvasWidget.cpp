@@ -416,6 +416,10 @@ void ScenarioCanvasWidget::setConnectionBlocksChangedHandler(std::function<void(
     connectionBlocksChangedHandler_ = std::move(handler);
 }
 
+void ScenarioCanvasWidget::setLayoutElementActivatedHandler(std::function<void(const QString&)> handler) {
+    layoutElementActivatedHandler_ = std::move(handler);
+}
+
 void ScenarioCanvasWidget::focusLayoutElement(const QString& elementId) {
     if (elementId.startsWith("floor:")) {
         currentFloorId_ = elementId.mid(QString("floor:").size());
@@ -532,6 +536,9 @@ void ScenarioCanvasWidget::mousePressEvent(QMouseEvent* event) {
             if (it == layout_.connections.end()) {
                 continue;
             }
+            if (!matchesFloor(it->floorId, currentFloorId_)) {
+                continue;
+            }
             const auto halfWidth = std::max(0.0, it->effectiveWidth * 0.5);
             const auto distance = std::max(
                 0.0,
@@ -569,6 +576,12 @@ void ScenarioCanvasWidget::mousePressEvent(QMouseEvent* event) {
 
     if (toolMode_ == ToolMode::BlockDoor) {
         addConnectionBlock(event->position());
+        event->accept();
+        return;
+    }
+
+    if (toolMode_ == ToolMode::Select) {
+        selectLayoutElementAt(event->position());
         event->accept();
         return;
     }
@@ -793,6 +806,9 @@ void ScenarioCanvasWidget::drawConnectionBlocks(QPainter& painter, const LayoutC
         if (it == layout_.connections.end()) {
             continue;
         }
+        if (!matchesFloor(it->floorId, currentFloorId_)) {
+            continue;
+        }
 
         const auto center = transform.map(connectionCenter(*it));
         const double r = 10.0;
@@ -876,10 +892,44 @@ const safecrowd::domain::Connection2D* ScenarioCanvasWidget::connectionAt(
     const safecrowd::domain::Connection2D* best = nullptr;
     double bestDistance = std::max(0.0, toleranceWorldUnits);
     for (const auto& connection : layout_.connections) {
+        if (!matchesFloor(connection.floorId, currentFloorId_)) {
+            continue;
+        }
         const auto distance = distancePointToSegment(point, connection.centerSpan.start, connection.centerSpan.end);
         if (distance <= bestDistance) {
             bestDistance = distance;
             best = &connection;
+        }
+    }
+    return best;
+}
+
+const safecrowd::domain::Barrier2D* ScenarioCanvasWidget::barrierAt(
+    const safecrowd::domain::Point2D& point,
+    double toleranceWorldUnits) const {
+    const safecrowd::domain::Barrier2D* best = nullptr;
+    double bestDistance = std::max(0.0, toleranceWorldUnits);
+    for (const auto& barrier : layout_.barriers) {
+        if (!matchesFloor(barrier.floorId, currentFloorId_)) {
+            continue;
+        }
+        const auto& vertices = barrier.geometry.vertices;
+        if (vertices.size() < 2) {
+            continue;
+        }
+        for (std::size_t index = 1; index < vertices.size(); ++index) {
+            const auto distance = distancePointToSegment(point, vertices[index - 1], vertices[index]);
+            if (distance <= bestDistance) {
+                bestDistance = distance;
+                best = &barrier;
+            }
+        }
+        if (barrier.geometry.closed) {
+            const auto distance = distancePointToSegment(point, vertices.back(), vertices.front());
+            if (distance <= bestDistance) {
+                bestDistance = distance;
+                best = &barrier;
+            }
         }
     }
     return best;
@@ -1095,6 +1145,9 @@ void ScenarioCanvasWidget::addConnectionBlock(const QPointF& position) {
     const safecrowd::domain::Connection2D* connection = nullptr;
     double bestDistance = toleranceWorldUnits;
     for (const auto& candidate : layout_.connections) {
+        if (!matchesFloor(candidate.floorId, currentFloorId_)) {
+            continue;
+        }
         if (candidate.kind != safecrowd::domain::ConnectionKind::Doorway
             && candidate.kind != safecrowd::domain::ConnectionKind::Exit) {
             continue;
@@ -1134,6 +1187,31 @@ void ScenarioCanvasWidget::addConnectionBlockForConnection(const safecrowd::doma
     draft.connectionId = connection.id;
     connectionBlocks_.push_back(std::move(draft));
     emitConnectionBlocksChanged();
+    update();
+}
+
+void ScenarioCanvasWidget::selectLayoutElementAt(const QPointF& position) {
+    const auto point = unmapPoint(position);
+    constexpr double kPickRadiusPixels = 14.0;
+    const auto offsetPoint = unmapPoint(position + QPointF(kPickRadiusPixels, 0.0));
+    const auto dx = offsetPoint.x - point.x;
+    const auto dy = offsetPoint.y - point.y;
+    const auto toleranceWorldUnits = std::max(0.35, std::hypot(dx, dy));
+
+    QString selectedId;
+    if (const auto* connection = connectionAt(point, toleranceWorldUnits); connection != nullptr) {
+        selectedId = QString::fromStdString(connection->id);
+    } else if (const auto* barrier = barrierAt(point, toleranceWorldUnits); barrier != nullptr) {
+        selectedId = QString::fromStdString(barrier->id);
+    } else {
+        selectedId = zoneAt(point);
+    }
+
+    focusedLayoutElementId_ = selectedId;
+    focusedPlacementId_.clear();
+    if (layoutElementActivatedHandler_) {
+        layoutElementActivatedHandler_(selectedId);
+    }
     update();
 }
 

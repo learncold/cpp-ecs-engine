@@ -3,6 +3,7 @@
 #include <functional>
 #include <vector>
 
+#include <QSet>
 #include <QString>
 #include <QWidget>
 
@@ -17,6 +18,12 @@ struct NavigationTreeNode {
     bool selectable{true};
 };
 
+struct NavigationTreeState {
+    QSet<QString> expandedNodeIds{};
+    QString selectedId{};
+    bool restoreExpandedState{false};
+};
+
 class NavigationTreeWidget : public QWidget {
 public:
     explicit NavigationTreeWidget(
@@ -25,7 +32,9 @@ public:
         const QString& emptyText,
         std::function<void(const QString&)> activateItemHandler = {},
         QWidget* parent = nullptr,
-        QWidget* headerWidget = nullptr);
+        QWidget* headerWidget = nullptr,
+        NavigationTreeState state = {},
+        std::function<void(const QSet<QString>&)> expandedStateChangedHandler = {});
 };
 
 }  // namespace safecrowd::application

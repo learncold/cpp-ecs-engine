@@ -13,6 +13,7 @@ struct DemoFixture {
 class DemoFixtureService {
 public:
     DemoFixture createSprint1DemoFixture() const;
+    DemoFixture create2FDemoFixture() const;
 };
 
 }  // namespace safecrowd::domain

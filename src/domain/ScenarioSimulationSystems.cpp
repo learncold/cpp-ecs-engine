@@ -1,10 +1,11 @@
 #include "domain/ScenarioSimulationSystems.h"
 
+#include "domain/ScenarioSimulationInternal.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
-#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -59,23 +60,15 @@ bool intervalContains(const ConnectionBlockIntervalDraft& interval, double timeS
 }
 
 bool connectionShouldBeBlocked(const ConnectionBlockDraft& block, double timeSeconds) {
+    if (block.connectionId.empty()) {
+        return false;
+    }
     if (block.intervals.empty()) {
         return true;
     }
-
-    for (const auto& interval : block.intervals) {
-        if (intervalContains(interval, timeSeconds)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-const Connection2D* findConnectionById(const FacilityLayout2D& layout, const std::string& connectionId) {
-    const auto it = std::find_if(layout.connections.begin(), layout.connections.end(), [&](const auto& connection) {
-        return connection.id == connectionId;
+    return std::any_of(block.intervals.begin(), block.intervals.end(), [&](const auto& interval) {
+        return intervalContains(interval, timeSeconds);
     });
-    return it == layout.connections.end() ? nullptr : &(*it);
 }
 
 Connection2D* findConnectionById(FacilityLayout2D& layout, const std::string& connectionId) {
@@ -83,6 +76,44 @@ Connection2D* findConnectionById(FacilityLayout2D& layout, const std::string& co
         return connection.id == connectionId;
     });
     return it == layout.connections.end() ? nullptr : &(*it);
+}
+
+std::unordered_set<std::string> activeBlockedConnectionIds(
+    const FacilityLayout2D& layout,
+    const std::vector<ConnectionBlockDraft>& blocks,
+    double elapsedSeconds) {
+    std::unordered_set<std::string> ids;
+    ids.reserve(blocks.size());
+    for (const auto& block : blocks) {
+        if (!connectionShouldBeBlocked(block, elapsedSeconds)) {
+            continue;
+        }
+        if (std::any_of(layout.connections.begin(), layout.connections.end(), [&](const auto& connection) {
+                return connection.id == block.connectionId;
+            })) {
+            ids.insert(block.connectionId);
+        }
+    }
+    return ids;
+}
+
+FacilityLayout2D layoutWithConnectionBlocks(
+    FacilityLayout2D layout,
+    const std::unordered_set<std::string>& blockedConnectionIds) {
+    for (const auto& connectionId : blockedConnectionIds) {
+        auto* connection = findConnectionById(layout, connectionId);
+        if (connection == nullptr) {
+            continue;
+        }
+        connection->directionality = TravelDirection::Closed;
+        layout.barriers.push_back(Barrier2D{
+            .id = "control-block-" + connectionId,
+            .floorId = connection->floorId,
+            .geometry = Polyline2D{.vertices = {connection->centerSpan.start, connection->centerSpan.end}, .closed = false},
+            .blocksMovement = true,
+        });
+    }
+    return layout;
 }
 
 class ScenarioControlSystem final : public engine::EngineSystem {
@@ -93,7 +124,7 @@ public:
     }
 
     void configure(engine::EngineWorld& world) override {
-        world.resources().set(ScenarioLayoutResource{.layout = baseLayout_});
+        world.resources().set(simulation_internal::buildScenarioLayoutCache(baseLayout_));
         world.resources().set(ScenarioLayoutRevisionResource{.revision = revision_});
     }
 
@@ -101,52 +132,30 @@ public:
         (void)step;
 
         auto& resources = world.resources();
-        if (!resources.contains<ScenarioLayoutResource>()) {
-            resources.set(ScenarioLayoutResource{.layout = baseLayout_});
-        }
-
         double elapsedSeconds = 0.0;
         if (resources.contains<ScenarioSimulationClockResource>()) {
             elapsedSeconds = std::max(0.0, resources.get<ScenarioSimulationClockResource>().elapsedSeconds);
         }
 
-        auto& layout = resources.get<ScenarioLayoutResource>().layout;
-        layout = baseLayout_;
-
-        std::unordered_set<std::string> blockedConnectionIds;
-        blockedConnectionIds.reserve(blocks_.size());
-        for (const auto& block : blocks_) {
-            if (block.connectionId.empty()) {
-                continue;
+        auto blockedConnectionIds = activeBlockedConnectionIds(baseLayout_, blocks_, elapsedSeconds);
+        const bool changed = blockedConnectionIds != previousBlockedConnectionIds_;
+        const bool cacheMissing = !resources.contains<ScenarioLayoutCacheResource>();
+        if (!changed && !cacheMissing) {
+            if (!resources.contains<ScenarioLayoutRevisionResource>()
+                || resources.get<ScenarioLayoutRevisionResource>().revision != revision_) {
+                resources.set(ScenarioLayoutRevisionResource{.revision = revision_});
             }
-
-            auto* connection = findConnectionById(layout, block.connectionId);
-            if (connection == nullptr) {
-                continue;
-            }
-
-            if (connectionShouldBeBlocked(block, elapsedSeconds)) {
-                connection->directionality = TravelDirection::Closed;
-                blockedConnectionIds.insert(block.connectionId);
-                layout.barriers.push_back(Barrier2D{
-                    .id = "control-block-" + block.connectionId,
-                    .floorId = connection->floorId,
-                    .geometry = Polyline2D{.vertices = {connection->centerSpan.start, connection->centerSpan.end}, .closed = false},
-                    .blocksMovement = true,
-                });
-            } else {
-                // Restored by layout reset from baseLayout_.
-            }
+            return;
         }
 
-        if (blockedConnectionIds != previousBlockedConnectionIds_) {
+        if (changed) {
             ++revision_;
-            previousBlockedConnectionIds_ = std::move(blockedConnectionIds);
-            resources.set(ScenarioLayoutRevisionResource{.revision = revision_});
-        } else if (!resources.contains<ScenarioLayoutRevisionResource>()
-            || resources.get<ScenarioLayoutRevisionResource>().revision != revision_) {
-            resources.set(ScenarioLayoutRevisionResource{.revision = revision_});
+            previousBlockedConnectionIds_ = blockedConnectionIds;
         }
+
+        auto controlledLayout = layoutWithConnectionBlocks(baseLayout_, blockedConnectionIds);
+        resources.set(simulation_internal::buildScenarioLayoutCache(std::move(controlledLayout)));
+        resources.set(ScenarioLayoutRevisionResource{.revision = revision_});
     }
 
 private:

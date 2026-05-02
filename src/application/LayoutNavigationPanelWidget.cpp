@@ -34,6 +34,7 @@ NavigationTreeNode makeZoneNode(const safecrowd::domain::Zone2D& zone) {
         .label = zoneLabel(zone),
         .id = QString::fromStdString(zone.id),
         .detail = QString("Zone: %1").arg(QString::fromStdString(zone.id)),
+        .expanded = false,
     };
 }
 
@@ -59,7 +60,7 @@ NavigationTreeNode makeSection(const QString& label, std::vector<NavigationTreeN
         .label = label,
         .id = id,
         .children = std::move(children),
-        .expanded = true,
+        .expanded = false,
         .selectable = !id.isEmpty(),
     };
 }
@@ -192,8 +193,9 @@ std::vector<NavigationTreeNode> buildLayoutTree(const safecrowd::domain::Facilit
         if (!rooms.empty()) {
             nodes.push_back({
                 .label = "Layout",
+                .id = "layout",
                 .children = std::move(rooms),
-                .expanded = true,
+                .expanded = false,
                 .selectable = false,
             });
         }
@@ -208,7 +210,9 @@ LayoutNavigationPanelWidget::LayoutNavigationPanelWidget(
     const safecrowd::domain::FacilityLayout2D* facilityLayout,
     std::function<void(const QString&)> selectElementHandler,
     QWidget* parent,
-    QWidget* headerWidget)
+    QWidget* headerWidget,
+    NavigationTreeState navigationState,
+    std::function<void(const QSet<QString>&)> expandedStateChangedHandler)
     : QWidget(parent) {
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -219,7 +223,9 @@ LayoutNavigationPanelWidget::LayoutNavigationPanelWidget(
         "No recognized layout elements",
         std::move(selectElementHandler),
         this,
-        headerWidget));
+        headerWidget,
+        std::move(navigationState),
+        std::move(expandedStateChangedHandler)));
 }
 
 }  // namespace safecrowd::application

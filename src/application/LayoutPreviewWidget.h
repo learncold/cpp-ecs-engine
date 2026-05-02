@@ -4,6 +4,10 @@
 #include <vector>
 
 #include <QString>
+#include <QStringList>
+#include <QPoint>
+#include <QPointF>
+#include <QRectF>
 #include <QWidget>
 
 #include "domain/FacilityLayout2D.h"
@@ -24,6 +28,7 @@ namespace safecrowd::application {
 
 enum class PreviewSelectionKind {
     None,
+    Multiple,
     Zone,
     Connection,
     Barrier,
@@ -72,7 +77,6 @@ private:
         DrawWall,
         DrawDoor,
         DrawStair,
-        Delete,
     };
 
     enum class RoomDrawMode {
@@ -90,8 +94,16 @@ private:
     void createZone(const QPointF& startWorld, const QPointF& endWorld, safecrowd::domain::ZoneKind kind);
     void deleteConnection(const QString& connectionId);
     void deleteBarrier(const QString& barrierId);
+    void deleteSelectedElements();
     void emitCurrentSelection();
     void finishRoomPolygonDraft();
+    bool hasSelection() const;
+    bool isSelected(PreviewSelectionKind kind, const QString& id) const;
+    void pruneSelection();
+    QPointF snapDragWorldPoint(
+        const QPointF& anchorWorldPoint,
+        const QPointF& worldPoint,
+        const LayoutCanvasTransform& transform) const;
     QPointF snapWorldPoint(const QPointF& worldPoint, const LayoutCanvasTransform& transform) const;
     void notifyLayoutEdited();
     void repositionToolbars();
@@ -99,25 +111,36 @@ private:
     void refreshPropertyPanel();
     void selectBarrier(const QString& barrierId);
     void selectConnection(const QString& connectionId);
+    void selectElementsInRect(const QRectF& screenRect, const LayoutCanvasTransform& transform);
     void selectFloorForElement(const QString& elementId);
+    void selectPrimaryFromLists();
+    void selectSingleAt(const QPointF& position, const LayoutCanvasTransform& transform);
     void selectZone(const QString& zoneId);
     void addFloor();
     QString currentFloorId() const;
+    bool switchFloorByWheel(QWheelEvent* event);
     QString verticalTargetFloorId() const;
     void setToolMode(ToolMode mode);
+    void showSelectionContextMenu(const QPoint& globalPosition);
     void setupToolbars();
     PreviewSelection currentSelection() const;
 
     safecrowd::domain::ImportResult importResult_{};
     QString selectedBarrierId_{};
+    QStringList selectedBarrierIds_{};
     QString focusedTargetId_{};
     QString selectedConnectionId_{};
+    QStringList selectedConnectionIds_{};
     QString selectedZoneId_{};
+    QStringList selectedZoneIds_{};
     QPointF draftStartWorld_{};
     QPointF draftCurrentWorld_{};
+    QPointF selectionDragStart_{};
+    QPointF selectionDragCurrent_{};
     std::vector<QPointF> roomPolygonDraftPoints_{};
     LayoutCanvasCamera camera_{};
     bool drafting_{false};
+    bool selectionDragging_{false};
     ToolMode toolMode_{ToolMode::Select};
     RoomDrawMode roomDrawMode_{RoomDrawMode::Rectangle};
     bool roomAutoWallsEnabled_{true};
@@ -148,7 +171,6 @@ private:
     QToolButton* wallToolButton_{nullptr};
     QToolButton* doorToolButton_{nullptr};
     QToolButton* stairToolButton_{nullptr};
-    QToolButton* deleteToolButton_{nullptr};
     QToolButton* addFloorButton_{nullptr};
     QToolButton* resetViewButton_{nullptr};
     std::function<void(const PreviewSelection&)> selectionChangedHandler_{};

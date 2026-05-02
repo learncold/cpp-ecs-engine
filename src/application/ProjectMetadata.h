@@ -4,8 +4,16 @@
 
 namespace safecrowd::application {
 
-inline QString builtInDemoLayoutPath() {
+inline QString builtInDemoLayoutPrefix() {
+    return QStringLiteral("safecrowd://demo/");
+}
+
+inline QString sprint1DemoLayoutPath() {
     return QStringLiteral("safecrowd://demo/sprint1-facility");
+}
+
+inline QString twoFloorDemoLayoutPath() {
+    return QStringLiteral("safecrowd://demo/2f-demo");
 }
 
 struct ProjectMetadata {
@@ -15,7 +23,7 @@ struct ProjectMetadata {
     QString savedAt{};
 
     bool isBuiltInDemo() const noexcept {
-        return layoutPath == builtInDemoLayoutPath();
+        return layoutPath.startsWith(builtInDemoLayoutPrefix());
     }
 
     bool isValid() const noexcept {
@@ -25,12 +33,5 @@ struct ProjectMetadata {
         return !name.isEmpty() && !folderPath.isEmpty() && !layoutPath.isEmpty();
     }
 };
-
-inline ProjectMetadata makeBuiltInDemoProject() {
-    return {
-        .name = QStringLiteral("Demo"),
-        .layoutPath = builtInDemoLayoutPath(),
-    };
-}
 
 }  // namespace safecrowd::application

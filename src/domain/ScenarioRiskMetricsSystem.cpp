@@ -150,9 +150,9 @@ public:
 
         auto& query = world.query();
         auto& resources = world.resources();
-        activeLayout_ = resources.contains<ScenarioLayoutResource>()
-            ? &resources.get<ScenarioLayoutResource>().layout
-            : &layout_;
+        const auto& activeLayout = resources.contains<ScenarioLayoutCacheResource>()
+            ? resources.get<ScenarioLayoutCacheResource>().layout
+            : layout_;
         ScenarioRiskSnapshot snapshot;
         const auto entities = query.view<Position, Agent, Velocity, EvacuationRoute, EvacuationStatus>();
 
@@ -187,7 +187,7 @@ public:
         }
 
         collectHotspots(snapshot, cells);
-        collectBottlenecks(snapshot, query, entities);
+        collectBottlenecks(snapshot, query, entities, activeLayout);
 
         ScenarioSimulationClockResource clock;
         if (resources.contains<ScenarioSimulationClockResource>()) {
@@ -255,17 +255,17 @@ private:
         }
     }
 
-    std::string zoneDisplayName(const std::string& zoneId) const {
-        const auto* zone = findZone(layout(), zoneId);
+    std::string zoneDisplayName(const FacilityLayout2D& layout, const std::string& zoneId) const {
+        const auto* zone = findZone(layout, zoneId);
         if (zone == nullptr) {
             return zoneId;
         }
         return zone->label.empty() ? zone->id : zone->label;
     }
 
-    std::string connectionLabel(const Connection2D& connection) const {
-        const auto from = zoneDisplayName(connection.fromZoneId);
-        const auto to = zoneDisplayName(connection.toZoneId);
+    std::string connectionLabel(const FacilityLayout2D& layout, const Connection2D& connection) const {
+        const auto from = zoneDisplayName(layout, connection.fromZoneId);
+        const auto to = zoneDisplayName(layout, connection.toZoneId);
         if (!from.empty() && !to.empty()) {
             return from + " -> " + to;
         }
@@ -275,15 +275,16 @@ private:
     void collectBottlenecks(
         ScenarioRiskSnapshot& snapshot,
         engine::WorldQuery& query,
-        const std::vector<engine::Entity>& entities) const {
-        for (const auto& connection : layout().connections) {
+        const std::vector<engine::Entity>& entities,
+        const FacilityLayout2D& layout) const {
+        for (const auto& connection : layout.connections) {
             if (connection.directionality == TravelDirection::Closed) {
                 continue;
             }
 
             ScenarioBottleneckMetric metric;
             metric.connectionId = connection.id;
-            metric.label = connectionLabel(connection);
+            metric.label = connectionLabel(layout, connection);
             metric.passage = connection.centerSpan;
             double speedSum = 0.0;
 

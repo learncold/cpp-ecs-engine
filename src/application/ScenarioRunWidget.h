@@ -30,6 +30,8 @@ public:
         std::function<void()> backToLayoutReviewHandler,
         QWidget* parent = nullptr);
 
+    const safecrowd::domain::ScenarioDraft& scenario() const noexcept;
+
 private:
     QWidget* createRunPanel();
     void returnToAuthoring();

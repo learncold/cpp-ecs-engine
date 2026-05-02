@@ -34,5 +34,52 @@ struct Sprint1FacilityIds {
 
 FacilityLayout2D demoFacility();
 
+struct TwoFloorFacilityIds {
+    static constexpr const char* LayoutId = "demo-fixture-02";
+    static constexpr const char* Floor1Id = "L1";
+    static constexpr const char* Floor2Id = "L2";
+
+    static constexpr const char* HallZoneL1Id = "zone-l1-hall";
+    static constexpr const char* HallZoneL2Id = "zone-l2-hall";
+    static constexpr const char* CornerRoomL1Id = "zone-l1-corner-room";
+    static constexpr const char* CornerRoomL2Id = "zone-l2-corner-room";
+    static constexpr const char* CornerRoomRightL1Id = "zone-l1-corner-room-right";
+    static constexpr const char* CornerRoomRightL2Id = "zone-l2-corner-room-right";
+
+    static constexpr const char* TopRoomL1Prefix = "zone-l1-top-room-";
+    static constexpr const char* BottomRoomL1Prefix = "zone-l1-bottom-room-";
+    static constexpr const char* TopRoomL2Prefix = "zone-l2-top-room-";
+    static constexpr const char* BottomRoomL2Prefix = "zone-l2-bottom-room-";
+
+    static constexpr const char* LeftStairZoneL1Id = "zone-l1-stairs-left";
+    static constexpr const char* RightStairZoneL1Id = "zone-l1-stairs-right";
+    static constexpr const char* LeftStairZoneL2Id = "zone-l2-stairs-left";
+    static constexpr const char* RightStairZoneL2Id = "zone-l2-stairs-right";
+    static constexpr const char* ExitZoneL1Id = "zone-l1-exit";
+
+    static constexpr const char* CornerDoorL1Id = "conn-l1-corner-door";
+    static constexpr const char* CornerDoorL2Id = "conn-l2-corner-door";
+    static constexpr const char* CornerRightDoorL1Id = "conn-l1-corner-right-door";
+    static constexpr const char* CornerRightDoorL2Id = "conn-l2-corner-right-door";
+
+    static constexpr const char* TopDoorL1Prefix = "conn-l1-top-door-";
+    static constexpr const char* BottomDoorL1Prefix = "conn-l1-bottom-door-";
+    static constexpr const char* TopDoorL2Prefix = "conn-l2-top-door-";
+    static constexpr const char* BottomDoorL2Prefix = "conn-l2-bottom-door-";
+
+    static constexpr const char* LeftStairDoorL1Id = "conn-l1-stairs-left-door";
+    static constexpr const char* RightStairDoorL1Id = "conn-l1-stairs-right-door";
+    static constexpr const char* LeftStairDoorL2Id = "conn-l2-stairs-left-door";
+    static constexpr const char* RightStairDoorL2Id = "conn-l2-stairs-right-door";
+    static constexpr const char* ExitDoorL1Id = "conn-l1-exit";
+    static constexpr const char* LeftStairLinkId = "conn-stairs-left-l1-l2";
+    static constexpr const char* RightStairLinkId = "conn-stairs-right-l1-l2";
+
+    static constexpr const char* OuterWallL1Id = "barrier-l1-outline";
+    static constexpr const char* OuterWallL2Id = "barrier-l2-outline";
+};
+
+FacilityLayout2D demoTwoFloorFacility();
+
 }  // namespace safecrowd::domain::DemoLayouts
 

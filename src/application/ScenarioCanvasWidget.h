@@ -52,6 +52,7 @@ public:
     void setPlacementsChangedHandler(std::function<void(const std::vector<ScenarioCrowdPlacement>&)> handler);
     void setConnectionBlocks(std::vector<safecrowd::domain::ConnectionBlockDraft> blocks);
     void setConnectionBlocksChangedHandler(std::function<void(const std::vector<safecrowd::domain::ConnectionBlockDraft>&)> handler);
+    void setLayoutElementActivatedHandler(std::function<void(const QString&)> handler);
     void focusLayoutElement(const QString& elementId);
     void activateLayoutElement(const QString& elementId);
     void focusPlacement(const QString& placementId);
@@ -83,6 +84,7 @@ private:
     safecrowd::domain::Point2D unmapPoint(const QPointF& point) const;
     QString zoneAt(const safecrowd::domain::Point2D& point) const;
     const safecrowd::domain::Connection2D* connectionAt(const safecrowd::domain::Point2D& point, double toleranceWorldUnits) const;
+    const safecrowd::domain::Barrier2D* barrierAt(const safecrowd::domain::Point2D& point, double toleranceWorldUnits) const;
     safecrowd::domain::Point2D connectionCenter(const safecrowd::domain::Connection2D& connection) const;
     bool placementAreaBlocked(const std::vector<safecrowd::domain::Point2D>& area, int occupantCount) const;
     bool placementPointBlocked(const safecrowd::domain::Point2D& point) const;
@@ -93,6 +95,7 @@ private:
     void addIndividualPlacement(const QPointF& position);
     void addConnectionBlock(const QPointF& position);
     void addConnectionBlockForConnection(const safecrowd::domain::Connection2D& connection);
+    void selectLayoutElementAt(const QPointF& position);
     void openConnectionBlockScheduleEditor(const QString& blockId, const QPoint& screenPosition);
     void drawFocusedLayoutElement(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawFocusedPlacement(QPainter& painter, const LayoutCanvasTransform& transform) const;
@@ -122,6 +125,7 @@ private:
     QToolButton* blockDoorToolButton_{nullptr};
     QLabel* groupCountLabel_{nullptr};
     QSpinBox* groupCountSpinBox_{nullptr};
+    std::function<void(const QString&)> layoutElementActivatedHandler_{};
     std::function<void(const std::vector<ScenarioCrowdPlacement>&)> placementsChangedHandler_{};
     std::function<void(const std::vector<safecrowd::domain::ConnectionBlockDraft>&)> connectionBlocksChangedHandler_{};
 };

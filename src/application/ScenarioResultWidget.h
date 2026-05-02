@@ -29,6 +29,11 @@ public:
         std::function<void()> backToLayoutReviewHandler,
         QWidget* parent = nullptr);
 
+    const safecrowd::domain::ScenarioDraft& scenario() const noexcept;
+    const safecrowd::domain::SimulationFrame& frame() const noexcept;
+    const safecrowd::domain::ScenarioRiskSnapshot& risk() const noexcept;
+    const safecrowd::domain::ScenarioResultArtifacts& artifacts() const noexcept;
+
 private:
     void rerunScenario();
     void navigateToAuthoring(bool showRunPanel);

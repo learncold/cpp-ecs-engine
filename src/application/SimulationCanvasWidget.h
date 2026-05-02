@@ -58,6 +58,7 @@ private:
     void drawConnectionBlockOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawHotspotOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawBottleneckOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
+    bool switchFloorByWheel(QWheelEvent* event);
     void setCurrentFloorId(std::string floorId, bool manualSelection);
     void setupFloorSelector();
     void repositionFloorSelector();

@@ -58,6 +58,7 @@ bool isLiveValidationIssue(safecrowd::domain::ImportIssueCode code) {
 
     switch (code) {
     case ImportIssueCode::MissingExit:
+    case ImportIssueCode::MissingRoom:
     case ImportIssueCode::DisconnectedWalkableArea:
     case ImportIssueCode::WidthBelowMinimum:
         return true;
@@ -226,6 +227,8 @@ QWidget* createNavigationPanel(
     bool showIssues,
     std::function<void(const safecrowd::domain::ImportIssue&)> selectIssueHandler,
     std::function<void(const QString&)> selectLayoutElementHandler,
+    NavigationTreeState layoutNavigationState,
+    std::function<void(const QSet<QString>&)> layoutExpandedStateChangedHandler,
     const WorkspaceShell* shell,
     QWidget* parent) {
     auto* content = new QWidget(parent);
@@ -238,7 +241,9 @@ QWidget* createNavigationPanel(
             importResult.layout.has_value() ? &(*importResult.layout) : nullptr,
             std::move(selectLayoutElementHandler),
             content,
-            shell != nullptr ? shell->createPanelHeader("Layout", content, false) : nullptr));
+            shell != nullptr ? shell->createPanelHeader("Layout", content, false) : nullptr,
+            std::move(layoutNavigationState),
+            std::move(layoutExpandedStateChangedHandler)));
         return content;
     }
 
@@ -465,6 +470,7 @@ void LayoutReviewWidget::handleIssueSelected(const safecrowd::domain::ImportIssu
 }
 
 void LayoutReviewWidget::handleLayoutElementSelected(const QString& elementId) {
+    selectedLayoutElementId_ = elementId;
     selectedIssueTargetId_.clear();
     selectedIssueCode_.clear();
 
@@ -484,16 +490,26 @@ void LayoutReviewWidget::handleLayoutEdited(const safecrowd::domain::FacilityLay
 
 void LayoutReviewWidget::handlePreviewSelectionChanged(const PreviewSelection& selection) {
     lastSelection_ = selection;
+    selectedLayoutElementId_ = selection.empty() || selection.kind == PreviewSelectionKind::Multiple ? QString{} : selection.id;
     selectedIssueTargetId_.clear();
     selectedIssueCode_.clear();
     showSelectionInspector(selection);
+    if (navigationView_ == NavigationView::Layout) {
+        refreshNavigationPanel();
+    }
 }
 
 void LayoutReviewWidget::refreshApprovalState() {
-    const auto hasBlocking = safecrowd::domain::hasBlockingImportIssue(importResult_.issues);
+    const auto blockingCount = std::count_if(importResult_.issues.begin(), importResult_.issues.end(), [](const auto& issue) {
+        return issue.blocksSimulation();
+    });
+    const auto hasBlocking = blockingCount > 0;
 
     if (approveButton_ != nullptr) {
         approveButton_->setEnabled(!hasBlocking);
+        approveButton_->setToolTip(hasBlocking
+            ? QString("Resolve %1 blocking issue(s) before approval").arg(static_cast<int>(blockingCount))
+            : QString("Approve layout and continue to Scenario Authoring"));
     }
 
     if (approvalStatusLabel_ == nullptr) {
@@ -501,7 +517,7 @@ void LayoutReviewWidget::refreshApprovalState() {
     }
 
     if (hasBlocking) {
-        approvalStatusLabel_->setText("Resolve blocking issues first");
+        approvalStatusLabel_->setText(QString("Resolve %1 blocking issue(s) first").arg(static_cast<int>(blockingCount)));
         return;
     }
 
@@ -534,6 +550,14 @@ void LayoutReviewWidget::refreshNavigationPanel() {
         },
         [this](const QString& elementId) {
             handleLayoutElementSelected(elementId);
+        },
+        NavigationTreeState{
+            .expandedNodeIds = layoutExpandedNodeIds_,
+            .selectedId = selectedLayoutElementId_,
+            .restoreExpandedState = true,
+        },
+        [this](const QSet<QString>& expandedNodeIds) {
+            layoutExpandedNodeIds_ = expandedNodeIds;
         },
         shell_,
         shell_));
