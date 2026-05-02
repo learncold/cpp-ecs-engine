@@ -9,6 +9,11 @@
 namespace safecrowd::application {
 namespace {
 
+struct SnapGeometry {
+    std::vector<safecrowd::domain::Point2D> vertices{};
+    std::vector<safecrowd::domain::LineSegment2D> edges{};
+};
+
 bool matchesFloor(const std::string& elementFloorId, const std::string& floorId) {
     return floorId.empty() || elementFloorId.empty() || elementFloorId == floorId;
 }
@@ -202,54 +207,55 @@ std::optional<safecrowd::domain::LineSegment2D> stairEntrySpanForFloor(
     return std::nullopt;
 }
 
-}  // namespace
-
-LayoutSnapResult snapLayoutPoint(
-    const safecrowd::domain::FacilityLayout2D& layout,
-    const std::string& floorId,
-    const safecrowd::domain::Point2D& point,
-    const LayoutCanvasTransform& transform,
-    const LayoutSnapOptions& options) {
-    std::vector<safecrowd::domain::Point2D> vertices;
-    std::vector<safecrowd::domain::LineSegment2D> edges;
-
+SnapGeometry collectSnapGeometry(const safecrowd::domain::FacilityLayout2D& layout, const std::string& floorId) {
+    SnapGeometry geometry;
     for (const auto& zone : layout.zones) {
         if (matchesFloor(zone.floorId, floorId)) {
-            appendPolygonSnapGeometry(zone.area, vertices, edges);
+            appendPolygonSnapGeometry(zone.area, geometry.vertices, geometry.edges);
         }
     }
     for (const auto& barrier : layout.barriers) {
         if (matchesFloor(barrier.floorId, floorId)) {
-            appendPolylineSnapGeometry(barrier.geometry, vertices, edges);
+            appendPolylineSnapGeometry(barrier.geometry, geometry.vertices, geometry.edges);
         }
     }
     for (const auto& connection : layout.connections) {
         if (!matchesFloor(connection.floorId, floorId)) {
             continue;
         }
-        vertices.push_back(connection.centerSpan.start);
-        vertices.push_back(connection.centerSpan.end);
-        edges.push_back(connection.centerSpan);
+        geometry.vertices.push_back(connection.centerSpan.start);
+        geometry.vertices.push_back(connection.centerSpan.end);
+        geometry.edges.push_back(connection.centerSpan);
     }
     for (const auto& connection : layout.connections) {
         const auto entrySpan = stairEntrySpanForFloor(layout, connection, floorId);
         if (!entrySpan.has_value()) {
             continue;
         }
-        vertices.push_back(entrySpan->start);
-        vertices.push_back(entrySpan->end);
-        vertices.push_back({
+        geometry.vertices.push_back(entrySpan->start);
+        geometry.vertices.push_back(entrySpan->end);
+        geometry.vertices.push_back({
             .x = (entrySpan->start.x + entrySpan->end.x) * 0.5,
             .y = (entrySpan->start.y + entrySpan->end.y) * 0.5,
         });
-        edges.push_back(*entrySpan);
+        geometry.edges.push_back(*entrySpan);
     }
+    return geometry;
+}
+
+LayoutSnapResult snapPointToGeometry(
+    const SnapGeometry& geometry,
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const safecrowd::domain::Point2D& point,
+    const LayoutCanvasTransform& transform,
+    const LayoutSnapOptions& options) {
+    (void)layout;
 
     LayoutSnapResult result{.point = point};
     double bestDistance = options.tolerancePixels;
 
     if (options.snapVertices) {
-        for (const auto& vertex : vertices) {
+        for (const auto& vertex : geometry.vertices) {
             const auto distance = screenDistance(transform, point, vertex);
             if (distance <= bestDistance) {
                 bestDistance = distance;
@@ -259,7 +265,7 @@ LayoutSnapResult snapLayoutPoint(
     }
 
     if (options.snapEdges) {
-        for (const auto& edge : edges) {
+        for (const auto& edge : geometry.edges) {
             const auto candidate = closestPointOnSegment(point, edge.start, edge.end);
             const auto distance = screenDistance(transform, point, candidate);
             if (distance <= bestDistance) {
@@ -269,6 +275,95 @@ LayoutSnapResult snapLayoutPoint(
         }
     }
 
+    return result;
+}
+
+double horizontalScreenDistance(
+    const LayoutCanvasTransform& transform,
+    const safecrowd::domain::Point2D& point,
+    double guideX) {
+    const auto current = transform.map(point);
+    const auto aligned = transform.map({.x = guideX, .y = point.y});
+    return std::abs(current.x() - aligned.x());
+}
+
+double verticalScreenDistance(
+    const LayoutCanvasTransform& transform,
+    const safecrowd::domain::Point2D& point,
+    double guideY) {
+    const auto current = transform.map(point);
+    const auto aligned = transform.map({.x = point.x, .y = guideY});
+    return std::abs(current.y() - aligned.y());
+}
+
+}  // namespace
+
+LayoutSnapResult snapLayoutPoint(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const std::string& floorId,
+    const safecrowd::domain::Point2D& point,
+    const LayoutCanvasTransform& transform,
+    const LayoutSnapOptions& options) {
+    return snapPointToGeometry(collectSnapGeometry(layout, floorId), layout, point, transform, options);
+}
+
+LayoutSnapResult snapLayoutDragPoint(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const std::string& floorId,
+    const safecrowd::domain::Point2D& anchor,
+    const safecrowd::domain::Point2D& point,
+    const LayoutCanvasTransform& transform,
+    const LayoutSnapOptions& options) {
+    const auto geometry = collectSnapGeometry(layout, floorId);
+    auto result = snapPointToGeometry(geometry, layout, point, transform, options);
+
+    double bestXDistance = options.tolerancePixels;
+    std::optional<double> snappedX;
+    double bestYDistance = options.tolerancePixels;
+    std::optional<double> snappedY;
+
+    auto considerX = [&](double x) {
+        if (std::abs(x - anchor.x) <= 1e-9) {
+            return;
+        }
+        const auto distance = horizontalScreenDistance(transform, point, x);
+        if (distance <= bestXDistance) {
+            bestXDistance = distance;
+            snappedX = x;
+        }
+    };
+    auto considerY = [&](double y) {
+        if (std::abs(y - anchor.y) <= 1e-9) {
+            return;
+        }
+        const auto distance = verticalScreenDistance(transform, point, y);
+        if (distance <= bestYDistance) {
+            bestYDistance = distance;
+            snappedY = y;
+        }
+    };
+
+    for (const auto& vertex : geometry.vertices) {
+        considerX(vertex.x);
+        considerY(vertex.y);
+    }
+    for (const auto& edge : geometry.edges) {
+        if (std::abs(edge.start.x - edge.end.x) <= 1e-9) {
+            considerX(edge.start.x);
+        }
+        if (std::abs(edge.start.y - edge.end.y) <= 1e-9) {
+            considerY(edge.start.y);
+        }
+    }
+
+    if (snappedX.has_value()) {
+        result.point.x = *snappedX;
+        result.snapped = true;
+    }
+    if (snappedY.has_value()) {
+        result.point.y = *snappedY;
+        result.snapped = true;
+    }
     return result;
 }
 

@@ -4,9 +4,12 @@
 #include <QColor>
 #include <QFrame>
 #include <QLabel>
+#include <QMouseEvent>
 #include <QPainter>
+#include <QSet>
 #include <QStyledItemDelegate>
 #include <QStyleOptionViewItem>
+#include <QTimer>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
 #include <QVBoxLayout>
@@ -31,6 +34,32 @@ public:
     using QTreeWidget::QTreeWidget;
 
 protected:
+    void mousePressEvent(QMouseEvent* event) override {
+        if (event != nullptr && event->button() == Qt::LeftButton) {
+            if (auto* item = toggleAreaItem(event->position()); item != nullptr) {
+                suppressToggleRelease_ = true;
+                item->setExpanded(!item->isExpanded());
+                event->accept();
+                return;
+            }
+        }
+
+        suppressToggleRelease_ = false;
+        QTreeWidget::mousePressEvent(event);
+    }
+
+    void mouseReleaseEvent(QMouseEvent* event) override {
+        if (suppressToggleRelease_) {
+            suppressToggleRelease_ = false;
+            if (event != nullptr) {
+                event->accept();
+            }
+            return;
+        }
+
+        QTreeWidget::mouseReleaseEvent(event);
+    }
+
     void drawBranches(QPainter* painter, const QRect& rect, const QModelIndex& index) const override {
         if (!model()->hasChildren(index)) {
             return;
@@ -55,6 +84,25 @@ protected:
         painter->drawPolygon(arrow);
         painter->restore();
     }
+
+private:
+    QTreeWidgetItem* toggleAreaItem(const QPointF& position) const {
+        auto* item = itemAt(position.toPoint());
+        if (item == nullptr || item->childCount() <= 0) {
+            return nullptr;
+        }
+
+        int depth = 0;
+        for (auto* parentItem = item->parent(); parentItem != nullptr; parentItem = parentItem->parent()) {
+            ++depth;
+        }
+
+        constexpr int kExtraToggleWidth = 24;
+        const int toggleWidth = ((depth + 1) * indentation()) + kExtraToggleWidth;
+        return position.x() <= toggleWidth ? item : nullptr;
+    }
+
+    bool suppressToggleRelease_{false};
 };
 
 class NavigationTreeDelegate final : public QStyledItemDelegate {
@@ -157,7 +205,38 @@ QString navigationTreeStyleSheet(bool interactive) {
     ).arg(itemHover, itemSelected);
 }
 
-QTreeWidgetItem* addTreeNode(QTreeWidgetItem* parentItem, const NavigationTreeNode& node) {
+void collectExpandedIds(const QTreeWidgetItem* item, QSet<QString>& expandedIds) {
+    if (item == nullptr) {
+        return;
+    }
+
+    const auto id = item->data(0, kIdRole).toString();
+    if (item->isExpanded() && !id.isEmpty()) {
+        expandedIds.insert(id);
+    }
+    for (int index = 0; index < item->childCount(); ++index) {
+        collectExpandedIds(item->child(index), expandedIds);
+    }
+}
+
+QSet<QString> collectExpandedIds(const QTreeWidget* tree) {
+    QSet<QString> expandedIds;
+    if (tree == nullptr) {
+        return expandedIds;
+    }
+
+    const auto* root = tree->invisibleRootItem();
+    for (int index = 0; index < root->childCount(); ++index) {
+        collectExpandedIds(root->child(index), expandedIds);
+    }
+    return expandedIds;
+}
+
+QTreeWidgetItem* addTreeNode(
+    QTreeWidgetItem* parentItem,
+    const NavigationTreeNode& node,
+    const NavigationTreeState& state,
+    QTreeWidgetItem** selectedItem) {
     auto* item = new QTreeWidgetItem(parentItem);
     item->setText(0, node.label);
     item->setToolTip(0, node.detail.isEmpty() ? node.label : node.detail);
@@ -169,9 +248,15 @@ QTreeWidgetItem* addTreeNode(QTreeWidgetItem* parentItem, const NavigationTreeNo
     }
 
     for (const auto& child : node.children) {
-        addTreeNode(item, child);
+        addTreeNode(item, child, state, selectedItem);
     }
-    item->setExpanded(node.expanded);
+    const bool expanded = state.restoreExpandedState && !node.id.isEmpty()
+        ? state.expandedNodeIds.contains(node.id)
+        : node.expanded;
+    item->setExpanded(expanded);
+    if (selectedItem != nullptr && *selectedItem == nullptr && !state.selectedId.isEmpty() && node.id == state.selectedId) {
+        *selectedItem = item;
+    }
 
     return item;
 }
@@ -184,7 +269,9 @@ NavigationTreeWidget::NavigationTreeWidget(
     const QString& emptyText,
     std::function<void(const QString&)> activateItemHandler,
     QWidget* parent,
-    QWidget* headerWidget)
+    QWidget* headerWidget,
+    NavigationTreeState state,
+    std::function<void(const QSet<QString>&)> expandedStateChangedHandler)
     : QWidget(parent) {
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -217,12 +304,22 @@ NavigationTreeWidget::NavigationTreeWidget(
     tree->setItemDelegate(new NavigationTreeDelegate(tree));
     tree->setStyleSheet(navigationTreeStyleSheet(interactive));
 
+    QTreeWidgetItem* selectedItem = nullptr;
     for (const auto& node : nodes) {
-        addTreeNode(tree->invisibleRootItem(), node);
+        addTreeNode(tree->invisibleRootItem(), node, state, &selectedItem);
+    }
+    if (selectedItem != nullptr) {
+        auto* ancestor = selectedItem->parent();
+        while (ancestor != nullptr) {
+            ancestor->setExpanded(true);
+            ancestor = ancestor->parent();
+        }
+        tree->setCurrentItem(selectedItem);
+        selectedItem->setSelected(true);
     }
 
     if (activateItemHandler) {
-        QObject::connect(tree, &QTreeWidget::itemClicked, tree, [activateItemHandler](QTreeWidgetItem* item, int) {
+        QObject::connect(tree, &QTreeWidget::itemClicked, tree, [activateItemHandler, tree](QTreeWidgetItem* item, int) {
             if (item == nullptr) {
                 return;
             }
@@ -230,13 +327,27 @@ NavigationTreeWidget::NavigationTreeWidget(
             const auto selectable = item->data(0, kSelectableRole).toBool();
             const auto id = item->data(0, kIdRole).toString();
             if (selectable && !id.isEmpty()) {
-                activateItemHandler(id);
+                QTimer::singleShot(0, tree, [activateItemHandler, id]() {
+                    activateItemHandler(id);
+                });
             }
         });
     } else {
         QObject::connect(tree, &QTreeWidget::itemClicked, tree, [tree](QTreeWidgetItem*, int) {
             tree->clearSelection();
             tree->setCurrentIndex(QModelIndex());
+        });
+    }
+
+    if (expandedStateChangedHandler) {
+        const auto notifyExpandedStateChanged = [tree, expandedStateChangedHandler]() {
+            expandedStateChangedHandler(collectExpandedIds(tree));
+        };
+        QObject::connect(tree, &QTreeWidget::itemExpanded, tree, [notifyExpandedStateChanged](QTreeWidgetItem*) {
+            notifyExpandedStateChanged();
+        });
+        QObject::connect(tree, &QTreeWidget::itemCollapsed, tree, [notifyExpandedStateChanged](QTreeWidgetItem*) {
+            notifyExpandedStateChanged();
         });
     }
 

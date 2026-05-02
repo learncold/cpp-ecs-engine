@@ -31,6 +31,8 @@ const char* toString(ImportIssueCode code) noexcept {
         return "UnsupportedEntity";
     case ImportIssueCode::MissingSourceGeometry:
         return "MissingSourceGeometry";
+    case ImportIssueCode::MissingRoom:
+        return "MissingRoom";
     case ImportIssueCode::MissingBlockDefinition:
         return "MissingBlockDefinition";
     case ImportIssueCode::InvalidGeometry:

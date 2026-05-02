@@ -40,6 +40,50 @@ QString zoneLabel(const safecrowd::domain::Zone2D& zone) {
     return label.isEmpty() ? id : QString("%1  -  %2").arg(label, id);
 }
 
+QString zoneName(const safecrowd::domain::FacilityLayout2D& layout, const std::string& zoneId) {
+    const auto it = std::find_if(layout.zones.begin(), layout.zones.end(), [&](const auto& zone) {
+        return zone.id == zoneId;
+    });
+    if (it == layout.zones.end()) {
+        return QString::fromStdString(zoneId);
+    }
+    const auto label = QString::fromStdString(it->label);
+    return label.isEmpty() ? QString::fromStdString(it->id) : label;
+}
+
+QString connectionLabel(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const safecrowd::domain::Connection2D& connection) {
+    const auto from = zoneName(layout, connection.fromZoneId);
+    const auto to = zoneName(layout, connection.toZoneId);
+    if (!from.isEmpty() && !to.isEmpty()) {
+        return QString("%1 -> %2").arg(from, to);
+    }
+    return QString::fromStdString(connection.id);
+}
+
+QString connectionLabelForId(const safecrowd::domain::FacilityLayout2D& layout, const std::string& connectionId) {
+    const auto it = std::find_if(layout.connections.begin(), layout.connections.end(), [&](const auto& connection) {
+        return connection.id == connectionId;
+    });
+    if (it == layout.connections.end()) {
+        return QString::fromStdString(connectionId);
+    }
+    return connectionLabel(layout, *it);
+}
+
+QString blockScheduleSummary(const safecrowd::domain::ConnectionBlockDraft& block) {
+    if (block.intervals.empty()) {
+        return "Always blocked";
+    }
+
+    QStringList intervals;
+    for (const auto& interval : block.intervals) {
+        intervals << QString("%1s - %2s").arg(interval.startSeconds, 0, 'f', 1).arg(interval.endSeconds, 0, 'f', 1);
+    }
+    return intervals.join(", ");
+}
+
 const safecrowd::domain::Zone2D* firstStartZone(const safecrowd::domain::FacilityLayout2D& layout) {
     const auto it = std::find_if(layout.zones.begin(), layout.zones.end(), [](const auto& zone) {
         return zone.kind == safecrowd::domain::ZoneKind::Room || zone.kind == safecrowd::domain::ZoneKind::Unknown;
@@ -201,51 +245,116 @@ QWidget* createCrowdPanel(
         shell != nullptr ? shell->createPanelHeader("Crowd", parent, false) : nullptr);
 }
 
-std::vector<NavigationTreeNode> buildEventsTree(const ScenarioAuthoringWidget::ScenarioState* scenario) {
-    if (scenario == nullptr || scenario->events.empty()) {
+std::vector<NavigationTreeNode> buildEventsTree(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const ScenarioAuthoringWidget::ScenarioState* scenario) {
+    if (scenario == nullptr) {
         return {};
     }
 
-    std::vector<NavigationTreeNode> events;
-    for (const auto& event : scenario->events) {
-        const auto eventId = QString::fromStdString(event.id);
-        events.push_back({
-            .label = QString::fromStdString(event.name),
-            .id = eventId,
-            .detail = QString::fromStdString(event.targetSummary),
-            .children = {
-                {
-                    .label = QString("Trigger  -  %1").arg(QString::fromStdString(event.triggerSummary)),
-                    .id = QString("%1/trigger").arg(eventId),
+    std::vector<NavigationTreeNode> sections;
+    if (!scenario->events.empty()) {
+        std::vector<NavigationTreeNode> events;
+        for (const auto& event : scenario->events) {
+            const auto eventId = QString::fromStdString(event.id);
+            events.push_back({
+                .label = QString::fromStdString(event.name),
+                .id = eventId,
+                .detail = QString::fromStdString(event.targetSummary),
+                .children = {
+                    {
+                        .label = QString("Trigger  -  %1").arg(QString::fromStdString(event.triggerSummary)),
+                        .id = QString("%1/trigger").arg(eventId),
+                    },
+                    {
+                        .label = QString("Target  -  %1").arg(QString::fromStdString(event.targetSummary)),
+                        .id = QString("%1/target").arg(eventId),
+                    },
                 },
-                {
-                    .label = QString("Target  -  %1").arg(QString::fromStdString(event.targetSummary)),
-                    .id = QString("%1/target").arg(eventId),
-                },
-            },
+                .expanded = true,
+            });
+        }
+
+        sections.push_back({
+            .label = QString("Operational Events (%1)").arg(static_cast<int>(scenario->events.size())),
+            .children = std::move(events),
             .expanded = true,
+            .selectable = false,
         });
     }
 
-    return {{
-        .label = QString("Events (%1)").arg(static_cast<int>(scenario->events.size())),
-        .children = std::move(events),
-        .expanded = true,
-        .selectable = false,
-    }};
+    const auto& connectionBlocks = scenario->draft.control.connectionBlocks;
+    if (!connectionBlocks.empty()) {
+        std::vector<NavigationTreeNode> blocks;
+        for (const auto& block : connectionBlocks) {
+            const auto blockId = QString::fromStdString(block.id);
+            const auto targetLabel = connectionLabelForId(layout, block.connectionId);
+            const auto schedule = blockScheduleSummary(block);
+            blocks.push_back({
+                .label = QString("Blocked  -  %1").arg(targetLabel),
+                .id = blockId,
+                .detail = schedule,
+                .children = {
+                    {
+                        .label = QString("Target  -  %1").arg(targetLabel),
+                        .id = QString("%1/target").arg(blockId),
+                    },
+                    {
+                        .label = QString("Schedule  -  %1").arg(schedule),
+                        .id = QString("%1/schedule").arg(blockId),
+                    },
+                },
+                .expanded = true,
+            });
+        }
+
+        sections.push_back({
+            .label = QString("Blocked Doors / Exits (%1)").arg(static_cast<int>(connectionBlocks.size())),
+            .children = std::move(blocks),
+            .expanded = true,
+            .selectable = false,
+        });
+    }
+
+    return sections;
 }
 
 QWidget* createEventsPanel(
+    const safecrowd::domain::FacilityLayout2D& layout,
     const ScenarioAuthoringWidget::ScenarioState* scenario,
     const WorkspaceShell* shell,
     QWidget* parent) {
     return new NavigationTreeWidget(
         "Events",
-        buildEventsTree(scenario),
-        "No operational events yet",
+        buildEventsTree(layout, scenario),
+        "No operational events or blocked exits yet",
         {},
         parent,
         shell != nullptr ? shell->createPanelHeader("Events", parent, false) : nullptr);
+}
+
+SavedNavigationView savedNavigationView(ScenarioAuthoringWidget::NavigationView view) {
+    switch (view) {
+    case ScenarioAuthoringWidget::NavigationView::Crowd:
+        return SavedNavigationView::Crowd;
+    case ScenarioAuthoringWidget::NavigationView::Events:
+        return SavedNavigationView::Events;
+    case ScenarioAuthoringWidget::NavigationView::Layout:
+    default:
+        return SavedNavigationView::Layout;
+    }
+}
+
+SavedRightPanelMode savedRightPanelMode(ScenarioAuthoringWidget::RightPanelMode mode) {
+    switch (mode) {
+    case ScenarioAuthoringWidget::RightPanelMode::None:
+        return SavedRightPanelMode::None;
+    case ScenarioAuthoringWidget::RightPanelMode::Run:
+        return SavedRightPanelMode::Run;
+    case ScenarioAuthoringWidget::RightPanelMode::Scenario:
+    default:
+        return SavedRightPanelMode::Scenario;
+    }
 }
 
 }  // namespace
@@ -309,6 +418,24 @@ void ScenarioAuthoringWidget::initializeUi(bool promptForScenario) {
             ensureInitialScenarioPrompt();
         });
     }
+}
+
+SavedScenarioAuthoringState ScenarioAuthoringWidget::currentSavedState() const {
+    SavedScenarioAuthoringState state;
+    state.currentScenarioIndex = currentScenarioIndex_;
+    state.navigationView = savedNavigationView(navigationView_);
+    state.rightPanelMode = savedRightPanelMode(rightPanelMode_);
+    state.scenarios.reserve(scenarios_.size());
+    for (const auto& scenario : scenarios_) {
+        auto draft = scenario.draft;
+        draft.control.events = scenario.events;
+        state.scenarios.push_back({
+            .draft = std::move(draft),
+            .baseScenarioId = scenario.baseScenarioId.toStdString(),
+            .stagedForRun = scenario.stagedForRun,
+        });
+    }
+    return state;
 }
 
 void ScenarioAuthoringWidget::addEventDraft(const QString& name, const QString& trigger, const QString& target) {
@@ -406,6 +533,12 @@ void ScenarioAuthoringWidget::refreshCanvas() {
     canvas_->setPlacementsChangedHandler([this](const std::vector<ScenarioCrowdPlacement>& placements) {
         updateCurrentScenarioPlacements(placements);
     });
+    canvas_->setLayoutElementActivatedHandler([this](const QString& elementId) {
+        selectedLayoutElementId_ = elementId;
+        if (navigationView_ == NavigationView::Layout) {
+            refreshNavigationPanel();
+        }
+    });
     canvas_->setConnectionBlocks(scenario->draft.control.connectionBlocks);
     canvas_->setConnectionBlocksChangedHandler([this](const std::vector<safecrowd::domain::ConnectionBlockDraft>& blocks) {
         auto* current = currentScenario();
@@ -413,11 +546,15 @@ void ScenarioAuthoringWidget::refreshCanvas() {
             return;
         }
         current->draft.control.connectionBlocks = blocks;
+        refreshNavigationPanel();
         refreshInspector();
         if (rightPanelMode_ == RightPanelMode::Run) {
             refreshRightPanel();
         }
     });
+    if (!selectedLayoutElementId_.isEmpty()) {
+        canvas_->focusLayoutElement(selectedLayoutElementId_);
+    }
     shell_->setCanvas(canvas_);
 }
 
@@ -433,13 +570,15 @@ void ScenarioAuthoringWidget::refreshInspector() {
             for (const auto& placement : scenario->crowdPlacements) {
                 people += placement.occupantCount;
             }
-            scenarioSummaryLabel_->setText(QString("Name: %1\nRole: %2\nPopulation: %3\nStart: %4\nDestination: %5\nEvents: %6")
+            const auto blockCount = static_cast<int>(scenario->draft.control.connectionBlocks.size());
+            scenarioSummaryLabel_->setText(QString("Name: %1\nRole: %2\nPopulation: %3\nStart: %4\nDestination: %5\nEvents: %6\nBlocked exits: %7")
                 .arg(
                     QString::fromStdString(scenario->draft.name),
                     scenario->draft.role == safecrowd::domain::ScenarioRole::Baseline ? "Baseline" : "Alternative")
                 .arg(people)
                 .arg(scenario->startText, scenario->destinationText)
-                .arg(static_cast<int>(scenario->events.size())));
+                .arg(static_cast<int>(scenario->events.size()))
+                .arg(blockCount));
         }
     }
 
@@ -450,6 +589,10 @@ void ScenarioAuthoringWidget::refreshInspector() {
             QStringList changes;
             if (!scenario->events.empty()) {
                 changes << QString("Events: %1 configured").arg(static_cast<int>(scenario->events.size()));
+            }
+            if (!scenario->draft.control.connectionBlocks.empty()) {
+                changes << QString("Blocked exits: %1 configured")
+                    .arg(static_cast<int>(scenario->draft.control.connectionBlocks.size()));
             }
             if (changes.isEmpty()) {
                 changes << "No changed fields yet";
@@ -486,12 +629,21 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
         shell_->setNavigationPanel(new LayoutNavigationPanelWidget(
             &layout_,
             [this](const QString& elementId) {
+                selectedLayoutElementId_ = elementId;
                 if (canvas_ != nullptr) {
                     canvas_->activateLayoutElement(elementId);
                 }
             },
             shell_,
-            shell_->createPanelHeader("Layout", shell_, false)));
+            shell_->createPanelHeader("Layout", shell_, false),
+            NavigationTreeState{
+                .expandedNodeIds = layoutExpandedNodeIds_,
+                .selectedId = selectedLayoutElementId_,
+                .restoreExpandedState = true,
+            },
+            [this](const QSet<QString>& expandedNodeIds) {
+                layoutExpandedNodeIds_ = expandedNodeIds;
+            }));
         return;
     }
     if (navigationView_ == NavigationView::Crowd) {
@@ -506,7 +658,7 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
             shell_));
         return;
     }
-    shell_->setNavigationPanel(createEventsPanel(currentScenario(), shell_, shell_));
+    shell_->setNavigationPanel(createEventsPanel(layout_, currentScenario(), shell_, shell_));
 }
 
 void ScenarioAuthoringWidget::refreshRightPanel() {

@@ -25,4 +25,12 @@ LayoutSnapResult snapLayoutPoint(
     const LayoutCanvasTransform& transform,
     const LayoutSnapOptions& options = {});
 
+LayoutSnapResult snapLayoutDragPoint(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const std::string& floorId,
+    const safecrowd::domain::Point2D& anchor,
+    const safecrowd::domain::Point2D& point,
+    const LayoutCanvasTransform& transform,
+    const LayoutSnapOptions& options = {});
+
 }  // namespace safecrowd::application

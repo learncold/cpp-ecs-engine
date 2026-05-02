@@ -17,6 +17,7 @@ enum class ImportIssueCode {
     FileReadFailed,
     UnsupportedEntity,
     MissingSourceGeometry,
+    MissingRoom,
     MissingBlockDefinition,
     InvalidGeometry,
     DisconnectedWalkableArea,

@@ -260,10 +260,13 @@ SC_TEST(ScenarioControlSystem_BlocksConnectionsUsingScenarioClock) {
     runtime.stepFrame(0.0);
 
     {
-        const auto& scenarioLayout = runtime.world().resources().get<safecrowd::domain::ScenarioLayoutResource>().layout;
-        SC_EXPECT_EQ(scenarioLayout.connections.size(), std::size_t{1});
-        SC_EXPECT_EQ(scenarioLayout.connections.front().directionality, safecrowd::domain::TravelDirection::Closed);
-        SC_EXPECT_EQ(scenarioLayout.barriers.size(), std::size_t{1});
+        const auto& layoutCache =
+            runtime.world().resources().get<safecrowd::domain::ScenarioLayoutCacheResource>();
+        SC_EXPECT_EQ(layoutCache.layout.connections.size(), std::size_t{1});
+        SC_EXPECT_EQ(
+            layoutCache.layout.connections.front().directionality,
+            safecrowd::domain::TravelDirection::Closed);
+        SC_EXPECT_EQ(layoutCache.layout.barriers.size(), std::size_t{1});
     }
 
     auto& clock = runtime.world().resources().get<safecrowd::domain::ScenarioSimulationClockResource>();
@@ -271,10 +274,13 @@ SC_TEST(ScenarioControlSystem_BlocksConnectionsUsingScenarioClock) {
     runtime.stepFrame(0.0);
 
     {
-        const auto& scenarioLayout = runtime.world().resources().get<safecrowd::domain::ScenarioLayoutResource>().layout;
-        SC_EXPECT_EQ(scenarioLayout.connections.size(), std::size_t{1});
-        SC_EXPECT_EQ(scenarioLayout.connections.front().directionality, safecrowd::domain::TravelDirection::Bidirectional);
-        SC_EXPECT_EQ(scenarioLayout.barriers.size(), std::size_t{0});
+        const auto& layoutCache =
+            runtime.world().resources().get<safecrowd::domain::ScenarioLayoutCacheResource>();
+        SC_EXPECT_EQ(layoutCache.layout.connections.size(), std::size_t{1});
+        SC_EXPECT_EQ(
+            layoutCache.layout.connections.front().directionality,
+            safecrowd::domain::TravelDirection::Bidirectional);
+        SC_EXPECT_EQ(layoutCache.layout.barriers.size(), std::size_t{0});
     }
 }
 

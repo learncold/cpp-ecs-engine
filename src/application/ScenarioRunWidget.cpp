@@ -219,6 +219,10 @@ ScenarioRunWidget::ScenarioRunWidget(
     timer_->start();
 }
 
+const safecrowd::domain::ScenarioDraft& ScenarioRunWidget::scenario() const noexcept {
+    return scenario_;
+}
+
 QWidget* ScenarioRunWidget::createRunPanel() {
     auto* panel = new QWidget(shell_);
     auto* layout = new QVBoxLayout(panel);

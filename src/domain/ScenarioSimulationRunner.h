@@ -52,6 +52,7 @@ private:
     Point2D placementPoint(const InitialPlacement2D& placement, std::size_t index) const;
 
     FacilityLayout2D layout_{};
+    ScenarioLayoutCacheResource layoutCache_{};
     ScenarioDraft scenario_{};
     std::unique_ptr<engine::EngineRuntime> runtime_{};
     SimulationFrame frame_{};
