@@ -3441,6 +3441,13 @@ void LayoutPreviewWidget::createUShapedStairLink(const QPointF& startWorld, cons
         return;
     }
 
+    const bool sourceIsLower = floorElevation(layout, sourceFloorId.toStdString())
+        <= floorElevation(layout, targetFloorId.toStdString());
+    const auto sourceEntryDirection = stairEntryDirection_;
+    const auto targetEntryDirection = stairEntryDirection_;
+    const auto lowerEntryDirection = sourceIsLower ? sourceEntryDirection : targetEntryDirection;
+    const auto upperEntryDirection = sourceIsLower ? targetEntryDirection : sourceEntryDirection;
+
     const auto sourceZoneCandidates = zonesContainingPoint(
         layout,
         QPointF(geometry.sourceOutsideSample.x, geometry.sourceOutsideSample.y),
@@ -3514,6 +3521,8 @@ void LayoutPreviewWidget::createUShapedStairLink(const QPointF& startWorld, cons
         .effectiveWidth = geometry.laneWidth,
         .directionality = safecrowd::domain::TravelDirection::Bidirectional,
         .isStair = true,
+        .lowerEntryDirection = lowerEntryDirection,
+        .upperEntryDirection = upperEntryDirection,
         .centerSpan = geometry.verticalSpan,
     });
 
