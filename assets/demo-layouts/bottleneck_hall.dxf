@@ -489,7 +489,7 @@ $SKPOLY
   9
 $TDCREATE
  40
-2461138.6350115743
+2461164.6288888888
   9
 $TDUCREATE
  40
@@ -497,7 +497,7 @@ $TDUCREATE
   9
 $TDUPDATE
  40
-2461138.6350115743
+2461164.6288888888
   9
 $TDUUPDATE
  40
@@ -549,7 +549,7 @@ $SPLINESEGS
   9
 $HANDSEED
   5
-9C
+46
   9
 $SURFTAB1
  70
@@ -929,11 +929,11 @@ $PSTYLEMODE
   9
 $FINGERPRINTGUID
   2
-{EA4EDBD7-1C5F-4C92-AE42-ABFA8F771DB4}
+{1A006C35-3BC2-4FF8-A7F7-77D267D4CE2C}
   9
 $VERSIONGUID
   2
-{C4992EE5-E95B-40AD-8708-DD50D7009CF4}
+{88E53264-57ED-4EE5-8CEF-E47D01815AD0}
   9
 $EXTNAMES
 290
@@ -1549,7 +1549,7 @@ LAYER
 100
 AcDbSymbolTable
  70
-20
+9
   0
 LAYER
   5
@@ -1747,7 +1747,7 @@ Continuous
   0
 LAYER
   5
-45
+36
 330
 1
 100
@@ -1755,271 +1755,7 @@ AcDbSymbolTableRecord
 100
 AcDbLayerTableRecord
   2
-SPACE_WEST_LOBBY
- 70
-0
- 62
-4
-  6
-Continuous
-370
--3
-390
-13
-347
-21
-  0
-LAYER
-  5
-48
-330
-1
-100
-AcDbSymbolTableRecord
-100
-AcDbLayerTableRecord
-  2
-SPACE_CENTRAL_CONCOURSE
- 70
-0
- 62
-4
-  6
-Continuous
-370
--3
-390
-13
-347
-21
-  0
-LAYER
-  5
-4B
-330
-1
-100
-AcDbSymbolTableRecord
-100
-AcDbLayerTableRecord
-  2
-SPACE_EAST_LOBBY
- 70
-0
- 62
-4
-  6
-Continuous
-370
--3
-390
-13
-347
-21
-  0
-LAYER
-  5
-4E
-330
-1
-100
-AcDbSymbolTableRecord
-100
-AcDbLayerTableRecord
-  2
-SPACE_AUDITORIUM
- 70
-0
- 62
-4
-  6
-Continuous
-370
--3
-390
-13
-347
-21
-  0
-LAYER
-  5
-51
-330
-1
-100
-AcDbSymbolTableRecord
-100
-AcDbLayerTableRecord
-  2
-SPACE_CAFETERIA
- 70
-0
- 62
-4
-  6
-Continuous
-370
--3
-390
-13
-347
-21
-  0
-LAYER
-  5
-54
-330
-1
-100
-AcDbSymbolTableRecord
-100
-AcDbLayerTableRecord
-  2
-SPACE_TRAINING_A
- 70
-0
- 62
-4
-  6
-Continuous
-370
--3
-390
-13
-347
-21
-  0
-LAYER
-  5
-57
-330
-1
-100
-AcDbSymbolTableRecord
-100
-AcDbLayerTableRecord
-  2
-SPACE_TRAINING_B
- 70
-0
- 62
-4
-  6
-Continuous
-370
--3
-390
-13
-347
-21
-  0
-LAYER
-  5
-5A
-330
-1
-100
-AcDbSymbolTableRecord
-100
-AcDbLayerTableRecord
-  2
-SPACE_COMMAND_CENTER
- 70
-0
- 62
-4
-  6
-Continuous
-370
--3
-390
-13
-347
-21
-  0
-LAYER
-  5
-5D
-330
-1
-100
-AcDbSymbolTableRecord
-100
-AcDbLayerTableRecord
-  2
-SPACE_WEST_SERVICE
- 70
-0
- 62
-4
-  6
-Continuous
-370
--3
-390
-13
-347
-21
-  0
-LAYER
-  5
-60
-330
-1
-100
-AcDbSymbolTableRecord
-100
-AcDbLayerTableRecord
-  2
-SPACE_WEST_BREAKOUT
- 70
-0
- 62
-4
-  6
-Continuous
-370
--3
-390
-13
-347
-21
-  0
-LAYER
-  5
-63
-330
-1
-100
-AcDbSymbolTableRecord
-100
-AcDbLayerTableRecord
-  2
-SPACE_EAST_STORAGE
- 70
-0
- 62
-4
-  6
-Continuous
-370
--3
-390
-13
-347
-21
-  0
-LAYER
-  5
-66
-330
-1
-100
-AcDbSymbolTableRecord
-100
-AcDbLayerTableRecord
-  2
-SPACE_EAST_OPERATIONS
+SPACE_MAIN_HALL
  70
 0
  62
@@ -2133,7 +1869,7 @@ ACAD
   0
 APPID
   5
-99
+43
 330
 3
 100
@@ -2147,7 +1883,7 @@ HATCHBACKGROUNDCOLOR
   0
 APPID
   5
-9A
+44
 330
 3
 100
@@ -2469,41 +2205,17 @@ AcDbMText
  10
 0.2
  20
--1.2
+-1.6
  30
 0.0
  40
-0.28
+0.34
  71
 1
   1
-LARGE EVACUATION COMPLEX\PMulti-wing civic center floor with wide concourse, large assembly spaces, service wings, and multiple exits
+BOTTLENECK HALL\P30x20m 단일 홀 / 1.0m 단일 출구 - 병목 시연
   0
-LINE
-  5
-36
-330
-17
-100
-AcDbEntity
-  8
-WALLS
-100
-AcDbLine
- 10
-0.0
- 20
-0.0
- 30
-0.0
- 11
-64.0
- 21
-0.0
- 31
-0.0
-  0
-LINE
+LWPOLYLINE
   5
 37
 330
@@ -2511,23 +2223,31 @@ LINE
 100
 AcDbEntity
   8
-WALLS
+SPACE_MAIN_HALL
 100
-AcDbLine
+AcDbPolyline
+ 90
+4
+ 70
+1
  10
-64.0
+0.05
  20
-0.0
- 30
-0.0
- 11
-64.0
- 21
-42.0
- 31
-0.0
+0.05
+ 10
+29.95
+ 20
+0.05
+ 10
+29.95
+ 20
+19.95
+ 10
+0.05
+ 20
+19.95
   0
-LINE
+MTEXT
   5
 38
 330
@@ -2535,21 +2255,21 @@ LINE
 100
 AcDbEntity
   8
-WALLS
+TEXT
 100
-AcDbLine
+AcDbMText
  10
-64.0
+13.6
  20
-42.0
+10.2
  30
 0.0
- 11
-0.0
- 21
-42.0
- 31
-0.0
+ 40
+0.28
+ 71
+1
+  1
+MAIN HALL\P600.0 m^2
   0
 LINE
   5
@@ -2565,11 +2285,11 @@ AcDbLine
  10
 0.0
  20
-42.0
+0.0
  30
 0.0
  11
-0.0
+30.0
  21
 0.0
  31
@@ -2587,15 +2307,15 @@ WALLS
 100
 AcDbLine
  10
-12.0
- 20
 0.0
+ 20
+20.0
  30
 0.0
  11
-12.0
+30.0
  21
-42.0
+20.0
  31
 0.0
   0
@@ -2611,15 +2331,15 @@ WALLS
 100
 AcDbLine
  10
-52.0
+0.0
  20
 0.0
  30
 0.0
  11
-52.0
+0.0
  21
-42.0
+20.0
  31
 0.0
   0
@@ -2635,15 +2355,15 @@ WALLS
 100
 AcDbLine
  10
-12.0
+30.0
  20
-16.0
+0.0
  30
 0.0
  11
-52.0
+30.0
  21
-16.0
+9.5
  31
 0.0
   0
@@ -2659,15 +2379,15 @@ WALLS
 100
 AcDbLine
  10
-12.0
+30.0
  20
-26.0
+10.5
  30
 0.0
  11
-52.0
+30.0
  21
-26.0
+20.0
  31
 0.0
   0
@@ -2679,23 +2399,23 @@ LINE
 100
 AcDbEntity
   8
-WALLS
+EXIT
 100
 AcDbLine
  10
-34.0
+30.0
  20
-26.0
+9.5
  30
 0.0
  11
-34.0
+30.0
  21
-42.0
+10.5
  31
 0.0
   0
-LINE
+LWPOLYLINE
   5
 3F
 330
@@ -2703,23 +2423,31 @@ LINE
 100
 AcDbEntity
   8
-WALLS
+OBSTACLE
 100
-AcDbLine
+AcDbPolyline
+ 90
+4
+ 70
+1
  10
-26.0
+9.0
  20
-0.0
- 30
-0.0
- 11
-26.0
- 21
-16.0
- 31
-0.0
+9.0
+ 10
+10.0
+ 20
+9.0
+ 10
+10.0
+ 20
+11.0
+ 10
+9.0
+ 20
+11.0
   0
-LINE
+LWPOLYLINE
   5
 40
 330
@@ -2727,23 +2455,31 @@ LINE
 100
 AcDbEntity
   8
-WALLS
+OBSTACLE
 100
-AcDbLine
+AcDbPolyline
+ 90
+4
+ 70
+1
  10
-40.0
+19.0
  20
-0.0
- 30
-0.0
- 11
-40.0
- 21
-16.0
- 31
-0.0
+9.0
+ 10
+20.0
+ 20
+9.0
+ 10
+20.0
+ 20
+11.0
+ 10
+19.0
+ 20
+11.0
   0
-LINE
+LWPOLYLINE
   5
 41
 330
@@ -2751,23 +2487,31 @@ LINE
 100
 AcDbEntity
   8
-WALLS
+OBSTACLE
 100
-AcDbLine
+AcDbPolyline
+ 90
+4
+ 70
+1
  10
-52.0
+14.0
  20
-12.0
- 30
-0.0
- 11
-64.0
- 21
-12.0
- 31
-0.0
+4.0
+ 10
+15.0
+ 20
+4.0
+ 10
+15.0
+ 20
+6.0
+ 10
+14.0
+ 20
+6.0
   0
-LINE
+LWPOLYLINE
   5
 42
 330
@@ -2775,2003 +2519,29 @@ LINE
 100
 AcDbEntity
   8
-WALLS
-100
-AcDbLine
- 10
-52.0
- 20
-30.0
- 30
-0.0
- 11
-64.0
- 21
-30.0
- 31
-0.0
-  0
-LINE
-  5
-43
-330
-17
-100
-AcDbEntity
-  8
-WALLS
-100
-AcDbLine
- 10
-0.0
- 20
-12.0
- 30
-0.0
- 11
-12.0
- 21
-12.0
- 31
-0.0
-  0
-LINE
-  5
-44
-330
-17
-100
-AcDbEntity
-  8
-WALLS
-100
-AcDbLine
- 10
-0.0
- 20
-30.0
- 30
-0.0
- 11
-12.0
- 21
-30.0
- 31
-0.0
-  0
-LWPOLYLINE
-  5
-46
-330
-17
-100
-AcDbEntity
-  8
-SPACE_WEST_LOBBY
+OBSTACLE
 100
 AcDbPolyline
  90
 4
  70
 1
- 10
-0.1
- 20
-12.1
- 10
-11.9
- 20
-12.1
- 10
-11.9
- 20
-29.9
- 10
-0.1
- 20
-29.9
-  0
-MTEXT
-  5
-47
-330
-17
-100
-AcDbEntity
-  8
-TEXT
-100
-AcDbMText
- 10
-5.2
- 20
-21.1
- 30
-0.0
- 40
-0.24
- 71
-1
-  1
-WEST LOBBY\P210.0 m^2
-  0
-LWPOLYLINE
-  5
-49
-330
-17
-100
-AcDbEntity
-  8
-SPACE_CENTRAL_CONCOURSE
-100
-AcDbPolyline
- 90
-4
- 70
-1
- 10
-12.1
- 20
-16.1
- 10
-51.9
- 20
-16.1
- 10
-51.9
- 20
-25.9
- 10
-12.1
- 20
-25.9
-  0
-MTEXT
-  5
-4A
-330
-17
-100
-AcDbEntity
-  8
-TEXT
-100
-AcDbMText
- 10
-31.2
- 20
-21.1
- 30
-0.0
- 40
-0.24
- 71
-1
-  1
-CENTRAL CONCOURSE\P390.0 m^2
-  0
-LWPOLYLINE
-  5
-4C
-330
-17
-100
-AcDbEntity
-  8
-SPACE_EAST_LOBBY
-100
-AcDbPolyline
- 90
-4
- 70
-1
- 10
-52.1
- 20
-12.1
- 10
-63.9
- 20
-12.1
- 10
-63.9
- 20
-29.9
- 10
-52.1
- 20
-29.9
-  0
-MTEXT
-  5
-4D
-330
-17
-100
-AcDbEntity
-  8
-TEXT
-100
-AcDbMText
- 10
-57.2
- 20
-21.1
- 30
-0.0
- 40
-0.24
- 71
-1
-  1
-EAST LOBBY\P210.0 m^2
-  0
-LWPOLYLINE
-  5
-4F
-330
-17
-100
-AcDbEntity
-  8
-SPACE_AUDITORIUM
-100
-AcDbPolyline
- 90
-4
- 70
-1
- 10
-12.1
- 20
-26.1
- 10
-33.9
- 20
-26.1
- 10
-33.9
- 20
-41.9
- 10
-12.1
- 20
-41.9
-  0
-MTEXT
-  5
-50
-330
-17
-100
-AcDbEntity
-  8
-TEXT
-100
-AcDbMText
- 10
-22.2
- 20
-34.1
- 30
-0.0
- 40
-0.24
- 71
-1
-  1
-AUDITORIUM\P344.4 m^2
-  0
-LWPOLYLINE
-  5
-52
-330
-17
-100
-AcDbEntity
-  8
-SPACE_CAFETERIA
-100
-AcDbPolyline
- 90
-4
- 70
-1
- 10
-34.1
- 20
-26.1
- 10
-51.9
- 20
-26.1
- 10
-51.9
- 20
-41.9
- 10
-34.1
- 20
-41.9
-  0
-MTEXT
-  5
-53
-330
-17
-100
-AcDbEntity
-  8
-TEXT
-100
-AcDbMText
- 10
-42.2
- 20
-34.1
- 30
-0.0
- 40
-0.24
- 71
-1
-  1
-CAFETERIA\P281.2 m^2
-  0
-LWPOLYLINE
-  5
-55
-330
-17
-100
-AcDbEntity
-  8
-SPACE_TRAINING_A
-100
-AcDbPolyline
- 90
-4
- 70
-1
- 10
-12.1
- 20
-0.1
- 10
-25.9
- 20
-0.1
- 10
-25.9
- 20
-15.9
- 10
-12.1
- 20
-15.9
-  0
-MTEXT
-  5
-56
-330
-17
-100
-AcDbEntity
-  8
-TEXT
-100
-AcDbMText
- 10
-18.2
- 20
-8.1
- 30
-0.0
- 40
-0.24
- 71
-1
-  1
-TRAINING A\P218.0 m^2
-  0
-LWPOLYLINE
-  5
-58
-330
-17
-100
-AcDbEntity
-  8
-SPACE_TRAINING_B
-100
-AcDbPolyline
- 90
-4
- 70
-1
- 10
-26.1
- 20
-0.1
- 10
-39.9
- 20
-0.1
- 10
-39.9
- 20
-15.9
- 10
-26.1
- 20
-15.9
-  0
-MTEXT
-  5
-59
-330
-17
-100
-AcDbEntity
-  8
-TEXT
-100
-AcDbMText
- 10
-32.2
- 20
-8.1
- 30
-0.0
- 40
-0.24
- 71
-1
-  1
-TRAINING B\P218.0 m^2
-  0
-LWPOLYLINE
-  5
-5B
-330
-17
-100
-AcDbEntity
-  8
-SPACE_COMMAND_CENTER
-100
-AcDbPolyline
- 90
-4
- 70
-1
- 10
-40.1
- 20
-0.1
- 10
-51.9
- 20
-0.1
- 10
-51.9
- 20
-15.9
- 10
-40.1
- 20
-15.9
-  0
-MTEXT
-  5
-5C
-330
-17
-100
-AcDbEntity
-  8
-TEXT
-100
-AcDbMText
- 10
-45.2
- 20
-8.1
- 30
-0.0
- 40
-0.24
- 71
-1
-  1
-COMMAND CENTER\P186.4 m^2
-  0
-LWPOLYLINE
-  5
-5E
-330
-17
-100
-AcDbEntity
-  8
-SPACE_WEST_SERVICE
-100
-AcDbPolyline
- 90
-4
- 70
-1
- 10
-0.1
- 20
-0.1
- 10
-11.9
- 20
-0.1
- 10
-11.9
- 20
-11.9
- 10
-0.1
- 20
-11.9
-  0
-MTEXT
-  5
-5F
-330
-17
-100
-AcDbEntity
-  8
-TEXT
-100
-AcDbMText
- 10
-5.2
- 20
-6.1
- 30
-0.0
- 40
-0.24
- 71
-1
-  1
-WEST SERVICE\P139.2 m^2
-  0
-LWPOLYLINE
-  5
-61
-330
-17
-100
-AcDbEntity
-  8
-SPACE_WEST_BREAKOUT
-100
-AcDbPolyline
- 90
-4
- 70
-1
- 10
-0.1
- 20
-30.1
- 10
-11.9
- 20
-30.1
- 10
-11.9
- 20
-41.9
- 10
-0.1
- 20
-41.9
-  0
-MTEXT
-  5
-62
-330
-17
-100
-AcDbEntity
-  8
-TEXT
-100
-AcDbMText
- 10
-5.2
- 20
-36.1
- 30
-0.0
- 40
-0.24
- 71
-1
-  1
-WEST BREAKOUT\P139.2 m^2
-  0
-LWPOLYLINE
-  5
-64
-330
-17
-100
-AcDbEntity
-  8
-SPACE_EAST_STORAGE
-100
-AcDbPolyline
- 90
-4
- 70
-1
- 10
-52.1
- 20
-0.1
- 10
-63.9
- 20
-0.1
- 10
-63.9
- 20
-11.9
- 10
-52.1
- 20
-11.9
-  0
-MTEXT
-  5
-65
-330
-17
-100
-AcDbEntity
-  8
-TEXT
-100
-AcDbMText
- 10
-57.2
- 20
-6.1
- 30
-0.0
- 40
-0.24
- 71
-1
-  1
-EAST STORAGE\P139.2 m^2
-  0
-LWPOLYLINE
-  5
-67
-330
-17
-100
-AcDbEntity
-  8
-SPACE_EAST_OPERATIONS
-100
-AcDbPolyline
- 90
-4
- 70
-1
- 10
-52.1
- 20
-30.1
- 10
-63.9
- 20
-30.1
- 10
-63.9
- 20
-41.9
- 10
-52.1
- 20
-41.9
-  0
-MTEXT
-  5
-68
-330
-17
-100
-AcDbEntity
-  8
-TEXT
-100
-AcDbMText
- 10
-57.2
- 20
-36.1
- 30
-0.0
- 40
-0.24
- 71
-1
-  1
-EAST OPERATIONS\P139.2 m^2
-  0
-LINE
-  5
-69
-330
-17
-100
-AcDbEntity
-  8
-DOORS
-100
-AcDbLine
- 10
-12.0
- 20
-19.5
- 30
-0.0
- 11
-12.0
- 21
-22.5
- 31
-0.0
-  0
-ARC
-  5
-6A
-330
-17
-100
-AcDbEntity
-  8
-DOORS
-100
-AcDbCircle
- 10
-12.0
- 20
-19.5
- 30
-0.0
- 40
-1.0
-100
-AcDbArc
- 50
-180.0
- 51
-270.0
-  0
-LINE
-  5
-6B
-330
-17
-100
-AcDbEntity
-  8
-DOORS
-100
-AcDbLine
- 10
-52.0
- 20
-19.5
- 30
-0.0
- 11
-52.0
- 21
-22.5
- 31
-0.0
-  0
-ARC
-  5
-6C
-330
-17
-100
-AcDbEntity
-  8
-DOORS
-100
-AcDbCircle
- 10
-52.0
- 20
-19.5
- 30
-0.0
- 40
-1.0
-100
-AcDbArc
- 50
-0.0
- 51
-90.0
-  0
-LINE
-  5
-6D
-330
-17
-100
-AcDbEntity
-  8
-DOORS
-100
-AcDbLine
- 10
-20.0
- 20
-26.0
- 30
-0.0
- 11
-23.0
- 21
-26.0
- 31
-0.0
-  0
-ARC
-  5
-6E
-330
-17
-100
-AcDbEntity
-  8
-DOORS
-100
-AcDbCircle
- 10
-20.0
- 20
-26.0
- 30
-0.0
- 40
-1.0
-100
-AcDbArc
- 50
-0.0
- 51
-90.0
-  0
-LINE
-  5
-6F
-330
-17
-100
-AcDbEntity
-  8
-DOORS
-100
-AcDbLine
- 10
-42.0
- 20
-26.0
- 30
-0.0
- 11
-45.0
- 21
-26.0
- 31
-0.0
-  0
-ARC
-  5
-70
-330
-17
-100
-AcDbEntity
-  8
-DOORS
-100
-AcDbCircle
- 10
-42.0
- 20
-26.0
- 30
-0.0
- 40
-1.0
-100
-AcDbArc
- 50
-90.0
- 51
-180.0
-  0
-LINE
-  5
-71
-330
-17
-100
-AcDbEntity
-  8
-DOORS
-100
-AcDbLine
- 10
-18.0
- 20
-16.0
- 30
-0.0
- 11
-21.0
- 21
-16.0
- 31
-0.0
-  0
-ARC
-  5
-72
-330
-17
-100
-AcDbEntity
-  8
-DOORS
-100
-AcDbCircle
- 10
-18.0
- 20
-16.0
- 30
-0.0
- 40
-1.0
-100
-AcDbArc
- 50
-270.0
- 51
-360.0
-  0
-LINE
-  5
-73
-330
-17
-100
-AcDbEntity
-  8
-DOORS
-100
-AcDbLine
- 10
-31.0
- 20
-16.0
- 30
-0.0
- 11
-34.0
- 21
-16.0
- 31
-0.0
-  0
-ARC
-  5
-74
-330
-17
-100
-AcDbEntity
-  8
-DOORS
-100
-AcDbCircle
- 10
-31.0
- 20
-16.0
- 30
-0.0
- 40
-1.0
-100
-AcDbArc
- 50
-270.0
- 51
-360.0
-  0
-LINE
-  5
-75
-330
-17
-100
-AcDbEntity
-  8
-DOORS
-100
-AcDbLine
- 10
-45.0
- 20
-16.0
- 30
-0.0
- 11
-48.0
- 21
-16.0
- 31
-0.0
-  0
-ARC
-  5
-76
-330
-17
-100
-AcDbEntity
-  8
-DOORS
-100
-AcDbCircle
- 10
-45.0
- 20
-16.0
- 30
-0.0
- 40
-1.0
-100
-AcDbArc
- 50
-270.0
- 51
-360.0
-  0
-LINE
-  5
-77
-330
-17
-100
-AcDbEntity
-  8
-DOORS
-100
-AcDbLine
- 10
-6.0
- 20
-12.0
- 30
-0.0
- 11
-8.5
- 21
-12.0
- 31
-0.0
-  0
-ARC
-  5
-78
-330
-17
-100
-AcDbEntity
-  8
-DOORS
-100
-AcDbCircle
- 10
-6.0
- 20
-12.0
- 30
-0.0
- 40
-0.9
-100
-AcDbArc
- 50
-270.0
- 51
-360.0
-  0
-LINE
-  5
-79
-330
-17
-100
-AcDbEntity
-  8
-DOORS
-100
-AcDbLine
- 10
-6.0
- 20
-30.0
- 30
-0.0
- 11
-8.5
- 21
-30.0
- 31
-0.0
-  0
-ARC
-  5
-7A
-330
-17
-100
-AcDbEntity
-  8
-DOORS
-100
-AcDbCircle
- 10
-6.0
- 20
-30.0
- 30
-0.0
- 40
-0.9
-100
-AcDbArc
- 50
-0.0
- 51
-90.0
-  0
-LINE
-  5
-7B
-330
-17
-100
-AcDbEntity
-  8
-DOORS
-100
-AcDbLine
- 10
-57.0
- 20
-12.0
- 30
-0.0
- 11
-59.5
- 21
-12.0
- 31
-0.0
-  0
-ARC
-  5
-7C
-330
-17
-100
-AcDbEntity
-  8
-DOORS
-100
-AcDbCircle
- 10
-57.0
- 20
-12.0
- 30
-0.0
- 40
-0.9
-100
-AcDbArc
- 50
-270.0
- 51
-360.0
-  0
-LINE
-  5
-7D
-330
-17
-100
-AcDbEntity
-  8
-DOORS
-100
-AcDbLine
- 10
-57.0
- 20
-30.0
- 30
-0.0
- 11
-59.5
- 21
-30.0
- 31
-0.0
-  0
-ARC
-  5
-7E
-330
-17
-100
-AcDbEntity
-  8
-DOORS
-100
-AcDbCircle
- 10
-57.0
- 20
-30.0
- 30
-0.0
- 40
-0.9
-100
-AcDbArc
- 50
-0.0
- 51
-90.0
-  0
-LINE
-  5
-7F
-330
-17
-100
-AcDbEntity
-  8
-EXIT
-100
-AcDbLine
- 10
-0.0
- 20
-18.0
- 30
-0.0
- 11
-0.0
- 21
-21.0
- 31
-0.0
-  0
-LINE
-  5
-80
-330
-17
-100
-AcDbEntity
-  8
-EXIT
-100
-AcDbLine
- 10
-0.0
- 20
-35.0
- 30
-0.0
- 11
-0.0
- 21
-38.0
- 31
-0.0
-  0
-LINE
-  5
-81
-330
-17
-100
-AcDbEntity
-  8
-EXIT
-100
-AcDbLine
- 10
-18.0
- 20
-42.0
- 30
-0.0
- 11
-21.0
- 21
-42.0
- 31
-0.0
-  0
-LINE
-  5
-82
-330
-17
-100
-AcDbEntity
-  8
-EXIT
-100
-AcDbLine
- 10
-43.0
- 20
-42.0
- 30
-0.0
- 11
-46.0
- 21
-42.0
- 31
-0.0
-  0
-LINE
-  5
-83
-330
-17
-100
-AcDbEntity
-  8
-EXIT
-100
-AcDbLine
- 10
-64.0
- 20
-18.0
- 30
-0.0
- 11
-64.0
- 21
-21.0
- 31
-0.0
-  0
-LINE
-  5
-84
-330
-17
-100
-AcDbEntity
-  8
-EXIT
-100
-AcDbLine
- 10
-64.0
- 20
-34.0
- 30
-0.0
- 11
-64.0
- 21
-37.0
- 31
-0.0
-  0
-LINE
-  5
-85
-330
-17
-100
-AcDbEntity
-  8
-EXIT
-100
-AcDbLine
- 10
-18.0
- 20
-0.0
- 30
-0.0
- 11
-21.0
- 21
-0.0
- 31
-0.0
-  0
-LINE
-  5
-86
-330
-17
-100
-AcDbEntity
-  8
-EXIT
-100
-AcDbLine
- 10
-44.0
- 20
-0.0
- 30
-0.0
- 11
-47.0
- 21
-0.0
- 31
-0.0
-  0
-LINE
-  5
-87
-330
-17
-100
-AcDbEntity
-  8
-WINDOWS
-100
-AcDbLine
- 10
-0.0
- 20
-23.0
- 30
-0.0
- 11
-0.0
- 21
-27.0
- 31
-0.0
-  0
-LINE
-  5
-88
-330
-17
-100
-AcDbEntity
-  8
-WINDOWS
-100
-AcDbLine
  10
 14.0
  20
-42.0
- 30
-0.0
- 11
-17.0
- 21
-42.0
- 31
-0.0
-  0
-LINE
-  5
-89
-330
-17
-100
-AcDbEntity
-  8
-WINDOWS
-100
-AcDbLine
+14.0
  10
-28.0
+15.0
  20
-42.0
- 30
-0.0
- 11
-31.0
- 21
-42.0
- 31
-0.0
-  0
-LINE
-  5
-8A
-330
-17
-100
-AcDbEntity
-  8
-WINDOWS
-100
-AcDbLine
+14.0
  10
-36.0
+15.0
  20
-42.0
- 30
-0.0
- 11
-39.0
- 21
-42.0
- 31
-0.0
-  0
-LINE
-  5
-8B
-330
-17
-100
-AcDbEntity
-  8
-WINDOWS
-100
-AcDbLine
+16.0
  10
-64.0
+14.0
  20
-24.0
- 30
-0.0
- 11
-64.0
- 21
-28.0
- 31
-0.0
-  0
-LINE
-  5
-8C
-330
-17
-100
-AcDbEntity
-  8
-WINDOWS
-100
-AcDbLine
- 10
-24.0
- 20
-0.0
- 30
-0.0
- 11
-27.0
- 21
-0.0
- 31
-0.0
-  0
-LINE
-  5
-8D
-330
-17
-100
-AcDbEntity
-  8
-WINDOWS
-100
-AcDbLine
- 10
-48.0
- 20
-0.0
- 30
-0.0
- 11
-51.0
- 21
-0.0
- 31
-0.0
-  0
-LWPOLYLINE
-  5
-8E
-330
-17
-100
-AcDbEntity
-  8
-OBSTACLE
-100
-AcDbPolyline
- 90
-4
- 70
-1
- 10
-20.0
- 20
-19.0
- 10
-21.5
- 20
-19.0
- 10
-21.5
- 20
-20.5
- 10
-20.0
- 20
-20.5
-  0
-LWPOLYLINE
-  5
-8F
-330
-17
-100
-AcDbEntity
-  8
-OBSTACLE
-100
-AcDbPolyline
- 90
-4
- 70
-1
- 10
-30.0
- 20
-19.0
- 10
-31.5
- 20
-19.0
- 10
-31.5
- 20
-20.5
- 10
-30.0
- 20
-20.5
-  0
-LWPOLYLINE
-  5
-90
-330
-17
-100
-AcDbEntity
-  8
-OBSTACLE
-100
-AcDbPolyline
- 90
-4
- 70
-1
- 10
-40.0
- 20
-19.0
- 10
-41.5
- 20
-19.0
- 10
-41.5
- 20
-20.5
- 10
-40.0
- 20
-20.5
-  0
-LWPOLYLINE
-  5
-91
-330
-17
-100
-AcDbEntity
-  8
-OBSTACLE
-100
-AcDbPolyline
- 90
-4
- 70
-1
- 10
-20.0
- 20
-21.5
- 10
-21.5
- 20
-21.5
- 10
-21.5
- 20
-23.0
- 10
-20.0
- 20
-23.0
-  0
-LWPOLYLINE
-  5
-92
-330
-17
-100
-AcDbEntity
-  8
-OBSTACLE
-100
-AcDbPolyline
- 90
-4
- 70
-1
- 10
-30.0
- 20
-21.5
- 10
-31.5
- 20
-21.5
- 10
-31.5
- 20
-23.0
- 10
-30.0
- 20
-23.0
-  0
-LWPOLYLINE
-  5
-93
-330
-17
-100
-AcDbEntity
-  8
-OBSTACLE
-100
-AcDbPolyline
- 90
-4
- 70
-1
- 10
-40.0
- 20
-21.5
- 10
-41.5
- 20
-21.5
- 10
-41.5
- 20
-23.0
- 10
-40.0
- 20
-23.0
-  0
-LWPOLYLINE
-  5
-94
-330
-17
-100
-AcDbEntity
-  8
-OBSTACLE
-100
-AcDbPolyline
- 90
-4
- 70
-1
- 10
-17.0
- 20
-31.0
- 10
-18.5
- 20
-31.0
- 10
-18.5
- 20
-32.5
- 10
-17.0
- 20
-32.5
-  0
-LWPOLYLINE
-  5
-95
-330
-17
-100
-AcDbEntity
-  8
-OBSTACLE
-100
-AcDbPolyline
- 90
-4
- 70
-1
- 10
-24.0
- 20
-31.0
- 10
-25.5
- 20
-31.0
- 10
-25.5
- 20
-32.5
- 10
-24.0
- 20
-32.5
-  0
-LWPOLYLINE
-  5
-96
-330
-17
-100
-AcDbEntity
-  8
-OBSTACLE
-100
-AcDbPolyline
- 90
-4
- 70
-1
- 10
-38.0
- 20
-32.0
- 10
-40.5
- 20
-32.0
- 10
-40.5
- 20
-34.0
- 10
-38.0
- 20
-34.0
-  0
-LWPOLYLINE
-  5
-97
-330
-17
-100
-AcDbEntity
-  8
-OBSTACLE
-100
-AcDbPolyline
- 90
-4
- 70
-1
- 10
-43.0
- 20
-6.0
- 10
-45.5
- 20
-6.0
- 10
-45.5
- 20
-8.0
- 10
-43.0
- 20
-8.0
-  0
-LWPOLYLINE
-  5
-98
-330
-17
-100
-AcDbEntity
-  8
-OBSTACLE
-100
-AcDbPolyline
- 90
-4
- 70
-1
- 10
-55.0
- 20
-34.0
- 10
-57.0
- 20
-34.0
- 10
-57.0
- 20
-36.5
- 10
-55.0
- 20
-36.5
+16.0
   0
 ENDSEC
   0
@@ -5763,7 +3533,7 @@ CREATED_BY_EZDXF
   3
 WRITTEN_BY_EZDXF
 350
-9B
+45
   0
 DICTIONARYVAR
   5
@@ -5775,11 +3545,11 @@ DictionaryVariables
 280
 0
   1
-1.4.2 @ 2026-04-07T06:14:25.712109+00:00
+1.4.3 @ 2026-05-03T06:05:36.026588+00:00
   0
 DICTIONARYVAR
   5
-9B
+45
 330
 2D
 100
@@ -5787,7 +3557,7 @@ DictionaryVariables
 280
 0
   1
-1.4.2 @ 2026-04-07T06:14:25.715931+00:00
+1.4.3 @ 2026-05-03T06:05:36.028068+00:00
   0
 ENDSEC
   0

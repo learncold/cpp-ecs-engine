@@ -221,13 +221,13 @@ SC_TEST(ImportOrchestratorUsesAFileBasedDomainEntryPoint) {
     FakeImportOrchestrator orchestrator;
 
     safecrowd::domain::ImportRequest request;
-    request.sourcePath = std::filesystem::path("tests/dxf/home_plan.dxf");
+    request.sourcePath = std::filesystem::path("tests/dxf/office_suite.dxf");
     request.requestedFormat = safecrowd::domain::ImportedFileFormat::Dxf;
     request.preserveRawModel = false;
 
     const auto result = orchestrator.importFile(request);
 
-    SC_EXPECT_EQ(orchestrator.lastRequest.sourcePath.generic_string(), std::string("tests/dxf/home_plan.dxf"));
+    SC_EXPECT_EQ(orchestrator.lastRequest.sourcePath.generic_string(), std::string("tests/dxf/office_suite.dxf"));
     SC_EXPECT_EQ(orchestrator.lastRequest.requestedFormat, safecrowd::domain::ImportedFileFormat::Dxf);
     SC_EXPECT_TRUE(!orchestrator.lastRequest.preserveRawModel);
     SC_EXPECT_TRUE(result.layout.has_value());
