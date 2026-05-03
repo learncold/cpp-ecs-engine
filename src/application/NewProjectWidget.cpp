@@ -20,6 +20,7 @@ namespace {
 
 constexpr auto kProjectsRootName = "SafeCrowd Projects";
 
+// String-only; saveProject creates the folder lazily on actual save.
 QString defaultProjectsRoot() {
     auto base = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
     if (base.isEmpty()) {
@@ -28,9 +29,7 @@ QString defaultProjectsRoot() {
     if (base.isEmpty()) {
         return QString();
     }
-    const auto root = QDir(base).filePath(kProjectsRootName);
-    QDir().mkpath(root);
-    return root;
+    return QDir(base).filePath(kProjectsRootName);
 }
 
 QString sanitizeFolderName(const QString& name) {
@@ -196,10 +195,10 @@ NewProjectWidget::NewProjectWidget(QWidget* parent)
         QString startDir = folderPathEdit_->text().trimmed();
         if (startDir.isEmpty()) {
             startDir = defaultProjectsRoot();
-        } else {
+        }
+        if (!startDir.isEmpty()) {
             QDir candidate(startDir);
             while (!candidate.exists() && !candidate.isRoot() && candidate.cdUp()) {
-                // walk up to the nearest existing parent so the dialog opens predictably
             }
             if (candidate.exists()) {
                 startDir = candidate.absolutePath();
