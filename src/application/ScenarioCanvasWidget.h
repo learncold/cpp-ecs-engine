@@ -120,6 +120,7 @@ private:
     std::vector<safecrowd::domain::ConnectionBlockDraft> connectionBlocks_{};
     QString currentFloorId_{};
     QString focusedLayoutElementId_{};
+    QString focusedCrowdElementId_{};
     QString focusedPlacementId_{};
     QStringList selectedPlacementIds_{};
     ToolMode toolMode_{ToolMode::Select};

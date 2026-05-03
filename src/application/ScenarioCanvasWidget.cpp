@@ -41,6 +41,7 @@ constexpr double kOccupantMinSpacing = kOccupantWorldRadius * 2.0;
 constexpr double kVelocityIndicatorSeconds = 0.75;
 constexpr double kGeometryEpsilon = 1e-9;
 constexpr double kSelectionDragThresholdPixels = 4.0;
+const QColor kSelectionHighlightColor(220, 38, 38);
 
 struct PointBounds {
     double minX{0.0};
@@ -586,6 +587,7 @@ void ScenarioCanvasWidget::focusLayoutElement(const QString& elementId) {
     if (elementId.startsWith("floor:")) {
         currentFloorId_ = elementId.mid(QString("floor:").size());
         focusedLayoutElementId_.clear();
+        focusedCrowdElementId_.clear();
         focusedPlacementId_.clear();
         selectedPlacementIds_.clear();
         camera_.reset();
@@ -595,6 +597,7 @@ void ScenarioCanvasWidget::focusLayoutElement(const QString& elementId) {
 
     selectFloorForElement(elementId);
     focusedLayoutElementId_ = elementId;
+    focusedCrowdElementId_.clear();
     focusedPlacementId_.clear();
     selectedPlacementIds_.clear();
     update();
@@ -619,6 +622,7 @@ void ScenarioCanvasWidget::activateLayoutElement(const QString& elementId) {
 }
 
 void ScenarioCanvasWidget::focusPlacement(const QString& placementId) {
+    focusedCrowdElementId_ = placementId;
     focusedPlacementId_ = placementId.section('/', 0, 0);
     selectedPlacementIds_ = focusedPlacementId_.isEmpty() ? QStringList{} : QStringList{focusedPlacementId_};
     focusedLayoutElementId_.clear();
@@ -876,8 +880,8 @@ void ScenarioCanvasWidget::paintEvent(QPaintEvent* event) {
     if (dragging_ || selectionDragging_) {
         const auto start = dragging_ ? dragStart_ : selectionDragStart_;
         const auto current = dragging_ ? dragCurrent_ : selectionDragCurrent_;
-        painter.setPen(QPen(QColor("#1f5fae"), 1.5, Qt::DashLine));
-        painter.setBrush(QColor(31, 95, 174, 36));
+        painter.setPen(QPen(kSelectionHighlightColor, 1.5, Qt::DashLine));
+        painter.setBrush(QColor(kSelectionHighlightColor.red(), kSelectionHighlightColor.green(), kSelectionHighlightColor.blue(), 36));
         painter.drawRect(QRectF(start, current).normalized());
     }
 }
@@ -907,8 +911,8 @@ void ScenarioCanvasWidget::drawFocusedLayoutElement(QPainter& painter, const Lay
         return;
     }
 
-    const QPen highlightPen(QColor("#f2a900"), 3.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
-    const QColor highlightFill(242, 169, 0, 42);
+    const QPen highlightPen(kSelectionHighlightColor, 3.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+    const QColor highlightFill(kSelectionHighlightColor.red(), kSelectionHighlightColor.green(), kSelectionHighlightColor.blue(), 42);
 
     for (const auto& zone : layout_.zones) {
         if (!matchesFloor(zone.floorId, currentFloorId_)) {
@@ -955,8 +959,8 @@ void ScenarioCanvasWidget::drawFocusedPlacement(QPainter& painter, const LayoutC
         return;
     }
 
-    painter.setPen(QPen(QColor("#f2a900"), 3.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    painter.setBrush(QColor(242, 169, 0, 42));
+    painter.setPen(QPen(kSelectionHighlightColor, 3.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(QColor(kSelectionHighlightColor.red(), kSelectionHighlightColor.green(), kSelectionHighlightColor.blue(), 42));
 
     for (const auto& placement : placements_) {
         const auto selected = selectedPlacementIds_.contains(placement.id) || placement.id == focusedPlacementId_;
@@ -968,14 +972,49 @@ void ScenarioCanvasWidget::drawFocusedPlacement(QPainter& painter, const LayoutC
         }
 
         if (placement.kind == ScenarioCrowdPlacementKind::Individual || placement.area.size() < 4) {
-            painter.drawEllipse(transform.map(placement.area.front()), kOccupantMarkerRadius + 7.0, kOccupantMarkerRadius + 7.0);
+            const auto center = transform.map(placement.area.front());
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(kSelectionHighlightColor);
+            painter.drawEllipse(center, kOccupantMarkerRadius, kOccupantMarkerRadius);
+            painter.setPen(QPen(kSelectionHighlightColor, 3.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            painter.setBrush(QColor(kSelectionHighlightColor.red(), kSelectionHighlightColor.green(), kSelectionHighlightColor.blue(), 42));
             continue;
         }
 
-        const auto markerBounds = groupMarkerBounds(placement, transform);
-        if (!markerBounds.isNull()) {
-            painter.drawRoundedRect(markerBounds, 8.0, 8.0);
+        QPainterPath areaPath;
+        if (placement.area.size() >= 3) {
+            areaPath.moveTo(transform.map(placement.area.front()));
+            for (std::size_t index = 1; index < placement.area.size(); ++index) {
+                areaPath.lineTo(transform.map(placement.area[index]));
+            }
+            areaPath.closeSubpath();
+            painter.drawPath(areaPath);
         }
+
+        const auto markerPositions = fallbackDisplayPositions(placement);
+        bool occupantIndexOk = false;
+        if (focusedCrowdElementId_.startsWith(placement.id + "/occupant-")) {
+            const auto suffix = focusedCrowdElementId_.mid(QString("%1/occupant-").arg(placement.id).size());
+            const auto parsedIndex = suffix.toInt(&occupantIndexOk);
+            for (int index = 0; index < static_cast<int>(markerPositions.size()); ++index) {
+                if (!occupantIndexOk || index + 1 != parsedIndex) {
+                    continue;
+                }
+                const auto center = transform.map(markerPositions[static_cast<std::size_t>(index)]);
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(kSelectionHighlightColor);
+                painter.drawEllipse(center, kOccupantMarkerRadius, kOccupantMarkerRadius);
+            }
+        } else {
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(kSelectionHighlightColor);
+            for (const auto& worldPoint : markerPositions) {
+                painter.drawEllipse(transform.map(worldPoint), kOccupantMarkerRadius, kOccupantMarkerRadius);
+            }
+        }
+
+        painter.setPen(QPen(kSelectionHighlightColor, 3.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.setBrush(QColor(kSelectionHighlightColor.red(), kSelectionHighlightColor.green(), kSelectionHighlightColor.blue(), 42));
     }
 }
 
@@ -1297,6 +1336,7 @@ void ScenarioCanvasWidget::addGroupPlacement(const QPointF& start, const QPointF
         .distribution = distribution,
         .generatedPositions = generatedPositions,
     });
+    focusedCrowdElementId_ = id;
     focusedPlacementId_ = id;
     selectedPlacementIds_ = QStringList{id};
     focusedLayoutElementId_.clear();
@@ -1325,6 +1365,7 @@ void ScenarioCanvasWidget::addIndividualPlacement(const QPointF& position) {
         .occupantCount = 1,
         .velocity = defaultVelocityFrom(point),
     });
+    focusedCrowdElementId_ = id;
     focusedPlacementId_ = id;
     selectedPlacementIds_ = QStringList{id};
     focusedLayoutElementId_.clear();
@@ -1396,6 +1437,7 @@ void ScenarioCanvasWidget::selectSingleAt(const QPointF& position, const LayoutC
     const auto crowdElementId = placementAt(position, transform);
     if (!crowdElementId.isEmpty()) {
         const auto placementId = crowdElementId.section('/', 0, 0);
+        focusedCrowdElementId_ = crowdElementId;
         focusedPlacementId_ = placementId;
         selectedPlacementIds_ = QStringList{placementId};
         focusedLayoutElementId_.clear();
@@ -1409,12 +1451,14 @@ void ScenarioCanvasWidget::selectSingleAt(const QPointF& position, const LayoutC
     }
 
     selectedPlacementIds_.clear();
+    focusedCrowdElementId_.clear();
     focusedPlacementId_.clear();
     selectLayoutElementAt(position);
 }
 
 void ScenarioCanvasWidget::selectPlacementsInRect(const QRectF& screenRect, const LayoutCanvasTransform& transform) {
     selectedPlacementIds_.clear();
+    focusedCrowdElementId_.clear();
     focusedPlacementId_.clear();
     focusedLayoutElementId_.clear();
 
@@ -1443,6 +1487,7 @@ void ScenarioCanvasWidget::selectPlacementsInRect(const QRectF& screenRect, cons
 
     if (!selectedPlacementIds_.empty()) {
         focusedPlacementId_ = selectedPlacementIds_.front();
+        focusedCrowdElementId_ = focusedPlacementId_;
     }
     if (layoutElementActivatedHandler_) {
         layoutElementActivatedHandler_({});
@@ -1470,6 +1515,7 @@ void ScenarioCanvasWidget::selectLayoutElementAt(const QPointF& position) {
     }
 
     focusedLayoutElementId_ = selectedId;
+    focusedCrowdElementId_.clear();
     focusedPlacementId_.clear();
     selectedPlacementIds_.clear();
     if (layoutElementActivatedHandler_) {

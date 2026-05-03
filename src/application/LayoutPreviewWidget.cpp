@@ -47,6 +47,7 @@ constexpr int kTopToolbarHeight = 44;
 constexpr int kPropertyPanelHeight = 42;
 constexpr int kSideToolbarWidth = 44;
 constexpr int kToolbarButtonSize = 44;
+const QColor kSelectionHighlightColor(220, 38, 38);
 
 QRectF previewViewport(const QRect& widgetRect) {
     return layoutCanvasViewport(widgetRect, kSideToolbarWidth + 16, kTopToolbarHeight + kPropertyPanelHeight + 16, 16, 16);
@@ -2511,8 +2512,8 @@ void LayoutPreviewWidget::paintEvent(QPaintEvent* event) {
 
     const bool hasExplicitSelection = hasSelection();
     if (hasExplicitSelection || !focusedTargetId_.isEmpty()) {
-        painter.setBrush(QColor(31, 95, 174, 44));
-        painter.setPen(QPen(QColor(31, 95, 174), 2.25, Qt::DashLine));
+        painter.setBrush(QColor(kSelectionHighlightColor.red(), kSelectionHighlightColor.green(), kSelectionHighlightColor.blue(), 44));
+        painter.setPen(QPen(kSelectionHighlightColor, 2.25, Qt::DashLine));
 
         if (importResult_.layout.has_value()) {
             for (const auto& zone : importResult_.layout->zones) {
@@ -2585,14 +2586,14 @@ void LayoutPreviewWidget::paintEvent(QPaintEvent* event) {
     }
 
     if (selectionDragging_) {
-        painter.setBrush(QColor(31, 95, 174, 28));
-        painter.setPen(QPen(QColor(31, 95, 174), 1.6, Qt::DashLine));
+        painter.setBrush(QColor(kSelectionHighlightColor.red(), kSelectionHighlightColor.green(), kSelectionHighlightColor.blue(), 28));
+        painter.setPen(QPen(kSelectionHighlightColor, 1.6, Qt::DashLine));
         painter.drawRect(QRectF(selectionDragStart_, selectionDragCurrent_).normalized());
     }
 
     if (drafting_) {
-        painter.setBrush(QColor(31, 95, 174, 60));
-        painter.setPen(QPen(QColor(31, 95, 174), 2.0, Qt::DashLine));
+        painter.setBrush(QColor(kSelectionHighlightColor.red(), kSelectionHighlightColor.green(), kSelectionHighlightColor.blue(), 60));
+        painter.setPen(QPen(kSelectionHighlightColor, 2.0, Qt::DashLine));
 
         if ((toolMode_ == ToolMode::DrawRoom || toolMode_ == ToolMode::DrawObstruction)
             && shapeDrawMode_ == ShapeDrawMode::Polygon) {
@@ -2604,19 +2605,21 @@ void LayoutPreviewWidget::paintEvent(QPaintEvent* event) {
                 draftPolygon.append(transform.map({.x = draftCurrentWorld_.x(), .y = draftCurrentWorld_.y()}));
             }
 
-            painter.setBrush(polygonDraftPoints_.size() >= 3 ? QColor(31, 95, 174, 42) : Qt::NoBrush);
+            painter.setBrush(polygonDraftPoints_.size() >= 3
+                    ? QColor(kSelectionHighlightColor.red(), kSelectionHighlightColor.green(), kSelectionHighlightColor.blue(), 42)
+                    : Qt::NoBrush);
             if (draftPolygon.size() >= 2) {
                 painter.drawPolyline(draftPolygon);
             }
             if (polygonDraftPoints_.size() >= 3) {
                 painter.drawLine(draftPolygon.last(), draftPolygon.first());
             }
-            painter.setBrush(QColor(31, 95, 174));
+            painter.setBrush(kSelectionHighlightColor);
             painter.setPen(Qt::NoPen);
             for (const auto& point : polygonDraftPoints_) {
                 painter.drawEllipse(transform.map({.x = point.x(), .y = point.y()}), 3.5, 3.5);
             }
-            painter.setPen(QPen(QColor(31, 95, 174), 2.0, Qt::DashLine));
+            painter.setPen(QPen(kSelectionHighlightColor, 2.0, Qt::DashLine));
         } else {
             const safecrowd::domain::Point2D start{draftStartWorld_.x(), draftStartWorld_.y()};
             const safecrowd::domain::Point2D current{draftCurrentWorld_.x(), draftCurrentWorld_.y()};
