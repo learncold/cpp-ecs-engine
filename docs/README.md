@@ -8,6 +8,7 @@
 - `process/`: GitHub Project, 이슈/PR 규칙 같은 협업 절차
 - `product/`: 개요, 사용자 시나리오, 위험 정의, 백로그 같은 제품 요구와 범위
 - `references/`: 외부 조사 자료와 튜토리얼. 기준 문서의 보조 근거로만 사용
+- `demo/`: 시연 시 사용하는 평면 자산과 시연 흐름 가이드
 - `제출용/`: 학교 제출 산출물. 저장소 운영 기준 문서와 분리해 보관
 - `UI.md`: 앱 화면 흐름, 기능 기준, Sprint별 UI 개선 체크리스트
 
@@ -22,6 +23,7 @@
 - [product/고급 위험 모델.md](product/고급 위험 모델.md)
 - [product/Product Backlog.md](product/Product Backlog.md)
 - [product/Sprint 시연 계획.md](<product/Sprint 시연 계획.md>)
+- [demo/시연 평면 가이드.md](<demo/시연 평면 가이드.md>)
 
 ## 유지 규칙
 

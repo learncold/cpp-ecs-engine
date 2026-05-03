@@ -707,6 +707,54 @@ SC_TEST(DxfImportServiceDoesNotInferConnectionsAcrossWallSeam) {
     std::filesystem::remove(sourcePath);
 }
 
+namespace {
+
+void expectDemoLayoutImports(const char* fileName, std::size_t minWalkableZones, std::size_t minExitConnections) {
+    const auto sourcePath = std::filesystem::path(__FILE__).parent_path().parent_path()
+        / "assets" / "demo-layouts" / fileName;
+
+    safecrowd::domain::DxfImportService importer;
+    safecrowd::domain::ImportRequest request;
+    request.sourcePath = sourcePath;
+    request.requestedFormat = safecrowd::domain::ImportedFileFormat::Dxf;
+
+    const auto result = importer.importFile(request);
+
+    SC_EXPECT_TRUE(result.layout.has_value());
+    SC_EXPECT_TRUE(!safecrowd::domain::hasBlockingImportIssue(result.issues));
+
+    if (result.layout.has_value()) {
+        std::size_t walkableCount = 0;
+        std::size_t exitConnectionCount = 0;
+        for (const auto& zone : result.layout->zones) {
+            if (zone.kind == safecrowd::domain::ZoneKind::Room) {
+                ++walkableCount;
+            }
+        }
+        for (const auto& connection : result.layout->connections) {
+            if (connection.kind == safecrowd::domain::ConnectionKind::Exit) {
+                ++exitConnectionCount;
+            }
+        }
+        SC_EXPECT_TRUE(walkableCount >= minWalkableZones);
+        SC_EXPECT_TRUE(exitConnectionCount >= minExitConnections);
+    }
+}
+
+}  // namespace
+
+SC_TEST(DxfImportServiceImportsBottleneckHallDemoLayout) {
+    expectDemoLayoutImports("bottleneck_hall.dxf", /*minWalkableZones=*/1, /*minExitConnections=*/1);
+}
+
+SC_TEST(DxfImportServiceImportsMultiExitConcourseDemoLayout) {
+    expectDemoLayoutImports("multi_exit_concourse.dxf", /*minWalkableZones=*/1, /*minExitConnections=*/3);
+}
+
+SC_TEST(DxfImportServiceImportsBranchedCorridorOfficeDemoLayout) {
+    expectDemoLayoutImports("branched_corridor_office.dxf", /*minWalkableZones=*/7, /*minExitConnections=*/2);
+}
+
 SC_TEST(DxfImportServiceReportsBlockingIssuesForReviewDemoFixture) {
     const auto sourcePath = std::filesystem::path(__FILE__).parent_path() / "dxf" / "blocking_review_demo.dxf";
 
