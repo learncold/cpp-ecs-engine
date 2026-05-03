@@ -325,18 +325,26 @@ void SimulationCanvasWidget::refreshLayoutCache(const LayoutCanvasBounds& bounds
     if (currentSize.isEmpty()) {
         layoutCache_ = QPixmap();
         layoutCacheSize_ = currentSize;
+        layoutCacheDevicePixelRatio_ = 0.0;
         layoutCacheValid_ = false;
         return;
     }
 
+    const auto devicePixelRatio = devicePixelRatioF();
     if (layoutCacheValid_
         && layoutCacheSize_ == currentSize
+        && layoutCacheDevicePixelRatio_ == devicePixelRatio
         && layoutCacheZoom_ == camera_.zoom()
         && layoutCachePan_ == camera_.panOffset()) {
         return;
     }
 
-    layoutCache_ = QPixmap(currentSize);
+    const QSize physicalSize{
+        std::max(1, static_cast<int>(std::ceil(currentSize.width() * devicePixelRatio))),
+        std::max(1, static_cast<int>(std::ceil(currentSize.height() * devicePixelRatio))),
+    };
+    layoutCache_ = QPixmap(physicalSize);
+    layoutCache_.setDevicePixelRatio(devicePixelRatio);
     layoutCache_.fill(QColor("#f4f7fb"));
     QPainter painter(&layoutCache_);
     painter.setRenderHint(QPainter::Antialiasing, true);
@@ -348,6 +356,7 @@ void SimulationCanvasWidget::refreshLayoutCache(const LayoutCanvasBounds& bounds
     layoutCacheSize_ = currentSize;
     layoutCacheZoom_ = camera_.zoom();
     layoutCachePan_ = camera_.panOffset();
+    layoutCacheDevicePixelRatio_ = devicePixelRatio;
     layoutCacheValid_ = true;
 }
 

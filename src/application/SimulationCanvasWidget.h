@@ -93,6 +93,7 @@ private:
     QSize layoutCacheSize_{};
     QPointF layoutCachePan_{};
     double layoutCacheZoom_{0.0};
+    double layoutCacheDevicePixelRatio_{0.0};
     bool layoutCacheValid_{false};
 };
 
