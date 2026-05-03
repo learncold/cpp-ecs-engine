@@ -6,6 +6,10 @@
 #include "engine/EngineRuntime.h"
 
 int main(int argc, char* argv[]) {
+    QApplication::setOrganizationName("SafeCrowd");
+    QApplication::setOrganizationDomain("safecrowd.local");
+    QApplication::setApplicationName("SafeCrowd");
+
     QApplication app(argc, argv);
     app.setStyleSheet(safecrowd::application::ui::appStyleSheet());
 
