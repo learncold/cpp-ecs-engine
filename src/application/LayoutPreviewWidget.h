@@ -74,6 +74,7 @@ private:
         Select,
         DrawRoom,
         DrawExit,
+        DrawWall,
         DrawObstruction,
         DrawDoor,
         DrawStair,
@@ -92,6 +93,7 @@ private:
     void createObstructionRectangle(const QPointF& startWorld, const QPointF& endWorld);
     void createRoomPolygon(const std::vector<QPointF>& points);
     void createVerticalLink(const QPointF& startWorld, const QPointF& endWorld);
+    void createWallSegment(const QPointF& startWorld, const QPointF& endWorld);
     void createZone(const QPointF& startWorld, const QPointF& endWorld, safecrowd::domain::ZoneKind kind);
     void deleteConnection(const QString& connectionId);
     void deleteBarrier(const QString& barrierId);
@@ -166,6 +168,7 @@ private:
     QToolButton* selectToolButton_{nullptr};
     QToolButton* roomToolButton_{nullptr};
     QToolButton* exitToolButton_{nullptr};
+    QToolButton* wallToolButton_{nullptr};
     QToolButton* obstructionToolButton_{nullptr};
     QToolButton* doorToolButton_{nullptr};
     QToolButton* stairToolButton_{nullptr};

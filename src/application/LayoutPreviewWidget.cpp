@@ -597,16 +597,11 @@ QString nextZoneId(const safecrowd::domain::FacilityLayout2D& layout) {
     return QString("zone-user-%1").arg(suffix);
 }
 
-QString nextBarrierId(const safecrowd::domain::FacilityLayout2D& layout) {
+QString nextBarrierId(const safecrowd::domain::FacilityLayout2D& layout, const QString& prefix) {
     int suffix = 1;
     for (const auto& barrier : layout.barriers) {
         const auto id = QString::fromStdString(barrier.id);
-        QString prefix;
-        if (id.startsWith("obstruction-user-")) {
-            prefix = "obstruction-user-";
-        } else if (id.startsWith("barrier-user-")) {
-            prefix = "barrier-user-";
-        } else {
+        if (!id.startsWith(prefix)) {
             continue;
         }
 
@@ -617,7 +612,15 @@ QString nextBarrierId(const safecrowd::domain::FacilityLayout2D& layout) {
         }
     }
 
-    return QString("obstruction-user-%1").arg(suffix);
+    return QString("%1%2").arg(prefix).arg(suffix);
+}
+
+QString nextWallId(const safecrowd::domain::FacilityLayout2D& layout) {
+    return nextBarrierId(layout, "wall-user-");
+}
+
+QString nextObstructionId(const safecrowd::domain::FacilityLayout2D& layout) {
+    return nextBarrierId(layout, "obstruction-user-");
 }
 
 QString nextVerticalConnectionId(const safecrowd::domain::FacilityLayout2D& layout) {
@@ -773,11 +776,14 @@ std::vector<std::size_t> zonesContainingPoint(
 }
 
 QString barrierTitle(const safecrowd::domain::Barrier2D& barrier) {
-    return QString("Obstruction %1").arg(QString::fromStdString(barrier.id));
+    return QString("%1 %2")
+        .arg(barrier.geometry.closed ? QString("Obstruction") : QString("Wall"))
+        .arg(QString::fromStdString(barrier.id));
 }
 
 QString barrierDetail(const safecrowd::domain::Barrier2D& barrier) {
-    return QString("Id: %1\nVertices: %2\nShape: %3")
+    return QString("Kind: %1\nId: %2\nVertices: %3\nShape: %4")
+        .arg(barrier.geometry.closed ? QString("Obstruction") : QString("Wall"))
         .arg(QString::fromStdString(barrier.id))
         .arg(static_cast<int>(barrier.geometry.vertices.size()))
         .arg(barrier.geometry.closed ? QString("Closed") : QString("Line"));
@@ -797,7 +803,7 @@ void appendBarrierSegment(
     const safecrowd::domain::Point2D& end,
     const std::string& floorId) {
     layout.barriers.push_back({
-        .id = nextBarrierId(layout).toStdString(),
+        .id = nextWallId(layout).toStdString(),
         .floorId = floorId,
         .geometry = safecrowd::domain::Polyline2D{
             .vertices = {start, end},
@@ -2143,6 +2149,9 @@ void LayoutPreviewWidget::mouseReleaseEvent(QMouseEvent* event) {
         case ToolMode::DrawExit:
             createZone(draftStartWorld_, draftCurrentWorld_, safecrowd::domain::ZoneKind::Exit);
             break;
+        case ToolMode::DrawWall:
+            createWallSegment(draftStartWorld_, draftCurrentWorld_);
+            break;
         case ToolMode::DrawObstruction:
             createObstructionRectangle(draftStartWorld_, draftCurrentWorld_);
             break;
@@ -2322,7 +2331,7 @@ void LayoutPreviewWidget::paintEvent(QPaintEvent* event) {
         } else {
             const safecrowd::domain::Point2D start{draftStartWorld_.x(), draftStartWorld_.y()};
             const safecrowd::domain::Point2D current{draftCurrentWorld_.x(), draftCurrentWorld_.y()};
-            if (toolMode_ == ToolMode::DrawDoor) {
+            if (toolMode_ == ToolMode::DrawDoor || toolMode_ == ToolMode::DrawWall) {
                 painter.setBrush(Qt::NoBrush);
                 painter.drawLine(transform.map(start), transform.map(current));
             } else {
@@ -2398,6 +2407,7 @@ void LayoutPreviewWidget::applyToolAt(const QPointF& position) {
         return;
     case ToolMode::DrawRoom:
     case ToolMode::DrawExit:
+    case ToolMode::DrawWall:
     case ToolMode::DrawObstruction:
     case ToolMode::DrawStair:
         return;
@@ -2581,6 +2591,42 @@ void LayoutPreviewWidget::createZone(const QPointF& startWorld, const QPointF& e
     update();
 }
 
+void LayoutPreviewWidget::createWallSegment(const QPointF& startWorld, const QPointF& endWorld) {
+    if (!importResult_.layout.has_value()) {
+        return;
+    }
+
+    if (std::hypot(endWorld.x() - startWorld.x(), endWorld.y() - startWorld.y()) < kDraftMinimumSize) {
+        return;
+    }
+
+    auto& layout = *importResult_.layout;
+    const auto barrierId = nextWallId(layout);
+    layout.barriers.push_back({
+        .id = barrierId.toStdString(),
+        .floorId = currentFloorId().toStdString(),
+        .geometry = safecrowd::domain::Polyline2D{
+            .vertices = {
+                {.x = startWorld.x(), .y = startWorld.y()},
+                {.x = endWorld.x(), .y = endWorld.y()},
+            },
+            .closed = false,
+        },
+        .blocksMovement = true,
+    });
+
+    selectedBarrierId_ = barrierId;
+    selectedBarrierIds_ = QStringList{barrierId};
+    selectedZoneId_.clear();
+    selectedZoneIds_.clear();
+    selectedConnectionId_.clear();
+    selectedConnectionIds_.clear();
+    focusedTargetId_ = barrierId;
+    notifyLayoutEdited();
+    emitCurrentSelection();
+    update();
+}
+
 void LayoutPreviewWidget::createObstructionPolygon(const std::vector<QPointF>& points) {
     if (!importResult_.layout.has_value() || points.size() < 3) {
         return;
@@ -2595,7 +2641,7 @@ void LayoutPreviewWidget::createObstructionPolygon(const std::vector<QPointF>& p
     }
 
     auto& layout = *importResult_.layout;
-    const auto barrierId = nextBarrierId(layout);
+    const auto barrierId = nextObstructionId(layout);
     std::vector<safecrowd::domain::Point2D> vertices;
     vertices.reserve(points.size());
     for (const auto& point : points) {
@@ -2635,7 +2681,7 @@ void LayoutPreviewWidget::createObstructionRectangle(const QPointF& startWorld, 
     }
 
     auto& layout = *importResult_.layout;
-    const auto barrierId = nextBarrierId(layout);
+    const auto barrierId = nextObstructionId(layout);
     layout.barriers.push_back({
         .id = barrierId.toStdString(),
         .floorId = currentFloorId().toStdString(),
@@ -3534,6 +3580,9 @@ void LayoutPreviewWidget::setToolMode(ToolMode mode) {
     if (exitToolButton_ != nullptr) {
         exitToolButton_->setChecked(toolMode_ == ToolMode::DrawExit);
     }
+    if (wallToolButton_ != nullptr) {
+        wallToolButton_->setChecked(toolMode_ == ToolMode::DrawWall);
+    }
     if (obstructionToolButton_ != nullptr) {
         obstructionToolButton_->setChecked(toolMode_ == ToolMode::DrawObstruction);
     }
@@ -3593,7 +3642,7 @@ void LayoutPreviewWidget::setupToolbars() {
     propertyLayout->setContentsMargins(12, 0, 16, 0);
     propertyLayout->setSpacing(14);
 
-    roomAutoWallsCheckBox_ = new QCheckBox("Auto-create boundary obstructions", propertyPanel_);
+    roomAutoWallsCheckBox_ = new QCheckBox("Auto-create boundary walls", propertyPanel_);
     roomAutoWallsCheckBox_->setChecked(roomAutoWallsEnabled_);
     propertyLayout->addWidget(roomAutoWallsCheckBox_);
 
@@ -3664,6 +3713,7 @@ void LayoutPreviewWidget::setupToolbars() {
 
     roomToolButton_ = makeButton(sideToolbar_, sideLayout, makeToolIcon("room", QColor("#2f5d8a")), "Draw Room");
     exitToolButton_ = makeButton(sideToolbar_, sideLayout, makeToolIcon("exit", QColor("#2d8f5b")), "Draw Exit");
+    wallToolButton_ = makeButton(sideToolbar_, sideLayout, makeToolIcon("wall", QColor("#4f5d6b")), "Draw Wall");
     obstructionToolButton_ = makeButton(sideToolbar_, sideLayout, makeToolIcon("obstruction", QColor("#6c4f38")), "Draw Obstruction");
     doorToolButton_ = makeButton(sideToolbar_, sideLayout, makeToolIcon("door", QColor("#8e6b23")), "Draw Door");
     stairToolButton_ = makeButton(sideToolbar_, sideLayout, makeToolIcon("stair", QColor("#6a5d9f")), "Draw Stair/Ramp");
@@ -3688,6 +3738,7 @@ void LayoutPreviewWidget::setupToolbars() {
     connect(addFloorButton_, &QToolButton::clicked, this, [this]() { addFloor(); });
     connect(roomToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::DrawRoom); });
     connect(exitToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::DrawExit); });
+    connect(wallToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::DrawWall); });
     connect(obstructionToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::DrawObstruction); });
     connect(doorToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::DrawDoor); });
     connect(stairToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::DrawStair); });
@@ -3763,7 +3814,7 @@ PreviewSelection LayoutPreviewWidget::currentSelection() const {
         selection.kind = PreviewSelectionKind::Multiple;
         selection.id = "multiple";
         selection.title = QString("%1 elements selected").arg(selectedCount);
-        selection.detail = QString("%1 rooms/exits/stairs, %2 openings/doors, %3 obstructions selected. Right-click the selection to delete.")
+        selection.detail = QString("%1 rooms/exits/stairs, %2 openings/doors, %3 walls/obstructions selected. Right-click the selection to delete.")
             .arg(selectedZoneIds_.size())
             .arg(selectedConnectionIds_.size())
             .arg(selectedBarrierIds_.size());
@@ -3813,7 +3864,7 @@ PreviewSelection LayoutPreviewWidget::currentSelection() const {
     }
 
     selection.title = "No selection";
-    selection.detail = "Use the top and left toolbars to select, draw rooms, exits, obstructions, and doors.";
+    selection.detail = "Use the top and left toolbars to select, draw rooms, exits, walls, obstructions, and doors.";
     return selection;
 }
 

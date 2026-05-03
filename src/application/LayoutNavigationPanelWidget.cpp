@@ -55,6 +55,10 @@ QString barrierLabel(const safecrowd::domain::Barrier2D& barrier) {
     return QString::fromStdString(barrier.id);
 }
 
+QString barrierKindLabel(const safecrowd::domain::Barrier2D& barrier) {
+    return barrier.geometry.closed ? QString("Obstruction") : QString("Wall");
+}
+
 NavigationTreeNode makeSection(const QString& label, std::vector<NavigationTreeNode> children, const QString& id = {}) {
     return {
         .label = label,
@@ -164,10 +168,11 @@ std::vector<NavigationTreeNode> roomChildren(
         if (!matchesFloor(barrier.floorId, room.floorId) || !barrierBelongsToZone(barrier, room)) {
             continue;
         }
+        const auto kind = barrierKindLabel(barrier);
         children.push_back({
-            .label = QString("Obstruction  -  %1").arg(barrierLabel(barrier)),
+            .label = QString("%1  -  %2").arg(kind, barrierLabel(barrier)),
             .id = QString::fromStdString(barrier.id),
-            .detail = QString("Obstruction: %1").arg(QString::fromStdString(barrier.id)),
+            .detail = QString("%1: %2").arg(kind, QString::fromStdString(barrier.id)),
         });
     }
 

@@ -285,7 +285,7 @@ QWidget* createReviewPanel(
     (*inspectorTitle)->setWordWrap(true);
     layout->addWidget(*inspectorTitle);
 
-    *inspectorDetail = new QLabel("Use the top and left toolbars to draw rooms, exits, obstructions, and doors.", panel);
+    *inspectorDetail = new QLabel("Use the top and left toolbars to draw rooms, exits, walls, obstructions, and doors.", panel);
     (*inspectorDetail)->setFont(ui::font(ui::FontRole::Body));
     (*inspectorDetail)->setWordWrap(true);
     (*inspectorDetail)->setStyleSheet(ui::mutedTextStyleSheet());
@@ -521,7 +521,7 @@ void LayoutReviewWidget::showDefaultInspector() {
         inspectorTitleLabel_->setText("No selection");
     }
     if (inspectorDetailLabel_ != nullptr) {
-        inspectorDetailLabel_->setText("Use the top and left toolbars to draw rooms, exits, obstructions, and doors.");
+        inspectorDetailLabel_->setText("Use the top and left toolbars to draw rooms, exits, walls, obstructions, and doors.");
     }
 }
 
