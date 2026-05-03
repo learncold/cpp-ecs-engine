@@ -299,7 +299,7 @@ NavigationTreeWidget::NavigationTreeWidget(
     tree->setSelectionMode(interactive ? QAbstractItemView::SingleSelection : QAbstractItemView::NoSelection);
     tree->setFocusPolicy(interactive ? Qt::StrongFocus : Qt::NoFocus);
     tree->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    tree->setUniformRowHeights(true);
+    tree->setUniformRowHeights(false);
     tree->setFont(ui::font(ui::FontRole::Body));
     tree->setItemDelegate(new NavigationTreeDelegate(tree));
     tree->setStyleSheet(navigationTreeStyleSheet(interactive));

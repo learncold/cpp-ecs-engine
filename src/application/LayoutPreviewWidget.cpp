@@ -40,6 +40,7 @@ constexpr double kGeometryEpsilon = 1e-4;
 constexpr double kPolygonCloseTolerancePixels = 12.0;
 constexpr double kSelectionDragThresholdPixels = 4.0;
 constexpr double kSelectionStrokeWidthPixels = 8.0;
+constexpr double kSelectedContextHitTolerancePixels = 24.0;
 constexpr double kMinimumDoorWidth = 0.9;
 constexpr int kTopToolbarHeight = 44;
 constexpr int kPropertyPanelHeight = 42;
@@ -203,6 +204,19 @@ bool strokedPathIntersectsRect(const QPainterPath& path, const QRectF& rect, dou
     QPainterPathStroker stroker;
     stroker.setWidth(strokeWidth);
     return stroker.createStroke(path).intersects(rect) || rect.contains(path.boundingRect());
+}
+
+bool strokedPathContainsPoint(const QPainterPath& path, const QPointF& point, double radius) {
+    if (path.isEmpty()) {
+        return false;
+    }
+    if (path.contains(point)) {
+        return true;
+    }
+
+    QPainterPathStroker stroker;
+    stroker.setWidth(radius * 2.0);
+    return stroker.createStroke(path).contains(point);
 }
 
 bool stringListContains(const std::vector<std::string>& values, const QString& target) {
@@ -1601,6 +1615,138 @@ std::optional<QString> hitTestBarrier(
     return bestId;
 }
 
+bool selectedZoneContainsContextPoint(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const QStringList& selectedZoneIds,
+    const QPointF& position,
+    const LayoutTransform& transform,
+    const QString& floorId) {
+    if (selectedZoneIds.isEmpty()) {
+        return false;
+    }
+
+    for (const auto& zone : layout.zones) {
+        const auto zoneId = QString::fromStdString(zone.id);
+        if (selectedZoneIds.contains(zoneId)
+            && matchesFloor(zone.floorId, floorId)
+            && strokedPathContainsPoint(polygonPath(zone.area, transform), position, kSelectedContextHitTolerancePixels)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool selectedConnectionContainsContextPoint(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const QStringList& selectedConnectionIds,
+    const QPointF& position,
+    const LayoutTransform& transform,
+    const QString& floorId) {
+    if (selectedConnectionIds.isEmpty()) {
+        return false;
+    }
+
+    for (const auto& connection : layout.connections) {
+        const auto connectionId = QString::fromStdString(connection.id);
+        if (!selectedConnectionIds.contains(connectionId) || !matchesFloor(connection.floorId, floorId)) {
+            continue;
+        }
+
+        const auto start = transform.map(connection.centerSpan.start);
+        const auto end = transform.map(connection.centerSpan.end);
+        if (distanceToSegment(position, start, end) <= kSelectedContextHitTolerancePixels) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool selectedBarrierContainsContextPoint(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const QStringList& selectedBarrierIds,
+    const QPointF& position,
+    const LayoutTransform& transform,
+    const QString& floorId) {
+    if (selectedBarrierIds.isEmpty()) {
+        return false;
+    }
+
+    for (const auto& barrier : layout.barriers) {
+        const auto barrierId = QString::fromStdString(barrier.id);
+        if (!selectedBarrierIds.contains(barrierId) || !matchesFloor(barrier.floorId, floorId)) {
+            continue;
+        }
+
+        if (strokedPathContainsPoint(polylinePainterPath(barrier.geometry, transform), position, kSelectedContextHitTolerancePixels)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool selectedElementContainsContextPoint(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const QPointF& position,
+    const LayoutTransform& transform,
+    const QString& floorId,
+    const QStringList& selectedZoneIds,
+    const QStringList& selectedConnectionIds,
+    const QStringList& selectedBarrierIds) {
+    return selectedBarrierContainsContextPoint(layout, selectedBarrierIds, position, transform, floorId)
+        || selectedConnectionContainsContextPoint(layout, selectedConnectionIds, position, transform, floorId)
+        || selectedZoneContainsContextPoint(layout, selectedZoneIds, position, transform, floorId);
+}
+
+std::optional<QString> barrierIdForTraceTarget(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const QString& targetId,
+    const QString& floorId) {
+    for (const auto& barrier : layout.barriers) {
+        if (!matchesFloor(barrier.floorId, floorId)) {
+            continue;
+        }
+        const auto barrierId = QString::fromStdString(barrier.id);
+        if (barrierId == targetId || traceMatches(barrier.provenance, targetId)) {
+            return barrierId;
+        }
+    }
+
+    return std::nullopt;
+}
+
+std::optional<QString> hitTestCanonicalWallBarrier(
+    const safecrowd::domain::ImportResult& importResult,
+    const QPointF& position,
+    const LayoutTransform& transform,
+    const QString& floorId) {
+    if (!importResult.layout.has_value() || !importResult.canonicalGeometry.has_value()) {
+        return std::nullopt;
+    }
+
+    double bestDistance = std::numeric_limits<double>::max();
+    std::optional<QString> bestBarrierId;
+    for (const auto& wall : importResult.canonicalGeometry->walls) {
+        const auto wallId = QString::fromStdString(wall.id);
+        const auto barrierId = barrierIdForTraceTarget(*importResult.layout, wallId, floorId);
+        if (!barrierId.has_value()) {
+            continue;
+        }
+
+        const auto start = transform.map(wall.segment.start);
+        const auto end = transform.map(wall.segment.end);
+        const auto distance = distanceToSegment(position, start, end);
+        if (distance <= kConnectionHitTolerance && distance < bestDistance) {
+            bestDistance = distance;
+            bestBarrierId = *barrierId;
+        }
+    }
+
+    return bestBarrierId;
+}
+
 }  // namespace
 
 LayoutPreviewWidget::LayoutPreviewWidget(safecrowd::domain::ImportResult importResult, QWidget* parent)
@@ -1858,15 +2004,28 @@ void LayoutPreviewWidget::mousePressEvent(QMouseEvent* event) {
         if (bounds.has_value() && importResult_.layout.has_value()) {
             const LayoutTransform transform(*bounds, previewViewport(rect()), camera_.zoom(), camera_.panOffset());
             const auto floorId = currentFloorId();
-            const auto zoneId = hitTestZone(*importResult_.layout, event->position(), transform, floorId);
-            const auto connectionId = hitTestConnection(*importResult_.layout, event->position(), transform, floorId);
-            const auto barrierId = hitTestBarrier(*importResult_.layout, event->position(), transform, floorId);
-            if (connectionId.has_value() && !isSelected(PreviewSelectionKind::Connection, *connectionId)) {
-                selectConnection(*connectionId);
-            } else if (barrierId.has_value() && !isSelected(PreviewSelectionKind::Barrier, *barrierId)) {
-                selectBarrier(*barrierId);
-            } else if (zoneId.has_value() && !isSelected(PreviewSelectionKind::Zone, *zoneId)) {
-                selectZone(*zoneId);
+            const bool clickedCurrentSelection = selectedElementContainsContextPoint(
+                *importResult_.layout,
+                event->position(),
+                transform,
+                floorId,
+                selectedZoneIds_,
+                selectedConnectionIds_,
+                selectedBarrierIds_);
+            if (!clickedCurrentSelection) {
+                const auto zoneId = hitTestZone(*importResult_.layout, event->position(), transform, floorId);
+                const auto connectionId = hitTestConnection(*importResult_.layout, event->position(), transform, floorId);
+                auto barrierId = hitTestBarrier(*importResult_.layout, event->position(), transform, floorId);
+                if (!barrierId.has_value()) {
+                    barrierId = hitTestCanonicalWallBarrier(importResult_, event->position(), transform, floorId);
+                }
+                if (connectionId.has_value() && !isSelected(PreviewSelectionKind::Connection, *connectionId)) {
+                    selectConnection(*connectionId);
+                } else if (barrierId.has_value() && !isSelected(PreviewSelectionKind::Barrier, *barrierId)) {
+                    selectBarrier(*barrierId);
+                } else if (zoneId.has_value() && !isSelected(PreviewSelectionKind::Zone, *zoneId)) {
+                    selectZone(*zoneId);
+                }
             }
         }
         showSelectionContextMenu(event->globalPosition().toPoint());
@@ -2034,7 +2193,7 @@ void LayoutPreviewWidget::paintEvent(QPaintEvent* event) {
         }
     }
 
-    if (importResult_.canonicalGeometry.has_value()) {
+    if (!importResult_.layout.has_value() && importResult_.canonicalGeometry.has_value()) {
         painter.setBrush(QColor(222, 145, 70, 120));
         painter.setPen(QPen(QColor(177, 110, 39), 1.5));
         for (const auto& obstacle : importResult_.canonicalGeometry->obstacles) {
@@ -3203,7 +3362,10 @@ void LayoutPreviewWidget::selectSingleAt(const QPointF& position, const LayoutCa
     const auto floorId = currentFloorId();
     const auto zoneId = hitTestZone(*importResult_.layout, position, transform, floorId);
     const auto connectionId = hitTestConnection(*importResult_.layout, position, transform, floorId);
-    const auto barrierId = hitTestBarrier(*importResult_.layout, position, transform, floorId);
+    auto barrierId = hitTestBarrier(*importResult_.layout, position, transform, floorId);
+    if (!barrierId.has_value()) {
+        barrierId = hitTestCanonicalWallBarrier(importResult_, position, transform, floorId);
+    }
     if (connectionId.has_value()) {
         selectConnection(*connectionId);
     } else if (barrierId.has_value()) {

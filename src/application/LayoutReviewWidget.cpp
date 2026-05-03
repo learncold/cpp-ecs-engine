@@ -417,11 +417,13 @@ void LayoutReviewWidget::handleLayoutEdited(const safecrowd::domain::FacilityLay
 
 void LayoutReviewWidget::handlePreviewSelectionChanged(const PreviewSelection& selection) {
     lastSelection_ = selection;
-    selectedLayoutElementId_ = selection.empty() || selection.kind == PreviewSelectionKind::Multiple ? QString{} : selection.id;
+    const auto previousLayoutElementId = selectedLayoutElementId_;
+    const auto nextLayoutElementId = selection.empty() || selection.kind == PreviewSelectionKind::Multiple ? QString{} : selection.id;
+    selectedLayoutElementId_ = nextLayoutElementId;
     selectedIssueTargetId_.clear();
     selectedIssueCode_.clear();
     showSelectionInspector(selection);
-    if (navigationView_ == NavigationView::Layout) {
+    if (navigationView_ == NavigationView::Layout && previousLayoutElementId != nextLayoutElementId) {
         refreshNavigationPanel();
     }
 }
