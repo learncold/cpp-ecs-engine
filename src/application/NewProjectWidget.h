@@ -23,6 +23,7 @@ private:
     QLineEdit* projectNameEdit_{nullptr};
     QLineEdit* layoutPathEdit_{nullptr};
     QLineEdit* folderPathEdit_{nullptr};
+    bool folderEditedByUser_{false};
     std::function<void(const NewProjectRequest&)> doneHandler_{};
     std::function<void()> cancelHandler_{};
 };

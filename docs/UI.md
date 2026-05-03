@@ -59,6 +59,18 @@ Sprint 1 시연에서 가장 중요한 기준은 `도면 불러오기 -> 검토/
 - 앱 데이터 경로에 최근 프로젝트 인덱스 저장
 - 다음 앱 실행 시 Project Navigator 목록에 표시
 
+저장 위치 정책:
+
+- 기본 위치는 `<사용자 Documents>/SafeCrowd Projects/<프로젝트 이름>`이며, 새 프로젝트 화면에서 프로젝트 이름을 입력하면 폴더 경로가 이 규칙으로 자동 제안된다.
+- 자동 제안 경로가 이미 비어 있지 않은 폴더와 충돌하면 ` (2)`, ` (3)` 같은 접미를 붙여 사용 가능한 경로를 찾는다.
+- 사용자가 Browse로 직접 고른 경로는 사용자의 의사로 보고, 이후 프로젝트 이름을 바꿔도 자동 갱신하지 않는다.
+- 폴더명은 OS 금지 문자(`\\ / : * ? " < > |`)를 `_`로 치환해 정규화한다.
+- 저장 시점에 다음 조건을 만족하지 않으면 거부한다.
+  - 드라이브 또는 볼륨의 루트가 아니어야 한다.
+  - 심볼릭 링크 또는 Windows 정션이 아니어야 한다.
+  - 비어 있거나, SafeCrowd 관리 파일(`safecrowd-project.json`, `layout.dxf`, `layout-review.json`, `workspace-state.json`)만 존재해야 한다.
+- 최근 프로젝트 인덱스는 `QStandardPaths::AppDataLocation` 아래에 저장한다. `QApplication`의 organization name과 application name을 모두 `SafeCrowd`로 고정하므로, Windows 기준 경로는 `%APPDATA%/SafeCrowd/SafeCrowd/recent-projects.json`이 된다.
+
 ## 3. 화면별 기능 기준
 
 ### 3.1 Project Navigator

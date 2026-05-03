@@ -202,6 +202,83 @@ bool canDeleteProjectFolder(const QString& folderPath, QString* errorMessage) {
     return true;
 }
 
+// Verifies the *location* of a folder being used to save a SafeCrowd project.
+// Rejects symlinks/junctions and drive/volume roots. Used by the save path;
+// the delete path keeps its own checks for now.
+bool validateProjectFolderLocation(const QString& folderPath, QString* errorMessage) {
+    const auto setError = [errorMessage](const QString& message) {
+        if (errorMessage != nullptr) {
+            *errorMessage = message;
+        }
+    };
+
+    if (folderPath.isEmpty()) {
+        setError("Project folder path is empty.");
+        return false;
+    }
+
+    const QFileInfo folderInfo(QDir(folderPath).absolutePath());
+    if (folderInfo.isSymLink() || folderInfo.isJunction()) {
+        setError(QString("Refusing to save into a symbolic link or junction: %1").arg(folderPath));
+        return false;
+    }
+
+    if (QDir(folderInfo.absoluteFilePath()).isRoot()) {
+        setError(QString("Refusing to save into a drive root: %1").arg(folderPath));
+        return false;
+    }
+
+    const QStorageInfo storage(folderInfo.absoluteFilePath());
+    if (storage.isValid() && !storage.rootPath().isEmpty()
+        && QFileInfo(storage.rootPath()).absoluteFilePath() == folderInfo.absoluteFilePath()) {
+        setError(QString("Refusing to save into a volume root: %1").arg(folderPath));
+        return false;
+    }
+
+    return true;
+}
+
+// Verifies that `folderPath` is safe to receive a SafeCrowd project save.
+// The folder may not yet exist (it will be created); if it exists, it must
+// be either empty or contain only SafeCrowd-managed files.
+bool canSaveIntoProjectFolder(const QString& folderPath, QString* errorMessage) {
+    const auto setError = [errorMessage](const QString& message) {
+        if (errorMessage != nullptr) {
+            *errorMessage = message;
+        }
+    };
+
+    if (!validateProjectFolderLocation(folderPath, errorMessage)) {
+        return false;
+    }
+
+    QDir folder(folderPath);
+    if (!folder.exists()) {
+        return true;
+    }
+
+    const auto entries = folder.entryInfoList(
+        QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot,
+        QDir::Name);
+    for (const auto& entry : entries) {
+        if (entry.isSymLink() || entry.isJunction()) {
+            setError(QString(
+                "Refusing to save into a folder that contains a link not created by SafeCrowd: %1")
+                .arg(entry.fileName()));
+            return false;
+        }
+        if (!entry.isFile() || !isProjectManagedEntry(entry.fileName())) {
+            setError(QString(
+                "Refusing to save into a folder that contains a file or folder not created by SafeCrowd: %1\n\n"
+                "Please choose an empty folder, or a folder that already contains a SafeCrowd project.")
+                .arg(entry.fileName()));
+            return false;
+        }
+    }
+
+    return true;
+}
+
 bool copyLayoutIntoProject(ProjectMetadata& metadata, QString* errorMessage) {
     const auto sourcePath = QFileInfo(metadata.layoutPath).absoluteFilePath();
     const auto targetPath = QDir(metadata.folderPath).filePath(kLayoutFileName);
@@ -1247,6 +1324,10 @@ bool ProjectPersistence::saveProject(ProjectMetadata metadata, QString* errorMes
         if (errorMessage != nullptr) {
             *errorMessage = "Project name, folder, and layout path are required.";
         }
+        return false;
+    }
+
+    if (!canSaveIntoProjectFolder(metadata.folderPath, errorMessage)) {
         return false;
     }
 

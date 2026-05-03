@@ -1,18 +1,76 @@
 #include "application/NewProjectWidget.h"
 
+#include <QDir>
 #include <QFileDialog>
 #include <QFont>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QRegularExpression>
+#include <QSignalBlocker>
 #include <QSizePolicy>
+#include <QStandardPaths>
 #include <QVBoxLayout>
 
 #include "application/UiStyle.h"
 
 namespace safecrowd::application {
 namespace {
+
+constexpr auto kProjectsRootName = "SafeCrowd Projects";
+
+// String-only; saveProject creates the folder lazily on actual save.
+QString defaultProjectsRoot() {
+    auto base = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (base.isEmpty()) {
+        base = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
+    }
+    if (base.isEmpty()) {
+        return QString();
+    }
+    return QDir(base).filePath(kProjectsRootName);
+}
+
+QString sanitizeFolderName(const QString& name) {
+    static const QRegularExpression invalid(R"([\\/:*?"<>|])");
+    auto cleaned = name.trimmed();
+    cleaned.replace(invalid, "_");
+    cleaned = cleaned.simplified();
+    return cleaned;
+}
+
+bool folderIsAvailableForSuggestion(const QString& path) {
+    QDir dir(path);
+    if (!dir.exists()) {
+        return true;
+    }
+    const auto entries = dir.entryInfoList(
+        QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot);
+    return entries.isEmpty();
+}
+
+QString suggestProjectFolder(const QString& projectName) {
+    const auto root = defaultProjectsRoot();
+    if (root.isEmpty()) {
+        return QString();
+    }
+    const auto sanitized = sanitizeFolderName(projectName);
+    if (sanitized.isEmpty()) {
+        return root;
+    }
+    const auto base = QDir(root).filePath(sanitized);
+    if (folderIsAvailableForSuggestion(base)) {
+        return base;
+    }
+    for (int suffix = 2; suffix < 1000; ++suffix) {
+        const auto candidate = QDir(root).filePath(QStringLiteral("%1 (%2)").arg(sanitized).arg(suffix));
+        if (folderIsAvailableForSuggestion(candidate)) {
+            return candidate;
+        }
+    }
+    return base;  // fall back; saveProject will surface a clear error
+}
 
 QPushButton* createOutlinedButton(const QString& text, QWidget* parent) {
     auto* button = new QPushButton(text, parent);
@@ -124,9 +182,32 @@ NewProjectWidget::NewProjectWidget(QWidget* parent)
         }
     });
 
+    connect(projectNameEdit_, &QLineEdit::textChanged, this, [this](const QString& name) {
+        if (folderEditedByUser_) {
+            return;
+        }
+        const auto suggestion = suggestProjectFolder(name);
+        const QSignalBlocker blocker(folderPathEdit_);
+        folderPathEdit_->setText(suggestion);
+    });
+
     connect(folderBrowseButton, &QPushButton::clicked, this, [this]() {
-        const auto path = QFileDialog::getExistingDirectory(this, "Select Project Folder");
+        QString startDir = folderPathEdit_->text().trimmed();
+        if (startDir.isEmpty()) {
+            startDir = defaultProjectsRoot();
+        }
+        if (!startDir.isEmpty()) {
+            QDir candidate(startDir);
+            while (!candidate.exists() && !candidate.isRoot() && candidate.cdUp()) {
+            }
+            if (candidate.exists()) {
+                startDir = candidate.absolutePath();
+            }
+        }
+
+        const auto path = QFileDialog::getExistingDirectory(this, "Select Project Folder", startDir);
         if (!path.isEmpty()) {
+            folderEditedByUser_ = true;
             folderPathEdit_->setText(path);
         }
     });
