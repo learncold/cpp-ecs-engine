@@ -1,9 +1,3 @@
-"""DXF 임포트 단위 테스트가 참조하는 픽스처 생성기.
-
-`office_suite.dxf` 만 본 스크립트로 결정적으로 재생성됩니다.
-시연용 평면 자산은 `assets/demo-layouts/generate_demo_layouts.py` 에 별도로 있습니다.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -115,6 +109,40 @@ def add_title(msp: ezdxf.layouts.Modelspace, title: str, subtitle: str) -> None:
     )
 
 
+def build_home_plan(path: Path) -> None:
+    doc, msp = new_document()
+
+    add_title(msp, "HOME PLAN SAMPLE", "Generated from a plan2dxf-style workflow for SafeCrowd tests")
+
+    outer = (0.0, 0.0, 10.0, 8.0)
+    add_wall(msp, (outer[0], outer[1]), (outer[2], outer[1]))
+    add_wall(msp, (outer[2], outer[1]), (outer[2], outer[3]))
+    add_wall(msp, (outer[2], outer[3]), (outer[0], outer[3]))
+    add_wall(msp, (outer[0], outer[3]), (outer[0], outer[1]))
+
+    add_wall(msp, (4.8, 0.0), (4.8, 5.0))
+    add_wall(msp, (0.0, 5.0), (10.0, 5.0))
+    add_wall(msp, (7.2, 5.0), (7.2, 8.0))
+
+    add_space(doc, msp, "Living Room", 0.1, 0.1, 4.7, 4.9)
+    add_space(doc, msp, "Kitchen", 4.9, 0.1, 9.9, 2.9)
+    add_space(doc, msp, "Dining", 4.9, 3.1, 9.9, 4.9)
+    add_space(doc, msp, "Bedroom", 0.1, 5.1, 7.1, 7.9)
+    add_space(doc, msp, "Bath", 7.3, 5.1, 9.9, 7.9)
+
+    add_door(msp, (2.0, 0.0), (2.9, 0.0), swing_center=(2.0, 0.0), swing_radius=0.9, start_angle=0, end_angle=90, layer="EXIT")
+    add_door(msp, (4.8, 2.0), (4.8, 2.9), swing_center=(4.8, 2.0), swing_radius=0.9, start_angle=0, end_angle=90)
+    add_door(msp, (7.2, 6.2), (7.2, 7.0), swing_center=(7.2, 6.2), swing_radius=0.8, start_angle=180, end_angle=270)
+
+    add_window(msp, (0.0, 6.1), (0.0, 7.2))
+    add_window(msp, (8.1, 8.0), (9.3, 8.0))
+    add_window(msp, (10.0, 1.0), (10.0, 2.2))
+
+    add_obstacle(msp, 6.2, 1.0, 7.3, 1.8)
+
+    doc.saveas(path)
+
+
 def build_office_plan(path: Path) -> None:
     doc, msp = new_document()
 
@@ -157,8 +185,100 @@ def build_office_plan(path: Path) -> None:
     doc.saveas(path)
 
 
+def build_evacuation_complex_large(path: Path) -> None:
+    doc, msp = new_document()
+
+    add_title(
+        msp,
+        "LARGE EVACUATION COMPLEX",
+        "Multi-wing civic center floor with wide concourse, large assembly spaces, service wings, and multiple exits",
+    )
+
+    outer = (0.0, 0.0, 64.0, 42.0)
+    add_wall(msp, (outer[0], outer[1]), (outer[2], outer[1]))
+    add_wall(msp, (outer[2], outer[1]), (outer[2], outer[3]))
+    add_wall(msp, (outer[2], outer[3]), (outer[0], outer[3]))
+    add_wall(msp, (outer[0], outer[3]), (outer[0], outer[1]))
+
+    # Primary structural partitions
+    add_wall(msp, (12.0, 0.0), (12.0, 42.0))
+    add_wall(msp, (52.0, 0.0), (52.0, 42.0))
+    add_wall(msp, (12.0, 16.0), (52.0, 16.0))
+    add_wall(msp, (12.0, 26.0), (52.0, 26.0))
+    add_wall(msp, (34.0, 26.0), (34.0, 42.0))
+    add_wall(msp, (26.0, 0.0), (26.0, 16.0))
+    add_wall(msp, (40.0, 0.0), (40.0, 16.0))
+    add_wall(msp, (52.0, 12.0), (64.0, 12.0))
+    add_wall(msp, (52.0, 30.0), (64.0, 30.0))
+    add_wall(msp, (0.0, 12.0), (12.0, 12.0))
+    add_wall(msp, (0.0, 30.0), (12.0, 30.0))
+
+    # Walkable zones
+    add_space(doc, msp, "West Lobby", 0.1, 12.1, 11.9, 29.9)
+    add_space(doc, msp, "Central Concourse", 12.1, 16.1, 51.9, 25.9)
+    add_space(doc, msp, "East Lobby", 52.1, 12.1, 63.9, 29.9)
+    add_space(doc, msp, "Auditorium", 12.1, 26.1, 33.9, 41.9)
+    add_space(doc, msp, "Cafeteria", 34.1, 26.1, 51.9, 41.9)
+    add_space(doc, msp, "Training A", 12.1, 0.1, 25.9, 15.9)
+    add_space(doc, msp, "Training B", 26.1, 0.1, 39.9, 15.9)
+    add_space(doc, msp, "Command Center", 40.1, 0.1, 51.9, 15.9)
+    add_space(doc, msp, "West Service", 0.1, 0.1, 11.9, 11.9)
+    add_space(doc, msp, "West Breakout", 0.1, 30.1, 11.9, 41.9)
+    add_space(doc, msp, "East Storage", 52.1, 0.1, 63.9, 11.9)
+    add_space(doc, msp, "East Operations", 52.1, 30.1, 63.9, 41.9)
+
+    # Internal doors from concourse/lobbies to adjacent spaces
+    add_door(msp, (12.0, 19.5), (12.0, 22.5), swing_center=(12.0, 19.5), swing_radius=1.0, start_angle=180, end_angle=270)
+    add_door(msp, (52.0, 19.5), (52.0, 22.5), swing_center=(52.0, 19.5), swing_radius=1.0, start_angle=0, end_angle=90)
+    add_door(msp, (20.0, 26.0), (23.0, 26.0), swing_center=(20.0, 26.0), swing_radius=1.0, start_angle=0, end_angle=90)
+    add_door(msp, (42.0, 26.0), (45.0, 26.0), swing_center=(42.0, 26.0), swing_radius=1.0, start_angle=90, end_angle=180)
+    add_door(msp, (18.0, 16.0), (21.0, 16.0), swing_center=(18.0, 16.0), swing_radius=1.0, start_angle=270, end_angle=360)
+    add_door(msp, (31.0, 16.0), (34.0, 16.0), swing_center=(31.0, 16.0), swing_radius=1.0, start_angle=270, end_angle=360)
+    add_door(msp, (45.0, 16.0), (48.0, 16.0), swing_center=(45.0, 16.0), swing_radius=1.0, start_angle=270, end_angle=360)
+    add_door(msp, (6.0, 12.0), (8.5, 12.0), swing_center=(6.0, 12.0), swing_radius=0.9, start_angle=270, end_angle=360)
+    add_door(msp, (6.0, 30.0), (8.5, 30.0), swing_center=(6.0, 30.0), swing_radius=0.9, start_angle=0, end_angle=90)
+    add_door(msp, (57.0, 12.0), (59.5, 12.0), swing_center=(57.0, 12.0), swing_radius=0.9, start_angle=270, end_angle=360)
+    add_door(msp, (57.0, 30.0), (59.5, 30.0), swing_center=(57.0, 30.0), swing_radius=0.9, start_angle=0, end_angle=90)
+
+    # External exits around the perimeter
+    add_door(msp, (0.0, 18.0), (0.0, 21.0), layer="EXIT")
+    add_door(msp, (0.0, 35.0), (0.0, 38.0), layer="EXIT")
+    add_door(msp, (18.0, 42.0), (21.0, 42.0), layer="EXIT")
+    add_door(msp, (43.0, 42.0), (46.0, 42.0), layer="EXIT")
+    add_door(msp, (64.0, 18.0), (64.0, 21.0), layer="EXIT")
+    add_door(msp, (64.0, 34.0), (64.0, 37.0), layer="EXIT")
+    add_door(msp, (18.0, 0.0), (21.0, 0.0), layer="EXIT")
+    add_door(msp, (44.0, 0.0), (47.0, 0.0), layer="EXIT")
+
+    # Windows
+    add_window(msp, (0.0, 23.0), (0.0, 27.0))
+    add_window(msp, (14.0, 42.0), (17.0, 42.0))
+    add_window(msp, (28.0, 42.0), (31.0, 42.0))
+    add_window(msp, (36.0, 42.0), (39.0, 42.0))
+    add_window(msp, (64.0, 24.0), (64.0, 28.0))
+    add_window(msp, (24.0, 0.0), (27.0, 0.0))
+    add_window(msp, (48.0, 0.0), (51.0, 0.0))
+
+    # Obstacles / columns / furniture islands
+    add_obstacle(msp, 20.0, 19.0, 21.5, 20.5)
+    add_obstacle(msp, 30.0, 19.0, 31.5, 20.5)
+    add_obstacle(msp, 40.0, 19.0, 41.5, 20.5)
+    add_obstacle(msp, 20.0, 21.5, 21.5, 23.0)
+    add_obstacle(msp, 30.0, 21.5, 31.5, 23.0)
+    add_obstacle(msp, 40.0, 21.5, 41.5, 23.0)
+    add_obstacle(msp, 17.0, 31.0, 18.5, 32.5)
+    add_obstacle(msp, 24.0, 31.0, 25.5, 32.5)
+    add_obstacle(msp, 38.0, 32.0, 40.5, 34.0)
+    add_obstacle(msp, 43.0, 6.0, 45.5, 8.0)
+    add_obstacle(msp, 55.0, 34.0, 57.0, 36.5)
+
+    doc.saveas(path)
+
+
 def main() -> None:
+    build_home_plan(OUTPUT_DIR / "home_plan.dxf")
     build_office_plan(OUTPUT_DIR / "office_suite.dxf")
+    build_evacuation_complex_large(OUTPUT_DIR / "evacuation_complex_large.dxf")
 
 
 if __name__ == "__main__":
