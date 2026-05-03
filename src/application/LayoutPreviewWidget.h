@@ -82,6 +82,7 @@ private:
         DrawObstruction,
         DrawDoor,
         DrawStair,
+        DrawUStair,
     };
 
     enum class ShapeDrawMode {
@@ -96,6 +97,7 @@ private:
     void createObstructionPolygon(const std::vector<QPointF>& points);
     void createObstructionRectangle(const QPointF& startWorld, const QPointF& endWorld);
     void createRoomPolygon(const std::vector<QPointF>& points);
+    void createUShapedStairLink(const QPointF& startWorld, const QPointF& endWorld);
     void createVerticalLink(const QPointF& startWorld, const QPointF& endWorld);
     void createWallSegment(const QPointF& startWorld, const QPointF& endWorld);
     void createZone(const QPointF& startWorld, const QPointF& endWorld, safecrowd::domain::ZoneKind kind);
@@ -202,6 +204,7 @@ private:
     QToolButton* obstructionToolButton_{nullptr};
     QToolButton* doorToolButton_{nullptr};
     QToolButton* stairToolButton_{nullptr};
+    QToolButton* uStairToolButton_{nullptr};
     QToolButton* addFloorButton_{nullptr};
     QToolButton* gridToolButton_{nullptr};
     QToolButton* resetViewButton_{nullptr};

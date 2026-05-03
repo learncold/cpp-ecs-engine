@@ -804,8 +804,9 @@ void appendBarrierSegment(
     const safecrowd::domain::Point2D& start,
     const safecrowd::domain::Point2D& end,
     const std::string& floorId) {
+    const auto id = nextWallId(layout);
     layout.barriers.push_back({
-        .id = nextWallId(layout).toStdString(),
+        .id = id.toStdString(),
         .floorId = floorId,
         .geometry = safecrowd::domain::Polyline2D{
             .vertices = {start, end},
@@ -813,6 +814,24 @@ void appendBarrierSegment(
         },
         .blocksMovement = true,
     });
+}
+
+QString appendBarrierSegmentWithId(
+    safecrowd::domain::FacilityLayout2D& layout,
+    const safecrowd::domain::Point2D& start,
+    const safecrowd::domain::Point2D& end,
+    const std::string& floorId) {
+    const auto id = nextWallId(layout);
+    layout.barriers.push_back({
+        .id = id.toStdString(),
+        .floorId = floorId,
+        .geometry = safecrowd::domain::Polyline2D{
+            .vertices = {start, end},
+            .closed = false,
+        },
+        .blocksMovement = true,
+    });
+    return id;
 }
 
 QPainterPath worldPolygonPath(const safecrowd::domain::Polygon2D& polygon) {
@@ -1327,6 +1346,175 @@ QPointF entryOutsideSample(const QRectF& rectangle, safecrowd::domain::StairEntr
     return sample;
 }
 
+struct UShapedStairGeometry {
+    safecrowd::domain::Polygon2D sourceFootprint{};
+    safecrowd::domain::Polygon2D targetFootprint{};
+    safecrowd::domain::LineSegment2D sourceEntrySpan{};
+    safecrowd::domain::LineSegment2D targetEntrySpan{};
+    safecrowd::domain::LineSegment2D verticalSpan{};
+    safecrowd::domain::Point2D sourceOutsideSample{};
+    safecrowd::domain::Point2D targetOutsideSample{};
+    double laneWidth{0.0};
+};
+
+struct UStairBasis {
+    safecrowd::domain::Point2D entryLeft{};
+    safecrowd::domain::Point2D right{};
+    safecrowd::domain::Point2D inward{};
+    double width{0.0};
+    double depth{0.0};
+};
+
+safecrowd::domain::Point2D pointAt(
+    const UStairBasis& basis,
+    double across,
+    double depth) {
+    return {
+        .x = basis.entryLeft.x + (basis.right.x * across) + (basis.inward.x * depth),
+        .y = basis.entryLeft.y + (basis.right.y * across) + (basis.inward.y * depth),
+    };
+}
+
+safecrowd::domain::Point2D midpoint(const safecrowd::domain::LineSegment2D& span) {
+    return {
+        .x = (span.start.x + span.end.x) * 0.5,
+        .y = (span.start.y + span.end.y) * 0.5,
+    };
+}
+
+UStairBasis uStairBasisForRectangle(
+    const QRectF& rectangle,
+    safecrowd::domain::StairEntryDirection entryDirection) {
+    const double north = std::max(rectangle.top(), rectangle.bottom());
+    const double south = std::min(rectangle.top(), rectangle.bottom());
+    switch (entryDirection) {
+    case safecrowd::domain::StairEntryDirection::North:
+        return {
+            .entryLeft = {.x = rectangle.right(), .y = north},
+            .right = {.x = -1.0, .y = 0.0},
+            .inward = {.x = 0.0, .y = -1.0},
+            .width = rectangle.width(),
+            .depth = rectangle.height(),
+        };
+    case safecrowd::domain::StairEntryDirection::East:
+        return {
+            .entryLeft = {.x = rectangle.right(), .y = south},
+            .right = {.x = 0.0, .y = 1.0},
+            .inward = {.x = -1.0, .y = 0.0},
+            .width = rectangle.height(),
+            .depth = rectangle.width(),
+        };
+    case safecrowd::domain::StairEntryDirection::South:
+        return {
+            .entryLeft = {.x = rectangle.left(), .y = south},
+            .right = {.x = 1.0, .y = 0.0},
+            .inward = {.x = 0.0, .y = 1.0},
+            .width = rectangle.width(),
+            .depth = rectangle.height(),
+        };
+    case safecrowd::domain::StairEntryDirection::West:
+        return {
+            .entryLeft = {.x = rectangle.left(), .y = north},
+            .right = {.x = 0.0, .y = -1.0},
+            .inward = {.x = 1.0, .y = 0.0},
+            .width = rectangle.height(),
+            .depth = rectangle.width(),
+        };
+    case safecrowd::domain::StairEntryDirection::Unspecified:
+        break;
+    }
+    return uStairBasisForRectangle(rectangle, safecrowd::domain::StairEntryDirection::West);
+}
+
+UShapedStairGeometry uShapedStairGeometryForRectangle(
+    const QRectF& rectangle,
+    safecrowd::domain::StairEntryDirection entryDirection) {
+    const auto basis = uStairBasisForRectangle(rectangle, entryDirection);
+    const double split = basis.width * 0.5;
+    const double platformStart = basis.depth * 0.70;
+    const double outsideOffset = std::max(basis.width, basis.depth) * 0.25;
+    const auto outsideSample = [&](const safecrowd::domain::LineSegment2D& span) {
+        const auto center = midpoint(span);
+        return safecrowd::domain::Point2D{
+            .x = center.x - (basis.inward.x * outsideOffset),
+            .y = center.y - (basis.inward.y * outsideOffset),
+        };
+    };
+
+    UShapedStairGeometry geometry;
+    geometry.sourceFootprint.outline = {
+        pointAt(basis, split, 0.0),
+        pointAt(basis, basis.width, 0.0),
+        pointAt(basis, basis.width, basis.depth),
+        pointAt(basis, split, basis.depth),
+    };
+    geometry.targetFootprint.outline = {
+        pointAt(basis, 0.0, 0.0),
+        pointAt(basis, split, 0.0),
+        pointAt(basis, split, basis.depth),
+        pointAt(basis, 0.0, basis.depth),
+    };
+    geometry.sourceEntrySpan = {
+        .start = pointAt(basis, split, 0.0),
+        .end = pointAt(basis, basis.width, 0.0),
+    };
+    geometry.targetEntrySpan = {
+        .start = pointAt(basis, 0.0, 0.0),
+        .end = pointAt(basis, split, 0.0),
+    };
+    geometry.verticalSpan = {
+        .start = pointAt(basis, split, platformStart),
+        .end = pointAt(basis, split, basis.depth),
+    };
+    geometry.sourceOutsideSample = outsideSample(geometry.sourceEntrySpan);
+    geometry.targetOutsideSample = outsideSample(geometry.targetEntrySpan);
+    geometry.laneWidth = split;
+    return geometry;
+}
+
+QStringList appendWallsForPolygonExceptGaps(
+    safecrowd::domain::FacilityLayout2D& layout,
+    const safecrowd::domain::Polygon2D& polygon,
+    const std::vector<safecrowd::domain::LineSegment2D>& gaps,
+    const std::string& floorId) {
+    QStringList ids;
+    if (polygon.outline.size() < 2) {
+        return ids;
+    }
+
+    for (std::size_t i = 0; i < polygon.outline.size(); ++i) {
+        std::vector<std::pair<safecrowd::domain::Point2D, safecrowd::domain::Point2D>> remaining{{
+            polygon.outline[i],
+            polygon.outline[(i + 1) % polygon.outline.size()],
+        }};
+        for (const auto& gap : gaps) {
+            std::vector<std::pair<safecrowd::domain::Point2D, safecrowd::domain::Point2D>> next;
+            for (const auto& segment : remaining) {
+                const safecrowd::domain::Barrier2D virtualBarrier{
+                    .floorId = floorId,
+                    .geometry = {.vertices = {segment.first, segment.second}},
+                    .blocksMovement = true,
+                };
+                const auto clipped = barrierSegmentsAfterGap(virtualBarrier, gap);
+                if (clipped.has_value()) {
+                    next.insert(next.end(), clipped->begin(), clipped->end());
+                } else {
+                    next.push_back(segment);
+                }
+            }
+            remaining = std::move(next);
+        }
+
+        for (const auto& segment : remaining) {
+            if (std::hypot(segment.second.x - segment.first.x, segment.second.y - segment.first.y) <= kGeometryEpsilon) {
+                continue;
+            }
+            ids.append(appendBarrierSegmentWithId(layout, segment.first, segment.second, floorId));
+        }
+    }
+    return ids;
+}
+
 void appendStairWallsExceptEntry(
     safecrowd::domain::FacilityLayout2D& layout,
     const QRectF& rectangle,
@@ -1720,6 +1908,14 @@ QIcon makeToolIcon(const QString& glyph, const QColor& color, bool filled = fals
         painter.drawLine(QPointF(7, 12), QPointF(17, 12));
         painter.drawLine(QPointF(7, 8), QPointF(17, 8));
         painter.drawLine(QPointF(9, 18), QPointF(17, 6));
+    } else if (glyph == "u-stair") {
+        painter.drawRect(QRectF(5, 5, 14, 14));
+        painter.drawLine(QPointF(12, 5), QPointF(12, 19));
+        painter.drawLine(QPointF(7, 16), QPointF(11, 16));
+        painter.drawLine(QPointF(7, 12), QPointF(11, 12));
+        painter.drawLine(QPointF(13, 8), QPointF(17, 8));
+        painter.drawLine(QPointF(13, 12), QPointF(17, 12));
+        painter.drawLine(QPointF(9, 18), QPointF(15, 6));
     } else if (glyph == "select") {
         QPainterPath path;
         path.moveTo(6, 4);
@@ -2461,6 +2657,9 @@ void LayoutPreviewWidget::mouseReleaseEvent(QMouseEvent* event) {
         case ToolMode::DrawStair:
             createVerticalLink(draftStartWorld_, draftCurrentWorld_);
             break;
+        case ToolMode::DrawUStair:
+            createUShapedStairLink(draftStartWorld_, draftCurrentWorld_);
+            break;
         case ToolMode::DrawDoor:
             break;
         case ToolMode::Select:
@@ -2717,6 +2916,7 @@ void LayoutPreviewWidget::applyToolAt(const QPointF& position) {
     case ToolMode::DrawWall:
     case ToolMode::DrawObstruction:
     case ToolMode::DrawStair:
+    case ToolMode::DrawUStair:
         return;
     case ToolMode::DrawDoor: {
         if (!barrierId.has_value()) {
@@ -3206,6 +3406,132 @@ void LayoutPreviewWidget::createVerticalLink(const QPointF& startWorld, const QP
             .centerSpan = targetEntrySpan,
         });
     }
+
+    selectedConnectionId_ = verticalConnectionId;
+    selectedConnectionIds_ = QStringList{verticalConnectionId};
+    selectedZoneId_.clear();
+    selectedZoneIds_.clear();
+    selectedBarrierId_.clear();
+    selectedBarrierIds_.clear();
+    focusedTargetId_ = verticalConnectionId;
+    notifyLayoutEdited();
+    emitCurrentSelection();
+    update();
+}
+
+void LayoutPreviewWidget::createUShapedStairLink(const QPointF& startWorld, const QPointF& endWorld) {
+    if (!importResult_.layout.has_value()) {
+        return;
+    }
+
+    auto& layout = *importResult_.layout;
+    const auto sourceFloorId = currentFloorId();
+    const auto targetFloorId = verticalTargetFloorId();
+    if (sourceFloorId.isEmpty() || targetFloorId.isEmpty() || sourceFloorId == targetFloorId) {
+        return;
+    }
+
+    const auto rectangle = rectFromWorldPoints(startWorld, endWorld);
+    if (rectangle.width() < kDraftMinimumSize || rectangle.height() < kDraftMinimumSize) {
+        return;
+    }
+
+    const auto geometry = uShapedStairGeometryForRectangle(rectangle, stairEntryDirection_);
+    if (geometry.laneWidth <= kGeometryEpsilon) {
+        return;
+    }
+
+    const auto sourceZoneCandidates = zonesContainingPoint(
+        layout,
+        QPointF(geometry.sourceOutsideSample.x, geometry.sourceOutsideSample.y),
+        sourceFloorId,
+        0.35);
+    const auto targetZoneCandidates = zonesContainingPoint(
+        layout,
+        QPointF(geometry.targetOutsideSample.x, geometry.targetOutsideSample.y),
+        targetFloorId,
+        0.35);
+    const auto sourceZone = choosePrimaryZone(layout, sourceZoneCandidates);
+    const auto targetZone = choosePrimaryZone(layout, targetZoneCandidates);
+
+    const auto sourceStairZoneId = nextZoneId(layout);
+    const auto sourceZoneNumber = static_cast<int>(layout.zones.size()) + 1;
+    layout.zones.push_back({
+        .id = sourceStairZoneId.toStdString(),
+        .floorId = sourceFloorId.toStdString(),
+        .kind = safecrowd::domain::ZoneKind::Stair,
+        .label = QString("U Stair %1").arg(sourceZoneNumber).toStdString(),
+        .area = geometry.sourceFootprint,
+        .defaultCapacity = 8,
+        .isStair = true,
+    });
+
+    const auto targetStairZoneId = nextZoneId(layout);
+    const auto targetZoneNumber = static_cast<int>(layout.zones.size()) + 1;
+    layout.zones.push_back({
+        .id = targetStairZoneId.toStdString(),
+        .floorId = targetFloorId.toStdString(),
+        .kind = safecrowd::domain::ZoneKind::Stair,
+        .label = QString("U Stair %1").arg(targetZoneNumber).toStdString(),
+        .area = geometry.targetFootprint,
+        .defaultCapacity = 8,
+        .isStair = true,
+    });
+
+    QStringList preferredWallIds;
+    preferredWallIds.append(appendWallsForPolygonExceptGaps(
+        layout,
+        geometry.sourceFootprint,
+        {geometry.sourceEntrySpan, geometry.verticalSpan},
+        sourceFloorId.toStdString()));
+    preferredWallIds.append(appendWallsForPolygonExceptGaps(
+        layout,
+        geometry.targetFootprint,
+        {geometry.targetEntrySpan, geometry.verticalSpan},
+        targetFloorId.toStdString()));
+
+    if (sourceZone.has_value()) {
+        cutBarriersAtSpan(layout, geometry.sourceEntrySpan, sourceFloorId.toStdString());
+        layout.connections.push_back({
+            .id = nextConnectionId(layout).toStdString(),
+            .floorId = sourceFloorId.toStdString(),
+            .kind = safecrowd::domain::ConnectionKind::Opening,
+            .fromZoneId = layout.zones[*sourceZone].id,
+            .toZoneId = sourceStairZoneId.toStdString(),
+            .effectiveWidth = geometry.laneWidth,
+            .directionality = safecrowd::domain::TravelDirection::Bidirectional,
+            .centerSpan = geometry.sourceEntrySpan,
+        });
+    }
+
+    const auto verticalConnectionId = nextVerticalConnectionId(layout);
+    layout.connections.push_back({
+        .id = verticalConnectionId.toStdString(),
+        .floorId = sourceFloorId.toStdString(),
+        .kind = safecrowd::domain::ConnectionKind::Stair,
+        .fromZoneId = sourceStairZoneId.toStdString(),
+        .toZoneId = targetStairZoneId.toStdString(),
+        .effectiveWidth = geometry.laneWidth,
+        .directionality = safecrowd::domain::TravelDirection::Bidirectional,
+        .isStair = true,
+        .centerSpan = geometry.verticalSpan,
+    });
+
+    if (targetZone.has_value()) {
+        cutBarriersAtSpan(layout, geometry.targetEntrySpan, targetFloorId.toStdString());
+        layout.connections.push_back({
+            .id = nextConnectionId(layout).toStdString(),
+            .floorId = targetFloorId.toStdString(),
+            .kind = safecrowd::domain::ConnectionKind::Opening,
+            .fromZoneId = targetStairZoneId.toStdString(),
+            .toZoneId = layout.zones[*targetZone].id,
+            .effectiveWidth = geometry.laneWidth,
+            .directionality = safecrowd::domain::TravelDirection::Bidirectional,
+            .centerSpan = geometry.targetEntrySpan,
+        });
+    }
+
+    normalizeOpenWallBarriers(layout, preferredWallIds);
 
     selectedConnectionId_ = verticalConnectionId;
     selectedConnectionIds_ = QStringList{verticalConnectionId};
@@ -4273,6 +4599,9 @@ void LayoutPreviewWidget::setToolMode(ToolMode mode) {
     if (stairToolButton_ != nullptr) {
         stairToolButton_->setChecked(toolMode_ == ToolMode::DrawStair);
     }
+    if (uStairToolButton_ != nullptr) {
+        uStairToolButton_->setChecked(toolMode_ == ToolMode::DrawUStair);
+    }
 
     refreshPropertyPanel();
     update();
@@ -4409,6 +4738,7 @@ void LayoutPreviewWidget::setupToolbars() {
     obstructionToolButton_ = makeButton(sideToolbar_, sideLayout, makeToolIcon("obstruction", QColor("#6c4f38")), "Draw Obstruction");
     doorToolButton_ = makeButton(sideToolbar_, sideLayout, makeToolIcon("door", QColor("#8e6b23")), "Draw Door");
     stairToolButton_ = makeButton(sideToolbar_, sideLayout, makeToolIcon("stair", QColor("#6a5d9f")), "Draw Stair/Ramp");
+    uStairToolButton_ = makeButton(sideToolbar_, sideLayout, makeToolIcon("u-stair", QColor("#4f46a5")), "Draw U-shaped Stair");
     sideLayout->addStretch(1);
 
     connect(selectToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::Select); });
@@ -4448,6 +4778,7 @@ void LayoutPreviewWidget::setupToolbars() {
     connect(obstructionToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::DrawObstruction); });
     connect(doorToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::DrawDoor); });
     connect(stairToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::DrawStair); });
+    connect(uStairToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::DrawUStair); });
     connect(roomAutoWallsCheckBox_, &QCheckBox::toggled, this, [this](bool checked) {
         roomAutoWallsEnabled_ = checked;
     });
@@ -4500,7 +4831,8 @@ void LayoutPreviewWidget::refreshPropertyPanel() {
     const bool showRoomWallsOption = toolMode_ == ToolMode::DrawRoom;
     const bool showShapeOptions = toolMode_ == ToolMode::DrawRoom || toolMode_ == ToolMode::DrawObstruction;
     const bool showDoorOptions = toolMode_ == ToolMode::DrawDoor;
-    const bool showVerticalOptions = toolMode_ == ToolMode::DrawStair;
+    const bool showVerticalOptions = toolMode_ == ToolMode::DrawStair || toolMode_ == ToolMode::DrawUStair;
+    const bool showRampOption = toolMode_ == ToolMode::DrawStair;
     roomAutoWallsCheckBox_->setVisible(showRoomWallsOption);
     shapeDrawModeComboBox_->setVisible(showShapeOptions);
     doorWidthSpinBox_->setVisible(showDoorOptions);
@@ -4508,7 +4840,7 @@ void LayoutPreviewWidget::refreshPropertyPanel() {
     verticalTargetFloorComboBox_->setVisible(showVerticalOptions);
     stairEntryLabel_->setVisible(showVerticalOptions);
     stairEntryComboBox_->setVisible(showVerticalOptions);
-    rampLinkCheckBox_->setVisible(showVerticalOptions);
+    rampLinkCheckBox_->setVisible(showRampOption);
     propertyPanel_->setVisible(importResult_.layout.has_value() && (showShapeOptions || showDoorOptions || showVerticalOptions));
 }
 
