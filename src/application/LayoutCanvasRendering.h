@@ -104,7 +104,11 @@ QPainterPath layoutCanvasPolygonPath(const safecrowd::domain::Polygon2D& polygon
 QPolygonF layoutCanvasPolylinePath(const safecrowd::domain::Polyline2D& polyline, const LayoutCanvasTransform& transform);
 void drawLayoutCanvasLine(QPainter& painter, const safecrowd::domain::LineSegment2D& line, const LayoutCanvasTransform& transform);
 void drawLayoutCanvasPolyline(QPainter& painter, const safecrowd::domain::Polyline2D& polyline, const LayoutCanvasTransform& transform);
-void drawLayoutCanvasGrid(QPainter& painter, const QRectF& viewport);
+void drawLayoutCanvasGrid(
+    QPainter& painter,
+    const QRectF& viewport,
+    const LayoutCanvasTransform& transform,
+    double spacingMeters);
 void drawLayoutCanvasSurface(QPainter& painter, const QRectF& viewport);
 void drawFacilityLayoutCanvas(QPainter& painter, const safecrowd::domain::FacilityLayout2D& layout, const LayoutCanvasTransform& transform);
 void drawFacilityLayoutCanvas(

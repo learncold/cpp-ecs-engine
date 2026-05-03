@@ -178,6 +178,8 @@ private:
     bool verticalLinkCreatesRamp_{false};
     safecrowd::domain::StairEntryDirection stairEntryDirection_{safecrowd::domain::StairEntryDirection::West};
     double doorWidth_{1.2};
+    bool gridSnapEnabled_{false};
+    double gridSpacingMeters_{0.5};
     QString currentFloorId_{};
     QFrame* toolbarCorner_{nullptr};
     QFrame* topToolbar_{nullptr};
@@ -192,6 +194,7 @@ private:
     QComboBox* stairEntryComboBox_{nullptr};
     QCheckBox* rampLinkCheckBox_{nullptr};
     QComboBox* floorComboBox_{nullptr};
+    QComboBox* gridSpacingComboBox_{nullptr};
     QToolButton* selectToolButton_{nullptr};
     QToolButton* roomToolButton_{nullptr};
     QToolButton* exitToolButton_{nullptr};
@@ -200,6 +203,7 @@ private:
     QToolButton* doorToolButton_{nullptr};
     QToolButton* stairToolButton_{nullptr};
     QToolButton* addFloorButton_{nullptr};
+    QToolButton* gridToolButton_{nullptr};
     QToolButton* resetViewButton_{nullptr};
     std::function<void(const PreviewSelection&)> selectionChangedHandler_{};
     std::function<void(const safecrowd::domain::FacilityLayout2D&)> layoutEditedHandler_{};

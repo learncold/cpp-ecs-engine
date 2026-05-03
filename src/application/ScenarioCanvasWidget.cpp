@@ -41,7 +41,7 @@ constexpr double kOccupantMinSpacing = kOccupantWorldRadius * 2.0;
 constexpr double kVelocityIndicatorSeconds = 0.75;
 constexpr double kGeometryEpsilon = 1e-9;
 constexpr double kSelectionDragThresholdPixels = 4.0;
-const QColor kSelectionHighlightColor(220, 38, 38);
+const QColor kSelectionHighlightColor("#0b3d78");
 
 struct PointBounds {
     double minX{0.0};

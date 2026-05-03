@@ -43,6 +43,22 @@ double screenDistance(
     return std::hypot(a.x() - b.x(), a.y() - b.y());
 }
 
+safecrowd::domain::Point2D snapPointToGrid(const safecrowd::domain::Point2D& point, double spacingMeters) {
+    if (spacingMeters <= 0.0) {
+        return point;
+    }
+
+    return {
+        .x = std::round(point.x / spacingMeters) * spacingMeters,
+        .y = std::round(point.y / spacingMeters) * spacingMeters,
+    };
+}
+
+LayoutSnapOptions withoutGridSnap(LayoutSnapOptions options) {
+    options.snapGrid = false;
+    return options;
+}
+
 safecrowd::domain::Point2D closestPointOnSegment(
     const safecrowd::domain::Point2D& point,
     const safecrowd::domain::Point2D& start,
@@ -183,23 +199,18 @@ std::optional<safecrowd::domain::LineSegment2D> stairEntrySpanForFloor(
         maxX = std::max(maxX, point.x);
         maxY = std::max(maxY, point.y);
     }
-    const auto halfWidth = std::max(0.35, std::min(maxX - minX, maxY - minY) * 0.35);
     switch (*direction) {
     case safecrowd::domain::StairEntryDirection::North: {
-        const auto x = (minX + maxX) * 0.5;
-        return safecrowd::domain::LineSegment2D{{.x = x - halfWidth, .y = maxY}, {.x = x + halfWidth, .y = maxY}};
+        return safecrowd::domain::LineSegment2D{{.x = minX, .y = maxY}, {.x = maxX, .y = maxY}};
     }
     case safecrowd::domain::StairEntryDirection::South: {
-        const auto x = (minX + maxX) * 0.5;
-        return safecrowd::domain::LineSegment2D{{.x = x - halfWidth, .y = minY}, {.x = x + halfWidth, .y = minY}};
+        return safecrowd::domain::LineSegment2D{{.x = maxX, .y = minY}, {.x = minX, .y = minY}};
     }
     case safecrowd::domain::StairEntryDirection::East: {
-        const auto y = (minY + maxY) * 0.5;
-        return safecrowd::domain::LineSegment2D{{.x = maxX, .y = y - halfWidth}, {.x = maxX, .y = y + halfWidth}};
+        return safecrowd::domain::LineSegment2D{{.x = maxX, .y = maxY}, {.x = maxX, .y = minY}};
     }
     case safecrowd::domain::StairEntryDirection::West: {
-        const auto y = (minY + maxY) * 0.5;
-        return safecrowd::domain::LineSegment2D{{.x = minX, .y = y - halfWidth}, {.x = minX, .y = y + halfWidth}};
+        return safecrowd::domain::LineSegment2D{{.x = minX, .y = minY}, {.x = minX, .y = maxY}};
     }
     case safecrowd::domain::StairEntryDirection::Unspecified:
         break;
@@ -273,6 +284,13 @@ LayoutSnapResult snapPointToGeometry(
                 result = {.point = candidate, .snapped = true};
             }
         }
+    }
+
+    if (!result.snapped && options.snapGrid) {
+        result = {
+            .point = snapPointToGrid(point, options.gridSpacingMeters),
+            .snapped = true,
+        };
     }
 
     return result;
@@ -364,6 +382,14 @@ LayoutSnapResult snapLayoutDragPoint(
         result.point.y = *snappedY;
         result.snapped = true;
     }
+
+    if (!result.snapped && options.snapGrid) {
+        result = {
+            .point = snapPointToGrid(point, options.gridSpacingMeters),
+            .snapped = true,
+        };
+    }
+
     return result;
 }
 
@@ -380,9 +406,10 @@ LayoutDragSnapResult snapLayoutSelectionDrag(
     }
 
     double bestDistance = options.tolerancePixels;
+    const auto geometryOptions = withoutGridSnap(options);
     for (const auto& anchor : anchors) {
         const auto moved = anchor + rawDelta;
-        const auto snapped = snapLayoutDragPoint(staticLayout, floorId, anchor, moved, transform, options);
+        const auto snapped = snapLayoutDragPoint(staticLayout, floorId, anchor, moved, transform, geometryOptions);
         if (!snapped.snapped) {
             continue;
         }
@@ -394,6 +421,22 @@ LayoutDragSnapResult snapLayoutSelectionDrag(
                 .delta = snapped.point - anchor,
                 .snapped = true,
             };
+        }
+    }
+
+    if (!result.snapped && options.snapGrid) {
+        double bestGridDistance = std::numeric_limits<double>::max();
+        for (const auto& anchor : anchors) {
+            const auto moved = anchor + rawDelta;
+            const auto snappedPoint = snapPointToGrid(moved, options.gridSpacingMeters);
+            const auto distance = screenDistance(transform, moved, snappedPoint);
+            if (distance <= bestGridDistance) {
+                bestGridDistance = distance;
+                result = {
+                    .delta = snappedPoint - anchor,
+                    .snapped = true,
+                };
+            }
         }
     }
 

@@ -526,14 +526,51 @@ void drawLayoutCanvasPolyline(QPainter& painter, const safecrowd::domain::Polyli
     painter.drawPolyline(path);
 }
 
-void drawLayoutCanvasGrid(QPainter& painter, const QRectF& viewport) {
-    painter.setPen(QPen(QColor(238, 243, 248), 1));
-    for (int x = static_cast<int>(viewport.left()); x < static_cast<int>(viewport.right()); x += 32) {
-        painter.drawLine(QPointF(x, viewport.top()), QPointF(x, viewport.bottom()));
+void drawLayoutCanvasGrid(
+    QPainter& painter,
+    const QRectF& viewport,
+    const LayoutCanvasTransform& transform,
+    double spacingMeters) {
+    if (spacingMeters <= 0.0 || viewport.isEmpty()) {
+        return;
     }
-    for (int y = static_cast<int>(viewport.top()); y < static_cast<int>(viewport.bottom()); y += 32) {
-        painter.drawLine(QPointF(viewport.left(), y), QPointF(viewport.right(), y));
+
+    double renderSpacing = spacingMeters;
+    auto screenSpacing = [&]() {
+        const auto start = transform.map({.x = 0.0, .y = 0.0});
+        const auto end = transform.map({.x = renderSpacing, .y = 0.0});
+        return std::abs(end.x() - start.x());
+    };
+    while (screenSpacing() < 8.0 && renderSpacing < 1000.0) {
+        renderSpacing *= 2.0;
     }
+
+    const auto topLeft = transform.unmap(viewport.topLeft());
+    const auto bottomRight = transform.unmap(viewport.bottomRight());
+    const double minX = std::min(topLeft.x, bottomRight.x);
+    const double maxX = std::max(topLeft.x, bottomRight.x);
+    const double minY = std::min(topLeft.y, bottomRight.y);
+    const double maxY = std::max(topLeft.y, bottomRight.y);
+
+    painter.save();
+    painter.setClipRect(viewport);
+    painter.setPen(QPen(QColor(224, 233, 242), 1));
+
+    const auto firstX = std::floor(minX / renderSpacing) * renderSpacing;
+    for (double x = firstX; x <= maxX + 1e-9; x += renderSpacing) {
+        const auto start = transform.map({.x = x, .y = minY});
+        const auto end = transform.map({.x = x, .y = maxY});
+        painter.drawLine(QPointF(start.x(), viewport.top()), QPointF(end.x(), viewport.bottom()));
+    }
+
+    const auto firstY = std::floor(minY / renderSpacing) * renderSpacing;
+    for (double y = firstY; y <= maxY + 1e-9; y += renderSpacing) {
+        const auto start = transform.map({.x = minX, .y = y});
+        const auto end = transform.map({.x = maxX, .y = y});
+        painter.drawLine(QPointF(viewport.left(), start.y()), QPointF(viewport.right(), end.y()));
+    }
+
+    painter.restore();
 }
 
 void drawLayoutCanvasSurface(QPainter& painter, const QRectF& viewport) {

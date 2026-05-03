@@ -12,6 +12,8 @@ struct LayoutSnapOptions {
     double tolerancePixels{12.0};
     bool snapVertices{true};
     bool snapEdges{true};
+    bool snapGrid{false};
+    double gridSpacingMeters{0.5};
 };
 
 struct LayoutSnapResult {

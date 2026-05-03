@@ -47,7 +47,7 @@ constexpr int kTopToolbarHeight = 44;
 constexpr int kPropertyPanelHeight = 42;
 constexpr int kSideToolbarWidth = 44;
 constexpr int kToolbarButtonSize = 44;
-const QColor kSelectionHighlightColor(220, 38, 38);
+const QColor kSelectionHighlightColor("#0b3d78");
 
 QRectF previewViewport(const QRect& widgetRect) {
     return layoutCanvasViewport(widgetRect, kSideToolbarWidth + 16, kTopToolbarHeight + kPropertyPanelHeight + 16, 16, 16);
@@ -1276,20 +1276,28 @@ QPointF entrySideMidpoint(const QRectF& rectangle, safecrowd::domain::StairEntry
 safecrowd::domain::LineSegment2D entrySpanForRectangle(
     const QRectF& rectangle,
     safecrowd::domain::StairEntryDirection direction) {
-    const auto openingHalfWidth = std::max(0.35, std::min(rectangle.width(), rectangle.height()) * 0.35);
-    const auto center = entrySideMidpoint(rectangle, direction);
+    const double north = std::max(rectangle.top(), rectangle.bottom());
+    const double south = std::min(rectangle.top(), rectangle.bottom());
     switch (direction) {
     case safecrowd::domain::StairEntryDirection::North:
+        return {
+            .start = {.x = rectangle.left(), .y = north},
+            .end = {.x = rectangle.right(), .y = north},
+        };
     case safecrowd::domain::StairEntryDirection::South:
         return {
-            .start = {.x = center.x() - openingHalfWidth, .y = center.y()},
-            .end = {.x = center.x() + openingHalfWidth, .y = center.y()},
+            .start = {.x = rectangle.right(), .y = south},
+            .end = {.x = rectangle.left(), .y = south},
         };
     case safecrowd::domain::StairEntryDirection::East:
+        return {
+            .start = {.x = rectangle.right(), .y = north},
+            .end = {.x = rectangle.right(), .y = south},
+        };
     case safecrowd::domain::StairEntryDirection::West:
         return {
-            .start = {.x = center.x(), .y = center.y() - openingHalfWidth},
-            .end = {.x = center.x(), .y = center.y() + openingHalfWidth},
+            .start = {.x = rectangle.left(), .y = south},
+            .end = {.x = rectangle.left(), .y = north},
         };
     case safecrowd::domain::StairEntryDirection::Unspecified:
         return centerSpanForRectangle(rectangle);
@@ -1730,6 +1738,11 @@ QIcon makeToolIcon(const QString& glyph, const QColor& color, bool filled = fals
     } else if (glyph == "add") {
         painter.drawLine(QPointF(12, 5), QPointF(12, 19));
         painter.drawLine(QPointF(5, 12), QPointF(19, 12));
+    } else if (glyph == "grid") {
+        for (int coordinate = 6; coordinate <= 18; coordinate += 6) {
+            painter.drawLine(QPointF(coordinate, 5), QPointF(coordinate, 19));
+            painter.drawLine(QPointF(5, coordinate), QPointF(19, coordinate));
+        }
     }
 
     return QIcon(pixmap);
@@ -2480,7 +2493,9 @@ void LayoutPreviewWidget::paintEvent(QPaintEvent* event) {
     const QRectF viewport = previewViewport(rect());
     const LayoutTransform transform(*bounds, viewport, camera_.zoom(), camera_.panOffset());
 
-    drawLayoutCanvasGrid(painter, viewport);
+    if (gridSnapEnabled_) {
+        drawLayoutCanvasGrid(painter, viewport, transform, gridSpacingMeters_);
+    }
 
     if (importResult_.layout.has_value()) {
         drawFacilityLayoutCanvas(painter, *importResult_.layout, transform, currentFloorId().toStdString());
@@ -3583,12 +3598,16 @@ safecrowd::domain::Point2D LayoutPreviewWidget::selectionMoveDeltaForPosition(co
         return rawDelta;
     }
 
+    LayoutSnapOptions snapOptions;
+    snapOptions.snapGrid = gridSnapEnabled_;
+    snapOptions.gridSpacingMeters = gridSpacingMeters_;
     const auto snapped = snapLayoutSelectionDrag(
         selectionMoveSnapTargetLayout_,
         currentFloorId().toStdString(),
         selectionMoveAnchors_,
         rawDelta,
-        transform);
+        transform,
+        snapOptions);
     return snapped.delta;
 }
 
@@ -3844,7 +3863,11 @@ QPointF LayoutPreviewWidget::snapDragWorldPoint(
         currentFloorId().toStdString(),
         {.x = anchorWorldPoint.x(), .y = anchorWorldPoint.y()},
         {.x = worldPoint.x(), .y = worldPoint.y()},
-        transform);
+        transform,
+        LayoutSnapOptions{
+            .snapGrid = gridSnapEnabled_,
+            .gridSpacingMeters = gridSpacingMeters_,
+        });
     return QPointF(snapped.point.x, snapped.point.y);
 }
 
@@ -3857,7 +3880,11 @@ QPointF LayoutPreviewWidget::snapWorldPoint(const QPointF& worldPoint, const Lay
         *importResult_.layout,
         currentFloorId().toStdString(),
         {.x = worldPoint.x(), .y = worldPoint.y()},
-        transform);
+        transform,
+        LayoutSnapOptions{
+            .snapGrid = gridSnapEnabled_,
+            .gridSpacingMeters = gridSpacingMeters_,
+        });
     return QPointF(snapped.point.x, snapped.point.y);
 }
 
@@ -4363,6 +4390,17 @@ void LayoutPreviewWidget::setupToolbars() {
     topLayout->addWidget(floorComboBox_);
     addFloorButton_ = makeButton(topToolbar_, topLayout, makeToolIcon("add", QColor("#1f5fae")), "Add Floor");
     addFloorButton_->setCheckable(false);
+    gridToolButton_ = makeButton(topToolbar_, topLayout, makeToolIcon("grid", QColor("#1f5fae")), "Grid snap");
+    gridToolButton_->setChecked(gridSnapEnabled_);
+    gridSpacingComboBox_ = new QComboBox(topToolbar_);
+    gridSpacingComboBox_->setMinimumWidth(86);
+    gridSpacingComboBox_->setToolTip("Grid spacing");
+    gridSpacingComboBox_->addItem("0.1 m", 0.1);
+    gridSpacingComboBox_->addItem("0.5 m", 0.5);
+    gridSpacingComboBox_->addItem("1.0 m", 1.0);
+    gridSpacingComboBox_->setCurrentIndex(1);
+    gridSpacingComboBox_->setEnabled(gridSnapEnabled_);
+    topLayout->addWidget(gridSpacingComboBox_);
     topLayout->addStretch(1);
 
     roomToolButton_ = makeButton(sideToolbar_, sideLayout, makeToolIcon("room", QColor("#2f5d8a")), "Draw Room");
@@ -4390,6 +4428,20 @@ void LayoutPreviewWidget::setupToolbars() {
         update();
     });
     connect(addFloorButton_, &QToolButton::clicked, this, [this]() { addFloor(); });
+    connect(gridToolButton_, &QToolButton::toggled, this, [this](bool checked) {
+        gridSnapEnabled_ = checked;
+        if (gridSpacingComboBox_ != nullptr) {
+            gridSpacingComboBox_->setEnabled(checked);
+        }
+        update();
+    });
+    connect(gridSpacingComboBox_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int index) {
+        if (index < 0 || gridSpacingComboBox_ == nullptr) {
+            return;
+        }
+        gridSpacingMeters_ = gridSpacingComboBox_->itemData(index).toDouble();
+        update();
+    });
     connect(roomToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::DrawRoom); });
     connect(exitToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::DrawExit); });
     connect(wallToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::DrawWall); });
