@@ -367,4 +367,37 @@ LayoutSnapResult snapLayoutDragPoint(
     return result;
 }
 
+LayoutDragSnapResult snapLayoutSelectionDrag(
+    const safecrowd::domain::FacilityLayout2D& staticLayout,
+    const std::string& floorId,
+    const std::vector<safecrowd::domain::Point2D>& anchors,
+    const safecrowd::domain::Point2D& rawDelta,
+    const LayoutCanvasTransform& transform,
+    const LayoutSnapOptions& options) {
+    LayoutDragSnapResult result{.delta = rawDelta};
+    if (anchors.empty()) {
+        return result;
+    }
+
+    double bestDistance = options.tolerancePixels;
+    for (const auto& anchor : anchors) {
+        const auto moved = anchor + rawDelta;
+        const auto snapped = snapLayoutDragPoint(staticLayout, floorId, anchor, moved, transform, options);
+        if (!snapped.snapped) {
+            continue;
+        }
+
+        const auto distance = screenDistance(transform, moved, snapped.point);
+        if (distance <= bestDistance) {
+            bestDistance = distance;
+            result = {
+                .delta = snapped.point - anchor,
+                .snapped = true,
+            };
+        }
+    }
+
+    return result;
+}
+
 }  // namespace safecrowd::application

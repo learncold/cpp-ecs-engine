@@ -56,6 +56,10 @@ public:
     void setImportResult(safecrowd::domain::ImportResult importResult);
     void setSelectionChangedHandler(std::function<void(const PreviewSelection&)> handler);
     void setLayoutEditedHandler(std::function<void(const safecrowd::domain::FacilityLayout2D&)> handler);
+    bool updateElementVertices(
+        PreviewSelectionKind kind,
+        const QString& elementId,
+        const std::vector<safecrowd::domain::Point2D>& vertices);
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -103,6 +107,16 @@ private:
     bool hasSelection() const;
     bool isSelected(PreviewSelectionKind kind, const QString& id) const;
     void pruneSelection();
+    void beginSelectionMove(const QPointF& position, const LayoutCanvasTransform& transform, const LayoutCanvasBounds& bounds);
+    void updateSelectionMove(const QPointF& position);
+    void finishSelectionMove(const QPointF& position);
+    void applySelectedTranslation(double dx, double dy);
+    safecrowd::domain::Point2D selectionMoveDeltaForPosition(const QPointF& position) const;
+    safecrowd::domain::FacilityLayout2D selectionMoveSnapTargetLayout(const safecrowd::domain::FacilityLayout2D& layout) const;
+    std::vector<safecrowd::domain::Point2D> selectionMoveAnchors(const safecrowd::domain::FacilityLayout2D& layout) const;
+    QStringList splitZoneBoundaryBarriersForSelection(safecrowd::domain::FacilityLayout2D& layout) const;
+    QStringList zoneBoundaryBarrierIdsForSelection(const safecrowd::domain::FacilityLayout2D& layout) const;
+    void updateHoverCursor(const QPointF& position);
     QPointF snapDragWorldPoint(
         const QPointF& anchorWorldPoint,
         const QPointF& worldPoint,
@@ -140,10 +154,23 @@ private:
     QPointF draftCurrentWorld_{};
     QPointF selectionDragStart_{};
     QPointF selectionDragCurrent_{};
+    QPointF selectionMoveStart_{};
+    QPointF selectionMoveCurrent_{};
+    QPointF selectionMoveStartWorld_{};
+    LayoutCanvasBounds selectionMoveBounds_{};
+    QRectF selectionMoveViewport_{};
+    double selectionMoveZoom_{1.0};
+    QPointF selectionMovePanOffset_{};
+    safecrowd::domain::FacilityLayout2D selectionMoveOriginalLayout_{};
+    safecrowd::domain::FacilityLayout2D selectionMoveBaseLayout_{};
+    safecrowd::domain::FacilityLayout2D selectionMoveSnapTargetLayout_{};
+    std::vector<safecrowd::domain::Point2D> selectionMoveAnchors_{};
+    QStringList selectionMoveAttachedBarrierIds_{};
     std::vector<QPointF> polygonDraftPoints_{};
     LayoutCanvasCamera camera_{};
     bool drafting_{false};
     bool selectionDragging_{false};
+    bool selectionMoveDragging_{false};
     ToolMode toolMode_{ToolMode::Select};
     ShapeDrawMode shapeDrawMode_{ShapeDrawMode::Rectangle};
     bool roomAutoWallsEnabled_{true};

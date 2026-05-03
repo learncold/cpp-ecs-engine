@@ -15,6 +15,7 @@
 #include <QDoubleSpinBox>
 #include <QEvent>
 #include <QFrame>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
@@ -882,6 +883,197 @@ std::vector<safecrowd::domain::Polygon2D> polygonsFromFillPath(const QPainterPat
 
 bool nearlyEqual(double a, double b, double epsilon = kGeometryEpsilon) {
     return std::abs(a - b) <= epsilon;
+}
+
+void translatePoint(safecrowd::domain::Point2D& point, double dx, double dy) {
+    point.x += dx;
+    point.y += dy;
+}
+
+void translatePolygon(safecrowd::domain::Polygon2D& polygon, double dx, double dy) {
+    for (auto& point : polygon.outline) {
+        translatePoint(point, dx, dy);
+    }
+    for (auto& hole : polygon.holes) {
+        for (auto& point : hole) {
+            translatePoint(point, dx, dy);
+        }
+    }
+}
+
+void translatePolyline(safecrowd::domain::Polyline2D& polyline, double dx, double dy) {
+    for (auto& point : polyline.vertices) {
+        translatePoint(point, dx, dy);
+    }
+}
+
+void translateLine(safecrowd::domain::LineSegment2D& line, double dx, double dy) {
+    translatePoint(line.start, dx, dy);
+    translatePoint(line.end, dx, dy);
+}
+
+bool segmentMatchesRingEdge(
+    const safecrowd::domain::Point2D& segmentStart,
+    const safecrowd::domain::Point2D& segmentEnd,
+    const std::vector<safecrowd::domain::Point2D>& ring) {
+    if (ring.size() < 2) {
+        return false;
+    }
+
+    const bool segmentVertical = nearlyEqual(segmentStart.x, segmentEnd.x);
+    const bool segmentHorizontal = nearlyEqual(segmentStart.y, segmentEnd.y);
+    if (!segmentVertical && !segmentHorizontal) {
+        return false;
+    }
+
+    for (std::size_t index = 0; index < ring.size(); ++index) {
+        const auto& edgeStart = ring[index];
+        const auto& edgeEnd = ring[(index + 1) % ring.size()];
+        const bool edgeVertical = nearlyEqual(edgeStart.x, edgeEnd.x);
+        const bool edgeHorizontal = nearlyEqual(edgeStart.y, edgeEnd.y);
+        if (segmentVertical && edgeVertical && nearlyEqual(segmentStart.x, edgeStart.x)) {
+            const auto segmentMin = std::min(segmentStart.y, segmentEnd.y);
+            const auto segmentMax = std::max(segmentStart.y, segmentEnd.y);
+            const auto edgeMin = std::min(edgeStart.y, edgeEnd.y);
+            const auto edgeMax = std::max(edgeStart.y, edgeEnd.y);
+            if (nearlyEqual(segmentMin, edgeMin) && nearlyEqual(segmentMax, edgeMax)) {
+                return true;
+            }
+        } else if (segmentHorizontal && edgeHorizontal && nearlyEqual(segmentStart.y, edgeStart.y)) {
+            const auto segmentMin = std::min(segmentStart.x, segmentEnd.x);
+            const auto segmentMax = std::max(segmentStart.x, segmentEnd.x);
+            const auto edgeMin = std::min(edgeStart.x, edgeEnd.x);
+            const auto edgeMax = std::max(edgeStart.x, edgeEnd.x);
+            if (nearlyEqual(segmentMin, edgeMin) && nearlyEqual(segmentMax, edgeMax)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool barrierMatchesZoneBoundary(
+    const safecrowd::domain::Barrier2D& barrier,
+    const safecrowd::domain::Zone2D& zone) {
+    if (barrier.geometry.closed || barrier.geometry.vertices.size() != 2 || !matchesFloor(barrier.floorId, QString::fromStdString(zone.floorId))) {
+        return false;
+    }
+
+    const auto& start = barrier.geometry.vertices[0];
+    const auto& end = barrier.geometry.vertices[1];
+    if (segmentMatchesRingEdge(start, end, zone.area.outline)) {
+        return true;
+    }
+    return std::any_of(zone.area.holes.begin(), zone.area.holes.end(), [&](const auto& hole) {
+        return segmentMatchesRingEdge(start, end, hole);
+    });
+}
+
+struct WallInterval {
+    safecrowd::domain::Barrier2D barrier{};
+    double start{0.0};
+    double end{0.0};
+    bool vertical{false};
+    double fixedCoordinate{0.0};
+};
+
+std::vector<WallInterval> normalizeWallIntervals(
+    std::vector<WallInterval> intervals,
+    const QStringList& preferredIds) {
+    std::sort(intervals.begin(), intervals.end(), [](const auto& lhs, const auto& rhs) {
+        if (lhs.barrier.floorId != rhs.barrier.floorId) {
+            return lhs.barrier.floorId < rhs.barrier.floorId;
+        }
+        if (!nearlyEqual(lhs.fixedCoordinate, rhs.fixedCoordinate)) {
+            return lhs.fixedCoordinate < rhs.fixedCoordinate;
+        }
+        if (lhs.vertical != rhs.vertical) {
+            return lhs.vertical;
+        }
+        if (!nearlyEqual(lhs.start, rhs.start)) {
+            return lhs.start < rhs.start;
+        }
+        return lhs.end < rhs.end;
+    });
+
+    std::vector<WallInterval> merged;
+    for (auto interval : intervals) {
+        if (interval.end - interval.start <= kGeometryEpsilon) {
+            continue;
+        }
+
+        if (merged.empty()
+            || merged.back().barrier.floorId != interval.barrier.floorId
+            || merged.back().vertical != interval.vertical
+            || !nearlyEqual(merged.back().fixedCoordinate, interval.fixedCoordinate)
+            || interval.start > merged.back().end + kGeometryEpsilon) {
+            merged.push_back(std::move(interval));
+            continue;
+        }
+
+        auto& current = merged.back();
+        const auto currentId = QString::fromStdString(current.barrier.id);
+        const auto intervalId = QString::fromStdString(interval.barrier.id);
+        if (!preferredIds.contains(currentId) && preferredIds.contains(intervalId)) {
+            current.barrier.id = interval.barrier.id;
+            current.barrier.provenance = interval.barrier.provenance;
+        }
+        current.end = std::max(current.end, interval.end);
+        current.barrier.blocksMovement = current.barrier.blocksMovement || interval.barrier.blocksMovement;
+    }
+
+    return merged;
+}
+
+void normalizeOpenWallBarriers(safecrowd::domain::FacilityLayout2D& layout, const QStringList& preferredIds = {}) {
+    std::vector<safecrowd::domain::Barrier2D> unchanged;
+    std::vector<WallInterval> intervals;
+    unchanged.reserve(layout.barriers.size());
+    intervals.reserve(layout.barriers.size());
+
+    for (auto barrier : layout.barriers) {
+        if (barrier.geometry.closed || barrier.geometry.vertices.size() != 2) {
+            unchanged.push_back(std::move(barrier));
+            continue;
+        }
+
+        const auto& a = barrier.geometry.vertices[0];
+        const auto& b = barrier.geometry.vertices[1];
+        const bool vertical = nearlyEqual(a.x, b.x);
+        const bool horizontal = nearlyEqual(a.y, b.y);
+        if (!vertical && !horizontal) {
+            unchanged.push_back(std::move(barrier));
+            continue;
+        }
+
+        intervals.push_back({
+            .barrier = std::move(barrier),
+            .start = vertical ? std::min(a.y, b.y) : std::min(a.x, b.x),
+            .end = vertical ? std::max(a.y, b.y) : std::max(a.x, b.x),
+            .vertical = vertical,
+            .fixedCoordinate = vertical ? a.x : a.y,
+        });
+    }
+
+    std::vector<safecrowd::domain::Barrier2D> normalized = std::move(unchanged);
+    for (auto& interval : normalizeWallIntervals(std::move(intervals), preferredIds)) {
+        if (interval.vertical) {
+            interval.barrier.geometry.vertices = {
+                {.x = interval.fixedCoordinate, .y = interval.start},
+                {.x = interval.fixedCoordinate, .y = interval.end},
+            };
+        } else {
+            interval.barrier.geometry.vertices = {
+                {.x = interval.start, .y = interval.fixedCoordinate},
+                {.x = interval.end, .y = interval.fixedCoordinate},
+            };
+        }
+        interval.barrier.geometry.closed = false;
+        normalized.push_back(std::move(interval.barrier));
+    }
+
+    layout.barriers = std::move(normalized);
 }
 
 std::vector<std::pair<double, double>> subtractInterval(
@@ -1911,6 +2103,73 @@ void LayoutPreviewWidget::setLayoutEditedHandler(std::function<void(const safecr
     layoutEditedHandler_ = std::move(handler);
 }
 
+bool LayoutPreviewWidget::updateElementVertices(
+    PreviewSelectionKind kind,
+    const QString& elementId,
+    const std::vector<safecrowd::domain::Point2D>& vertices) {
+    if (!importResult_.layout.has_value() || elementId.isEmpty()) {
+        return false;
+    }
+
+    bool changed = false;
+    auto& layout = *importResult_.layout;
+
+    switch (kind) {
+    case PreviewSelectionKind::Zone:
+        if (vertices.size() < 3) {
+            return false;
+        }
+        for (auto& zone : layout.zones) {
+            if (QString::fromStdString(zone.id) == elementId) {
+                zone.area.outline = vertices;
+                changed = true;
+                break;
+            }
+        }
+        break;
+    case PreviewSelectionKind::Connection:
+        if (vertices.size() != 2) {
+            return false;
+        }
+        for (auto& connection : layout.connections) {
+            if (QString::fromStdString(connection.id) == elementId) {
+                connection.centerSpan = {.start = vertices[0], .end = vertices[1]};
+                changed = true;
+                break;
+            }
+        }
+        break;
+    case PreviewSelectionKind::Barrier:
+        if (vertices.size() < 2) {
+            return false;
+        }
+        for (auto& barrier : layout.barriers) {
+            if (QString::fromStdString(barrier.id) == elementId) {
+                barrier.geometry.vertices = vertices;
+                changed = true;
+                break;
+            }
+        }
+        if (changed) {
+            normalizeOpenWallBarriers(layout, QStringList{elementId});
+            pruneSelection();
+        }
+        break;
+    case PreviewSelectionKind::None:
+    case PreviewSelectionKind::Multiple:
+        return false;
+    }
+
+    if (!changed) {
+        return false;
+    }
+
+    emitCurrentSelection();
+    notifyLayoutEdited();
+    update();
+    return true;
+}
+
 bool LayoutPreviewWidget::eventFilter(QObject* watched, QEvent* event) {
     (void)watched;
 
@@ -1966,7 +2225,14 @@ void LayoutPreviewWidget::mouseDoubleClickEvent(QMouseEvent* event) {
 }
 
 void LayoutPreviewWidget::mouseMoveEvent(QMouseEvent* event) {
+    if (selectionMoveDragging_) {
+        updateSelectionMove(event->position());
+        event->accept();
+        return;
+    }
+
     if (!camera_.panning() && !drafting_ && !selectionDragging_) {
+        updateHoverCursor(event->position());
         QWidget::mouseMoveEvent(event);
         return;
     }
@@ -2097,6 +2363,23 @@ void LayoutPreviewWidget::mousePressEvent(QMouseEvent* event) {
             return;
         }
 
+        if (importResult_.layout.has_value() && hasSelection()) {
+            const LayoutTransform transform(*bounds, previewViewport(rect()), camera_.zoom(), camera_.panOffset());
+            const bool clickedCurrentSelection = selectedElementContainsContextPoint(
+                *importResult_.layout,
+                event->position(),
+                transform,
+                currentFloorId(),
+                selectedZoneIds_,
+                selectedConnectionIds_,
+                selectedBarrierIds_);
+            if (clickedCurrentSelection) {
+                beginSelectionMove(event->position(), transform, *bounds);
+                event->accept();
+                return;
+            }
+        }
+
         selectionDragging_ = true;
         selectionDragStart_ = event->position();
         selectionDragCurrent_ = selectionDragStart_;
@@ -2110,6 +2393,12 @@ void LayoutPreviewWidget::mousePressEvent(QMouseEvent* event) {
 
 void LayoutPreviewWidget::mouseReleaseEvent(QMouseEvent* event) {
     if (camera_.finishPan(event)) {
+        return;
+    }
+
+    if (selectionMoveDragging_ && event->button() == Qt::LeftButton) {
+        finishSelectionMove(event->position());
+        event->accept();
         return;
     }
 
@@ -2431,6 +2720,9 @@ void LayoutPreviewWidget::clearSelection() {
     selectedBarrierIds_.clear();
     focusedTargetId_.clear();
     selectionDragging_ = false;
+    selectionMoveDragging_ = false;
+    selectionMoveAttachedBarrierIds_.clear();
+    selectionMoveAnchors_.clear();
     emitCurrentSelection();
     update();
 }
@@ -2614,6 +2906,7 @@ void LayoutPreviewWidget::createWallSegment(const QPointF& startWorld, const QPo
         },
         .blocksMovement = true,
     });
+    normalizeOpenWallBarriers(layout, QStringList{barrierId});
 
     selectedBarrierId_ = barrierId;
     selectedBarrierIds_ = QStringList{barrierId};
@@ -3180,6 +3473,361 @@ void LayoutPreviewWidget::finishPolygonDraft() {
     }
 }
 
+void LayoutPreviewWidget::beginSelectionMove(
+    const QPointF& position,
+    const LayoutCanvasTransform& transform,
+    const LayoutCanvasBounds& bounds) {
+    if (!importResult_.layout.has_value() || !hasSelection()) {
+        return;
+    }
+
+    selectionMoveDragging_ = true;
+    selectionMoveStart_ = position;
+    selectionMoveCurrent_ = position;
+    const auto world = transform.unmap(position);
+    selectionMoveStartWorld_ = QPointF(world.x, world.y);
+    selectionMoveBounds_ = bounds;
+    selectionMoveViewport_ = previewViewport(rect());
+    selectionMoveZoom_ = camera_.zoom();
+    selectionMovePanOffset_ = camera_.panOffset();
+    selectionMoveOriginalLayout_ = *importResult_.layout;
+    selectionMoveBaseLayout_ = selectionMoveOriginalLayout_;
+    selectionMoveAttachedBarrierIds_ = splitZoneBoundaryBarriersForSelection(selectionMoveBaseLayout_);
+    const auto exactBoundaryBarrierIds = zoneBoundaryBarrierIdsForSelection(selectionMoveBaseLayout_);
+    for (const auto& barrierId : exactBoundaryBarrierIds) {
+        if (!selectionMoveAttachedBarrierIds_.contains(barrierId)) {
+            selectionMoveAttachedBarrierIds_.append(barrierId);
+        }
+    }
+    selectionMoveAnchors_ = selectionMoveAnchors(selectionMoveBaseLayout_);
+    selectionMoveSnapTargetLayout_ = selectionMoveSnapTargetLayout(selectionMoveBaseLayout_);
+    *importResult_.layout = selectionMoveBaseLayout_;
+    setCursor(Qt::SizeAllCursor);
+}
+
+void LayoutPreviewWidget::updateSelectionMove(const QPointF& position) {
+    if (!selectionMoveDragging_ || !importResult_.layout.has_value()) {
+        return;
+    }
+
+    selectionMoveCurrent_ = position;
+    const auto delta = selectionMoveDeltaForPosition(position);
+    *importResult_.layout = selectionMoveBaseLayout_;
+    applySelectedTranslation(delta.x, delta.y);
+    update();
+}
+
+void LayoutPreviewWidget::finishSelectionMove(const QPointF& position) {
+    if (!selectionMoveDragging_ || !importResult_.layout.has_value()) {
+        return;
+    }
+
+    updateSelectionMove(position);
+    selectionMoveDragging_ = false;
+    selectionMoveAttachedBarrierIds_.clear();
+    selectionMoveAnchors_.clear();
+
+    const auto dragDistance = distanceBetweenScreenPoints(selectionMoveStart_, selectionMoveCurrent_);
+    if (dragDistance <= kSelectionDragThresholdPixels) {
+        *importResult_.layout = selectionMoveOriginalLayout_;
+        emitCurrentSelection();
+        updateHoverCursor(position);
+        update();
+        return;
+    }
+
+    normalizeOpenWallBarriers(*importResult_.layout, selectedBarrierIds_);
+    pruneSelection();
+    emitCurrentSelection();
+    notifyLayoutEdited();
+    updateHoverCursor(position);
+    update();
+}
+
+void LayoutPreviewWidget::applySelectedTranslation(double dx, double dy) {
+    if (!importResult_.layout.has_value()) {
+        return;
+    }
+
+    auto& layout = *importResult_.layout;
+    for (auto& zone : layout.zones) {
+        if (selectedZoneIds_.contains(QString::fromStdString(zone.id))) {
+            translatePolygon(zone.area, dx, dy);
+        }
+    }
+    for (auto& connection : layout.connections) {
+        if (selectedConnectionIds_.contains(QString::fromStdString(connection.id))) {
+            translateLine(connection.centerSpan, dx, dy);
+        }
+    }
+    for (auto& barrier : layout.barriers) {
+        const auto barrierId = QString::fromStdString(barrier.id);
+        if (selectedBarrierIds_.contains(barrierId) || selectionMoveAttachedBarrierIds_.contains(barrierId)) {
+            translatePolyline(barrier.geometry, dx, dy);
+        }
+    }
+}
+
+safecrowd::domain::Point2D LayoutPreviewWidget::selectionMoveDeltaForPosition(const QPointF& position) const {
+    const LayoutTransform transform(selectionMoveBounds_, selectionMoveViewport_, selectionMoveZoom_, selectionMovePanOffset_);
+    const auto world = transform.unmap(position);
+    const safecrowd::domain::Point2D rawDelta{
+        .x = world.x - selectionMoveStartWorld_.x(),
+        .y = world.y - selectionMoveStartWorld_.y(),
+    };
+
+    if ((QGuiApplication::keyboardModifiers() & Qt::AltModifier) || selectionMoveAnchors_.empty()) {
+        return rawDelta;
+    }
+
+    const auto snapped = snapLayoutSelectionDrag(
+        selectionMoveSnapTargetLayout_,
+        currentFloorId().toStdString(),
+        selectionMoveAnchors_,
+        rawDelta,
+        transform);
+    return snapped.delta;
+}
+
+safecrowd::domain::FacilityLayout2D LayoutPreviewWidget::selectionMoveSnapTargetLayout(
+    const safecrowd::domain::FacilityLayout2D& layout) const {
+    auto snapTarget = layout;
+
+    auto& zones = snapTarget.zones;
+    zones.erase(std::remove_if(zones.begin(), zones.end(), [&](const auto& zone) {
+        return selectedZoneIds_.contains(QString::fromStdString(zone.id));
+    }), zones.end());
+
+    auto& connections = snapTarget.connections;
+    connections.erase(std::remove_if(connections.begin(), connections.end(), [&](const auto& connection) {
+        return selectedConnectionIds_.contains(QString::fromStdString(connection.id));
+    }), connections.end());
+
+    auto& barriers = snapTarget.barriers;
+    barriers.erase(std::remove_if(barriers.begin(), barriers.end(), [&](const auto& barrier) {
+        const auto barrierId = QString::fromStdString(barrier.id);
+        return selectedBarrierIds_.contains(barrierId) || selectionMoveAttachedBarrierIds_.contains(barrierId);
+    }), barriers.end());
+
+    return snapTarget;
+}
+
+std::vector<safecrowd::domain::Point2D> LayoutPreviewWidget::selectionMoveAnchors(
+    const safecrowd::domain::FacilityLayout2D& layout) const {
+    std::vector<safecrowd::domain::Point2D> anchors;
+
+    for (const auto& zone : layout.zones) {
+        if (!selectedZoneIds_.contains(QString::fromStdString(zone.id))) {
+            continue;
+        }
+        anchors.insert(anchors.end(), zone.area.outline.begin(), zone.area.outline.end());
+        for (const auto& hole : zone.area.holes) {
+            anchors.insert(anchors.end(), hole.begin(), hole.end());
+        }
+    }
+
+    for (const auto& connection : layout.connections) {
+        if (!selectedConnectionIds_.contains(QString::fromStdString(connection.id))) {
+            continue;
+        }
+        anchors.push_back(connection.centerSpan.start);
+        anchors.push_back(connection.centerSpan.end);
+    }
+
+    for (const auto& barrier : layout.barriers) {
+        const auto barrierId = QString::fromStdString(barrier.id);
+        if (!selectedBarrierIds_.contains(barrierId) && !selectionMoveAttachedBarrierIds_.contains(barrierId)) {
+            continue;
+        }
+        anchors.insert(anchors.end(), barrier.geometry.vertices.begin(), barrier.geometry.vertices.end());
+    }
+
+    return anchors;
+}
+
+QStringList LayoutPreviewWidget::splitZoneBoundaryBarriersForSelection(safecrowd::domain::FacilityLayout2D& layout) const {
+    struct BoundaryEdge {
+        std::string floorId{};
+        bool vertical{false};
+        double fixedCoordinate{0.0};
+        double start{0.0};
+        double end{0.0};
+    };
+
+    std::vector<BoundaryEdge> edges;
+    const auto appendRingEdges = [&](const std::vector<safecrowd::domain::Point2D>& ring, const std::string& floorId) {
+        if (ring.size() < 2) {
+            return;
+        }
+        for (std::size_t index = 0; index < ring.size(); ++index) {
+            const auto& a = ring[index];
+            const auto& b = ring[(index + 1) % ring.size()];
+            const bool vertical = nearlyEqual(a.x, b.x);
+            const bool horizontal = nearlyEqual(a.y, b.y);
+            if (!vertical && !horizontal) {
+                continue;
+            }
+            edges.push_back({
+                .floorId = floorId,
+                .vertical = vertical,
+                .fixedCoordinate = vertical ? a.x : a.y,
+                .start = vertical ? std::min(a.y, b.y) : std::min(a.x, b.x),
+                .end = vertical ? std::max(a.y, b.y) : std::max(a.x, b.x),
+            });
+        }
+    };
+
+    for (const auto& zone : layout.zones) {
+        if (!selectedZoneIds_.contains(QString::fromStdString(zone.id))) {
+            continue;
+        }
+        appendRingEdges(zone.area.outline, zone.floorId);
+        for (const auto& hole : zone.area.holes) {
+            appendRingEdges(hole, zone.floorId);
+        }
+    }
+
+    QStringList attachedBarrierIds;
+    if (edges.empty()) {
+        return attachedBarrierIds;
+    }
+
+    for (std::size_t reverseIndex = layout.barriers.size(); reverseIndex > 0; --reverseIndex) {
+        const auto barrierIndex = reverseIndex - 1;
+        const auto barrier = layout.barriers[barrierIndex];
+        const auto barrierId = QString::fromStdString(barrier.id);
+        if (selectedBarrierIds_.contains(barrierId)
+            || barrier.geometry.closed
+            || barrier.geometry.vertices.size() != 2) {
+            continue;
+        }
+
+        const auto& a = barrier.geometry.vertices[0];
+        const auto& b = barrier.geometry.vertices[1];
+        const bool vertical = nearlyEqual(a.x, b.x);
+        const bool horizontal = nearlyEqual(a.y, b.y);
+        if (!vertical && !horizontal) {
+            continue;
+        }
+
+        const auto fixedCoordinate = vertical ? a.x : a.y;
+        const auto barrierStart = vertical ? std::min(a.y, b.y) : std::min(a.x, b.x);
+        const auto barrierEnd = vertical ? std::max(a.y, b.y) : std::max(a.x, b.x);
+        std::vector<double> cuts{barrierStart, barrierEnd};
+        std::vector<std::pair<double, double>> attachedIntervals;
+
+        for (const auto& edge : edges) {
+            if (edge.vertical != vertical
+                || !nearlyEqual(edge.fixedCoordinate, fixedCoordinate)
+                || !matchesFloor(barrier.floorId, QString::fromStdString(edge.floorId))) {
+                continue;
+            }
+
+            const auto overlapStart = std::max(barrierStart, edge.start);
+            const auto overlapEnd = std::min(barrierEnd, edge.end);
+            if (overlapEnd <= overlapStart + kGeometryEpsilon) {
+                continue;
+            }
+            cuts.push_back(overlapStart);
+            cuts.push_back(overlapEnd);
+            attachedIntervals.emplace_back(overlapStart, overlapEnd);
+        }
+
+        if (attachedIntervals.empty()) {
+            continue;
+        }
+
+        std::sort(cuts.begin(), cuts.end());
+        cuts.erase(std::unique(cuts.begin(), cuts.end(), [](double lhs, double rhs) {
+            return nearlyEqual(lhs, rhs);
+        }), cuts.end());
+
+        layout.barriers.erase(layout.barriers.begin() + static_cast<std::ptrdiff_t>(barrierIndex));
+        auto insertAt = layout.barriers.begin() + static_cast<std::ptrdiff_t>(barrierIndex);
+        bool originalIdUsed = false;
+        for (std::size_t cutIndex = 1; cutIndex < cuts.size(); ++cutIndex) {
+            const auto start = cuts[cutIndex - 1];
+            const auto end = cuts[cutIndex];
+            if (end <= start + kGeometryEpsilon) {
+                continue;
+            }
+
+            const auto middle = (start + end) * 0.5;
+            const bool attached = std::any_of(attachedIntervals.begin(), attachedIntervals.end(), [&](const auto& interval) {
+                return middle >= interval.first - kGeometryEpsilon && middle <= interval.second + kGeometryEpsilon;
+            });
+
+            auto segment = barrier;
+            segment.id = (!originalIdUsed && attached) ? barrier.id : nextWallId(layout).toStdString();
+            originalIdUsed = originalIdUsed || attached;
+            segment.geometry.vertices = vertical
+                ? std::vector<safecrowd::domain::Point2D>{{.x = fixedCoordinate, .y = start}, {.x = fixedCoordinate, .y = end}}
+                : std::vector<safecrowd::domain::Point2D>{{.x = start, .y = fixedCoordinate}, {.x = end, .y = fixedCoordinate}};
+            segment.geometry.closed = false;
+            if (attached) {
+                attachedBarrierIds.append(QString::fromStdString(segment.id));
+            }
+            insertAt = layout.barriers.insert(insertAt, std::move(segment));
+            ++insertAt;
+        }
+    }
+
+    attachedBarrierIds.removeDuplicates();
+    return attachedBarrierIds;
+}
+
+QStringList LayoutPreviewWidget::zoneBoundaryBarrierIdsForSelection(const safecrowd::domain::FacilityLayout2D& layout) const {
+    QStringList barrierIds;
+    if (selectedZoneIds_.isEmpty()) {
+        return barrierIds;
+    }
+
+    for (const auto& barrier : layout.barriers) {
+        const auto barrierId = QString::fromStdString(barrier.id);
+        if (selectedBarrierIds_.contains(barrierId)) {
+            continue;
+        }
+
+        const bool matchesSelectedZone = std::any_of(layout.zones.begin(), layout.zones.end(), [&](const auto& zone) {
+            return selectedZoneIds_.contains(QString::fromStdString(zone.id))
+                && barrierMatchesZoneBoundary(barrier, zone);
+        });
+        if (matchesSelectedZone) {
+            barrierIds.append(barrierId);
+        }
+    }
+
+    return barrierIds;
+}
+
+void LayoutPreviewWidget::updateHoverCursor(const QPointF& position) {
+    if (toolMode_ != ToolMode::Select || selectionMoveDragging_ || selectionDragging_ || drafting_ || !hasSelection()) {
+        unsetCursor();
+        return;
+    }
+
+    const auto bounds = collectBounds(importResult_, currentFloorId());
+    if (!bounds.has_value() || !importResult_.layout.has_value()) {
+        unsetCursor();
+        return;
+    }
+
+    const LayoutTransform transform(*bounds, previewViewport(rect()), camera_.zoom(), camera_.panOffset());
+    const bool overSelection = selectedElementContainsContextPoint(
+        *importResult_.layout,
+        position,
+        transform,
+        currentFloorId(),
+        selectedZoneIds_,
+        selectedConnectionIds_,
+        selectedBarrierIds_);
+    if (overSelection) {
+        setCursor(Qt::SizeAllCursor);
+    } else {
+        unsetCursor();
+    }
+}
+
 QPointF LayoutPreviewWidget::snapDragWorldPoint(
     const QPointF& anchorWorldPoint,
     const QPointF& worldPoint,
@@ -3571,6 +4219,9 @@ void LayoutPreviewWidget::setToolMode(ToolMode mode) {
         polygonDraftPoints_.clear();
     }
     toolMode_ = mode;
+    if (toolMode_ != ToolMode::Select) {
+        unsetCursor();
+    }
     if (selectToolButton_ != nullptr) {
         selectToolButton_->setChecked(toolMode_ == ToolMode::Select);
     }

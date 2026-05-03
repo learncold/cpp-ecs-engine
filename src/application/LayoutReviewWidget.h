@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <optional>
 #include <vector>
 
 #include <QSet>
@@ -12,6 +13,7 @@
 
 class QLabel;
 class QPushButton;
+class QVBoxLayout;
 
 namespace safecrowd::application {
 
@@ -46,6 +48,9 @@ private:
     void showDefaultInspector();
     void showIssueInspector(const safecrowd::domain::ImportIssue& issue);
     void showSelectionInspector(const PreviewSelection& selection);
+    void clearInspectorEditor();
+    void showVertexEditor(const PreviewSelection& selection);
+    std::optional<std::vector<safecrowd::domain::Point2D>> selectionVertices(const PreviewSelection& selection) const;
     void updateValidatedIssues();
     void applyImportResultState();
 
@@ -58,6 +63,8 @@ private:
     LayoutPreviewWidget* preview_{nullptr};
     QLabel* inspectorTitleLabel_{nullptr};
     QLabel* inspectorDetailLabel_{nullptr};
+    QWidget* inspectorEditorHost_{nullptr};
+    QVBoxLayout* inspectorEditorLayout_{nullptr};
     QLabel* approvalStatusLabel_{nullptr};
     QPushButton* approveButton_{nullptr};
     NavigationView navigationView_{NavigationView::Issues};

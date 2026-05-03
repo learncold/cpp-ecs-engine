@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "application/LayoutCanvasRendering.h"
 #include "domain/FacilityLayout2D.h"
@@ -18,6 +19,11 @@ struct LayoutSnapResult {
     bool snapped{false};
 };
 
+struct LayoutDragSnapResult {
+    safecrowd::domain::Point2D delta{};
+    bool snapped{false};
+};
+
 LayoutSnapResult snapLayoutPoint(
     const safecrowd::domain::FacilityLayout2D& layout,
     const std::string& floorId,
@@ -30,6 +36,14 @@ LayoutSnapResult snapLayoutDragPoint(
     const std::string& floorId,
     const safecrowd::domain::Point2D& anchor,
     const safecrowd::domain::Point2D& point,
+    const LayoutCanvasTransform& transform,
+    const LayoutSnapOptions& options = {});
+
+LayoutDragSnapResult snapLayoutSelectionDrag(
+    const safecrowd::domain::FacilityLayout2D& staticLayout,
+    const std::string& floorId,
+    const std::vector<safecrowd::domain::Point2D>& anchors,
+    const safecrowd::domain::Point2D& rawDelta,
     const LayoutCanvasTransform& transform,
     const LayoutSnapOptions& options = {});
 

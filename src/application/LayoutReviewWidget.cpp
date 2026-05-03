@@ -2,7 +2,9 @@
 
 #include <algorithm>
 
+#include <QDoubleSpinBox>
 #include <QFrame>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QLabel>
@@ -268,6 +270,8 @@ QWidget* createNavigationPanel(
 QWidget* createReviewPanel(
     QLabel** inspectorTitle,
     QLabel** inspectorDetail,
+    QWidget** inspectorEditorHost,
+    QVBoxLayout** inspectorEditorLayout,
     QLabel** approvalStatus,
     QPushButton** approveButton,
     QWidget* parent) {
@@ -290,6 +294,12 @@ QWidget* createReviewPanel(
     (*inspectorDetail)->setWordWrap(true);
     (*inspectorDetail)->setStyleSheet(ui::mutedTextStyleSheet());
     layout->addWidget(*inspectorDetail);
+
+    *inspectorEditorHost = new QWidget(panel);
+    *inspectorEditorLayout = new QVBoxLayout(*inspectorEditorHost);
+    (*inspectorEditorLayout)->setContentsMargins(0, 0, 0, 0);
+    (*inspectorEditorLayout)->setSpacing(8);
+    layout->addWidget(*inspectorEditorHost);
 
     layout->addStretch(1);
 
@@ -337,6 +347,8 @@ LayoutReviewWidget::LayoutReviewWidget(
     auto* reviewPanel = createReviewPanel(
         &inspectorTitleLabel_,
         &inspectorDetailLabel_,
+        &inspectorEditorHost_,
+        &inspectorEditorLayout_,
         &approvalStatusLabel_,
         &approveButton_,
         shell_);
@@ -517,6 +529,7 @@ void LayoutReviewWidget::restoreInspectorState() {
 }
 
 void LayoutReviewWidget::showDefaultInspector() {
+    clearInspectorEditor();
     if (inspectorTitleLabel_ != nullptr) {
         inspectorTitleLabel_->setText("No selection");
     }
@@ -526,6 +539,7 @@ void LayoutReviewWidget::showDefaultInspector() {
 }
 
 void LayoutReviewWidget::showIssueInspector(const safecrowd::domain::ImportIssue& issue) {
+    clearInspectorEditor();
     if (inspectorTitleLabel_ != nullptr) {
         inspectorTitleLabel_->setText(issueCodeText(issue));
     }
@@ -534,18 +548,153 @@ void LayoutReviewWidget::showIssueInspector(const safecrowd::domain::ImportIssue
     }
 }
 
+void LayoutReviewWidget::clearInspectorEditor() {
+    if (inspectorEditorLayout_ == nullptr || inspectorEditorHost_ == nullptr) {
+        return;
+    }
+
+    while (auto* item = inspectorEditorLayout_->takeAt(0)) {
+        if (auto* widget = item->widget(); widget != nullptr) {
+            widget->deleteLater();
+        }
+        delete item;
+    }
+    inspectorEditorHost_->hide();
+}
+
+std::optional<std::vector<safecrowd::domain::Point2D>> LayoutReviewWidget::selectionVertices(const PreviewSelection& selection) const {
+    if (!importResult_.layout.has_value() || selection.empty() || selection.kind == PreviewSelectionKind::Multiple) {
+        return std::nullopt;
+    }
+
+    const auto& layout = *importResult_.layout;
+    switch (selection.kind) {
+    case PreviewSelectionKind::Zone:
+        for (const auto& zone : layout.zones) {
+            if (QString::fromStdString(zone.id) == selection.id) {
+                return zone.area.outline;
+            }
+        }
+        break;
+    case PreviewSelectionKind::Connection:
+        for (const auto& connection : layout.connections) {
+            if (QString::fromStdString(connection.id) == selection.id) {
+                return std::vector<safecrowd::domain::Point2D>{connection.centerSpan.start, connection.centerSpan.end};
+            }
+        }
+        break;
+    case PreviewSelectionKind::Barrier:
+        for (const auto& barrier : layout.barriers) {
+            if (QString::fromStdString(barrier.id) == selection.id) {
+                return barrier.geometry.vertices;
+            }
+        }
+        break;
+    case PreviewSelectionKind::None:
+    case PreviewSelectionKind::Multiple:
+        break;
+    }
+
+    return std::nullopt;
+}
+
+void LayoutReviewWidget::showVertexEditor(const PreviewSelection& selection) {
+    clearInspectorEditor();
+    if (inspectorEditorLayout_ == nullptr || inspectorEditorHost_ == nullptr) {
+        return;
+    }
+
+    const auto vertices = selectionVertices(selection);
+    if (!vertices.has_value() || vertices->empty()) {
+        return;
+    }
+
+    auto* editor = new QWidget(inspectorEditorHost_);
+    auto* editorLayout = new QVBoxLayout(editor);
+    editorLayout->setContentsMargins(0, 0, 0, 0);
+    editorLayout->setSpacing(8);
+
+    auto* title = new QLabel("Vertices", editor);
+    title->setFont(ui::font(ui::FontRole::Body));
+    editorLayout->addWidget(title);
+
+    auto* gridHost = new QWidget(editor);
+    auto* grid = new QGridLayout(gridHost);
+    grid->setContentsMargins(0, 0, 0, 0);
+    grid->setHorizontalSpacing(6);
+    grid->setVerticalSpacing(6);
+    grid->addWidget(new QLabel("#", gridHost), 0, 0);
+    grid->addWidget(new QLabel("X", gridHost), 0, 1);
+    grid->addWidget(new QLabel("Y", gridHost), 0, 2);
+
+    std::vector<QDoubleSpinBox*> xEditors;
+    std::vector<QDoubleSpinBox*> yEditors;
+    xEditors.reserve(vertices->size());
+    yEditors.reserve(vertices->size());
+
+    const auto makeCoordinateEditor = [&](double value) {
+        auto* editor = new QDoubleSpinBox(gridHost);
+        editor->setRange(-100000.0, 100000.0);
+        editor->setDecimals(3);
+        editor->setSingleStep(0.1);
+        editor->setValue(value);
+        editor->setMinimumWidth(86);
+        return editor;
+    };
+
+    for (std::size_t index = 0; index < vertices->size(); ++index) {
+        auto* indexLabel = new QLabel(QString::number(static_cast<int>(index + 1)), gridHost);
+        indexLabel->setStyleSheet(ui::mutedTextStyleSheet());
+        auto* xEditor = makeCoordinateEditor((*vertices)[index].x);
+        auto* yEditor = makeCoordinateEditor((*vertices)[index].y);
+        grid->addWidget(indexLabel, static_cast<int>(index + 1), 0);
+        grid->addWidget(xEditor, static_cast<int>(index + 1), 1);
+        grid->addWidget(yEditor, static_cast<int>(index + 1), 2);
+        xEditors.push_back(xEditor);
+        yEditors.push_back(yEditor);
+    }
+    editorLayout->addWidget(gridHost);
+
+    auto* applyButton = new QPushButton("Apply Vertices", editor);
+    applyButton->setFont(ui::font(ui::FontRole::Body));
+    editorLayout->addWidget(applyButton);
+    connect(applyButton, &QPushButton::clicked, this, [this, selection, xEditors, yEditors]() {
+        if (preview_ == nullptr || xEditors.size() != yEditors.size()) {
+            return;
+        }
+
+        std::vector<safecrowd::domain::Point2D> updatedVertices;
+        updatedVertices.reserve(xEditors.size());
+        for (std::size_t index = 0; index < xEditors.size(); ++index) {
+            if (xEditors[index] == nullptr || yEditors[index] == nullptr) {
+                return;
+            }
+            updatedVertices.push_back({
+                .x = xEditors[index]->value(),
+                .y = yEditors[index]->value(),
+            });
+        }
+        preview_->updateElementVertices(selection.kind, selection.id, updatedVertices);
+    });
+
+    inspectorEditorLayout_->addWidget(editor);
+    inspectorEditorHost_->show();
+}
+
 void LayoutReviewWidget::showSelectionInspector(const PreviewSelection& selection) {
     if (selection.empty()) {
         showDefaultInspector();
         return;
     }
 
+    clearInspectorEditor();
     if (inspectorTitleLabel_ != nullptr) {
         inspectorTitleLabel_->setText(selection.title);
     }
     if (inspectorDetailLabel_ != nullptr) {
         inspectorDetailLabel_->setText(selection.detail);
     }
+    showVertexEditor(selection);
 }
 
 void LayoutReviewWidget::updateValidatedIssues() {
