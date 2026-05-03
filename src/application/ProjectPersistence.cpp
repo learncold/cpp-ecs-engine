@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include <QDateTime>
+#include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -10,6 +11,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QStandardPaths>
+#include <QStorageInfo>
 
 #include "domain/ImportValidationService.h"
 
@@ -26,6 +28,20 @@ bool isProjectManagedEntry(const QString& fileName) {
         || fileName.compare(kLayoutFileName, Qt::CaseInsensitive) == 0
         || fileName.compare(kReviewFileName, Qt::CaseInsensitive) == 0
         || fileName.compare(kWorkspaceFileName, Qt::CaseInsensitive) == 0;
+}
+
+QString normalizedFolderKey(const QString& folderPath) {
+    const auto canonical = QFileInfo(folderPath).canonicalFilePath();
+    const auto base = canonical.isEmpty() ? QDir(folderPath).absolutePath() : canonical;
+#if defined(Q_OS_WIN) || defined(Q_OS_MAC)
+    return base.toLower();
+#else
+    return base;
+#endif
+}
+
+bool sameFolderPath(const QString& lhs, const QString& rhs) {
+    return normalizedFolderKey(lhs) == normalizedFolderKey(rhs);
 }
 
 QString projectFilePath(const QString& folderPath) {
@@ -96,10 +112,9 @@ void upsertRecentProject(const ProjectMetadata& metadata) {
     QJsonArray updated;
     updated.append(toJson(metadata));
 
-    const auto normalizedFolder = QDir(metadata.folderPath).absolutePath();
     for (const auto& value : projects) {
         const auto existing = fromJson(value.toObject());
-        if (QDir(existing.folderPath).absolutePath() == normalizedFolder) {
+        if (sameFolderPath(existing.folderPath, metadata.folderPath)) {
             continue;
         }
         updated.append(value);
@@ -119,10 +134,9 @@ void removeRecentProject(const QString& folderPath) {
     }
 
     QJsonArray updated;
-    const auto normalizedFolder = QDir(folderPath).absolutePath();
     for (const auto& value : document.object().value("projects").toArray()) {
         const auto existing = fromJson(value.toObject());
-        if (QDir(existing.folderPath).absolutePath() == normalizedFolder) {
+        if (sameFolderPath(existing.folderPath, folderPath)) {
             continue;
         }
         updated.append(value);
@@ -130,24 +144,40 @@ void removeRecentProject(const QString& folderPath) {
 
     QJsonObject root;
     root["projects"] = updated;
-    QString ignoredError;
-    writeJsonDocument(recentPath, QJsonDocument(root), &ignoredError);
+    QString writeError;
+    if (!writeJsonDocument(recentPath, QJsonDocument(root), &writeError)) {
+        qWarning() << "Failed to update recent projects list:" << writeError;
+    }
 }
 
 bool canDeleteProjectFolder(const QString& folderPath, QString* errorMessage) {
+    const auto setError = [errorMessage](const QString& message) {
+        if (errorMessage != nullptr) {
+            *errorMessage = message;
+        }
+    };
+
     QDir folder(folderPath);
     if (!folder.exists()) {
-        if (errorMessage != nullptr) {
-            *errorMessage = QString("Project folder does not exist: %1").arg(folderPath);
-        }
+        setError(QString("Project folder does not exist: %1").arg(folderPath));
         return false;
     }
 
     const QFileInfo folderInfo(folder.absolutePath());
-    if (folderInfo.absoluteFilePath() == QDir(folderInfo.absolutePath()).rootPath()) {
-        if (errorMessage != nullptr) {
-            *errorMessage = QString("Refusing to delete a drive root: %1").arg(folderPath);
-        }
+    if (folderInfo.isSymLink() || folderInfo.isJunction()) {
+        setError(QString("Refusing to delete a symbolic link or junction: %1").arg(folderPath));
+        return false;
+    }
+
+    if (QDir(folderInfo.absoluteFilePath()).isRoot()) {
+        setError(QString("Refusing to delete a drive root: %1").arg(folderPath));
+        return false;
+    }
+
+    const QStorageInfo storage(folderInfo.absoluteFilePath());
+    if (storage.isValid() && !storage.rootPath().isEmpty()
+        && QFileInfo(storage.rootPath()).absoluteFilePath() == folderInfo.absoluteFilePath()) {
+        setError(QString("Refusing to delete a volume root: %1").arg(folderPath));
         return false;
     }
 
@@ -155,12 +185,16 @@ bool canDeleteProjectFolder(const QString& folderPath, QString* errorMessage) {
         QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot,
         QDir::Name);
     for (const auto& entry : entries) {
+        if (entry.isSymLink() || entry.isJunction()) {
+            setError(QString(
+                "Refusing to delete project folder because it contains a link not created by SafeCrowd: %1")
+                .arg(entry.fileName()));
+            return false;
+        }
         if (!entry.isFile() || !isProjectManagedEntry(entry.fileName())) {
-            if (errorMessage != nullptr) {
-                *errorMessage = QString(
-                    "Refusing to delete project folder because it contains a file or folder not created by SafeCrowd: %1")
-                    .arg(entry.fileName());
-            }
+            setError(QString(
+                "Refusing to delete project folder because it contains a file or folder not created by SafeCrowd: %1")
+                .arg(entry.fileName()));
             return false;
         }
     }
@@ -1109,17 +1143,19 @@ ProjectMetadata ProjectPersistence::loadProject(const QString& folderPath) {
 }
 
 bool ProjectPersistence::deleteProject(const ProjectMetadata& metadata, QString* errorMessage) {
-    if (metadata.isBuiltInDemo()) {
+    const auto setError = [errorMessage](const QString& message) {
         if (errorMessage != nullptr) {
-            *errorMessage = "Built-in demo projects cannot be deleted.";
+            *errorMessage = message;
         }
+    };
+
+    if (metadata.isBuiltInDemo()) {
+        setError("Built-in demo projects cannot be deleted.");
         return false;
     }
 
     if (metadata.folderPath.isEmpty()) {
-        if (errorMessage != nullptr) {
-            *errorMessage = "Project folder is missing.";
-        }
+        setError("Project folder is missing.");
         return false;
     }
 
@@ -1131,9 +1167,7 @@ bool ProjectPersistence::deleteProject(const ProjectMetadata& metadata, QString*
 
     const auto loaded = loadProject(metadata.folderPath);
     if (!loaded.isValid()) {
-        if (errorMessage != nullptr) {
-            *errorMessage = "The selected folder does not contain a valid SafeCrowd project.";
-        }
+        setError("The selected folder does not contain a valid SafeCrowd project.");
         return false;
     }
 
@@ -1141,16 +1175,23 @@ bool ProjectPersistence::deleteProject(const ProjectMetadata& metadata, QString*
         return false;
     }
 
-    QDir folder(metadata.folderPath);
-    if (!folder.removeRecursively()) {
-        if (errorMessage != nullptr) {
-            *errorMessage = QString("Failed to delete project folder: %1").arg(metadata.folderPath);
-        }
-        return false;
+    const auto absoluteFolder = QFileInfo(metadata.folderPath).absoluteFilePath();
+    QString trashPath;
+    if (QFile::moveToTrash(absoluteFolder, &trashPath)) {
+        qInfo().noquote() << "Moved project folder to trash:" << absoluteFolder
+                          << "->" << (trashPath.isEmpty() ? QStringLiteral("(unknown)") : trashPath);
+        removeRecentProject(metadata.folderPath);
+        return true;
     }
 
-    removeRecentProject(metadata.folderPath);
-    return true;
+    qWarning().noquote() << "moveToTrash failed for" << absoluteFolder
+                         << "- aborting deletion to keep the operation reversible";
+    setError(QString(
+        "Failed to move the project folder to the recycle bin:\n%1\n\n"
+        "The project was not deleted. Please check folder permissions and try again, "
+        "or remove the folder manually.")
+        .arg(metadata.folderPath));
+    return false;
 }
 
 bool ProjectPersistence::loadProjectReview(const ProjectMetadata& metadata, safecrowd::domain::ImportResult* importResult) {
