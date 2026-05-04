@@ -18,11 +18,15 @@ struct ProjectMetadata {
         return layoutPath == builtInDemoLayoutPath();
     }
 
+    bool isBlankLayoutProject() const noexcept {
+        return layoutPath.isEmpty();
+    }
+
     bool isValid() const noexcept {
         if (isBuiltInDemo()) {
             return !name.isEmpty();
         }
-        return !name.isEmpty() && !folderPath.isEmpty() && !layoutPath.isEmpty();
+        return !name.isEmpty() && !folderPath.isEmpty();
     }
 };
 

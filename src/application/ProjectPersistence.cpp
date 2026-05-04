@@ -280,6 +280,10 @@ bool canSaveIntoProjectFolder(const QString& folderPath, QString* errorMessage) 
 }
 
 bool copyLayoutIntoProject(ProjectMetadata& metadata, QString* errorMessage) {
+    if (metadata.isBlankLayoutProject()) {
+        return true;
+    }
+
     const auto sourcePath = QFileInfo(metadata.layoutPath).absoluteFilePath();
     const auto targetPath = QDir(metadata.folderPath).filePath(kLayoutFileName);
 
@@ -1326,7 +1330,7 @@ bool ProjectPersistence::saveProject(ProjectMetadata metadata, QString* errorMes
 
     if (!metadata.isValid()) {
         if (errorMessage != nullptr) {
-            *errorMessage = "Project name, folder, and layout path are required.";
+            *errorMessage = "Project name and folder are required.";
         }
         return false;
     }
@@ -1343,7 +1347,7 @@ bool ProjectPersistence::saveProject(ProjectMetadata metadata, QString* errorMes
         return false;
     }
 
-    if (!copyLayoutIntoProject(metadata, errorMessage)) {
+    if (!metadata.isBlankLayoutProject() && !copyLayoutIntoProject(metadata, errorMessage)) {
         return false;
     }
 

@@ -94,6 +94,11 @@ private:
     void clearSelection();
     void createConnection(const QPointF& startWorld, const QPointF& endWorld);
     void createDoorAt(const QString& barrierId, const QPointF& position);
+    bool createDoorSpan(
+        const QString& barrierId,
+        const safecrowd::domain::Point2D& gapStart,
+        const safecrowd::domain::Point2D& gapEnd);
+    bool createDoorSegment(const QPointF& startWorld, const QPointF& endWorld);
     void createObstructionPolygon(const std::vector<QPointF>& points);
     void createObstructionRectangle(const QPointF& startWorld, const QPointF& endWorld);
     void createRoomPolygon(const std::vector<QPointF>& points);

@@ -73,6 +73,15 @@ void includeLine(Bounds2D& bounds, const safecrowd::domain::LineSegment2D& line)
     includeLayoutCanvasLine(bounds, line);
 }
 
+Bounds2D blankCanvasBounds() {
+    return {
+        .minX = 0.0,
+        .minY = 0.0,
+        .maxX = 120.0,
+        .maxY = 80.0,
+    };
+}
+
 bool matchesFloor(const std::string& elementFloorId, const QString& floorId) {
     return floorId.isEmpty() || elementFloorId.empty() || QString::fromStdString(elementFloorId) == floorId;
 }
@@ -155,6 +164,7 @@ std::optional<Bounds2D> collectBounds(const safecrowd::domain::ImportResult& imp
         if (layoutBounds.has_value()) {
             return layoutBounds;
         }
+        return blankCanvasBounds();
     }
 
     return collectLayoutCanvasBounds(importResult);
@@ -1838,6 +1848,53 @@ void replaceBarrierWithSegments(
     }
 }
 
+bool intervalContainsSpan(double sourceStart, double sourceEnd, double spanStart, double spanEnd) {
+    const auto sourceMin = std::min(sourceStart, sourceEnd);
+    const auto sourceMax = std::max(sourceStart, sourceEnd);
+    const auto spanMin = std::min(spanStart, spanEnd);
+    const auto spanMax = std::max(spanStart, spanEnd);
+    return sourceMin <= spanMin + kGeometryEpsilon
+        && sourceMax >= spanMax - kGeometryEpsilon
+        && spanMax - spanMin > kGeometryEpsilon;
+}
+
+std::optional<std::size_t> barrierIndexCoveringSpan(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const safecrowd::domain::LineSegment2D& span,
+    const QString& floorId) {
+    const bool spanVertical = nearlyEqual(span.start.x, span.end.x);
+    const bool spanHorizontal = nearlyEqual(span.start.y, span.end.y);
+    if (!spanVertical && !spanHorizontal) {
+        return std::nullopt;
+    }
+
+    for (std::size_t index = 0; index < layout.barriers.size(); ++index) {
+        const auto& barrier = layout.barriers[index];
+        if (!matchesFloor(barrier.floorId, floorId)
+            || barrier.geometry.closed
+            || barrier.geometry.vertices.size() != 2) {
+            continue;
+        }
+
+        const auto& barrierStart = barrier.geometry.vertices[0];
+        const auto& barrierEnd = barrier.geometry.vertices[1];
+        const bool barrierVertical = nearlyEqual(barrierStart.x, barrierEnd.x);
+        const bool barrierHorizontal = nearlyEqual(barrierStart.y, barrierEnd.y);
+        if (spanVertical && barrierVertical
+            && nearlyEqual(span.start.x, barrierStart.x)
+            && intervalContainsSpan(barrierStart.y, barrierEnd.y, span.start.y, span.end.y)) {
+            return index;
+        }
+        if (spanHorizontal && barrierHorizontal
+            && nearlyEqual(span.start.y, barrierStart.y)
+            && intervalContainsSpan(barrierStart.x, barrierEnd.x, span.start.x, span.end.x)) {
+            return index;
+        }
+    }
+
+    return std::nullopt;
+}
+
 std::optional<std::vector<std::pair<safecrowd::domain::Point2D, safecrowd::domain::Point2D>>> barrierSegmentsAfterGap(
     const safecrowd::domain::Barrier2D& barrier,
     const safecrowd::domain::LineSegment2D& gap) {
@@ -2674,12 +2731,6 @@ void LayoutPreviewWidget::mousePressEvent(QMouseEvent* event) {
             return;
         }
 
-        if (toolMode_ == ToolMode::DrawDoor) {
-            applyToolAt(event->position());
-            event->accept();
-            return;
-        }
-
         if ((toolMode_ == ToolMode::DrawRoom || toolMode_ == ToolMode::DrawObstruction)
             && shapeDrawMode_ == ShapeDrawMode::Polygon) {
             const LayoutTransform transform(*bounds, previewViewport(rect()), camera_.zoom(), camera_.panOffset());
@@ -2799,6 +2850,13 @@ void LayoutPreviewWidget::mouseReleaseEvent(QMouseEvent* event) {
         case ToolMode::DrawWall:
             createWallSegment(draftStartWorld_, draftCurrentWorld_);
             break;
+        case ToolMode::DrawDoor:
+            if (std::hypot(draftCurrentWorld_.x() - draftStartWorld_.x(), draftCurrentWorld_.y() - draftStartWorld_.y()) < kDraftMinimumSize) {
+                applyToolAt(event->position());
+            } else {
+                createDoorSegment(draftStartWorld_, draftCurrentWorld_);
+            }
+            break;
         case ToolMode::DrawObstruction:
             createObstructionRectangle(draftStartWorld_, draftCurrentWorld_);
             break;
@@ -2807,8 +2865,6 @@ void LayoutPreviewWidget::mouseReleaseEvent(QMouseEvent* event) {
             break;
         case ToolMode::DrawUStair:
             createUShapedStairLink(draftStartWorld_, draftCurrentWorld_);
-            break;
-        case ToolMode::DrawDoor:
             break;
         case ToolMode::Select:
             break;
@@ -3715,7 +3771,6 @@ void LayoutPreviewWidget::createDoorAt(const QString& barrierId, const QPointF& 
         return;
     }
 
-    const auto barrierIndex = static_cast<std::size_t>(std::distance(layout.barriers.begin(), barrierIt));
     const auto& barrierStart = barrierIt->geometry.vertices[0];
     const auto& barrierEnd = barrierIt->geometry.vertices[1];
     const auto projected = projectOntoSegment(position, barrierStart, barrierEnd);
@@ -3751,6 +3806,100 @@ void LayoutPreviewWidget::createDoorAt(const QString& barrierId, const QPointF& 
         gapEnd = {.x = centerX + openingWidth * 0.5, .y = barrierStart.y};
     }
 
+    createDoorSpan(barrierId, gapStart, gapEnd);
+}
+
+bool LayoutPreviewWidget::createDoorSegment(const QPointF& startWorld, const QPointF& endWorld) {
+    if (!importResult_.layout.has_value()) {
+        return false;
+    }
+
+    safecrowd::domain::LineSegment2D span{
+        .start = {.x = startWorld.x(), .y = startWorld.y()},
+        .end = {.x = endWorld.x(), .y = endWorld.y()},
+    };
+    if (std::hypot(span.end.x - span.start.x, span.end.y - span.start.y) < kMinimumDoorWidth) {
+        return false;
+    }
+
+    const bool vertical = nearlyEqual(span.start.x, span.end.x);
+    const bool horizontal = nearlyEqual(span.start.y, span.end.y);
+    if (!vertical && !horizontal) {
+        return false;
+    }
+
+    if (vertical && span.end.y < span.start.y) {
+        std::swap(span.start, span.end);
+    } else if (horizontal && span.end.x < span.start.x) {
+        std::swap(span.start, span.end);
+    }
+
+    auto& layout = *importResult_.layout;
+    const auto barrierIndex = barrierIndexCoveringSpan(layout, span, currentFloorId());
+    if (barrierIndex.has_value()) {
+        const auto barrierId = QString::fromStdString(layout.barriers[*barrierIndex].id);
+        return createDoorSpan(barrierId, span.start, span.end);
+    }
+
+    return createDoorSpan({}, span.start, span.end);
+}
+
+bool LayoutPreviewWidget::createDoorSpan(
+    const QString& barrierId,
+    const safecrowd::domain::Point2D& gapStart,
+    const safecrowd::domain::Point2D& gapEnd) {
+    if (!importResult_.layout.has_value()) {
+        return false;
+    }
+
+    auto& layout = *importResult_.layout;
+    const auto openingWidth = std::hypot(gapEnd.x - gapStart.x, gapEnd.y - gapStart.y);
+    if (openingWidth < kMinimumDoorWidth) {
+        return false;
+    }
+
+    const bool vertical = nearlyEqual(gapStart.x, gapEnd.x);
+    const bool horizontal = nearlyEqual(gapStart.y, gapEnd.y);
+    if (!vertical && !horizontal) {
+        return false;
+    }
+
+    std::optional<std::size_t> barrierIndex;
+    std::optional<safecrowd::domain::Point2D> barrierStart;
+    std::optional<safecrowd::domain::Point2D> barrierEnd;
+    if (!barrierId.isEmpty()) {
+        const auto barrierIt = std::find_if(layout.barriers.begin(), layout.barriers.end(), [&](const auto& barrier) {
+            return QString::fromStdString(barrier.id) == barrierId && barrier.geometry.vertices.size() == 2;
+        });
+        if (barrierIt == layout.barriers.end()) {
+            return false;
+        }
+
+        barrierIndex = static_cast<std::size_t>(std::distance(layout.barriers.begin(), barrierIt));
+        barrierStart = barrierIt->geometry.vertices[0];
+        barrierEnd = barrierIt->geometry.vertices[1];
+        const bool barrierVertical = nearlyEqual(barrierStart->x, barrierEnd->x);
+        const bool barrierHorizontal = nearlyEqual(barrierStart->y, barrierEnd->y);
+        if (barrierVertical != vertical || barrierHorizontal != horizontal) {
+            return false;
+        }
+
+        if (vertical) {
+            if (!nearlyEqual(barrierStart->x, gapStart.x)
+                || !intervalContainsSpan(barrierStart->y, barrierEnd->y, gapStart.y, gapEnd.y)) {
+                return false;
+            }
+        } else if (!nearlyEqual(barrierStart->y, gapStart.y)
+            || !intervalContainsSpan(barrierStart->x, barrierEnd->x, gapStart.x, gapEnd.x)) {
+            return false;
+        }
+
+        const auto segmentLength = std::hypot(barrierEnd->x - barrierStart->x, barrierEnd->y - barrierStart->y);
+        if (segmentLength <= openingWidth + kGeometryEpsilon) {
+            return false;
+        }
+    }
+
     const auto neighbors = doorNeighborsAcrossSegment(layout, gapStart, gapEnd, currentFloorId());
     const auto firstZone = choosePrimaryZone(layout, neighbors.firstSide);
     const auto secondZone = choosePrimaryZone(layout, neighbors.secondSide, firstZone);
@@ -3770,7 +3919,7 @@ void LayoutPreviewWidget::createDoorAt(const QString& barrierId, const QPointF& 
     } else {
         const auto interiorZone = firstZone.has_value() ? firstZone : secondZone;
         if (!interiorZone.has_value()) {
-            return;
+            return false;
         }
 
         const bool useFirstOutside = !firstZone.has_value();
@@ -3779,7 +3928,7 @@ void LayoutPreviewWidget::createDoorAt(const QString& barrierId, const QPointF& 
         QPointF outsideDirection = outsideSample - insideSample;
         const auto directionLength = std::hypot(outsideDirection.x(), outsideDirection.y());
         if (directionLength <= kGeometryEpsilon) {
-            return;
+            return false;
         }
         outsideDirection /= directionLength;
 
@@ -3792,43 +3941,45 @@ void LayoutPreviewWidget::createDoorAt(const QString& barrierId, const QPointF& 
         || toZoneId.isEmpty()
         || fromZoneId == toZoneId
         || hasConnectionPairAtSpan(layout, fromZoneId, toZoneId, gapStart, gapEnd)) {
-        return;
+        return false;
     }
 
-    std::vector<std::pair<safecrowd::domain::Point2D, safecrowd::domain::Point2D>> remainingSegments;
-    if (vertical) {
-        const auto lowerStart = std::min(barrierStart.y, barrierEnd.y);
-        const auto lowerEnd = std::max(barrierStart.y, barrierEnd.y);
-        if (gapStart.y - lowerStart > kGeometryEpsilon) {
-            remainingSegments.push_back({
-                {.x = barrierStart.x, .y = lowerStart},
-                {.x = barrierStart.x, .y = gapStart.y},
-            });
+    if (barrierIndex.has_value() && barrierStart.has_value() && barrierEnd.has_value()) {
+        std::vector<std::pair<safecrowd::domain::Point2D, safecrowd::domain::Point2D>> remainingSegments;
+        if (vertical) {
+            const auto lowerStart = std::min(barrierStart->y, barrierEnd->y);
+            const auto lowerEnd = std::max(barrierStart->y, barrierEnd->y);
+            if (gapStart.y - lowerStart > kGeometryEpsilon) {
+                remainingSegments.push_back({
+                    {.x = barrierStart->x, .y = lowerStart},
+                    {.x = barrierStart->x, .y = gapStart.y},
+                });
+            }
+            if (lowerEnd - gapEnd.y > kGeometryEpsilon) {
+                remainingSegments.push_back({
+                    {.x = barrierStart->x, .y = gapEnd.y},
+                    {.x = barrierStart->x, .y = lowerEnd},
+                });
+            }
+        } else {
+            const auto lowerStart = std::min(barrierStart->x, barrierEnd->x);
+            const auto lowerEnd = std::max(barrierStart->x, barrierEnd->x);
+            if (gapStart.x - lowerStart > kGeometryEpsilon) {
+                remainingSegments.push_back({
+                    {.x = lowerStart, .y = barrierStart->y},
+                    {.x = gapStart.x, .y = barrierStart->y},
+                });
+            }
+            if (lowerEnd - gapEnd.x > kGeometryEpsilon) {
+                remainingSegments.push_back({
+                    {.x = gapEnd.x, .y = barrierStart->y},
+                    {.x = lowerEnd, .y = barrierStart->y},
+                });
+            }
         }
-        if (lowerEnd - gapEnd.y > kGeometryEpsilon) {
-            remainingSegments.push_back({
-                {.x = barrierStart.x, .y = gapEnd.y},
-                {.x = barrierStart.x, .y = lowerEnd},
-            });
-        }
-    } else {
-        const auto lowerStart = std::min(barrierStart.x, barrierEnd.x);
-        const auto lowerEnd = std::max(barrierStart.x, barrierEnd.x);
-        if (gapStart.x - lowerStart > kGeometryEpsilon) {
-            remainingSegments.push_back({
-                {.x = lowerStart, .y = barrierStart.y},
-                {.x = gapStart.x, .y = barrierStart.y},
-            });
-        }
-        if (lowerEnd - gapEnd.x > kGeometryEpsilon) {
-            remainingSegments.push_back({
-                {.x = gapEnd.x, .y = barrierStart.y},
-                {.x = lowerEnd, .y = barrierStart.y},
-            });
-        }
-    }
 
-    replaceBarrierWithSegments(layout, barrierIndex, remainingSegments, currentFloorId().toStdString());
+        replaceBarrierWithSegments(layout, *barrierIndex, remainingSegments, currentFloorId().toStdString());
+    }
 
     const auto connectionId = nextConnectionId(layout);
     layout.connections.push_back({
@@ -3852,6 +4003,7 @@ void LayoutPreviewWidget::createDoorAt(const QString& barrierId, const QPointF& 
     notifyLayoutEdited();
     emitCurrentSelection();
     update();
+    return true;
 }
 
 void LayoutPreviewWidget::deleteConnection(const QString& connectionId) {

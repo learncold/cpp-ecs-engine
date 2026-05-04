@@ -1048,7 +1048,8 @@ private:
         const bool inStairZone = zone != nullptr
             && (zone->kind == ZoneKind::Stair || zone->isStair || zone->isRamp);
         const bool onVerticalTransition = currentWaypointIsVertical(route);
-        return static_cast<double>(agent.maxSpeed) * (inStairZone || onVerticalTransition ? kStairSpeedMultiplier : 1.0);
+        const auto maxSpeed = static_cast<double>(agent.maxSpeed);
+        return inStairZone || onVerticalTransition ? std::min(maxSpeed, kStairAgentSpeed) : maxSpeed;
     }
 
     void updateDisplayFloor(EvacuationRoute& route, const Point2D& position) const {

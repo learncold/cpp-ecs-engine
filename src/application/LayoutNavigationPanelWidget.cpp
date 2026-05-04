@@ -182,13 +182,89 @@ bool pointInPolygon(
     return true;
 }
 
-bool barrierBelongsToZone(const safecrowd::domain::Barrier2D& barrier, const safecrowd::domain::Zone2D& zone) {
+double overlapLength(double firstStart, double firstEnd, double secondStart, double secondEnd) {
+    const auto firstMin = std::min(firstStart, firstEnd);
+    const auto firstMax = std::max(firstStart, firstEnd);
+    const auto secondMin = std::min(secondStart, secondEnd);
+    const auto secondMax = std::max(secondStart, secondEnd);
+    return std::min(firstMax, secondMax) - std::max(firstMin, secondMin);
+}
+
+bool segmentsShareSpan(
+    const safecrowd::domain::Point2D& firstStart,
+    const safecrowd::domain::Point2D& firstEnd,
+    const safecrowd::domain::Point2D& secondStart,
+    const safecrowd::domain::Point2D& secondEnd) {
+    const auto firstDx = firstEnd.x - firstStart.x;
+    const auto firstDy = firstEnd.y - firstStart.y;
+    const auto firstLength = std::hypot(firstDx, firstDy);
+    const auto secondDx = secondEnd.x - secondStart.x;
+    const auto secondDy = secondEnd.y - secondStart.y;
+    const auto secondLength = std::hypot(secondDx, secondDy);
+    if (firstLength <= kGeometryEpsilon || secondLength <= kGeometryEpsilon) {
+        return false;
+    }
+
+    const auto directionCross = (firstDx * secondDy) - (firstDy * secondDx);
+    if (std::abs(directionCross) > kGeometryEpsilon * std::max(firstLength, secondLength)) {
+        return false;
+    }
+
+    const auto startCross = (firstDx * (secondStart.y - firstStart.y)) - (firstDy * (secondStart.x - firstStart.x));
+    const auto endCross = (firstDx * (secondEnd.y - firstStart.y)) - (firstDy * (secondEnd.x - firstStart.x));
+    if (std::abs(startCross) > kGeometryEpsilon * firstLength
+        || std::abs(endCross) > kGeometryEpsilon * firstLength) {
+        return false;
+    }
+
+    const bool useX = std::abs(firstDx) >= std::abs(firstDy);
+    const auto overlap = useX
+        ? overlapLength(firstStart.x, firstEnd.x, secondStart.x, secondEnd.x)
+        : overlapLength(firstStart.y, firstEnd.y, secondStart.y, secondEnd.y);
+    return overlap > kGeometryEpsilon;
+}
+
+bool segmentSharesRingSpan(
+    const safecrowd::domain::Point2D& segmentStart,
+    const safecrowd::domain::Point2D& segmentEnd,
+    const std::vector<safecrowd::domain::Point2D>& ring) {
+    if (ring.size() < 2) {
+        return false;
+    }
+
+    for (std::size_t index = 0; index < ring.size(); ++index) {
+        if (segmentsShareSpan(segmentStart, segmentEnd, ring[index], ring[(index + 1) % ring.size()])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool openWallBelongsToZoneBoundary(const safecrowd::domain::Barrier2D& barrier, const safecrowd::domain::Zone2D& zone) {
+    const auto& start = barrier.geometry.vertices[0];
+    const auto& end = barrier.geometry.vertices[1];
+    if (segmentSharesRingSpan(start, end, zone.area.outline)) {
+        return true;
+    }
+    return std::any_of(zone.area.holes.begin(), zone.area.holes.end(), [&](const auto& hole) {
+        return segmentSharesRingSpan(start, end, hole);
+    });
+}
+
+bool barrierContainedInZone(const safecrowd::domain::Barrier2D& barrier, const safecrowd::domain::Zone2D& zone) {
     for (const auto& point : barrier.geometry.vertices) {
         if (pointInPolygon(zone.area, point) || distanceToPolygonBoundary(zone.area, point) <= 0.08) {
             return true;
         }
     }
     return false;
+}
+
+bool barrierBelongsToZone(const safecrowd::domain::Barrier2D& barrier, const safecrowd::domain::Zone2D& zone) {
+    if (!barrier.geometry.closed && barrier.geometry.vertices.size() == 2) {
+        return openWallBelongsToZoneBoundary(barrier, zone);
+    }
+    return barrierContainedInZone(barrier, zone);
 }
 
 bool isRoomLikeZone(const safecrowd::domain::Zone2D& zone) {

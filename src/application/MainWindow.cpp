@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <string>
 #include <utility>
 
 #include <QMessageBox>
@@ -43,9 +44,32 @@ safecrowd::domain::ImportResult makeDemoImportResult() {
     return result;
 }
 
+safecrowd::domain::ImportResult makeBlankImportResult(const QString& projectName) {
+    safecrowd::domain::ImportResult result;
+    result.layout = safecrowd::domain::FacilityLayout2D{
+        .id = projectName.isEmpty() ? std::string{"blank-layout"} : projectName.toStdString(),
+        .name = projectName.toStdString(),
+        .levelId = "L1",
+        .floors = {{
+            .id = "L1",
+            .label = "Floor 1",
+        }},
+    };
+
+    safecrowd::domain::ImportValidationService validator;
+    result.issues = validator.validate(*result.layout);
+    result.reviewStatus = safecrowd::domain::hasBlockingImportIssue(result.issues)
+        ? safecrowd::domain::ImportReviewStatus::Pending
+        : safecrowd::domain::ImportReviewStatus::NotRequired;
+    return result;
+}
+
 safecrowd::domain::ImportResult importProjectLayout(const ProjectMetadata& metadata) {
     if (metadata.isBuiltInDemo()) {
         return makeDemoImportResult();
+    }
+    if (metadata.isBlankLayoutProject()) {
+        return makeBlankImportResult(metadata.name);
     }
 
     safecrowd::domain::DxfImportService importer;
@@ -250,8 +274,8 @@ void MainWindow::showNewProject() {
 }
 
 void MainWindow::createProject(const NewProjectRequest& request) {
-    if (request.projectName.isEmpty() || request.layoutPath.isEmpty() || request.folderPath.isEmpty()) {
-        QMessageBox::warning(this, "New Project", "Project name, layout file, and folder are required.");
+    if (request.projectName.isEmpty() || request.folderPath.isEmpty()) {
+        QMessageBox::warning(this, "New Project", "Project name and folder are required.");
         return;
     }
 

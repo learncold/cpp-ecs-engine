@@ -126,7 +126,7 @@ NewProjectWidget::NewProjectWidget(QWidget* parent)
     cardLayout->addWidget(projectNameEdit_);
     cardLayout->addSpacing(20);
 
-    auto* layoutLabel = new QLabel("Layout", this);
+    auto* layoutLabel = new QLabel("Layout (optional)", this);
     layoutLabel->setFont(ui::font(ui::FontRole::SectionTitle));
     cardLayout->addWidget(layoutLabel);
     cardLayout->addSpacing(10);
@@ -135,7 +135,7 @@ NewProjectWidget::NewProjectWidget(QWidget* parent)
     layoutRow->setSpacing(12);
     auto* layoutBrowseButton = createOutlinedButton("Browse", this);
     layoutPathEdit_ = createTextInput(this);
-    layoutPathEdit_->setPlaceholderText("DXF file");
+    layoutPathEdit_->setPlaceholderText("DXF file, or leave empty to start from a blank canvas");
     layoutPathEdit_->setReadOnly(true);
     layoutPathEdit_->setStyleSheet(ui::textFieldStyleSheet(true));
     layoutPathEdit_->setMaximumWidth(760);

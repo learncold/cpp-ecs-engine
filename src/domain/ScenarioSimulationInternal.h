@@ -21,8 +21,8 @@ namespace safecrowd::domain::simulation_internal {
 
 inline constexpr double kDefaultTimeLimitSeconds = 60.0;
 inline constexpr double kDefaultAgentRadius = 0.25;
-inline constexpr double kDefaultAgentSpeed = 1.5;
-inline constexpr double kStairSpeedMultiplier = 0.55;
+inline constexpr double kDefaultAgentSpeed = 1.3;
+inline constexpr double kStairAgentSpeed = 0.8;
 inline constexpr double kArrivalEpsilon = 0.05;
 inline constexpr double kPersonalSpaceBuffer = 0.08;
 inline constexpr double kAvoidanceLateralStrength = 0.65;
