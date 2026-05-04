@@ -12,10 +12,12 @@
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QIcon>
 #include <QLabel>
 #include <QLinearGradient>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPixmap>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSizePolicy>
@@ -26,6 +28,7 @@
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QTimer>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 #include "application/ScenarioAuthoringWidget.h"
@@ -300,6 +303,23 @@ QLabel* createReportSectionHeader(const QString& text, QWidget* parent) {
     return label;
 }
 
+QFrame* createReportInfoRow(const QStringList& lines, QWidget* parent) {
+    auto* row = new QFrame(parent);
+    row->setStyleSheet(ui::panelStyleSheet());
+    row->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+
+    auto* layout = new QVBoxLayout(row);
+    layout->setContentsMargins(14, 12, 14, 12);
+    layout->setSpacing(4);
+    for (const auto& line : lines) {
+        auto* label = createLabel(line, row, ui::FontRole::Body);
+        label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        label->setStyleSheet("QLabel { background: transparent; border: 0; padding: 0; }");
+        layout->addWidget(label);
+    }
+    return row;
+}
+
 QPushButton* createReportRowButton(const QStringList& lines, QWidget* parent) {
     auto* button = new QPushButton(parent);
     button->setFont(ui::font(ui::FontRole::Body));
@@ -399,6 +419,83 @@ QWidget* createHotspotLegend(QWidget* parent) {
     return legend;
 }
 
+QString resultCriteriaTooltip(const safecrowd::domain::ScenarioResultArtifacts& artifacts) {
+    return QStringList{
+        QString("High density: %1 / m2 or higher for accumulated duration.")
+            .arg(artifacts.densitySummary.highDensityThresholdPeoplePerSquareMeter, 0, 'f', 1),
+        safecrowd::domain::scenarioStalledDefinition(),
+        safecrowd::domain::scenarioBottleneckDefinition(),
+    }.join("\n\n");
+}
+
+QWidget* createOverviewHeader(const safecrowd::domain::ScenarioResultArtifacts& artifacts, QWidget* parent) {
+    auto* header = new QWidget(parent);
+    auto* layout = new QHBoxLayout(header);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(8);
+
+    auto* title = createLabel("Overview", header, ui::FontRole::Title);
+    title->setWordWrap(false);
+    layout->addWidget(title, 0, Qt::AlignVCenter);
+
+    auto* help = new QToolButton(header);
+    help->setText("?");
+    help->setCursor(Qt::PointingHandCursor);
+    help->setFixedSize(22, 22);
+    help->setToolTip(resultCriteriaTooltip(artifacts));
+    help->setAccessibleName("Overview criteria");
+    help->setStyleSheet(
+        "QToolButton {"
+        " background: #ffffff;"
+        " border: 1px solid #c9d5e2;"
+        " border-radius: 11px;"
+        " color: #4f5d6b;"
+        " font-weight: 700;"
+        " padding: 0;"
+        "}"
+        "QToolButton:hover { background: #eef3f8; border-color: #9fb0c2; }");
+    layout->addWidget(help, 0, Qt::AlignVCenter);
+    layout->addStretch(1);
+    return header;
+}
+
+QIcon makeResultNavigationIcon(const QString& tabId, const QColor& color) {
+    QPixmap pixmap(44, 44);
+    pixmap.fill(Qt::transparent);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(QPen(color, 2.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(Qt::NoBrush);
+
+    if (tabId == "bottleneck") {
+        painter.drawLine(QPointF(12, 12), QPointF(20, 21));
+        painter.drawLine(QPointF(12, 32), QPointF(20, 23));
+        painter.drawLine(QPointF(32, 12), QPointF(24, 21));
+        painter.drawLine(QPointF(32, 32), QPointF(24, 23));
+        painter.setBrush(color);
+        painter.drawEllipse(QPointF(22, 22), 2.8, 2.8);
+    } else if (tabId == "hotspot") {
+        painter.drawEllipse(QPointF(22, 22), 12, 12);
+        painter.drawEllipse(QPointF(22, 22), 7, 7);
+        painter.setBrush(color);
+        painter.drawEllipse(QPointF(22, 22), 3, 3);
+    } else if (tabId == "zone") {
+        painter.drawRoundedRect(QRectF(11, 11, 22, 22), 4, 4);
+        painter.drawLine(QPointF(22, 11), QPointF(22, 33));
+        painter.drawLine(QPointF(11, 22), QPointF(33, 22));
+    } else {
+        painter.drawEllipse(QPointF(22, 14), 5, 5);
+        painter.drawEllipse(QPointF(14, 20), 4, 4);
+        painter.drawEllipse(QPointF(30, 20), 4, 4);
+        painter.drawArc(QRectF(12, 22, 20, 14), 20 * 16, 140 * 16);
+        painter.drawArc(QRectF(5, 26, 18, 10), 30 * 16, 120 * 16);
+        painter.drawArc(QRectF(21, 26, 18, 10), 30 * 16, 120 * 16);
+    }
+
+    return QIcon(pixmap);
+}
+
 QTableWidget* createResultTable(const QStringList& headers, int rows, QWidget* parent) {
     auto* table = new QTableWidget(rows, headers.size(), parent);
     table->setHorizontalHeaderLabels(headers);
@@ -451,90 +548,145 @@ QWidget* createExitUsageTable(const safecrowd::domain::ScenarioResultArtifacts& 
     return container;
 }
 
-QWidget* createDetailTabs(const safecrowd::domain::ScenarioResultArtifacts& artifacts, QWidget* parent) {
-    auto* tabs = new QTabWidget(parent);
-    tabs->setStyleSheet(
-        "QTabWidget::pane { border: 0; }"
-        "QTabBar::tab { background: #ffffff; border: 1px solid #c9d5e2; padding: 5px 8px; margin-right: 3px; }"
-        "QTabBar::tab:selected { background: #e6eef8; color: #1f5fae; }");
+struct ResultReportPanelParts {
+    QWidget* panel{nullptr};
+    QWidget* content{nullptr};
+    QVBoxLayout* contentLayout{nullptr};
+};
 
-    auto* zones = createResultTable({"Zone", "People", "Out", "Last"}, static_cast<int>(artifacts.zoneCompletion.size()), tabs);
-    for (int row = 0; row < static_cast<int>(artifacts.zoneCompletion.size()); ++row) {
-        const auto& zone = artifacts.zoneCompletion[static_cast<std::size_t>(row)];
-        zones->setItem(row, 0, tableItem(QString::fromStdString(zone.zoneLabel)));
-        zones->setItem(row, 1, tableItem(QString::number(static_cast<int>(zone.initialCount))));
-        zones->setItem(row, 2, tableItem(QString::number(static_cast<int>(zone.evacuatedCount))));
-        zones->setItem(row, 3, tableItem(formatOptionalSeconds(zone.lastCompletionTimeSeconds)));
+ResultReportPanelParts createResultReportPanel(
+    const QString& title,
+    const QString& caption,
+    QWidget* parent) {
+    auto* panel = new QWidget(parent);
+    auto* layout = new QVBoxLayout(panel);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(12);
+
+    auto* header = createReportSectionHeader(title, panel);
+    layout->addWidget(header);
+    if (!caption.isEmpty()) {
+        auto* captionLabel = createLabel(caption, panel, ui::FontRole::Caption);
+        captionLabel->setStyleSheet(ui::subtleTextStyleSheet());
+        layout->addWidget(captionLabel);
     }
-    tabs->addTab(zones, "Zones");
 
-    auto* groups = createResultTable({"Group", "People", "Out", "Last"}, static_cast<int>(artifacts.placementCompletion.size()), tabs);
-    for (int row = 0; row < static_cast<int>(artifacts.placementCompletion.size()); ++row) {
-        const auto& group = artifacts.placementCompletion[static_cast<std::size_t>(row)];
-        groups->setItem(row, 0, tableItem(QString::fromStdString(group.placementId)));
-        groups->setItem(row, 1, tableItem(QString::number(static_cast<int>(group.initialCount))));
-        groups->setItem(row, 2, tableItem(QString::number(static_cast<int>(group.evacuatedCount))));
-        groups->setItem(row, 3, tableItem(formatOptionalSeconds(group.lastCompletionTimeSeconds)));
-    }
-    tabs->addTab(groups, "Groups");
+    auto* area = new QScrollArea(panel);
+    area->setWidgetResizable(true);
+    area->setFrameShape(QFrame::NoFrame);
+    area->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    ui::polishScrollArea(area);
 
-    auto* criteria = new QWidget(tabs);
-    auto* criteriaLayout = new QVBoxLayout(criteria);
-    criteriaLayout->setContentsMargins(0, 8, 0, 0);
-    criteriaLayout->setSpacing(6);
-    auto* density = createLabel(
-        QString("High density: %1 / m2 or higher for accumulated duration.")
-            .arg(artifacts.densitySummary.highDensityThresholdPeoplePerSquareMeter, 0, 'f', 1),
-        criteria);
-    auto* stalled = createLabel(safecrowd::domain::scenarioStalledDefinition(), criteria);
-    auto* bottleneck = createLabel(safecrowd::domain::scenarioBottleneckDefinition(), criteria);
-    density->setStyleSheet(ui::mutedTextStyleSheet());
-    stalled->setStyleSheet(ui::mutedTextStyleSheet());
-    bottleneck->setStyleSheet(ui::mutedTextStyleSheet());
-    criteriaLayout->addWidget(density);
-    criteriaLayout->addWidget(stalled);
-    criteriaLayout->addWidget(bottleneck);
-    criteriaLayout->addStretch(1);
-    tabs->addTab(criteria, "Criteria");
+    auto* content = new QWidget(area);
+    content->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    auto* contentLayout = new QVBoxLayout(content);
+    contentLayout->setContentsMargins(0, 0, 10, 0);
+    contentLayout->setSpacing(12);
+    area->setWidget(content);
+    layout->addWidget(area, 1);
 
-    return tabs;
+    return {
+        .panel = panel,
+        .content = content,
+        .contentLayout = contentLayout,
+    };
 }
 
-QStringList resultInterpretations(
-    const safecrowd::domain::SimulationFrame& frame,
+QWidget* createBottleneckReportPanel(
     const safecrowd::domain::ScenarioRiskSnapshot& risk,
-    const safecrowd::domain::ScenarioResultArtifacts& artifacts) {
-    QStringList lines;
-    if (artifacts.timingSummary.marginSeconds.has_value()) {
-        if (*artifacts.timingSummary.marginSeconds < 0.0) {
-            lines.push_back(QString("Evacuation exceeds the target by %1 sec; review the worst bottleneck first.")
-                .arg(std::abs(*artifacts.timingSummary.marginSeconds), 0, 'f', 1));
-        } else {
-            lines.push_back(QString("Evacuation remains within the target with %1 sec of margin.")
-                .arg(*artifacts.timingSummary.marginSeconds, 0, 'f', 1));
+    std::function<void(std::size_t)> bottleneckFocusHandler,
+    QWidget* parent) {
+    auto parts = createResultReportPanel("Bottleneck", "Detected passage constraints", parent);
+    auto* bottleneckHeader = createReportSectionHeader("Bottlenecks", parts.content);
+    bottleneckHeader->setToolTip(safecrowd::domain::scenarioBottleneckDefinition());
+    parts.contentLayout->addWidget(bottleneckHeader);
+    if (risk.bottlenecks.empty()) {
+        auto* empty = createLabel("None detected", parts.content);
+        empty->setStyleSheet(ui::mutedTextStyleSheet());
+        parts.contentLayout->addWidget(empty);
+    } else {
+        for (std::size_t index = 0; index < risk.bottlenecks.size(); ++index) {
+            auto* row = createBottleneckRowButton(risk.bottlenecks[index], index, parts.content);
+            QObject::connect(row, &QPushButton::clicked, parts.content, [bottleneckFocusHandler, index]() {
+                if (bottleneckFocusHandler) {
+                    bottleneckFocusHandler(index);
+                }
+            });
+            parts.contentLayout->addWidget(row);
         }
     }
-    if (artifacts.densitySummary.peakDensityPeoplePerSquareMeter
-        >= artifacts.densitySummary.highDensityThresholdPeoplePerSquareMeter) {
-        lines.push_back(QString("Peak density reaches %1; apply staff guidance or entry control near the highlighted area.")
-            .arg(formatDensity(artifacts.densitySummary.peakDensityPeoplePerSquareMeter)));
+    parts.contentLayout->addStretch(1);
+    return parts.panel;
+}
+
+QWidget* createHotspotReportPanel(
+    const safecrowd::domain::ScenarioRiskSnapshot& risk,
+    std::function<void(std::size_t)> hotspotFocusHandler,
+    QWidget* parent) {
+    auto parts = createResultReportPanel("Hotspot", "Peak congestion locations", parent);
+    auto* hotspotHeader = createReportSectionHeader("Hotspots", parts.content);
+    hotspotHeader->setToolTip(safecrowd::domain::scenarioHotspotDefinition());
+    parts.contentLayout->addWidget(hotspotHeader);
+    parts.contentLayout->addWidget(createHotspotLegend(parts.content));
+    if (risk.hotspots.empty()) {
+        auto* empty = createLabel("None detected", parts.content);
+        empty->setStyleSheet(ui::mutedTextStyleSheet());
+        parts.contentLayout->addWidget(empty);
+    } else {
+        for (std::size_t index = 0; index < risk.hotspots.size(); ++index) {
+            auto* row = createHotspotRowButton(risk.hotspots[index], index, parts.content);
+            QObject::connect(row, &QPushButton::clicked, parts.content, [hotspotFocusHandler, index]() {
+                if (hotspotFocusHandler) {
+                    hotspotFocusHandler(index);
+                }
+            });
+            parts.contentLayout->addWidget(row);
+        }
     }
-    if (!risk.bottlenecks.empty()) {
-        lines.push_back(QString("The strongest bottleneck is %1; opening capacity or redirecting people here is the first action.")
-            .arg(QString::fromStdString(risk.bottlenecks.front().label)));
+    parts.contentLayout->addStretch(1);
+    return parts.panel;
+}
+
+QWidget* createZoneReportPanel(const safecrowd::domain::ScenarioResultArtifacts& artifacts, QWidget* parent) {
+    auto parts = createResultReportPanel("Zone", "Completion by source zone", parent);
+    if (artifacts.zoneCompletion.empty()) {
+        auto* empty = createLabel("No zone completion data", parts.content);
+        empty->setStyleSheet(ui::mutedTextStyleSheet());
+        parts.contentLayout->addWidget(empty);
+    } else {
+        for (const auto& zone : artifacts.zoneCompletion) {
+            parts.contentLayout->addWidget(createReportInfoRow({
+                QString::fromStdString(zone.zoneLabel),
+                QString("People: %1    Out: %2")
+                    .arg(static_cast<int>(zone.initialCount))
+                    .arg(static_cast<int>(zone.evacuatedCount)),
+                QString("Last: %1").arg(formatOptionalSeconds(zone.lastCompletionTimeSeconds)),
+            }, parts.content));
+        }
     }
-    if (!artifacts.exitUsage.empty() && artifacts.exitUsage.front().usageRatio >= 0.65) {
-        lines.push_back(QString("%1 handles %2 of evacuees; use signs or staff to distribute exits.")
-            .arg(QString::fromStdString(artifacts.exitUsage.front().exitLabel), formatPercent(artifacts.exitUsage.front().usageRatio)));
+    parts.contentLayout->addStretch(1);
+    return parts.panel;
+}
+
+QWidget* createGroupsReportPanel(const safecrowd::domain::ScenarioResultArtifacts& artifacts, QWidget* parent) {
+    auto parts = createResultReportPanel("Groups", "Completion by crowd placement", parent);
+    if (artifacts.placementCompletion.empty()) {
+        auto* empty = createLabel("No group completion data", parts.content);
+        empty->setStyleSheet(ui::mutedTextStyleSheet());
+        parts.contentLayout->addWidget(empty);
+    } else {
+        for (const auto& group : artifacts.placementCompletion) {
+            parts.contentLayout->addWidget(createReportInfoRow({
+                QString::fromStdString(group.placementId),
+                QString("People: %1    Out: %2")
+                    .arg(static_cast<int>(group.initialCount))
+                    .arg(static_cast<int>(group.evacuatedCount)),
+                QString("Last: %1").arg(formatOptionalSeconds(group.lastCompletionTimeSeconds)),
+            }, parts.content));
+        }
     }
-    if (lines.empty()) {
-        lines.push_back(QString("No dominant risk is detected in this result; keep the current plan as the baseline."));
-    }
-    while (lines.size() > 3) {
-        lines.removeLast();
-    }
-    (void)frame;
-    return lines;
+    parts.contentLayout->addStretch(1);
+    return parts.panel;
 }
 
 class ResultReplayControls final : public QWidget {
@@ -888,14 +1040,13 @@ QWidget* createResultPanel(
     const safecrowd::domain::ScenarioResultArtifacts& artifacts,
     std::function<void()> runAgainHandler,
     std::function<void()> editHandler,
-    const WorkspaceShell* shell,
     QWidget* parent) {
     auto* panel = new QWidget(parent);
     auto* layout = new QVBoxLayout(panel);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(12);
 
-    layout->addWidget(shell != nullptr ? shell->createPanelHeader("Overview", panel, false) : createLabel("Overview", panel, ui::FontRole::Title));
+    layout->addWidget(createOverviewHeader(artifacts, panel));
     auto* scenarioLabel = createLabel(QString("Scenario: %1").arg(QString::fromStdString(scenario.name)), panel);
     scenarioLabel->setStyleSheet(ui::mutedTextStyleSheet());
     layout->addWidget(scenarioLabel);
@@ -965,9 +1116,6 @@ QWidget* createResultPanel(
         panel,
         "Time at which 95% of occupants completed evacuation."), 4, 0);
     layout->addLayout(metricsGrid);
-    auto* detailsHeader = createReportSectionHeader("Details", panel);
-    layout->addWidget(detailsHeader);
-    layout->addWidget(createDetailTabs(artifacts, panel), 1);
     layout->addStretch(1);
 
     auto* actions = new QWidget(panel);
@@ -996,87 +1144,6 @@ QWidget* createResultPanel(
         }
     });
 
-    return panel;
-}
-
-QWidget* createResultFindingsPanel(
-    const safecrowd::domain::SimulationFrame& frame,
-    const safecrowd::domain::ScenarioRiskSnapshot& risk,
-    const safecrowd::domain::ScenarioResultArtifacts& artifacts,
-    std::function<void(std::size_t)> bottleneckFocusHandler,
-    std::function<void(std::size_t)> hotspotFocusHandler,
-    QWidget* parent) {
-    auto* panel = new QWidget(parent);
-    auto* layout = new QVBoxLayout(panel);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(12);
-
-    auto* caption = createLabel("Risk findings and spatial reports", panel, ui::FontRole::Caption);
-    caption->setStyleSheet(ui::subtleTextStyleSheet());
-    layout->addWidget(caption);
-
-    auto* area = new QScrollArea(panel);
-    area->setWidgetResizable(true);
-    area->setFrameShape(QFrame::NoFrame);
-    area->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    ui::polishScrollArea(area);
-
-    auto* content = new QWidget(area);
-    content->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-    auto* contentLayout = new QVBoxLayout(content);
-    contentLayout->setContentsMargins(0, 0, 10, 0);
-    contentLayout->setSpacing(12);
-
-    auto* interpretationHeader = createReportSectionHeader("Decision Notes", content);
-    contentLayout->addWidget(interpretationHeader);
-    for (const auto& line : resultInterpretations(frame, risk, artifacts)) {
-        auto* row = createReportRowButton({line}, content);
-        row->setEnabled(false);
-        contentLayout->addWidget(row);
-    }
-
-    auto* bottleneckHeader = createReportSectionHeader("Bottlenecks", content);
-    bottleneckHeader->setToolTip(safecrowd::domain::scenarioBottleneckDefinition());
-    contentLayout->addWidget(bottleneckHeader);
-    if (risk.bottlenecks.empty()) {
-        auto* empty = createLabel("None detected", content);
-        empty->setStyleSheet(ui::mutedTextStyleSheet());
-        contentLayout->addWidget(empty);
-    } else {
-        for (std::size_t index = 0; index < risk.bottlenecks.size(); ++index) {
-            auto* row = createBottleneckRowButton(risk.bottlenecks[index], index, content);
-            QObject::connect(row, &QPushButton::clicked, content, [bottleneckFocusHandler, index]() {
-                if (bottleneckFocusHandler) {
-                    bottleneckFocusHandler(index);
-                }
-            });
-            contentLayout->addWidget(row);
-        }
-    }
-
-    auto* hotspotHeader = createReportSectionHeader("Hotspots", content);
-    hotspotHeader->setToolTip(safecrowd::domain::scenarioHotspotDefinition());
-    contentLayout->addWidget(hotspotHeader);
-    contentLayout->addWidget(createHotspotLegend(content));
-    if (risk.hotspots.empty()) {
-        auto* empty = createLabel("None detected", content);
-        empty->setStyleSheet(ui::mutedTextStyleSheet());
-        contentLayout->addWidget(empty);
-    } else {
-        for (std::size_t index = 0; index < risk.hotspots.size(); ++index) {
-            auto* row = createHotspotRowButton(risk.hotspots[index], index, content);
-            QObject::connect(row, &QPushButton::clicked, content, [hotspotFocusHandler, index]() {
-                if (hotspotFocusHandler) {
-                    hotspotFocusHandler(index);
-                }
-            });
-            contentLayout->addWidget(row);
-        }
-    }
-
-    contentLayout->addStretch(1);
-    area->setWidget(content);
-    layout->addWidget(area, 1);
     return panel;
 }
 
@@ -1119,15 +1186,6 @@ ScenarioResultWidget::ScenarioResultWidget(
     shell_->setBackHandler([this]() {
         navigateToAuthoring(true);
     });
-    shell_->setNavigationTabs(
-        {
-            {
-                .id = "reports",
-                .label = "Reports",
-            },
-        },
-        "reports",
-        [](const QString&) {});
 
     auto* canvas = new SimulationCanvasWidget(layout_, shell_);
     canvas->setFrame(frame_);
@@ -1135,35 +1193,31 @@ ScenarioResultWidget::ScenarioResultWidget(
     canvas->setBottleneckOverlay(risk_.bottlenecks);
     ResultReplayControls* replayControls = nullptr;
     shell_->setCanvas(createResultCanvasPanel(canvas, frame_, artifacts_, &replayControls, shell_));
-    shell_->setNavigationPanel(createResultFindingsPanel(
-        frame_,
-        risk_,
-        artifacts_,
-        [this, canvas, replayControls](std::size_t index) {
-            if (index < risk_.bottlenecks.size() && replayControls != nullptr) {
-                const auto& bottleneck = risk_.bottlenecks[index];
-                if (bottleneck.detectionFrame.has_value()) {
-                    replayControls->showFrame(*bottleneck.detectionFrame);
-                } else if (bottleneck.detectedAtSeconds.has_value()) {
-                    replayControls->showClosestFrameAtSeconds(*bottleneck.detectedAtSeconds);
-                }
+    bottleneckFocusHandler_ = [this, canvas, replayControls](std::size_t index) {
+        if (index < risk_.bottlenecks.size() && replayControls != nullptr) {
+            const auto& bottleneck = risk_.bottlenecks[index];
+            if (bottleneck.detectionFrame.has_value()) {
+                replayControls->showFrame(*bottleneck.detectionFrame);
+            } else if (bottleneck.detectedAtSeconds.has_value()) {
+                replayControls->showClosestFrameAtSeconds(*bottleneck.detectedAtSeconds);
             }
-            canvas->setResultOverlayMode(ResultOverlayMode::Bottlenecks);
-            canvas->focusBottleneck(index);
-        },
-        [this, canvas, replayControls](std::size_t index) {
-            if (index < risk_.hotspots.size() && replayControls != nullptr) {
-                const auto& hotspot = risk_.hotspots[index];
-                if (hotspot.detectionFrame.has_value()) {
-                    replayControls->showFrame(*hotspot.detectionFrame);
-                } else if (hotspot.detectedAtSeconds.has_value()) {
-                    replayControls->showClosestFrameAtSeconds(*hotspot.detectedAtSeconds);
-                }
+        }
+        canvas->setResultOverlayMode(ResultOverlayMode::Bottlenecks);
+        canvas->focusBottleneck(index);
+    };
+    hotspotFocusHandler_ = [this, canvas, replayControls](std::size_t index) {
+        if (index < risk_.hotspots.size() && replayControls != nullptr) {
+            const auto& hotspot = risk_.hotspots[index];
+            if (hotspot.detectionFrame.has_value()) {
+                replayControls->showFrame(*hotspot.detectionFrame);
+            } else if (hotspot.detectedAtSeconds.has_value()) {
+                replayControls->showClosestFrameAtSeconds(*hotspot.detectedAtSeconds);
             }
-            canvas->setResultOverlayMode(ResultOverlayMode::Hotspots);
-            canvas->focusHotspot(index);
-        },
-        shell_));
+        }
+        canvas->setResultOverlayMode(ResultOverlayMode::Hotspots);
+        canvas->focusHotspot(index);
+    };
+    refreshResultNavigationPanel();
     shell_->setReviewPanel(createResultPanel(
         scenario_,
         frame_,
@@ -1175,11 +1229,83 @@ ScenarioResultWidget::ScenarioResultWidget(
         [this]() {
             navigateToAuthoring(false);
         },
-        shell_,
         shell_));
     shell_->setReviewPanelVisible(true);
 
     rootLayout->addWidget(shell_);
+}
+
+void ScenarioResultWidget::refreshResultNavigationPanel() {
+    if (shell_ == nullptr) {
+        return;
+    }
+
+    const auto activeTabId = [this]() {
+        switch (resultNavigationView_) {
+        case ResultNavigationView::Hotspot:
+            return QString("hotspot");
+        case ResultNavigationView::Zone:
+            return QString("zone");
+        case ResultNavigationView::Groups:
+            return QString("groups");
+        case ResultNavigationView::Bottleneck:
+        default:
+            return QString("bottleneck");
+        }
+    }();
+
+    shell_->setNavigationTabs(
+        {
+            {
+                .id = "bottleneck",
+                .label = "Bottleneck",
+                .icon = makeResultNavigationIcon("bottleneck", QColor("#1f5fae")),
+            },
+            {
+                .id = "hotspot",
+                .label = "Hotspot",
+                .icon = makeResultNavigationIcon("hotspot", QColor("#1f5fae")),
+            },
+            {
+                .id = "zone",
+                .label = "Zone",
+                .icon = makeResultNavigationIcon("zone", QColor("#1f5fae")),
+            },
+            {
+                .id = "groups",
+                .label = "Groups",
+                .icon = makeResultNavigationIcon("groups", QColor("#1f5fae")),
+            },
+        },
+        activeTabId,
+        [this](const QString& tabId) {
+            if (tabId == "hotspot") {
+                resultNavigationView_ = ResultNavigationView::Hotspot;
+            } else if (tabId == "zone") {
+                resultNavigationView_ = ResultNavigationView::Zone;
+            } else if (tabId == "groups") {
+                resultNavigationView_ = ResultNavigationView::Groups;
+            } else {
+                resultNavigationView_ = ResultNavigationView::Bottleneck;
+            }
+            refreshResultNavigationPanel();
+        });
+
+    switch (resultNavigationView_) {
+    case ResultNavigationView::Hotspot:
+        shell_->setNavigationPanel(createHotspotReportPanel(risk_, hotspotFocusHandler_, shell_));
+        break;
+    case ResultNavigationView::Zone:
+        shell_->setNavigationPanel(createZoneReportPanel(artifacts_, shell_));
+        break;
+    case ResultNavigationView::Groups:
+        shell_->setNavigationPanel(createGroupsReportPanel(artifacts_, shell_));
+        break;
+    case ResultNavigationView::Bottleneck:
+    default:
+        shell_->setNavigationPanel(createBottleneckReportPanel(risk_, bottleneckFocusHandler_, shell_));
+        break;
+    }
 }
 
 const safecrowd::domain::ScenarioDraft& ScenarioResultWidget::scenario() const noexcept {

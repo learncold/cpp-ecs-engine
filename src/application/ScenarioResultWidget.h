@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <functional>
 
 #include <QString>
@@ -35,8 +36,16 @@ public:
     const safecrowd::domain::ScenarioResultArtifacts& artifacts() const noexcept;
 
 private:
+    enum class ResultNavigationView {
+        Bottleneck,
+        Hotspot,
+        Zone,
+        Groups,
+    };
+
     void rerunScenario();
     void navigateToAuthoring(bool showRunPanel);
+    void refreshResultNavigationPanel();
 
     QString projectName_{};
     safecrowd::domain::FacilityLayout2D layout_{};
@@ -47,6 +56,9 @@ private:
     std::function<void()> saveProjectHandler_{};
     std::function<void()> openProjectHandler_{};
     std::function<void()> backToLayoutReviewHandler_{};
+    std::function<void(std::size_t)> bottleneckFocusHandler_{};
+    std::function<void(std::size_t)> hotspotFocusHandler_{};
+    ResultNavigationView resultNavigationView_{ResultNavigationView::Bottleneck};
     WorkspaceShell* shell_{nullptr};
 };
 
