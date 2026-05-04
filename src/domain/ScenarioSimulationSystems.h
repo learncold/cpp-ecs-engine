@@ -74,7 +74,6 @@ struct ScenarioAgentSeed {
     Position position{};
     Agent agent{};
     Velocity velocity{};
-    AvoidanceState avoidance{};
     EvacuationRoute route{};
     EvacuationStatus status{};
 };

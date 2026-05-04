@@ -24,18 +24,40 @@ inline constexpr double kDefaultAgentRadius = 0.25;
 inline constexpr double kDefaultAgentSpeed = 1.5;
 inline constexpr double kStairSpeedMultiplier = 0.55;
 inline constexpr double kArrivalEpsilon = 0.05;
-inline constexpr double kPersonalSpaceBuffer = 0.08;
-inline constexpr double kAvoidanceLateralStrength = 0.65;
-inline constexpr double kAvoidanceSlowdownStrength = 0.7;
-inline constexpr double kAvoidanceSideLockSeconds = 0.55;
-inline constexpr double kHeadOnLookAheadDistance = 1.2;
-inline constexpr double kHeadOnDirectionDotThreshold = -0.6;
-inline constexpr double kBarrierAvoidanceBuffer = 0.18;
-inline constexpr double kBarrierAvoidanceStrength = 1.1;
-inline constexpr int kOverlapRelaxationIterations = 4;
 inline constexpr double kGeometryEpsilon = 1e-9;
 inline constexpr double kPathClearance = 0.08;
-inline constexpr double kCandidateClearance = kDefaultAgentRadius + kBarrierAvoidanceBuffer;
+inline constexpr double kPathPlanningWallBuffer = 0.18;
+inline constexpr double kCandidateClearance = kDefaultAgentRadius + kPathPlanningWallBuffer;
+
+// Social Force model parameters.
+// Reference: Helbing & Molnár, "Social force model for pedestrian dynamics",
+//            Physical Review E 51 (1995); anisotropy from Helbing, Farkas & Vicsek,
+//            "Simulating dynamical features of escape panic", Nature 407 (2000).
+// Citation trail and parameter rationale:
+//   docs/references/Helbing Social Force 모델.md
+//   docs/product/고급 위험 모델.md §3.5
+//
+// Driving term: a_drv = (v_desired - v_current) / tau
+inline constexpr double kSocialForceRelaxationTime = 0.5;            // tau, s
+// Agent-agent repulsion: f_ij = A * exp((r_ij - d_ij) / B) * n_ij * w(phi)
+inline constexpr double kSocialForceAgentStrength = 2.1;             // A_i / m_i, m/s^2
+inline constexpr double kSocialForceAgentRange = 0.30;               // B_i, m
+inline constexpr double kSocialForceAgentAnisotropy = 0.5;           // lambda; w(phi) = lambda + (1-lambda)*(1+cos(phi))/2
+inline constexpr double kSocialForceAgentInteractionRadius = 2.0;    // m, neighbor cutoff
+// Wall repulsion: f_iW = A_W * exp((r_i - d_iW) / B_W) * n_iW
+inline constexpr double kSocialForceWallStrength = 5.0;              // A_W / m_i, m/s^2
+inline constexpr double kSocialForceWallRange = 0.20;                // B_W, m
+inline constexpr double kSocialForceWallInteractionRadius = 1.0;     // m, wall cutoff
+// Body acceleration limit (typical comfortable human: 3-5 m/s^2)
+inline constexpr double kSocialForceMaxAcceleration = 5.0;           // m/s^2
+// Tangential nudge that breaks symmetry on a perfectly head-on encounter.
+// Without it two mirror-image agents along a shared axis would receive a purely
+// longitudinal repulsion and stall against each other. Each agent steps to its
+// own left so that a mirror-image pair separates onto opposite world sides.
+// The threshold keeps the bias narrowly scoped to nearly co-linear pairs so it
+// does not perturb generic oblique encounters handled by the base repulsion.
+inline constexpr double kSocialForceHeadOnTangentBias = 0.4;
+inline constexpr double kSocialForceHeadOnAlignmentThreshold = 0.985;
 inline constexpr double kWaypointCrossingEpsilon = 0.08;
 inline constexpr double kWaypointProgressEpsilon = 0.02;
 inline constexpr double kWaypointBypassLongitudinalTolerance = 0.5;
@@ -150,14 +172,16 @@ std::vector<engine::Entity> nearbyAgents(
     const std::string& floorId,
     double radius);
 Point2D deterministicFallbackDirection(engine::Entity entity);
-Point2D forwardPreservingAgentAvoidanceVelocity(
+Point2D socialForceDriving(const Point2D& desiredVelocity, const Point2D& currentVelocity);
+Point2D socialForceAgentRepulsion(
     engine::WorldQuery& query,
     engine::Entity entity,
     const std::vector<engine::Entity>& candidates,
-    const Point2D& desiredVelocity,
-    double deltaSeconds,
-    double& speedScale);
-Point2D barrierSeparationVelocity(const FacilityLayout2D& layout, const Position& position, const Agent& agent);
+    const Point2D& currentVelocity);
+Point2D socialForceWallRepulsion(
+    const FacilityLayout2D& layout,
+    const Position& position,
+    const Agent& agent);
 bool movementCrossesBarrier(const FacilityLayout2D& layout, const Point2D& from, const Point2D& to);
 bool lineOfSightClear(const FacilityLayout2D& layout, const Point2D& from, const Point2D& to, double clearance);
 std::vector<Point2D> buildPath(const FacilityLayout2D& layout, const Point2D& start, const Point2D& goal, double clearance);

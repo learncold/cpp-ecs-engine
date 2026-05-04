@@ -24,11 +24,6 @@ struct Velocity {
     Point2D value;
 };
 
-struct AvoidanceState {
-    int preferredSide{0};
-    double sideLockSeconds{0.0};
-};
-
 struct EvacuationRoute {
     std::vector<Point2D> waypoints{};
     std::vector<LineSegment2D> waypointPassages{};

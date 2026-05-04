@@ -276,7 +276,6 @@ void ScenarioAgentSpawnSystem::configure(engine::EngineWorld& world) {
             seed.position,
             seed.agent,
             seed.velocity,
-            seed.avoidance,
             seed.route,
             seed.status);
     }

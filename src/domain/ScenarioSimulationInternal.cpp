@@ -723,7 +723,7 @@ double speedOf(const Point2D& velocity) {
 }
 
 std::vector<engine::Entity> simulationEntities(engine::WorldQuery& query) {
-    return query.view<Position, Agent, Velocity, AvoidanceState, EvacuationRoute, EvacuationStatus>();
+    return query.view<Position, Agent, Velocity, EvacuationRoute, EvacuationStatus>();
 }
 
 AgentSpatialIndex buildAgentSpatialIndex(
@@ -793,42 +793,39 @@ Point2D deterministicFallbackDirection(engine::Entity entity) {
     return normalizedOr({.x = std::cos(seed * 1.37), .y = std::sin(seed * 1.37)}, {.x = 1.0, .y = 0.0});
 }
 
-int deterministicPairSide(engine::Entity first, engine::Entity second) {
-    const auto minIndex = std::min(first.index, second.index);
-    const auto maxIndex = std::max(first.index, second.index);
-    return ((minIndex + maxIndex) % 2U) == 0U ? -1 : 1;
+// Helbing & Molnár (1995) Eq. (3): driving force pushes the agent toward its
+// desired velocity over the relaxation time tau.
+Point2D socialForceDriving(const Point2D& desiredVelocity, const Point2D& currentVelocity) {
+    const auto delta = desiredVelocity - currentVelocity;
+    return delta * (1.0 / kSocialForceRelaxationTime);
 }
 
-Point2D forwardPreservingAgentAvoidanceVelocity(
+// Anisotropic agent-agent repulsion. Helbing & Molnár (1995) Eq. (4) gives the
+// isotropic exponential form; the angular weight w(phi) follows Helbing, Farkas
+// & Vicsek (2000) Eq. (3) so that obstacles in front are felt more strongly than
+// those behind.
+Point2D socialForceAgentRepulsion(
     engine::WorldQuery& query,
     engine::Entity entity,
     const std::vector<engine::Entity>& candidates,
-    const Point2D& desiredVelocity,
-    double deltaSeconds,
-    double& speedScale) {
+    const Point2D& currentVelocity) {
     const auto& position = query.get<Position>(entity);
     const auto& agent = query.get<Agent>(entity);
     const auto& route = query.get<EvacuationRoute>(entity);
-    auto& avoidance = query.get<AvoidanceState>(entity);
-    const auto desiredSpeed = lengthOf(desiredVelocity);
-    if (desiredSpeed <= 1e-9) {
-        speedScale = 1.0;
-        return {};
-    }
 
-    if (avoidance.sideLockSeconds > 0.0) {
-        avoidance.sideLockSeconds = std::max(0.0, avoidance.sideLockSeconds - std::max(0.0, deltaSeconds));
-        if (avoidance.sideLockSeconds <= 0.0) {
-            avoidance.preferredSide = 0;
+    Point2D heading{};
+    const auto currentSpeed = lengthOf(currentVelocity);
+    if (currentSpeed > 1e-6) {
+        heading = currentVelocity * (1.0 / currentSpeed);
+    } else if (route.nextWaypointIndex < route.waypoints.size()) {
+        const auto target = routeWaypointTarget(route, position.value);
+        const auto distance = distanceBetween(position.value, target);
+        if (distance > 1e-6) {
+            heading = (target - position.value) * (1.0 / distance);
         }
     }
 
-    const auto forward = desiredVelocity * (1.0 / desiredSpeed);
-    const auto lateral = perpendicularLeft(forward);
-    Point2D lateralCorrection{};
-    speedScale = 1.0;
-    bool lockedSideThisFrame = false;
-
+    Point2D acceleration{};
     for (const auto other : candidates) {
         if (other == entity) {
             continue;
@@ -837,117 +834,96 @@ Point2D forwardPreservingAgentAvoidanceVelocity(
         if (otherStatus.evacuated) {
             continue;
         }
-        const auto& otherPosition = query.get<Position>(other);
-        const auto& otherAgent = query.get<Agent>(other);
         const auto& otherRoute = query.get<EvacuationRoute>(other);
         if (agentCollisionFloorId(otherRoute) != agentCollisionFloorId(route)) {
             continue;
         }
-        const auto offsetToOther = otherPosition.value - position.value;
-        const auto distance = lengthOf(offsetToOther);
-        const auto desiredDistance = static_cast<double>(agent.radius + otherAgent.radius) + kPersonalSpaceBuffer;
-        const auto forwardDistance = dot(offsetToOther, forward);
-        const auto lateralDistance = dot(offsetToOther, lateral);
 
-        bool headOn = false;
-        if (route.nextWaypointIndex < route.waypoints.size() && distance <= kHeadOnLookAheadDistance) {
-            if (otherRoute.currentFloorId == route.currentFloorId
-                && otherRoute.nextWaypointIndex < otherRoute.waypoints.size()) {
-                const auto otherTarget = routeWaypointTarget(otherRoute, otherPosition.value);
-                const auto otherTargetDistance = distanceBetween(otherPosition.value, otherTarget);
-                if (otherTargetDistance > kArrivalEpsilon) {
-                    const auto otherForward = (otherTarget - otherPosition.value) * (1.0 / otherTargetDistance);
-                    const auto otherForwardDistance = dot(position.value - otherPosition.value, otherForward);
-                    headOn = dot(forward, otherForward) <= kHeadOnDirectionDotThreshold
-                        && forwardDistance > 0.0
-                        && otherForwardDistance > 0.0;
-                }
+        const auto& otherPosition = query.get<Position>(other);
+        const auto& otherAgent = query.get<Agent>(other);
+        const auto offsetFromOther = position.value - otherPosition.value;
+        const auto distance = lengthOf(offsetFromOther);
+        if (distance > kSocialForceAgentInteractionRadius) {
+            continue;
+        }
+        const auto contactDistance = static_cast<double>(agent.radius + otherAgent.radius);
+        const auto normal = distance > 1e-6
+            ? offsetFromOther * (1.0 / distance)
+            : deterministicFallbackDirection(entity);
+        const auto magnitude = kSocialForceAgentStrength
+            * std::exp((contactDistance - distance) / kSocialForceAgentRange);
+
+        // Anisotropy: agents perceive what is in front more strongly than what is behind.
+        // phi is the angle between the agent's heading and the direction toward the other.
+        double anisotropy = 1.0;
+        if (lengthOf(heading) > 1e-6) {
+            const auto towardOther = normal * -1.0;
+            const auto cosPhi = dot(heading, towardOther);
+            anisotropy = kSocialForceAgentAnisotropy
+                + (1.0 - kSocialForceAgentAnisotropy) * 0.5 * (1.0 + cosPhi);
+        }
+
+        auto contribution = normal * (magnitude * anisotropy);
+
+        // Symmetry breaker for nearly perfect head-on alignment. Two agents on
+        // a shared axis would otherwise receive purely longitudinal repulsion
+        // and stall against each other. Each agent biases to its own left, so a
+        // mirror-image pair ends up sliding past on opposite world sides — the
+        // convention is global and stays deterministic across replays.
+        if (lengthOf(heading) > 1e-6 && distance < contactDistance + kSocialForceAgentRange) {
+            const auto towardOther = normal * -1.0;
+            const auto alignment = dot(heading, towardOther);
+            if (alignment >= kSocialForceHeadOnAlignmentThreshold) {
+                const auto tangent = perpendicularLeft(heading);
+                contribution = contribution + (tangent * (magnitude * kSocialForceHeadOnTangentBias));
             }
         }
 
-        if (distance >= desiredDistance && !headOn) {
-            continue;
-        }
-
-        const auto pressure = headOn
-            ? std::clamp((kHeadOnLookAheadDistance - distance) / kHeadOnLookAheadDistance, 0.15, 1.0)
-            : (desiredDistance - distance) / desiredDistance;
-
-        if (forwardDistance > -desiredDistance && forwardDistance < kHeadOnLookAheadDistance) {
-            speedScale = std::min(speedScale, std::max(0.2, 1.0 - (pressure * kAvoidanceSlowdownStrength)));
-        }
-
-        double side = 0.0;
-        if (avoidance.preferredSide != 0 && avoidance.sideLockSeconds > 0.0) {
-            side = static_cast<double>(avoidance.preferredSide);
-        } else if (headOn) {
-            side = static_cast<double>(deterministicPairSide(entity, other));
-        } else if (std::fabs(lateralDistance) > 1e-6) {
-            side = lateralDistance < 0.0 ? 1.0 : -1.0;
-        } else {
-            side = entity.index < other.index ? -1.0 : 1.0;
-        }
-
-        if (headOn) {
-            avoidance.preferredSide = side < 0.0 ? -1 : 1;
-            avoidance.sideLockSeconds = kAvoidanceSideLockSeconds;
-            lockedSideThisFrame = true;
-            const bool shouldYield = entity.index > other.index;
-            speedScale = std::min(
-                speedScale,
-                shouldYield
-                    ? std::max(0.18, 1.0 - (pressure * 1.05))
-                    : std::max(0.55, 1.0 - (pressure * 0.35)));
-            const auto sideStepMultiplier = shouldYield ? 1.35 : 0.85;
-            lateralCorrection = lateralCorrection + (lateral * (
-                side * pressure * sideStepMultiplier * kAvoidanceLateralStrength * static_cast<double>(agent.maxSpeed)));
-        } else {
-            lateralCorrection = lateralCorrection + (lateral * (
-                side * pressure * kAvoidanceLateralStrength * static_cast<double>(agent.maxSpeed)));
-        }
+        acceleration = acceleration + contribution;
     }
 
-    if (!lockedSideThisFrame && avoidance.sideLockSeconds <= 0.0) {
-        avoidance.preferredSide = 0;
-    }
-
-    return clampedToLength(lateralCorrection, static_cast<double>(agent.maxSpeed) * 0.45);
+    return acceleration;
 }
 
-Point2D barrierSeparationVelocity(const FacilityLayout2D& layout, const Position& position, const Agent& agent) {
-    Point2D correction{};
-    const auto keepoutDistance = static_cast<double>(agent.radius) + kBarrierAvoidanceBuffer;
+// Wall repulsion follows the same exponential form as the agent-agent term.
+// Helbing & Molnár (1995) Eq. (5).
+Point2D socialForceWallRepulsion(
+    const FacilityLayout2D& layout,
+    const Position& position,
+    const Agent& agent) {
+    Point2D acceleration{};
+    const auto agentRadius = static_cast<double>(agent.radius);
+
+    auto accumulate = [&](const Point2D& closest, bool insideClosedRegion) {
+        const auto delta = position.value - closest;
+        const auto distance = lengthOf(delta);
+        if (!insideClosedRegion && distance > kSocialForceWallInteractionRadius) {
+            return;
+        }
+        const auto normal = distance > 1e-6
+            ? delta * (1.0 / distance)
+            : Point2D{.x = 0.0, .y = 1.0};
+        const auto effectiveDistance = insideClosedRegion ? -distance : distance;
+        const auto magnitude = kSocialForceWallStrength
+            * std::exp((agentRadius - effectiveDistance) / kSocialForceWallRange);
+        acceleration = acceleration + (normal * magnitude);
+    };
 
     for (const auto& barrier : layout.barriers) {
         if (!barrier.blocksMovement || barrier.geometry.vertices.size() < 2) {
             continue;
         }
-
         const auto& vertices = barrier.geometry.vertices;
         for (std::size_t index = 0; index + 1 < vertices.size(); ++index) {
-            const auto closest = closestPointOnSegment(position.value, vertices[index], vertices[index + 1]);
-            const auto delta = position.value - closest;
-            const auto distance = lengthOf(delta);
-            if (distance < keepoutDistance) {
-                const auto direction = normalizedOr(delta, deterministicFallbackDirection({static_cast<engine::EntityIndex>(index + 1), 0}));
-                const auto pressure = (keepoutDistance - distance) / keepoutDistance;
-                correction = correction + (direction * (pressure * kBarrierAvoidanceStrength * static_cast<double>(agent.maxSpeed)));
-            }
+            accumulate(closestPointOnSegment(position.value, vertices[index], vertices[index + 1]), false);
         }
-
         if (barrier.geometry.closed) {
             const auto closest = closestPointOnSegment(position.value, vertices.back(), vertices.front());
-            const auto delta = position.value - closest;
-            const auto distance = lengthOf(delta);
-            if (distance < keepoutDistance || pointInRing(vertices, position.value)) {
-                const auto direction = normalizedOr(delta, {.x = 0.0, .y = 1.0});
-                const auto pressure = distance < keepoutDistance ? (keepoutDistance - distance) / keepoutDistance : 1.0;
-                correction = correction + (direction * (pressure * kBarrierAvoidanceStrength * static_cast<double>(agent.maxSpeed)));
-            }
+            accumulate(closest, pointInRing(vertices, position.value));
         }
     }
 
-    return correction;
+    return acceleration;
 }
 
 bool movementCrossesBarrier(const FacilityLayout2D& layout, const Point2D& from, const Point2D& to) {
