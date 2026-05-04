@@ -93,7 +93,8 @@ private:
     const safecrowd::domain::Connection2D* connectionAt(const safecrowd::domain::Point2D& point, double toleranceWorldUnits) const;
     const safecrowd::domain::Barrier2D* barrierAt(const safecrowd::domain::Point2D& point, double toleranceWorldUnits) const;
     safecrowd::domain::Point2D connectionCenter(const safecrowd::domain::Connection2D& connection) const;
-    QString placementAt(const QPointF& position, const LayoutCanvasTransform& transform) const;
+    QString placementAt(const QPointF& position, const LayoutCanvasTransform& transform, double pickPadding = 0.0) const;
+    QString selectedPlacementAt(const QPointF& position, const LayoutCanvasTransform& transform) const;
     bool placementAreaBlocked(const std::vector<safecrowd::domain::Point2D>& area, int occupantCount) const;
     bool placementPointBlocked(const safecrowd::domain::Point2D& point) const;
     safecrowd::domain::Point2D defaultVelocityFrom(const safecrowd::domain::Point2D& point) const;
@@ -106,7 +107,9 @@ private:
     void selectSingleAt(const QPointF& position, const LayoutCanvasTransform& transform);
     void selectPlacementsInRect(const QRectF& screenRect, const LayoutCanvasTransform& transform);
     void selectLayoutElementAt(const QPointF& position);
+    void openCrowdPlacementContextMenu(const QString& crowdElementId, const QPoint& screenPosition);
     void openConnectionBlockScheduleEditor(const QString& blockId, const QPoint& screenPosition);
+    bool deleteCrowdElement(const QString& crowdElementId);
     void drawFocusedLayoutElement(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawFocusedPlacement(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawConnectionBlocks(QPainter& painter, const LayoutCanvasTransform& transform) const;

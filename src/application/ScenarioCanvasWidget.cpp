@@ -316,6 +316,24 @@ QRectF groupMarkerBounds(const ScenarioCrowdPlacement& placement, const LayoutCa
     return bounds.adjusted(-7.0, -7.0, 7.0, 7.0);
 }
 
+QString placementIdFromCrowdElementId(const QString& crowdElementId) {
+    return crowdElementId.section('/', 0, 0);
+}
+
+std::optional<int> occupantIndexFromCrowdElementId(const QString& crowdElementId, const QString& placementId) {
+    const auto prefix = QString("%1/occupant-").arg(placementId);
+    if (!crowdElementId.startsWith(prefix)) {
+        return std::nullopt;
+    }
+
+    bool ok = false;
+    const auto oneBasedIndex = crowdElementId.mid(prefix.size()).toInt(&ok);
+    if (!ok || oneBasedIndex <= 0) {
+        return std::nullopt;
+    }
+    return oneBasedIndex - 1;
+}
+
 QString scenarioToolIconResourcePath(const QString& type) {
     if (type == "select") {
         return QStringLiteral(":/tool-icons/scenario-authoring/select.svg");
@@ -720,6 +738,20 @@ void ScenarioCanvasWidget::mousePressEvent(QMouseEvent* event) {
     }
 
     if (event->button() == Qt::RightButton) {
+        if (const auto bounds = collectBounds(); bounds.has_value()) {
+            const auto transform = currentTransform(*bounds);
+            auto crowdElementId = selectedPlacementAt(event->position(), transform);
+            if (crowdElementId.isEmpty()) {
+                crowdElementId = placementAt(event->position(), transform, 8.0);
+            }
+            if (!crowdElementId.isEmpty()) {
+                focusPlacement(crowdElementId);
+                openCrowdPlacementContextMenu(crowdElementId, event->globalPosition().toPoint());
+                event->accept();
+                return;
+            }
+        }
+
         const auto point = unmapPoint(event->position());
         constexpr double kPickRadiusPixels = 18.0;
         const auto offsetPoint = unmapPoint(event->position() + QPointF(kPickRadiusPixels, 0.0));
@@ -1238,8 +1270,11 @@ safecrowd::domain::Point2D ScenarioCanvasWidget::connectionCenter(const safecrow
     };
 }
 
-QString ScenarioCanvasWidget::placementAt(const QPointF& position, const LayoutCanvasTransform& transform) const {
-    constexpr double kPickRadius = kOccupantMarkerRadius + 6.0;
+QString ScenarioCanvasWidget::placementAt(
+    const QPointF& position,
+    const LayoutCanvasTransform& transform,
+    double pickPadding) const {
+    const double pickRadius = kOccupantMarkerRadius + 6.0 + std::max(0.0, pickPadding);
     for (auto it = placements_.rbegin(); it != placements_.rend(); ++it) {
         const auto& placement = *it;
         if (!currentFloorId_.isEmpty() && !placement.floorId.isEmpty() && placement.floorId != currentFloorId_) {
@@ -1249,7 +1284,7 @@ QString ScenarioCanvasWidget::placementAt(const QPointF& position, const LayoutC
             continue;
         }
         if (placement.kind == ScenarioCrowdPlacementKind::Individual || placement.area.size() < 4) {
-            if (QLineF(position, transform.map(placement.area.front())).length() <= kPickRadius) {
+            if (QLineF(position, transform.map(placement.area.front())).length() <= pickRadius) {
                 return placement.id;
             }
             continue;
@@ -1258,15 +1293,72 @@ QString ScenarioCanvasWidget::placementAt(const QPointF& position, const LayoutC
         const auto markers = fallbackDisplayPositions(placement);
         for (int index = 0; index < static_cast<int>(markers.size()); ++index) {
             const auto& worldPoint = markers[static_cast<std::size_t>(index)];
-            if (QLineF(position, transform.map(worldPoint)).length() <= kPickRadius) {
+            if (QLineF(position, transform.map(worldPoint)).length() <= pickRadius) {
                 return QString("%1/occupant-%2").arg(placement.id).arg(index + 1);
             }
         }
 
-        if (groupMarkerBounds(placement, transform).contains(position)) {
+        if (groupMarkerBounds(placement, transform).adjusted(-pickPadding, -pickPadding, pickPadding, pickPadding).contains(position)) {
             return placement.id;
         }
     }
+    return {};
+}
+
+QString ScenarioCanvasWidget::selectedPlacementAt(const QPointF& position, const LayoutCanvasTransform& transform) const {
+    constexpr double kSelectedPickPadding = 14.0;
+    const auto focusedPlacementId = placementIdFromCrowdElementId(focusedCrowdElementId_);
+
+    for (auto it = placements_.rbegin(); it != placements_.rend(); ++it) {
+        const auto& placement = *it;
+        if (!currentFloorId_.isEmpty() && !placement.floorId.isEmpty() && placement.floorId != currentFloorId_) {
+            continue;
+        }
+        if (placement.area.empty()) {
+            continue;
+        }
+        const bool selected = selectedPlacementIds_.contains(placement.id) || placement.id == focusedPlacementId;
+        if (!selected) {
+            continue;
+        }
+
+        const double pickRadius = kOccupantMarkerRadius + 6.0 + kSelectedPickPadding;
+        if (placement.kind == ScenarioCrowdPlacementKind::Individual || placement.area.size() < 4) {
+            if (QLineF(position, transform.map(placement.area.front())).length() <= pickRadius) {
+                return placement.id;
+            }
+            continue;
+        }
+
+        if (const auto focusedOccupantIndex = occupantIndexFromCrowdElementId(focusedCrowdElementId_, placement.id);
+            focusedOccupantIndex.has_value()) {
+            const auto markers = fallbackDisplayPositions(placement);
+            const auto index = *focusedOccupantIndex;
+            if (index >= 0 && index < static_cast<int>(markers.size())) {
+                if (QLineF(position, transform.map(markers[static_cast<std::size_t>(index)])).length() <= pickRadius) {
+                    return focusedCrowdElementId_;
+                }
+            }
+        }
+
+        const auto markers = fallbackDisplayPositions(placement);
+        for (int index = 0; index < static_cast<int>(markers.size()); ++index) {
+            if (QLineF(position, transform.map(markers[static_cast<std::size_t>(index)])).length() <= pickRadius) {
+                return QString("%1/occupant-%2").arg(placement.id).arg(index + 1);
+            }
+        }
+
+        if (pointInsidePlacementArea(placement.area, transform.unmap(position))) {
+            return placement.id;
+        }
+
+        if (groupMarkerBounds(placement, transform)
+                .adjusted(-kSelectedPickPadding, -kSelectedPickPadding, kSelectedPickPadding, kSelectedPickPadding)
+                .contains(position)) {
+            return placement.id;
+        }
+    }
+
     return {};
 }
 
@@ -1627,6 +1719,87 @@ void ScenarioCanvasWidget::openConnectionBlockScheduleEditor(const QString& bloc
     it->intervals = dialog.intervals();
     emitConnectionBlocksChanged();
     update();
+}
+
+void ScenarioCanvasWidget::openCrowdPlacementContextMenu(const QString& crowdElementId, const QPoint& screenPosition) {
+    QMenu menu(this);
+    auto* deleteAction = menu.addAction("Delete");
+    const auto* selectedAction = menu.exec(screenPosition);
+    if (selectedAction == deleteAction) {
+        deleteCrowdElement(crowdElementId);
+    }
+}
+
+bool ScenarioCanvasWidget::deleteCrowdElement(const QString& crowdElementId) {
+    const auto placementId = placementIdFromCrowdElementId(crowdElementId);
+    if (placementId.isEmpty()) {
+        return false;
+    }
+
+    auto placementIt = std::find_if(placements_.begin(), placements_.end(), [&](const auto& placement) {
+        return placement.id == placementId;
+    });
+    if (placementIt == placements_.end()) {
+        return false;
+    }
+
+    if (const auto occupantIndex = occupantIndexFromCrowdElementId(crowdElementId, placementId);
+        occupantIndex.has_value() && placementIt->kind == ScenarioCrowdPlacementKind::Group) {
+        const auto index = *occupantIndex;
+        if (index < 0 || index >= placementIt->occupantCount) {
+            return false;
+        }
+
+        if (placementIt->occupantCount <= 1) {
+            placements_.erase(placementIt);
+            focusedCrowdElementId_.clear();
+            focusedPlacementId_.clear();
+            selectedPlacementIds_.clear();
+            if (crowdSelectionChangedHandler_) {
+                crowdSelectionChangedHandler_({});
+            }
+        } else {
+            if (!placementIt->generatedPositions.empty()) {
+                if (index >= static_cast<int>(placementIt->generatedPositions.size())) {
+                    return false;
+                }
+                placementIt->generatedPositions.erase(placementIt->generatedPositions.begin() + index);
+            }
+            placementIt->occupantCount -= 1;
+            focusedCrowdElementId_ = placementId;
+            focusedPlacementId_ = placementId;
+            selectedPlacementIds_ = QStringList{placementId};
+            if (crowdSelectionChangedHandler_) {
+                crowdSelectionChangedHandler_(placementId);
+            }
+        }
+
+        emitPlacementsChanged();
+        update();
+        return true;
+    }
+
+    const bool deleteSelectedPlacements =
+        selectedPlacementIds_.contains(placementId) && selectedPlacementIds_.size() > 1;
+    if (deleteSelectedPlacements) {
+        placements_.erase(
+            std::remove_if(placements_.begin(), placements_.end(), [&](const auto& placement) {
+                return selectedPlacementIds_.contains(placement.id);
+            }),
+            placements_.end());
+    } else {
+        placements_.erase(placementIt);
+    }
+
+    focusedCrowdElementId_.clear();
+    focusedPlacementId_.clear();
+    selectedPlacementIds_.clear();
+    if (crowdSelectionChangedHandler_) {
+        crowdSelectionChangedHandler_({});
+    }
+    emitPlacementsChanged();
+    update();
+    return true;
 }
 
 void ScenarioCanvasWidget::emitPlacementsChanged() {

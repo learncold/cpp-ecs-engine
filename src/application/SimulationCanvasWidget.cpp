@@ -167,6 +167,9 @@ void SimulationCanvasWidget::focusHotspot(std::size_t index) {
         return;
     }
 
+    if (!hotspotOverlay_[index].floorId.empty() && hotspotOverlay_[index].floorId != currentFloorId_) {
+        setCurrentFloorId(hotspotOverlay_[index].floorId, true);
+    }
     focusedHotspotIndex_ = index;
     focusedBottleneckIndex_.reset();
     focusWorldPoint(hotspotOverlay_[index].center, std::max(camera_.zoom(), kHotspotFocusZoom));
@@ -178,6 +181,9 @@ void SimulationCanvasWidget::focusBottleneck(std::size_t index) {
     }
 
     const auto& passage = bottleneckOverlay_[index].passage;
+    if (!bottleneckOverlay_[index].floorId.empty() && bottleneckOverlay_[index].floorId != currentFloorId_) {
+        setCurrentFloorId(bottleneckOverlay_[index].floorId, true);
+    }
     focusedBottleneckIndex_ = index;
     focusedHotspotIndex_.reset();
     focusWorldPoint(
@@ -487,10 +493,16 @@ void SimulationCanvasWidget::drawHotspotOverlay(QPainter& painter, const LayoutC
     }
 
     std::size_t maxAgentCount = 0;
+    std::vector<const safecrowd::domain::ScenarioCongestionHotspot*> visibleHotspots;
+    visibleHotspots.reserve(hotspotOverlay_.size());
     for (const auto& hotspot : hotspotOverlay_) {
+        if (!matchesFloor(hotspot.floorId, currentFloorId_)) {
+            continue;
+        }
         maxAgentCount = std::max(maxAgentCount, hotspot.agentCount);
+        visibleHotspots.push_back(&hotspot);
     }
-    if (maxAgentCount == 0) {
+    if (maxAgentCount == 0 || visibleHotspots.empty()) {
         return;
     }
 
@@ -508,20 +520,20 @@ void SimulationCanvasWidget::drawHotspotOverlay(QPainter& painter, const LayoutC
         painter.setClipPath(walkableClip);
     }
 
-    for (const auto& hotspot : hotspotOverlay_) {
-        if (hotspot.agentCount == 0) {
+    for (const auto* hotspot : visibleHotspots) {
+        if (hotspot->agentCount == 0) {
             continue;
         }
-        const auto intensity = static_cast<double>(hotspot.agentCount) / static_cast<double>(maxAgentCount);
-        const auto center = transform.map(hotspot.center);
-        const auto cellWidth = hotspot.cellMax.x > hotspot.cellMin.x
-            ? hotspot.cellMax.x - hotspot.cellMin.x
+        const auto intensity = static_cast<double>(hotspot->agentCount) / static_cast<double>(maxAgentCount);
+        const auto center = transform.map(hotspot->center);
+        const auto cellWidth = hotspot->cellMax.x > hotspot->cellMin.x
+            ? hotspot->cellMax.x - hotspot->cellMin.x
             : kDefaultHotspotCellSize;
-        const auto cellHeight = hotspot.cellMax.y > hotspot.cellMin.y
-            ? hotspot.cellMax.y - hotspot.cellMin.y
+        const auto cellHeight = hotspot->cellMax.y > hotspot->cellMin.y
+            ? hotspot->cellMax.y - hotspot->cellMin.y
             : kDefaultHotspotCellSize;
         const auto sourceRadiusWorld = std::max(cellWidth, cellHeight) * (1.2 + (0.85 * std::sqrt(intensity)));
-        const auto radiusAnchor = transform.map({.x = hotspot.center.x + sourceRadiusWorld, .y = hotspot.center.y});
+        const auto radiusAnchor = transform.map({.x = hotspot->center.x + sourceRadiusWorld, .y = hotspot->center.y});
         const auto radius = std::max(12.0, std::hypot(radiusAnchor.x() - center.x(), radiusAnchor.y() - center.y()));
         const auto coreAlpha = kHotspotMinCoreAlpha
             + static_cast<int>((kHotspotMaxCoreAlpha - kHotspotMinCoreAlpha) * intensity);
@@ -536,7 +548,7 @@ void SimulationCanvasWidget::drawHotspotOverlay(QPainter& painter, const LayoutC
 
         if (focusedHotspotIndex_.has_value()
             && *focusedHotspotIndex_ < hotspotOverlay_.size()
-            && &hotspot == &hotspotOverlay_[*focusedHotspotIndex_]) {
+            && hotspot == &hotspotOverlay_[*focusedHotspotIndex_]) {
             painter.setBrush(Qt::NoBrush);
             painter.setPen(QPen(QColor(127, 29, 29, 220), 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
             painter.drawEllipse(center, radius + 4.0, radius + 4.0);
@@ -555,6 +567,9 @@ void SimulationCanvasWidget::drawBottleneckOverlay(QPainter& painter, const Layo
     painter.setBrush(Qt::NoBrush);
     painter.setRenderHint(QPainter::Antialiasing, true);
     for (std::size_t index = 0; index < bottleneckOverlay_.size(); ++index) {
+        if (!matchesFloor(bottleneckOverlay_[index].floorId, currentFloorId_)) {
+            continue;
+        }
         const auto focused = focusedBottleneckIndex_.has_value() && *focusedBottleneckIndex_ == index;
         painter.setPen(QPen(
             focused ? QColor(127, 29, 29, 235) : QColor(220, 38, 38, 150),

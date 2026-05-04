@@ -338,6 +338,9 @@ QPushButton* createBottleneckRowButton(
     if (bottleneck.detectedAtSeconds.has_value()) {
         lines.push_back(QString("Detected: %1 sec").arg(*bottleneck.detectedAtSeconds, 0, 'f', 1));
     }
+    if (!bottleneck.floorId.empty()) {
+        lines.push_back(QString("Floor: %1").arg(QString::fromStdString(bottleneck.floorId)));
+    }
     auto* button = createReportRowButton(lines, parent);
     button->setToolTip(QString("%1\nClick to focus this bottleneck on the canvas.")
         .arg(safecrowd::domain::scenarioBottleneckDefinition()));
@@ -357,6 +360,9 @@ QPushButton* createHotspotRowButton(
     };
     if (hotspot.detectedAtSeconds.has_value()) {
         lines.push_back(QString("Detected: %1 sec").arg(*hotspot.detectedAtSeconds, 0, 'f', 1));
+    }
+    if (!hotspot.floorId.empty()) {
+        lines.push_back(QString("Floor: %1").arg(QString::fromStdString(hotspot.floorId)));
     }
     auto* button = createReportRowButton(lines, parent);
     button->setToolTip(QString("%1\nClick to focus this hotspot on the canvas.")

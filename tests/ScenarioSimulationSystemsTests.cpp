@@ -1,5 +1,6 @@
 #include "TestSupport.h"
 
+#include <algorithm>
 #include <memory>
 #include <string>
 
@@ -135,6 +136,77 @@ public:
     }
 };
 
+class ConfigureMovingFloorDensityAgentsSystem final : public safecrowd::engine::EngineSystem {
+public:
+    void configure(safecrowd::engine::EngineWorld& world) override {
+        world.resources().set(safecrowd::domain::ScenarioSimulationClockResource{
+            .elapsedSeconds = 1.0,
+            .timeLimitSeconds = 10.0,
+            .complete = false,
+        });
+        for (int index = 0; index < 6; ++index) {
+            world.commands().spawnEntity(
+                safecrowd::domain::Position{.value = {.x = 0.1 + (0.04 * static_cast<double>(index)), .y = 0.1}},
+                safecrowd::domain::Agent{.radius = 0.25f, .maxSpeed = 1.5f},
+                safecrowd::domain::Velocity{.value = {}},
+                safecrowd::domain::EvacuationRoute{.currentFloorId = "L2", .displayFloorId = "L2"},
+                safecrowd::domain::EvacuationStatus{});
+        }
+    }
+
+    void update(safecrowd::engine::EngineWorld&, const safecrowd::engine::EngineStepContext&) override {
+    }
+};
+
+class ConfigureSplitFloorHotspotAgentsSystem final : public safecrowd::engine::EngineSystem {
+public:
+    void configure(safecrowd::engine::EngineWorld& world) override {
+        world.resources().set(safecrowd::domain::ScenarioSimulationClockResource{
+            .elapsedSeconds = 1.0,
+            .timeLimitSeconds = 10.0,
+            .complete = false,
+        });
+        for (int index = 0; index < 6; ++index) {
+            const auto floorId = index < 3 ? std::string{"L1"} : std::string{"L2"};
+            world.commands().spawnEntity(
+                safecrowd::domain::Position{.value = {.x = 0.2 + (0.03 * static_cast<double>(index % 3)), .y = 0.2}},
+                safecrowd::domain::Agent{.radius = 0.25f, .maxSpeed = 1.5f},
+                safecrowd::domain::Velocity{.value = {}},
+                safecrowd::domain::EvacuationRoute{
+                    .stalledSeconds = 1.0,
+                    .currentFloorId = floorId,
+                    .displayFloorId = floorId,
+                },
+                safecrowd::domain::EvacuationStatus{});
+        }
+    }
+
+    void update(safecrowd::engine::EngineWorld&, const safecrowd::engine::EngineStepContext&) override {
+    }
+};
+
+class ConfigureSecondFloorBottleneckAgentsSystem final : public safecrowd::engine::EngineSystem {
+public:
+    void configure(safecrowd::engine::EngineWorld& world) override {
+        world.resources().set(safecrowd::domain::ScenarioSimulationClockResource{
+            .elapsedSeconds = 1.0,
+            .timeLimitSeconds = 10.0,
+            .complete = false,
+        });
+        for (int index = 0; index < 5; ++index) {
+            world.commands().spawnEntity(
+                safecrowd::domain::Position{.value = {.x = 0.75 + (0.03 * static_cast<double>(index)), .y = 0.0}},
+                safecrowd::domain::Agent{.radius = 0.25f, .maxSpeed = 1.5f},
+                safecrowd::domain::Velocity{.value = {}},
+                safecrowd::domain::EvacuationRoute{.stalledSeconds = 1.0, .currentFloorId = "L2", .displayFloorId = "L2"},
+                safecrowd::domain::EvacuationStatus{});
+        }
+    }
+
+    void update(safecrowd::engine::EngineWorld&, const safecrowd::engine::EngineStepContext&) override {
+    }
+};
+
 safecrowd::domain::FacilityLayout2D straightExitLayout() {
     safecrowd::domain::FacilityLayout2D layout;
     layout.zones.push_back({
@@ -155,6 +227,59 @@ safecrowd::domain::FacilityLayout2D straightExitLayout() {
         .fromZoneId = "room",
         .toZoneId = "exit",
         .effectiveWidth = 0.8,
+        .centerSpan = {{1.0, -0.4}, {1.0, 0.4}},
+    });
+    return layout;
+}
+
+safecrowd::domain::FacilityLayout2D overlappingFloorBottleneckLayout() {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.floors.push_back({.id = "L1", .label = "Floor 1"});
+    layout.floors.push_back({.id = "L2", .label = "Floor 2", .elevationMeters = 3.5});
+    layout.zones.push_back({
+        .id = "room-l1",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Room L1",
+        .area = {.outline = {{0.0, -1.0}, {1.0, -1.0}, {1.0, 1.0}, {0.0, 1.0}}},
+    });
+    layout.zones.push_back({
+        .id = "exit-l1",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Exit,
+        .label = "Exit L1",
+        .area = {.outline = {{1.0, -1.0}, {2.0, -1.0}, {2.0, 1.0}, {1.0, 1.0}}},
+    });
+    layout.zones.push_back({
+        .id = "room-l2",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Room L2",
+        .area = {.outline = {{0.0, -1.0}, {1.0, -1.0}, {1.0, 1.0}, {0.0, 1.0}}},
+    });
+    layout.zones.push_back({
+        .id = "exit-l2",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ZoneKind::Exit,
+        .label = "Exit L2",
+        .area = {.outline = {{1.0, -1.0}, {2.0, -1.0}, {2.0, 1.0}, {1.0, 1.0}}},
+    });
+    layout.connections.push_back({
+        .id = "door-l1",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ConnectionKind::Exit,
+        .fromZoneId = "room-l1",
+        .toZoneId = "exit-l1",
+        .effectiveWidth = 1.0,
+        .centerSpan = {{1.0, -0.4}, {1.0, 0.4}},
+    });
+    layout.connections.push_back({
+        .id = "door-l2",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ConnectionKind::Exit,
+        .fromZoneId = "room-l2",
+        .toZoneId = "exit-l2",
+        .effectiveWidth = 1.0,
         .centerSpan = {{1.0, -0.4}, {1.0, 0.4}},
     });
     return layout;
@@ -572,6 +697,48 @@ SC_TEST(ScenarioRiskMetricsSystem_PublishesStalledHotspotAndBottleneckMetrics) {
     SC_EXPECT_EQ(snapshot.completionRisk, safecrowd::domain::ScenarioRiskLevel::High);
 }
 
+SC_TEST(ScenarioRiskMetricsSystem_DoesNotMergeHotspotsAcrossFloors) {
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 34,
+    });
+    runtime.addSystem(std::make_unique<ConfigureSplitFloorHotspotAgentsSystem>());
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioRiskMetricsSystem(overlappingFloorBottleneckLayout()),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(0.0);
+
+    const auto& snapshot =
+        runtime.world().resources().get<safecrowd::domain::ScenarioRiskMetricsResource>().snapshot;
+    SC_EXPECT_TRUE(snapshot.hotspots.empty());
+}
+
+SC_TEST(ScenarioRiskMetricsSystem_FiltersBottlenecksByConnectionFloor) {
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 35,
+    });
+    runtime.addSystem(std::make_unique<ConfigureSecondFloorBottleneckAgentsSystem>());
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioRiskMetricsSystem(overlappingFloorBottleneckLayout()),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(0.0);
+
+    const auto& snapshot =
+        runtime.world().resources().get<safecrowd::domain::ScenarioRiskMetricsResource>().snapshot;
+    SC_EXPECT_EQ(snapshot.bottlenecks.size(), std::size_t{1});
+    SC_EXPECT_EQ(snapshot.bottlenecks.front().connectionId, std::string{"door-l2"});
+    SC_EXPECT_EQ(snapshot.bottlenecks.front().floorId, std::string{"L2"});
+}
+
 SC_TEST(ScenarioRiskMetricsSystem_PreservesPeakMetricsAfterAllAgentsEvacuate) {
     std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
     for (int index = 0; index < 5; ++index) {
@@ -695,8 +862,52 @@ SC_TEST(ScenarioResultArtifactsSystem_PublishesDensitySummary) {
     SC_EXPECT_TRUE(!artifacts.densitySummary.peakCells.empty());
     SC_EXPECT_EQ(artifacts.densitySummary.peakCells.size(), std::size_t{5});
     SC_EXPECT_TRUE(artifacts.densitySummary.peakField.cells.size() > artifacts.densitySummary.peakCells.size());
-    SC_EXPECT_NEAR(artifacts.densitySummary.peakField.timeSeconds, 1.0, 1e-9);
+    SC_EXPECT_NEAR(artifacts.densitySummary.peakField.timeSeconds, 2.0, 1e-9);
     SC_EXPECT_NEAR(artifacts.densitySummary.peakField.cellSizeMeters, artifacts.densitySummary.cellSizeMeters, 1e-9);
+}
+
+SC_TEST(ScenarioResultArtifactsSystem_AccumulatesDensityPeakFieldByFloorAndCell) {
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 36,
+    });
+    runtime.addSystem(std::make_unique<ConfigureMovingFloorDensityAgentsSystem>());
+    runtime.addSystem(
+        std::make_unique<safecrowd::domain::ScenarioResultArtifactsSystem>(1.0),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(0.0);
+
+    auto& query = runtime.world().query();
+    int movedIndex = 0;
+    for (const auto entity : query.view<
+             safecrowd::domain::Position,
+             safecrowd::domain::EvacuationRoute,
+             safecrowd::domain::EvacuationStatus>()) {
+        auto& position = query.get<safecrowd::domain::Position>(entity);
+        auto& route = query.get<safecrowd::domain::EvacuationRoute>(entity);
+        position.value = {.x = 3.1 + (0.04 * static_cast<double>(movedIndex)), .y = 0.1};
+        route.currentFloorId = "L1";
+        route.displayFloorId = "L1";
+        ++movedIndex;
+    }
+    auto& clock = runtime.world().resources().get<safecrowd::domain::ScenarioSimulationClockResource>();
+    clock.elapsedSeconds = 2.0;
+    runtime.stepFrame(0.0);
+
+    const auto& cells =
+        runtime.world().resources().get<safecrowd::domain::ScenarioResultArtifactsResource>().artifacts.densitySummary.peakField.cells;
+    const auto hasL1Cell = std::any_of(cells.begin(), cells.end(), [](const auto& cell) {
+        return cell.floorId == "L1";
+    });
+    const auto hasL2Cell = std::any_of(cells.begin(), cells.end(), [](const auto& cell) {
+        return cell.floorId == "L2";
+    });
+    SC_EXPECT_TRUE(hasL1Cell);
+    SC_EXPECT_TRUE(hasL2Cell);
 }
 
 SC_TEST(ScenarioRoutePassageCrossed_UsesDoorPlaneNearEndpoint) {

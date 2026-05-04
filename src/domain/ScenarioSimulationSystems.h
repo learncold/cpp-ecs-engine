@@ -68,6 +68,7 @@ struct ScenarioResultArtifactsResource {
     std::size_t maxReplayFrames{600};
     bool densityTrackingInitialized{false};
     double lastDensitySampleTimeSeconds{0.0};
+    std::unordered_map<long long, DensityCellMetric> peakDensityCellsByAddress{};
 };
 
 struct ScenarioAgentSeed {

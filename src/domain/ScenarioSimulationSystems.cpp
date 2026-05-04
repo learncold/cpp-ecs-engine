@@ -637,20 +637,41 @@ void ScenarioResultArtifactsSystem::update(engine::EngineWorld& world, const eng
     result.artifacts.densitySummary.cellSizeMeters = kScenarioHotspotCellSize;
     result.artifacts.densitySummary.highDensityThresholdPeoplePerSquareMeter =
         kHighDensityThresholdPeoplePerSquareMeter;
+    for (const auto& [key, cell] : densityCells) {
+        auto metric = densityMetricFromCell(cell, kScenarioHotspotCellSize);
+        auto& peakMetric = result.peakDensityCellsByAddress[key];
+        if (metric.densityPeoplePerSquareMeter > peakMetric.densityPeoplePerSquareMeter) {
+            peakMetric = std::move(metric);
+        }
+    }
+
+    std::vector<DensityCellMetric> cumulativePeakMetrics;
+    cumulativePeakMetrics.reserve(result.peakDensityCellsByAddress.size());
+    for (const auto& [_, cell] : result.peakDensityCellsByAddress) {
+        cumulativePeakMetrics.push_back(cell);
+    }
+    std::sort(cumulativePeakMetrics.begin(), cumulativePeakMetrics.end(), [](const auto& lhs, const auto& rhs) {
+        if (lhs.densityPeoplePerSquareMeter != rhs.densityPeoplePerSquareMeter) {
+            return lhs.densityPeoplePerSquareMeter > rhs.densityPeoplePerSquareMeter;
+        }
+        return lhs.agentCount > rhs.agentCount;
+    });
+
+    result.artifacts.densitySummary.peakField = {
+        .timeSeconds = elapsedSeconds,
+        .cellSizeMeters = kScenarioHotspotCellSize,
+        .cells = cumulativePeakMetrics,
+    };
+    result.artifacts.densitySummary.peakCells = cumulativePeakMetrics;
+    if (result.artifacts.densitySummary.peakCells.size() > kMaxResultDensityCells) {
+        result.artifacts.densitySummary.peakCells.resize(kMaxResultDensityCells);
+    }
+
     if (currentPeakDensity > result.artifacts.densitySummary.peakDensityPeoplePerSquareMeter) {
         result.artifacts.densitySummary.peakDensityPeoplePerSquareMeter = currentPeakDensity;
         result.artifacts.densitySummary.peakAgentCount = densityMetrics.front().agentCount;
         result.artifacts.densitySummary.peakAtSeconds = elapsedSeconds;
         result.artifacts.densitySummary.peakCell = densityMetrics.front();
-        result.artifacts.densitySummary.peakCells = densityMetrics;
-        result.artifacts.densitySummary.peakField = {
-            .timeSeconds = elapsedSeconds,
-            .cellSizeMeters = kScenarioHotspotCellSize,
-            .cells = densityMetrics,
-        };
-        if (result.artifacts.densitySummary.peakCells.size() > kMaxResultDensityCells) {
-            result.artifacts.densitySummary.peakCells.resize(kMaxResultDensityCells);
-        }
     }
     if (result.densityTrackingInitialized && currentPeakDensity >= kHighDensityThresholdPeoplePerSquareMeter) {
         result.artifacts.densitySummary.highDensityDurationSeconds +=

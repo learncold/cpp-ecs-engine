@@ -27,6 +27,7 @@ struct ScenarioCongestionHotspot {
     Point2D center{};
     Point2D cellMin{};
     Point2D cellMax{};
+    std::string floorId{};
     std::size_t agentCount{0};
     std::optional<double> detectedAtSeconds{};
     std::optional<SimulationFrame> detectionFrame{};
@@ -35,6 +36,7 @@ struct ScenarioCongestionHotspot {
 struct ScenarioBottleneckMetric {
     std::string connectionId{};
     std::string label{};
+    std::string floorId{};
     LineSegment2D passage{};
     std::size_t nearbyAgentCount{0};
     std::size_t stalledAgentCount{0};

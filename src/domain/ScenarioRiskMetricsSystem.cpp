@@ -21,25 +21,29 @@ struct RiskCellAccumulator {
     Point2D positionSum{};
     Point2D cellMin{};
     Point2D cellMax{};
+    std::string floorId{};
     std::size_t agentCount{0};
 };
 
 struct RiskCellAddress {
     int x{0};
     int y{0};
+    std::string floorId{};
 };
 
-RiskCellAddress riskCellAddress(const Point2D& point) {
+RiskCellAddress riskCellAddress(const Point2D& point, const std::string& floorId) {
     return {
         .x = static_cast<int>(std::floor(point.x / kScenarioHotspotCellSize)),
         .y = static_cast<int>(std::floor(point.y / kScenarioHotspotCellSize)),
+        .floorId = floorId,
     };
 }
 
 long long riskCellKey(const RiskCellAddress& cell) {
     const auto x = cell.x;
     const auto y = cell.y;
-    return (static_cast<long long>(x) << 32) ^ static_cast<unsigned int>(y);
+    const auto cellKey = (static_cast<long long>(x) << 32) ^ static_cast<unsigned int>(y);
+    return cellKey ^ (static_cast<long long>(std::hash<std::string>{}(cell.floorId)) << 1);
 }
 
 Point2D riskCellMin(const RiskCellAddress& cell) {
@@ -212,11 +216,13 @@ public:
                 ++snapshot.stalledAgentCount;
             }
 
-            const auto address = riskCellAddress(position.value);
+            const auto floorId = agentCollisionFloorId(route);
+            const auto address = riskCellAddress(position.value, floorId);
             auto& cell = cells[riskCellKey(address)];
             if (cell.agentCount == 0) {
                 cell.cellMin = riskCellMin(address);
                 cell.cellMax = riskCellMax(address);
+                cell.floorId = address.floorId;
             }
             cell.positionSum = cell.positionSum + position.value;
             ++cell.agentCount;
@@ -291,6 +297,7 @@ private:
                 .center = {.x = cell.positionSum.x / count, .y = cell.positionSum.y / count},
                 .cellMin = cell.cellMin,
                 .cellMax = cell.cellMax,
+                .floorId = cell.floorId,
                 .agentCount = cell.agentCount,
             });
         }
@@ -320,6 +327,19 @@ private:
         return connection.id;
     }
 
+    std::string connectionFloorId(const FacilityLayout2D& layout, const Connection2D& connection) const {
+        if (!connection.floorId.empty()) {
+            return connection.floorId;
+        }
+        if (const auto* fromZone = findZone(layout, connection.fromZoneId); fromZone != nullptr && !fromZone->floorId.empty()) {
+            return fromZone->floorId;
+        }
+        if (const auto* toZone = findZone(layout, connection.toZoneId); toZone != nullptr) {
+            return toZone->floorId;
+        }
+        return {};
+    }
+
     void collectBottlenecks(
         ScenarioRiskSnapshot& snapshot,
         engine::WorldQuery& query,
@@ -333,6 +353,7 @@ private:
             ScenarioBottleneckMetric metric;
             metric.connectionId = connection.id;
             metric.label = connectionLabel(layout, connection);
+            metric.floorId = connectionFloorId(layout, connection);
             metric.passage = connection.centerSpan;
             double speedSum = 0.0;
 
@@ -344,6 +365,9 @@ private:
                 const auto& position = query.get<Position>(entity);
                 const auto& velocity = query.get<Velocity>(entity);
                 const auto& route = query.get<EvacuationRoute>(entity);
+                if (agentCollisionFloorId(route) != metric.floorId) {
+                    continue;
+                }
                 const auto distanceToConnection = distanceBetween(
                     position.value,
                     closestPointOnSegment(position.value, connection.centerSpan.start, connection.centerSpan.end));

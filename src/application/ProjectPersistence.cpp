@@ -925,6 +925,7 @@ QJsonObject hotspotToJson(const safecrowd::domain::ScenarioCongestionHotspot& ho
     object["center"] = pointArray(hotspot.center);
     object["cellMin"] = pointArray(hotspot.cellMin);
     object["cellMax"] = pointArray(hotspot.cellMax);
+    object["floorId"] = QString::fromStdString(hotspot.floorId);
     object["agentCount"] = static_cast<qint64>(hotspot.agentCount);
     object["detectedAtSeconds"] = optionalDoubleToJson(hotspot.detectedAtSeconds);
     if (hotspot.detectionFrame.has_value()) {
@@ -938,6 +939,7 @@ safecrowd::domain::ScenarioCongestionHotspot hotspotFromJson(const QJsonObject& 
         .center = pointFromJson(object.value("center")),
         .cellMin = pointFromJson(object.value("cellMin")),
         .cellMax = pointFromJson(object.value("cellMax")),
+        .floorId = object.value("floorId").toString().toStdString(),
         .agentCount = static_cast<std::size_t>(object.value("agentCount").toInteger()),
     };
     hotspot.detectedAtSeconds = optionalDoubleFromJson(object.value("detectedAtSeconds"));
@@ -951,6 +953,7 @@ QJsonObject bottleneckToJson(const safecrowd::domain::ScenarioBottleneckMetric& 
     QJsonObject object;
     object["connectionId"] = QString::fromStdString(bottleneck.connectionId);
     object["label"] = QString::fromStdString(bottleneck.label);
+    object["floorId"] = QString::fromStdString(bottleneck.floorId);
     object["passage"] = lineToJson(bottleneck.passage);
     object["nearbyAgentCount"] = static_cast<qint64>(bottleneck.nearbyAgentCount);
     object["stalledAgentCount"] = static_cast<qint64>(bottleneck.stalledAgentCount);
@@ -966,6 +969,7 @@ safecrowd::domain::ScenarioBottleneckMetric bottleneckFromJson(const QJsonObject
     safecrowd::domain::ScenarioBottleneckMetric bottleneck{
         .connectionId = object.value("connectionId").toString().toStdString(),
         .label = object.value("label").toString().toStdString(),
+        .floorId = object.value("floorId").toString().toStdString(),
         .passage = lineFromJson(object.value("passage").toObject()),
         .nearbyAgentCount = static_cast<std::size_t>(object.value("nearbyAgentCount").toInteger()),
         .stalledAgentCount = static_cast<std::size_t>(object.value("stalledAgentCount").toInteger()),
