@@ -119,6 +119,13 @@ struct StairFloorView {
     QString label{};
 };
 
+struct AdjacentStairGhostView {
+    const safecrowd::domain::Zone2D* currentZone{nullptr};
+    const safecrowd::domain::Zone2D* adjacentZone{nullptr};
+    safecrowd::domain::StairEntryDirection currentEntryDirection{safecrowd::domain::StairEntryDirection::Unspecified};
+    bool straightFootprint{false};
+};
+
 std::optional<StairFloorView> stairFloorView(
     const safecrowd::domain::FacilityLayout2D& layout,
     const safecrowd::domain::Connection2D& connection,
@@ -148,6 +155,162 @@ std::optional<StairFloorView> stairFloorView(
         .entryDirection = currentIsLower ? connection.lowerEntryDirection : connection.upperEntryDirection,
         .label = currentIsLower ? QString("Up") : QString("Down"),
     };
+}
+
+bool nearlyEqual(double lhs, double rhs, double tolerance = 1e-4) {
+    return std::abs(lhs - rhs) <= tolerance;
+}
+
+bool nearlySameBounds(const LayoutCanvasBounds& lhs, const LayoutCanvasBounds& rhs) {
+    return lhs.valid() && rhs.valid()
+        && nearlyEqual(lhs.minX, rhs.minX)
+        && nearlyEqual(lhs.minY, rhs.minY)
+        && nearlyEqual(lhs.maxX, rhs.maxX)
+        && nearlyEqual(lhs.maxY, rhs.maxY);
+}
+
+std::optional<AdjacentStairGhostView> adjacentStairGhostView(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const safecrowd::domain::Connection2D& connection,
+    const std::string& floorId) {
+    if (floorId.empty() || !isVerticalConnection(connection)) {
+        return std::nullopt;
+    }
+
+    const auto* fromZone = findZone(layout, connection.fromZoneId);
+    const auto* toZone = findZone(layout, connection.toZoneId);
+    if (fromZone == nullptr || toZone == nullptr || fromZone->floorId == toZone->floorId) {
+        return std::nullopt;
+    }
+
+    const auto* currentZone = matchesFloor(fromZone->floorId, floorId) ? fromZone
+        : (matchesFloor(toZone->floorId, floorId) ? toZone : nullptr);
+    if (currentZone == nullptr) {
+        return std::nullopt;
+    }
+
+    const auto* adjacentZone = currentZone == fromZone ? toZone : fromZone;
+    if (!isVerticalZone(currentZone) || !isVerticalZone(adjacentZone)) {
+        return std::nullopt;
+    }
+
+    const auto fromElevation = floorElevation(layout, fromZone->floorId);
+    const auto toElevation = floorElevation(layout, toZone->floorId);
+    const bool fromIsLower = fromElevation <= toElevation;
+    const bool currentIsLower = currentZone == fromZone ? fromIsLower : !fromIsLower;
+    const auto currentEntryDirection = currentIsLower ? connection.lowerEntryDirection : connection.upperEntryDirection;
+
+    return AdjacentStairGhostView{
+        .currentZone = currentZone,
+        .adjacentZone = adjacentZone,
+        .currentEntryDirection = currentEntryDirection,
+        .straightFootprint = nearlySameBounds(zoneBounds(*currentZone), zoneBounds(*adjacentZone)),
+    };
+}
+
+std::optional<LayoutCanvasBounds> straightStairNextFloorHalfBounds(const AdjacentStairGhostView& view) {
+    if (view.currentZone == nullptr || !view.straightFootprint) {
+        return std::nullopt;
+    }
+
+    auto bounds = zoneBounds(*view.currentZone);
+    if (!bounds.valid()) {
+        return std::nullopt;
+    }
+
+    const double midX = (bounds.minX + bounds.maxX) * 0.5;
+    const double midY = (bounds.minY + bounds.maxY) * 0.5;
+    switch (view.currentEntryDirection) {
+    case safecrowd::domain::StairEntryDirection::North:
+        bounds.maxY = midY;
+        break;
+    case safecrowd::domain::StairEntryDirection::East:
+        bounds.maxX = midX;
+        break;
+    case safecrowd::domain::StairEntryDirection::South:
+        bounds.minY = midY;
+        break;
+    case safecrowd::domain::StairEntryDirection::West:
+        bounds.minX = midX;
+        break;
+    case safecrowd::domain::StairEntryDirection::Unspecified:
+        return std::nullopt;
+    }
+
+    return bounds;
+}
+
+QPainterPath boundsPath(const LayoutCanvasBounds& bounds, const LayoutCanvasTransform& transform) {
+    QPainterPath path;
+    if (!bounds.valid()) {
+        return path;
+    }
+
+    const auto minPoint = transform.map({.x = bounds.minX, .y = bounds.minY});
+    const auto maxPoint = transform.map({.x = bounds.maxX, .y = bounds.maxY});
+    path.addRect(QRectF(minPoint, maxPoint).normalized());
+    return path;
+}
+
+void drawStraightStairTransitionLine(
+    QPainter& painter,
+    const AdjacentStairGhostView& view,
+    const LayoutCanvasTransform& transform) {
+    if (view.currentZone == nullptr || !view.straightFootprint) {
+        return;
+    }
+
+    const auto bounds = zoneBounds(*view.currentZone);
+    if (!bounds.valid()) {
+        return;
+    }
+
+    const double midX = (bounds.minX + bounds.maxX) * 0.5;
+    const double midY = (bounds.minY + bounds.maxY) * 0.5;
+    switch (view.currentEntryDirection) {
+    case safecrowd::domain::StairEntryDirection::North:
+    case safecrowd::domain::StairEntryDirection::South:
+        painter.drawLine(
+            transform.map({.x = bounds.minX, .y = midY}),
+            transform.map({.x = bounds.maxX, .y = midY}));
+        break;
+    case safecrowd::domain::StairEntryDirection::East:
+    case safecrowd::domain::StairEntryDirection::West:
+        painter.drawLine(
+            transform.map({.x = midX, .y = bounds.minY}),
+            transform.map({.x = midX, .y = bounds.maxY}));
+        break;
+    case safecrowd::domain::StairEntryDirection::Unspecified:
+        break;
+    }
+}
+
+void drawAdjacentStairGhost(
+    QPainter& painter,
+    const AdjacentStairGhostView& view,
+    const LayoutCanvasTransform& transform) {
+    if (view.adjacentZone == nullptr) {
+        return;
+    }
+
+    painter.save();
+    painter.setBrush(QColor(112, 141, 176, 56));
+    painter.setPen(QPen(QColor(76, 92, 118, 112), 1.4, Qt::DashLine));
+
+    if (const auto halfBounds = straightStairNextFloorHalfBounds(view); halfBounds.has_value()) {
+        painter.setClipPath(boundsPath(*halfBounds, transform), Qt::IntersectClip);
+    }
+
+    painter.drawPath(layoutCanvasPolygonPath(view.adjacentZone->area, transform));
+    painter.restore();
+
+    if (view.straightFootprint) {
+        painter.save();
+        painter.setBrush(Qt::NoBrush);
+        painter.setPen(QPen(QColor(76, 92, 118, 116), 1.2, Qt::DotLine));
+        drawStraightStairTransitionLine(painter, view, transform);
+        painter.restore();
+    }
 }
 
 void drawArrowHead(QPainter& painter, const QPointF& start, const QPointF& end) {
@@ -400,6 +563,18 @@ std::optional<LayoutCanvasBounds> collectLayoutCanvasBounds(const safecrowd::dom
             includeLayoutCanvasPolygon(bounds, zone.area);
         }
     }
+    for (const auto& connection : layout.connections) {
+        if (const auto view = adjacentStairGhostView(layout, connection, floorId); view.has_value()) {
+            if (view->straightFootprint) {
+                if (const auto halfBounds = straightStairNextFloorHalfBounds(*view); halfBounds.has_value()) {
+                    includeLayoutCanvasPoint(bounds, {.x = halfBounds->minX, .y = halfBounds->minY});
+                    includeLayoutCanvasPoint(bounds, {.x = halfBounds->maxX, .y = halfBounds->maxY});
+                }
+            } else if (view->adjacentZone != nullptr) {
+                includeLayoutCanvasPolygon(bounds, view->adjacentZone->area);
+            }
+        }
+    }
     for (const auto& barrier : layout.barriers) {
         if (matchesFloor(barrier.floorId, floorId)) {
             includeLayoutCanvasPolyline(bounds, barrier.geometry);
@@ -623,6 +798,12 @@ void drawFacilityLayoutCanvas(
                 ? QColor(214, 239, 226)
                 : QColor(231, 238, 246));
         painter.drawPath(layoutCanvasPolygonPath(zone.area, transform));
+    }
+
+    for (const auto& connection : layout.connections) {
+        if (const auto view = adjacentStairGhostView(layout, connection, floorId); view.has_value()) {
+            drawAdjacentStairGhost(painter, *view, transform);
+        }
     }
 
     painter.setPen(QPen(QColor(56, 122, 186), 2.5));

@@ -22,7 +22,6 @@ namespace safecrowd::application {
 namespace {
 
 constexpr double kViewportPadding = 32.0;
-constexpr double kVelocityIndicatorSeconds = 0.75;
 constexpr double kAgentMarkerRadius = 5.0;
 constexpr double kDefaultHotspotCellSize = 1.5;
 constexpr double kHotspotFocusZoom = 2.8;
@@ -33,9 +32,7 @@ constexpr int kHotspotMinCoreAlpha = 72;
 constexpr int kHotspotMaxCoreAlpha = 190;
 constexpr int kFloorSelectorMargin = 14;
 const QColor kMovingAgentColor("#1f5fae");
-const QColor kMovingAgentLineColor("#0f4c8f");
 const QColor kStalledAgentColor("#7c3aed");
-const QColor kStalledAgentLineColor("#6d28d9");
 
 std::string defaultFloorId(const safecrowd::domain::FacilityLayout2D& layout) {
     if (!layout.floors.empty() && !layout.floors.front().id.empty()) {
@@ -277,12 +274,6 @@ void SimulationCanvasWidget::paintEvent(QPaintEvent* event) {
             continue;
         }
         const auto origin = transform.map(agent.position);
-        const auto tip = transform.map({
-            .x = agent.position.x + (agent.velocity.x * kVelocityIndicatorSeconds),
-            .y = agent.position.y + (agent.velocity.y * kVelocityIndicatorSeconds),
-        });
-        painter.setPen(QPen(agent.stalled ? kStalledAgentLineColor : kMovingAgentLineColor, 1.3, Qt::SolidLine, Qt::RoundCap));
-        painter.drawLine(origin, tip);
         painter.setPen(Qt::NoPen);
         painter.setBrush(agent.stalled ? kStalledAgentColor : kMovingAgentColor);
         painter.drawEllipse(origin, kAgentMarkerRadius, kAgentMarkerRadius);

@@ -1043,6 +1043,47 @@ SC_TEST(ScenarioSimulationRunnerKeepsUShapedStairVerticalOpeningClearOfEntryWall
     SC_EXPECT_TRUE(runner.frame().agents.front().position.y > 2.0);
 }
 
+SC_TEST(ScenarioSimulationRunnerQueuesCrowdedUShapedStairFloorTransitions) {
+    safecrowd::domain::InitialPlacement2D placement;
+    placement.id = "descending-crowd";
+    placement.floorId = "L2";
+    placement.zoneId = "stair-l2";
+    placement.initialVelocity = {.x = 0.0, .y = -1.0};
+    placement.explicitPositions = {
+        {.x = 2.9, .y = 2.35},
+        {.x = 3.25, .y = 2.35},
+        {.x = 3.6, .y = 2.35},
+        {.x = 2.9, .y = 2.75},
+        {.x = 3.25, .y = 2.75},
+        {.x = 3.6, .y = 2.75},
+    };
+
+    safecrowd::domain::ScenarioDraft scenario;
+    scenario.population.initialPlacements.push_back(placement);
+    scenario.execution.timeLimitSeconds = 8.0;
+
+    const auto layout = descendingWestEntryUShapedStairTransitionLayout();
+    safecrowd::domain::ScenarioSimulationRunner runner(layout, scenario);
+    for (int i = 0; i < 12 && !runner.complete(); ++i) {
+        runner.step(0.1);
+    }
+
+    std::size_t agentsOnLowerFloor = 0;
+    std::size_t agentsQueuedOnUpperFloor = 0;
+    for (const auto& agent : runner.frame().agents) {
+        if (agent.floorId == "L1") {
+            ++agentsOnLowerFloor;
+        }
+        if (agent.floorId == "L2") {
+            ++agentsQueuedOnUpperFloor;
+        }
+        SC_EXPECT_TRUE(agentInsideAnyZoneOnFrameFloor(layout, agent));
+    }
+
+    SC_EXPECT_TRUE(agentsOnLowerFloor >= 2);
+    SC_EXPECT_TRUE(agentsQueuedOnUpperFloor >= 1);
+}
+
 SC_TEST(ScenarioSimulationRunnerMovesFollowingAgentsThroughDescendingUShapedStair) {
     safecrowd::domain::InitialPlacement2D placement;
     placement.id = "descending-group";
@@ -1068,7 +1109,7 @@ SC_TEST(ScenarioSimulationRunnerMovesFollowingAgentsThroughDescendingUShapedStai
 
     const auto layout = descendingWestEntryUShapedStairTransitionLayout();
     safecrowd::domain::ScenarioSimulationRunner runner(layout, scenario);
-    for (int i = 0; i < 120 && !runner.complete(); ++i) {
+    for (int i = 0; i < 160 && !runner.complete(); ++i) {
         runner.step(0.1);
     }
 

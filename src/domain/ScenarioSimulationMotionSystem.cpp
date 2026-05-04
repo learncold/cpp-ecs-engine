@@ -95,6 +95,11 @@ public:
             const auto target = routeWaypointTarget(route, position.value);
             const auto distance = distanceBetween(position.value, target);
             if (distance <= kArrivalEpsilon) {
+                if (verticalTransitionLandingBlocked(query, entities, layoutCache, entity, agent, route, target)) {
+                    position.value = verticalTransitionWaitingPoint(layoutCache, route, position.value);
+                    velocity.value = {};
+                    continue;
+                }
                 position.value = advanceRouteWaypoint(layoutCache, route, target);
                 velocity.value = {};
                 continue;
@@ -182,6 +187,8 @@ private:
     static constexpr double kNoExitReplanCooldownSeconds = 7.0;
     static constexpr double kSegmentReplanCooldownSeconds = 0.25;
     static constexpr double kFailedSegmentReplanCooldownSeconds = 1.25;
+    static constexpr double kVerticalLandingBlockedDistanceMultiplier = 0.6;
+    static constexpr double kVerticalLandingMovingAwayBlockedDistanceMultiplier = 0.25;
 
     struct RoutePlan {
         std::vector<Point2D> waypoints{};
@@ -324,6 +331,110 @@ private:
         return reachedPoint;
     }
 
+    Point2D verticalTransitionWaitingPoint(
+        const ScenarioLayoutCacheResource& layoutCache,
+        const EvacuationRoute& route,
+        const Point2D& position) const {
+        if (route.nextWaypointIndex >= route.waypointPassages.size()
+            || route.nextWaypointIndex >= route.waypointFromZoneIds.size()
+            || route.nextWaypointIndex >= route.waypointZoneIds.size()) {
+            return position;
+        }
+
+        const auto& passage = route.waypointPassages[route.nextWaypointIndex];
+        if (lengthSquaredOf(passage) <= 1e-9) {
+            return position;
+        }
+
+        const auto* fromZone = findCachedZone(layoutCache, route.waypointFromZoneIds[route.nextWaypointIndex]);
+        const auto* toZone = findCachedZone(layoutCache, route.waypointZoneIds[route.nextWaypointIndex]);
+        if (fromZone == nullptr || toZone == nullptr) {
+            return position;
+        }
+
+        auto normal = normalizedOr(perpendicularLeft(passage.end - passage.start), {});
+        if (lengthOf(normal) <= 1e-9) {
+            return closestPointOnSegment(position, passage.start, passage.end);
+        }
+
+        const auto towardToZone = polygonCenter(toZone->area) - midpoint(passage);
+        if (dot(normal, towardToZone) < 0.0) {
+            normal = normal * -1.0;
+        }
+
+        const auto waitingOffset = std::max(kPortalCrossingEpsilon * 2.0, kArrivalEpsilon);
+        return closestPointOnSegment(position, passage.start, passage.end) - (normal * waitingOffset);
+    }
+
+    bool verticalTransitionLandingBlocked(
+        engine::WorldQuery& query,
+        const std::vector<engine::Entity>& entities,
+        const ScenarioLayoutCacheResource& layoutCache,
+        engine::Entity entity,
+        const Agent& agent,
+        const EvacuationRoute& route,
+        const Point2D& reachedPoint) const {
+        const auto reachedIndex = route.nextWaypointIndex;
+        if (reachedIndex >= route.waypointVerticalTransitions.size()
+            || !route.waypointVerticalTransitions[reachedIndex]) {
+            return false;
+        }
+
+        const auto targetFloorId = verticalTransitionTargetFloorId(layoutCache, route, reachedIndex);
+        if (targetFloorId.empty()) {
+            return false;
+        }
+
+        const auto landingPoint = verticalTransitionLandingPoint(layoutCache, route, reachedIndex, reachedPoint);
+
+        for (const auto other : entities) {
+            if (other == entity) {
+                continue;
+            }
+            const auto& otherStatus = query.get<EvacuationStatus>(other);
+            if (otherStatus.evacuated || !query.contains<EvacuationRoute>(other)) {
+                continue;
+            }
+            const auto& otherRoute = query.get<EvacuationRoute>(other);
+            if (agentCollisionFloorId(otherRoute) != targetFloorId) {
+                continue;
+            }
+
+            const auto& otherPosition = query.get<Position>(other);
+            const auto& otherAgent = query.get<Agent>(other);
+            const auto distance = distanceBetween(landingPoint, otherPosition.value);
+            const auto minimumDistance = static_cast<double>(agent.radius + otherAgent.radius);
+            const auto movingAwayFromLanding = query.contains<Velocity>(other)
+                && dot(query.get<Velocity>(other).value, otherPosition.value - landingPoint) > 0.02;
+            const auto blockingDistance = minimumDistance * (movingAwayFromLanding
+                    ? kVerticalLandingMovingAwayBlockedDistanceMultiplier
+                    : kVerticalLandingBlockedDistanceMultiplier);
+            if (distance < blockingDistance) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    std::string verticalTransitionTargetFloorId(
+        const ScenarioLayoutCacheResource& layoutCache,
+        const EvacuationRoute& route,
+        std::size_t reachedIndex) const {
+        auto targetFloorId = reachedIndex < route.waypointFloorIds.size()
+            ? route.waypointFloorIds[reachedIndex]
+            : std::string{};
+        if (reachedIndex < route.waypointZoneIds.size()) {
+            const auto toZoneFloorId = cachedFloorIdForZone(layoutCache, route.waypointZoneIds[reachedIndex]);
+            if (!toZoneFloorId.empty() && toZoneFloorId != route.currentFloorId) {
+                targetFloorId = toZoneFloorId;
+            } else if (targetFloorId.empty()) {
+                targetFloorId = toZoneFloorId;
+            }
+        }
+        return targetFloorId;
+    }
+
     RoutePlan routePlanToNearestExit(
         const ScenarioLayoutCacheResource& layoutCache,
         const Point2D& start,
@@ -410,7 +521,10 @@ private:
 
         const auto reachedIndex = route.nextWaypointIndex;
         const auto advancedPoint = verticalTransitionLandingPoint(layoutCache, route, reachedIndex, reachedPoint);
-        if (reachedIndex < route.waypointFloorIds.size() && !route.waypointFloorIds[reachedIndex].empty()) {
+        const auto verticalTargetFloorId = verticalTransitionTargetFloorId(layoutCache, route, reachedIndex);
+        if (!verticalTargetFloorId.empty()) {
+            route.currentFloorId = verticalTargetFloorId;
+        } else if (reachedIndex < route.waypointFloorIds.size() && !route.waypointFloorIds[reachedIndex].empty()) {
             route.currentFloorId = route.waypointFloorIds[reachedIndex];
         }
         route.displayFloorId = route.currentFloorId;
@@ -492,6 +606,15 @@ private:
                     ? verticalPassageCrossed(layoutCache, route, position.value)
                     : routePassageCrossed(cachedLayoutForFloor(layoutCache, route.currentFloorId), route, position.value, agent.radius);
                 if (passageCrossed) {
+                    if (verticalTransitionLandingBlocked(query, entities, layoutCache, entity, agent, route, position.value)) {
+                        position.value = verticalTransitionWaitingPoint(layoutCache, route, position.value);
+                        if (deltaSeconds > 0.0) {
+                            route.stalledSeconds += deltaSeconds;
+                        }
+                        route.previousDistanceToWaypoint =
+                            std::min(route.previousDistanceToWaypoint, distanceToRouteWaypoint(route, position.value));
+                        break;
+                    }
                     position.value = advanceRouteWaypoint(layoutCache, route, position.value);
                     continue;
                 }
@@ -502,6 +625,15 @@ private:
                 const auto distance = distanceToRouteWaypoint(route, position.value);
 
                 if (distance <= kArrivalEpsilon) {
+                    if (verticalTransitionLandingBlocked(query, entities, layoutCache, entity, agent, route, target)) {
+                        position.value = verticalTransitionWaitingPoint(layoutCache, route, position.value);
+                        if (deltaSeconds > 0.0) {
+                            route.stalledSeconds += deltaSeconds;
+                        }
+                        route.previousDistanceToWaypoint =
+                            std::min(route.previousDistanceToWaypoint, distanceToRouteWaypoint(route, position.value));
+                        break;
+                    }
                     position.value = advanceRouteWaypoint(layoutCache, route, target);
                     continue;
                 }
@@ -535,12 +667,15 @@ private:
                     route.stalledSeconds += deltaSeconds;
                 }
 
-                if (!verticalTransition
-                    && route.stalledSeconds >= kWaypointStallSeconds
+                if (route.stalledSeconds >= kWaypointStallSeconds
                     && route.nextWaypointIndex + 1 < route.waypoints.size()
                     && segmentLengthSquared > 1e-9) {
                     const auto projection = dot(position.value - route.currentSegmentStart, segment);
                     if (projection > segmentLengthSquared * 0.45) {
+                        if (verticalTransition
+                            && verticalTransitionLandingBlocked(query, entities, layoutCache, entity, agent, route, position.value)) {
+                            break;
+                        }
                         position.value = advanceRouteWaypoint(layoutCache, route, position.value);
                         continue;
                     }

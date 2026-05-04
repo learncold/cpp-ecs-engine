@@ -38,7 +38,6 @@ constexpr double kDefaultInitialSpeed = 1.2;
 constexpr double kOccupantMarkerRadius = 5.0;
 constexpr double kOccupantWorldRadius = 0.25;
 constexpr double kOccupantMinSpacing = kOccupantWorldRadius * 2.0;
-constexpr double kVelocityIndicatorSeconds = 0.75;
 constexpr double kGeometryEpsilon = 1e-9;
 constexpr double kSelectionDragThresholdPixels = 4.0;
 const QColor kSelectionHighlightColor("#0b3d78");
@@ -845,12 +844,6 @@ void ScenarioCanvasWidget::paintEvent(QPaintEvent* event) {
                 continue;
             }
             const auto origin = transform.map(placement.area.front());
-            const auto tip = transform.map({
-                .x = placement.area.front().x + (placement.velocity.x * kVelocityIndicatorSeconds),
-                .y = placement.area.front().y + (placement.velocity.y * kVelocityIndicatorSeconds),
-            });
-            painter.setPen(QPen(QColor("#0f4c8f"), 1.4, Qt::SolidLine, Qt::RoundCap));
-            painter.drawLine(origin, tip);
             painter.setPen(Qt::NoPen);
             painter.setBrush(QColor("#1f5fae"));
             painter.drawEllipse(origin, kOccupantMarkerRadius, kOccupantMarkerRadius);
@@ -862,11 +855,6 @@ void ScenarioCanvasWidget::paintEvent(QPaintEvent* event) {
             painter.setPen(QPen(QColor("#0f4c8f"), 1.2, Qt::SolidLine, Qt::RoundCap));
             for (const auto& worldPoint : fallbackDisplayPositions(placement)) {
                 const auto point = transform.map(worldPoint);
-                const auto tip = transform.map({
-                    .x = worldPoint.x + (placement.velocity.x * kVelocityIndicatorSeconds),
-                    .y = worldPoint.y + (placement.velocity.y * kVelocityIndicatorSeconds),
-                });
-                painter.drawLine(point, tip);
                 painter.setPen(Qt::NoPen);
                 painter.drawEllipse(point, kOccupantMarkerRadius, kOccupantMarkerRadius);
                 painter.setPen(QPen(QColor("#0f4c8f"), 1.2, Qt::SolidLine, Qt::RoundCap));
