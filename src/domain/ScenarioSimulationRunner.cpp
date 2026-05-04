@@ -201,12 +201,12 @@ void ScenarioSimulationRunner::syncFrameFromRuntime() {
 
 ScenarioSimulationRunner::RoutePlan ScenarioSimulationRunner::routePlan(const Point2D& start, const std::string& startZoneId) const {
     RoutePlan plan;
-    auto zoneRoute = zoneRouteToExit(startZoneId);
+    auto zoneRoute = zoneRouteToNearestExit(layoutCache_, start, startZoneId);
     if (!zoneRoute.has_value() || zoneRoute->empty()) {
         return plan;
     }
 
-    plan.destinationZoneId = zoneRoute->back();
+    plan.destinationZoneId = zoneRoute->zoneIds.back();
 
     Point2D segmentStart = start;
     auto appendSegment = [&](const std::vector<Point2D>& segment,
@@ -228,10 +228,12 @@ ScenarioSimulationRunner::RoutePlan ScenarioSimulationRunner::routePlan(const Po
         }
     };
 
-    for (std::size_t index = 1; index < zoneRoute->size(); ++index) {
-        const auto& fromZoneId = (*zoneRoute)[index - 1];
-        const auto& toZoneId = (*zoneRoute)[index];
-        if (const auto* connection = findCachedConnectionBetween(layoutCache_, fromZoneId, toZoneId)) {
+    for (std::size_t index = 1; index < zoneRoute->zoneIds.size(); ++index) {
+        const auto& fromZoneId = zoneRoute->zoneIds[index - 1];
+        const auto& toZoneId = zoneRoute->zoneIds[index];
+        const auto connectionIndex = zoneRoute->connectionIndices[index - 1];
+        if (connectionIndex < layoutCache_.layout.connections.size()) {
+            const auto* connection = &layoutCache_.layout.connections[connectionIndex];
             const auto passage = passageWithClearance(*connection, kCandidateClearance);
             const auto fromFloorId = cachedFloorIdForZone(layoutCache_, fromZoneId);
             const auto toFloorId = cachedFloorIdForZone(layoutCache_, toZoneId);
@@ -249,7 +251,7 @@ ScenarioSimulationRunner::RoutePlan ScenarioSimulationRunner::routePlan(const Po
             segmentStart = target;
         }
     }
-    if (const auto* exitZone = findCachedZone(layoutCache_, zoneRoute->back())) {
+    if (const auto* exitZone = findCachedZone(layoutCache_, zoneRoute->zoneIds.back())) {
         const auto exitCenter = polygonCenter(exitZone->area);
         if (distanceBetween(segmentStart, exitCenter) > kArrivalEpsilon) {
             const auto exitFloorId = exitZone->floorId;
@@ -269,10 +271,6 @@ ScenarioSimulationRunner::RoutePlan ScenarioSimulationRunner::routePlan(const Po
         plan.waypointVerticalTransitions.erase(plan.waypointVerticalTransitions.begin());
     }
     return plan;
-}
-
-std::optional<std::vector<std::string>> ScenarioSimulationRunner::zoneRouteToExit(const std::string& startZoneId) const {
-    return zoneRouteToNearestExit(layoutCache_, startZoneId);
 }
 
 std::string ScenarioSimulationRunner::zoneAt(const Point2D& point, const std::string& floorId) const {

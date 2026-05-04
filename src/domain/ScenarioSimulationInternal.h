@@ -90,6 +90,15 @@ struct PathQueueNode {
     }
 };
 
+struct ZoneRouteToExit {
+    std::vector<std::string> zoneIds{};
+    std::vector<std::size_t> connectionIndices{};
+
+    bool empty() const noexcept {
+        return zoneIds.empty();
+    }
+};
+
 long long spatialKey(const SpatialCell& cell);
 SpatialCell spatialCellFor(const Point2D& point, double cellSize);
 Bounds boundsOf(const Polygon2D& polygon);
@@ -114,8 +123,9 @@ bool pointInRing(const std::vector<Point2D>& ring, const Point2D& point);
 Point2D polygonCenter(const Polygon2D& polygon);
 const Zone2D* findZone(const FacilityLayout2D& layout, const std::string& zoneId);
 const Connection2D* findConnectionBetween(const FacilityLayout2D& layout, const std::string& from, const std::string& to);
-std::optional<std::vector<std::string>> zoneRouteToNearestExit(
+std::optional<ZoneRouteToExit> zoneRouteToNearestExit(
     const ScenarioLayoutCacheResource& cache,
+    const Point2D& startPosition,
     const std::string& startZoneId);
 std::string floorIdForZone(const FacilityLayout2D& layout, const std::string& zoneId);
 bool isVerticalConnection(const Connection2D& connection);
@@ -140,6 +150,7 @@ std::string agentCollisionFloorId(const EvacuationRoute& route);
 std::string zoneAt(const ScenarioLayoutCacheResource& cache, const Point2D& point, const std::string& floorId);
 bool routePassageCrossed(const FacilityLayout2D& layout, const EvacuationRoute& route, const Point2D& position, double agentRadius);
 double speedOf(const Point2D& velocity);
+bool pointHasBarrierClearance(const FacilityLayout2D& layout, const Point2D& point, double clearance);
 std::vector<engine::Entity> simulationEntities(engine::WorldQuery& query);
 AgentSpatialIndex buildAgentSpatialIndex(engine::WorldQuery& query, const std::vector<engine::Entity>& entities, double cellSize);
 std::vector<engine::Entity> nearbyAgents(engine::WorldQuery& query, const AgentSpatialIndex& index, const Point2D& point, double radius);
@@ -162,5 +173,6 @@ bool movementCrossesBarrier(const FacilityLayout2D& layout, const Point2D& from,
 bool lineOfSightClear(const FacilityLayout2D& layout, const Point2D& from, const Point2D& to, double clearance);
 std::vector<Point2D> buildPath(const FacilityLayout2D& layout, const Point2D& start, const Point2D& goal, double clearance);
 Point2D constrainedMove(const FacilityLayout2D& layout, const Point2D& from, const Point2D& to, double clearance = 0.0);
+Point2D constrainedMoveWithBarrierClearance(const FacilityLayout2D& layout, const Point2D& from, const Point2D& to, double clearance);
 
 }  // namespace safecrowd::domain::simulation_internal

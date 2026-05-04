@@ -696,23 +696,24 @@ const Connection2D* findConnectionBetween(const FacilityLayout2D& layout, const 
     return it == layout.connections.end() ? nullptr : &(*it);
 }
 
-std::optional<std::vector<std::string>> zoneRouteToNearestExit(
+std::optional<ZoneRouteToExit> zoneRouteToNearestExit(
     const ScenarioLayoutCacheResource& cache,
+    const Point2D& startPosition,
     const std::string& startZoneId) {
     if (startZoneId.empty()) {
         return std::nullopt;
     }
 
     if (const auto* startZone = findCachedZone(cache, startZoneId); startZone != nullptr && startZone->kind == ZoneKind::Exit) {
-        return std::vector<std::string>{startZoneId};
+        return ZoneRouteToExit{.zoneIds = {startZoneId}};
     }
 
     std::unordered_set<std::string> exitZoneIds;
     exitZoneIds.reserve(cache.layout.zones.size());
-    std::unordered_map<std::string, Point2D> centers;
-    centers.reserve(cache.layout.zones.size());
+    constexpr double kDefaultVerticalRouteCost = 3.0;
+    constexpr std::size_t kStartConnectionIndex = static_cast<std::size_t>(-1);
+
     for (const auto& zone : cache.layout.zones) {
-        centers.emplace(zone.id, polygonCenter(zone.area));
         if (zone.kind == ZoneKind::Exit) {
             exitZoneIds.insert(zone.id);
         }
@@ -721,14 +722,30 @@ std::optional<std::vector<std::string>> zoneRouteToNearestExit(
         return std::nullopt;
     }
 
-    auto zoneCenter = [&](const std::string& zoneId) -> Point2D {
-        const auto it = centers.find(zoneId);
-        return it == centers.end() ? Point2D{} : it->second;
+    auto stateKey = [](const std::string& zoneId, std::size_t entryConnectionIndex) {
+        return zoneId + '\x1f' + std::to_string(entryConnectionIndex);
+    };
+    auto verticalRouteCost = [&](const Connection2D& connection) {
+        if (!isVerticalConnection(connection)) {
+            return 0.0;
+        }
+
+        const auto fromFloorId = cachedFloorIdForZone(cache, connection.fromZoneId);
+        const auto toFloorId = cachedFloorIdForZone(cache, connection.toZoneId);
+        if (fromFloorId.empty() || toFloorId.empty() || fromFloorId == toFloorId) {
+            return kDefaultVerticalRouteCost;
+        }
+
+        const auto elevationDelta = std::fabs(floorElevation(cache.layout, fromFloorId) - floorElevation(cache.layout, toFloorId));
+        return elevationDelta > kGeometryEpsilon ? elevationDelta : kDefaultVerticalRouteCost;
     };
 
     struct QueueItem {
         double distance{0.0};
+        std::string key{};
         std::string zoneId{};
+        Point2D point{};
+        std::size_t entryConnectionIndex{static_cast<std::size_t>(-1)};
 
         bool operator>(const QueueItem& other) const noexcept {
             return distance > other.distance;
@@ -736,32 +753,49 @@ std::optional<std::vector<std::string>> zoneRouteToNearestExit(
     };
 
     std::unordered_map<std::string, double> distances;
-    distances.reserve(cache.layout.zones.size());
+    distances.reserve(cache.layout.connections.size() + 1);
     std::unordered_map<std::string, std::string> previous;
-    previous.reserve(cache.layout.zones.size());
+    previous.reserve(cache.layout.connections.size() + 1);
+    std::unordered_map<std::string, std::string> stateZones;
+    stateZones.reserve(cache.layout.connections.size() + 1);
+    std::unordered_map<std::string, std::size_t> stateConnectionIndices;
+    stateConnectionIndices.reserve(cache.layout.connections.size() + 1);
     std::priority_queue<QueueItem, std::vector<QueueItem>, std::greater<QueueItem>> queue;
 
-    distances[startZoneId] = 0.0;
-    queue.push({.distance = 0.0, .zoneId = startZoneId});
+    const auto startKey = stateKey(startZoneId, kStartConnectionIndex);
+    distances[startKey] = 0.0;
+    stateZones[startKey] = startZoneId;
+    stateConnectionIndices[startKey] = kStartConnectionIndex;
+    queue.push({
+        .distance = 0.0,
+        .key = startKey,
+        .zoneId = startZoneId,
+        .point = startPosition,
+        .entryConnectionIndex = kStartConnectionIndex,
+    });
+
+    double bestExitDistance = std::numeric_limits<double>::max();
+    std::string bestExitKey;
 
     while (!queue.empty()) {
         const auto current = queue.top();
         queue.pop();
 
-        const auto bestIt = distances.find(current.zoneId);
+        if (current.distance > bestExitDistance + 1e-12) {
+            continue;
+        }
+
+        const auto bestIt = distances.find(current.key);
         if (bestIt == distances.end() || current.distance > bestIt->second + 1e-12) {
             continue;
         }
 
         if (exitZoneIds.contains(current.zoneId)) {
-            std::vector<std::string> route;
-            for (auto zoneId = current.zoneId; !zoneId.empty();) {
-                route.push_back(zoneId);
-                const auto it = previous.find(zoneId);
-                zoneId = it == previous.end() ? std::string{} : it->second;
+            if (current.distance + 1e-12 < bestExitDistance) {
+                bestExitDistance = current.distance;
+                bestExitKey = current.key;
             }
-            std::reverse(route.begin(), route.end());
-            return route;
+            continue;
         }
 
         for (const auto& traversal : cachedTraversalsForZone(cache, current.zoneId)) {
@@ -771,19 +805,48 @@ std::optional<std::vector<std::string>> zoneRouteToNearestExit(
 
             const auto& connection = cache.layout.connections[traversal.connectionIndex];
             const auto portal = midpoint(connection.centerSpan);
-            const auto nextDistance = current.distance
-                + distanceBetween(zoneCenter(current.zoneId), portal)
-                + distanceBetween(portal, zoneCenter(traversal.nextZoneId));
-            const auto distanceIt = distances.find(traversal.nextZoneId);
+            const auto nextDistance = current.distance + distanceBetween(current.point, portal) + verticalRouteCost(connection);
+            const auto nextKey = stateKey(traversal.nextZoneId, traversal.connectionIndex);
+            const auto distanceIt = distances.find(nextKey);
             if (distanceIt == distances.end() || nextDistance + 1e-12 < distanceIt->second) {
-                distances[traversal.nextZoneId] = nextDistance;
-                previous[traversal.nextZoneId] = current.zoneId;
-                queue.push({.distance = nextDistance, .zoneId = traversal.nextZoneId});
+                distances[nextKey] = nextDistance;
+                previous[nextKey] = current.key;
+                stateZones[nextKey] = traversal.nextZoneId;
+                stateConnectionIndices[nextKey] = traversal.connectionIndex;
+                queue.push({
+                    .distance = nextDistance,
+                    .key = nextKey,
+                    .zoneId = traversal.nextZoneId,
+                    .point = portal,
+                    .entryConnectionIndex = traversal.connectionIndex,
+                });
             }
         }
     }
 
-    return std::nullopt;
+    if (bestExitKey.empty()) {
+        return std::nullopt;
+    }
+
+    ZoneRouteToExit route;
+    for (auto key = bestExitKey; !key.empty();) {
+        const auto zoneIt = stateZones.find(key);
+        if (zoneIt != stateZones.end()) {
+            route.zoneIds.push_back(zoneIt->second);
+        }
+        const auto connectionIt = stateConnectionIndices.find(key);
+        if (connectionIt != stateConnectionIndices.end() && connectionIt->second != kStartConnectionIndex) {
+            route.connectionIndices.push_back(connectionIt->second);
+        }
+        const auto previousIt = previous.find(key);
+        key = previousIt == previous.end() ? std::string{} : previousIt->second;
+    }
+    std::reverse(route.zoneIds.begin(), route.zoneIds.end());
+    std::reverse(route.connectionIndices.begin(), route.connectionIndices.end());
+    if (route.zoneIds.empty() || route.connectionIndices.size() + 1 != route.zoneIds.size()) {
+        return std::nullopt;
+    }
+    return route;
 }
 
 double speedOf(const Point2D& velocity) {
@@ -1063,8 +1126,8 @@ bool pointInsideClosedBarrier(const FacilityLayout2D& layout, const Point2D& poi
     return false;
 }
 
-bool pointHasClearance(const FacilityLayout2D& layout, const Point2D& point, double clearance) {
-    if ((!layout.zones.empty() && !pointInAnyZone(layout, point)) || pointInsideClosedBarrier(layout, point)) {
+bool pointHasBarrierClearance(const FacilityLayout2D& layout, const Point2D& point, double clearance) {
+    if (pointInsideClosedBarrier(layout, point)) {
         return false;
     }
 
@@ -1089,6 +1152,11 @@ bool pointHasClearance(const FacilityLayout2D& layout, const Point2D& point, dou
         }
     }
     return true;
+}
+
+bool pointHasClearance(const FacilityLayout2D& layout, const Point2D& point, double clearance) {
+    return (layout.zones.empty() || pointInAnyZone(layout, point))
+        && pointHasBarrierClearance(layout, point, clearance);
 }
 
 bool lineOfSightClear(const FacilityLayout2D& layout, const Point2D& from, const Point2D& to, double clearance) {
@@ -1450,6 +1518,43 @@ Point2D constrainedMove(const FacilityLayout2D& layout, const Point2D& from, con
     };
     auto validMove = [&](const Point2D& candidate) {
         return validDestination(candidate) && !movementCrossesBarrier(layout, from, candidate);
+    };
+
+    if (validMove(to)) {
+        return to;
+    }
+
+    const Point2D xOnly{.x = to.x, .y = from.y};
+    if (validMove(xOnly)) {
+        return xOnly;
+    }
+
+    const Point2D yOnly{.x = from.x, .y = to.y};
+    if (validMove(yOnly)) {
+        return yOnly;
+    }
+
+    Point2D best = from;
+    double low = 0.0;
+    double high = 1.0;
+    for (int i = 0; i < 8; ++i) {
+        const auto t = (low + high) * 0.5;
+        const auto candidate = from + ((to - from) * t);
+        if (validMove(candidate)) {
+            low = t;
+            best = candidate;
+        } else {
+            high = t;
+        }
+    }
+    return best;
+}
+
+Point2D constrainedMoveWithBarrierClearance(const FacilityLayout2D& layout, const Point2D& from, const Point2D& to, double clearance) {
+    const auto effectiveClearance = std::max(0.0, clearance);
+    auto validMove = [&](const Point2D& candidate) {
+        return pointHasBarrierClearance(layout, candidate, effectiveClearance)
+            && !movementCrossesBarrier(layout, from, candidate);
     };
 
     if (validMove(to)) {

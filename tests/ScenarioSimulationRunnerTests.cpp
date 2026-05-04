@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include "domain/DemoLayouts.h"
+#include "domain/ScenarioSimulationInternal.h"
 #include "domain/ScenarioSimulationRunner.h"
+#include "domain/ScenarioSimulationSystems.h"
 
 namespace {
 
@@ -572,6 +574,289 @@ safecrowd::domain::FacilityLayout2D descendingWestEntryUShapedStairTransitionLay
     return layout;
 }
 
+safecrowd::domain::FacilityLayout2D competingStairExitLayout() {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.id = "competing-stair-exit";
+    layout.levelId = "L1";
+    layout.floors.push_back({.id = "L1", .label = "Floor 1"});
+    layout.floors.push_back({.id = "L2", .label = "Floor 2", .elevationMeters = 3.5});
+    layout.zones.push_back({
+        .id = "upper-room",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Upper Room",
+        .area = {.outline = {{0.0, 0.0}, {20.0, 0.0}, {20.0, 4.0}, {0.0, 4.0}}},
+    });
+    layout.zones.push_back({
+        .id = "left-stair-upper",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ZoneKind::Stair,
+        .label = "Left Stair Upper",
+        .area = {.outline = {{0.0, 4.0}, {2.0, 4.0}, {2.0, 6.0}, {0.0, 6.0}}},
+        .isStair = true,
+    });
+    layout.zones.push_back({
+        .id = "right-stair-upper",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ZoneKind::Stair,
+        .label = "Right Stair Upper",
+        .area = {.outline = {{18.0, 4.0}, {20.0, 4.0}, {20.0, 6.0}, {18.0, 6.0}}},
+        .isStair = true,
+    });
+    layout.zones.push_back({
+        .id = "left-stair-lower",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Stair,
+        .label = "Left Stair Lower",
+        .area = {.outline = {{0.0, 4.0}, {2.0, 4.0}, {2.0, 6.0}, {0.0, 6.0}}},
+        .isStair = true,
+    });
+    layout.zones.push_back({
+        .id = "right-stair-lower",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Stair,
+        .label = "Right Stair Lower",
+        .area = {.outline = {{18.0, 4.0}, {20.0, 4.0}, {20.0, 6.0}, {18.0, 6.0}}},
+        .isStair = true,
+    });
+    layout.zones.push_back({
+        .id = "lower-corridor",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Lower Corridor",
+        .area = {.outline = {{0.0, 0.0}, {20.0, 0.0}, {20.0, 4.0}, {0.0, 4.0}}},
+    });
+    layout.zones.push_back({
+        .id = "exit-left",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Exit,
+        .label = "Left Exit",
+        .area = {.outline = {{-2.0, 0.8}, {0.0, 0.8}, {0.0, 3.2}, {-2.0, 3.2}}},
+    });
+    layout.connections.push_back({
+        .id = "upper-room-left-stair",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ConnectionKind::Opening,
+        .fromZoneId = "upper-room",
+        .toZoneId = "left-stair-upper",
+        .effectiveWidth = 1.2,
+        .centerSpan = {{1.0, 4.0}, {1.8, 4.0}},
+    });
+    layout.connections.push_back({
+        .id = "upper-room-right-stair",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ConnectionKind::Opening,
+        .fromZoneId = "upper-room",
+        .toZoneId = "right-stair-upper",
+        .effectiveWidth = 1.2,
+        .centerSpan = {{18.2, 4.0}, {19.0, 4.0}},
+    });
+    layout.connections.push_back({
+        .id = "left-stair-vertical",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ConnectionKind::Stair,
+        .fromZoneId = "left-stair-upper",
+        .toZoneId = "left-stair-lower",
+        .effectiveWidth = 1.2,
+        .isStair = true,
+        .centerSpan = {{1.0, 4.8}, {1.8, 4.8}},
+    });
+    layout.connections.push_back({
+        .id = "right-stair-vertical",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ConnectionKind::Stair,
+        .fromZoneId = "right-stair-upper",
+        .toZoneId = "right-stair-lower",
+        .effectiveWidth = 1.2,
+        .isStair = true,
+        .centerSpan = {{18.2, 4.8}, {19.0, 4.8}},
+    });
+    layout.connections.push_back({
+        .id = "left-stair-lower-corridor",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ConnectionKind::Opening,
+        .fromZoneId = "left-stair-lower",
+        .toZoneId = "lower-corridor",
+        .effectiveWidth = 1.2,
+        .centerSpan = {{1.0, 4.0}, {1.8, 4.0}},
+    });
+    layout.connections.push_back({
+        .id = "right-stair-lower-corridor",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ConnectionKind::Opening,
+        .fromZoneId = "right-stair-lower",
+        .toZoneId = "lower-corridor",
+        .effectiveWidth = 1.2,
+        .centerSpan = {{18.2, 4.0}, {19.0, 4.0}},
+    });
+    layout.connections.push_back({
+        .id = "corridor-exit-left",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ConnectionKind::Exit,
+        .fromZoneId = "lower-corridor",
+        .toZoneId = "exit-left",
+        .effectiveWidth = 1.8,
+        .centerSpan = {{0.0, 1.2}, {0.0, 2.8}},
+    });
+    return layout;
+}
+
+safecrowd::domain::FacilityLayout2D adjacentExitPortalChoiceLayout() {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.id = "adjacent-exit-portal-choice";
+    layout.zones.push_back({
+        .id = "lower-hall",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Lower Hall",
+        .area = {.outline = {{0.0, 0.0}, {6.0, 0.0}, {6.0, 4.0}, {0.0, 4.0}}},
+    });
+    layout.zones.push_back({
+        .id = "near-exit",
+        .kind = safecrowd::domain::ZoneKind::Exit,
+        .label = "Near Exit",
+        .area = {.outline = {{0.5, -4.0}, {1.5, -4.0}, {1.5, 0.0}, {0.5, 0.0}}},
+    });
+    layout.zones.push_back({
+        .id = "adjacent-exit",
+        .kind = safecrowd::domain::ZoneKind::Exit,
+        .label = "Adjacent Exit",
+        .area = {.outline = {{3.5, -0.2}, {4.5, -0.2}, {4.5, 0.0}, {3.5, 0.0}}},
+    });
+    layout.connections.push_back({
+        .id = "hall-near-exit",
+        .kind = safecrowd::domain::ConnectionKind::Exit,
+        .fromZoneId = "lower-hall",
+        .toZoneId = "near-exit",
+        .effectiveWidth = 1.0,
+        .centerSpan = {{0.6, 0.0}, {1.4, 0.0}},
+    });
+    layout.connections.push_back({
+        .id = "hall-adjacent-exit",
+        .kind = safecrowd::domain::ConnectionKind::Exit,
+        .fromZoneId = "lower-hall",
+        .toZoneId = "adjacent-exit",
+        .effectiveWidth = 1.0,
+        .centerSpan = {{3.6, 0.0}, {4.4, 0.0}},
+    });
+    return layout;
+}
+
+safecrowd::domain::FacilityLayout2D verticalLandingExitChoiceLayout() {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.id = "vertical-landing-exit-choice";
+    layout.floors.push_back({.id = "L1", .label = "Floor 1"});
+    layout.floors.push_back({.id = "L2", .label = "Floor 2", .elevationMeters = 3.5});
+    layout.zones.push_back({
+        .id = "upper-room",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Upper Room",
+        .area = {.outline = {{0.0, 0.0}, {4.0, 0.0}, {4.0, 1.5}, {0.0, 1.5}}},
+    });
+    layout.zones.push_back({
+        .id = "stair-upper",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ZoneKind::Stair,
+        .label = "Upper Stair",
+        .area = {.outline = {{0.0, 1.5}, {4.0, 1.5}, {4.0, 4.5}, {0.0, 4.5}}},
+        .isStair = true,
+    });
+    layout.zones.push_back({
+        .id = "stair-lower",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Stair,
+        .label = "Lower Stair",
+        .area = {.outline = {{0.0, 1.5}, {4.0, 1.5}, {4.0, 4.5}, {0.0, 4.5}}},
+        .isStair = true,
+    });
+    layout.zones.push_back({
+        .id = "near-exit",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Exit,
+        .label = "Near Exit",
+        .area = {.outline = {{4.0, 2.2}, {5.0, 2.2}, {5.0, 2.7}, {4.0, 2.7}}},
+    });
+    layout.zones.push_back({
+        .id = "far-exit",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Exit,
+        .label = "Far Exit",
+        .area = {.outline = {{4.0, 1.75}, {5.0, 1.75}, {5.0, 2.05}, {4.0, 2.05}}},
+    });
+    layout.connections.push_back({
+        .id = "room-to-stair",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ConnectionKind::Opening,
+        .fromZoneId = "upper-room",
+        .toZoneId = "stair-upper",
+        .effectiveWidth = 1.0,
+        .centerSpan = {{1.8, 1.5}, {2.8, 1.5}},
+    });
+    layout.connections.push_back({
+        .id = "stair-vertical",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ConnectionKind::Stair,
+        .fromZoneId = "stair-upper",
+        .toZoneId = "stair-lower",
+        .effectiveWidth = 1.0,
+        .isStair = true,
+        .centerSpan = {{1.8, 2.0}, {2.8, 2.0}},
+    });
+    layout.connections.push_back({
+        .id = "stair-to-near-exit",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ConnectionKind::Exit,
+        .fromZoneId = "stair-lower",
+        .toZoneId = "near-exit",
+        .effectiveWidth = 0.5,
+        .centerSpan = {{4.0, 2.25}, {4.0, 2.65}},
+    });
+    layout.connections.push_back({
+        .id = "stair-to-far-exit",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ConnectionKind::Exit,
+        .fromZoneId = "stair-lower",
+        .toZoneId = "far-exit",
+        .effectiveWidth = 0.3,
+        .centerSpan = {{4.0, 1.82}, {4.0, 1.98}},
+    });
+    return layout;
+}
+
+safecrowd::domain::FacilityLayout2D sharedExitMultiPortalLayout() {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.id = "shared-exit-multi-portal";
+    layout.zones.push_back({
+        .id = "lower-hall",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Lower Hall",
+        .area = {.outline = {{0.0, 0.0}, {4.0, 0.0}, {4.0, 8.0}, {0.0, 8.0}}},
+    });
+    layout.zones.push_back({
+        .id = "shared-exit",
+        .kind = safecrowd::domain::ZoneKind::Exit,
+        .label = "Shared Exit",
+        .area = {.outline = {{4.0, 0.0}, {8.0, 0.0}, {8.0, 8.0}, {4.0, 8.0}}},
+    });
+    layout.connections.push_back({
+        .id = "hall-to-shared-exit-far",
+        .kind = safecrowd::domain::ConnectionKind::Exit,
+        .fromZoneId = "lower-hall",
+        .toZoneId = "shared-exit",
+        .effectiveWidth = 0.4,
+        .centerSpan = {{4.0, 1.0}, {4.0, 1.4}},
+    });
+    layout.connections.push_back({
+        .id = "hall-to-shared-exit-near",
+        .kind = safecrowd::domain::ConnectionKind::Exit,
+        .fromZoneId = "lower-hall",
+        .toZoneId = "shared-exit",
+        .effectiveWidth = 0.4,
+        .centerSpan = {{4.0, 6.4}, {4.0, 6.8}},
+    });
+    return layout;
+}
+
 safecrowd::domain::InitialPlacement2D groupPlacement() {
     safecrowd::domain::InitialPlacement2D placement;
     placement.id = "group-1";
@@ -818,6 +1103,37 @@ SC_TEST(ScenarioSimulationRunnerKeepsCrowdedNarrowDoorAgentsOutOfWalls) {
     SC_EXPECT_TRUE(anyAgentEnteredPassage);
 }
 
+SC_TEST(ScenarioSimulationRunnerMovesWallContactAgentBackIntoInterior) {
+    safecrowd::domain::InitialPlacement2D placement;
+    placement.id = "wall-contact";
+    placement.zoneId = "room";
+    placement.targetAgentCount = 1;
+    placement.initialVelocity = {.x = 1.4, .y = 0.0};
+    placement.area.outline = {{.x = 3.74, .y = 1.36}};
+
+    safecrowd::domain::ScenarioDraft scenario;
+    scenario.execution.timeLimitSeconds = 4.0;
+    scenario.population.initialPlacements.push_back(placement);
+
+    const auto layout = narrowDoorCrowdLayout();
+    safecrowd::domain::ScenarioSimulationRunner runner(layout, scenario);
+    runner.step(0.1);
+
+    SC_EXPECT_EQ(runner.frame().agents.size(), static_cast<std::size_t>(1));
+    const auto firstFrameAgent = runner.frame().agents.front();
+    SC_EXPECT_TRUE(firstFrameAgent.position.x < 3.74);
+    SC_EXPECT_TRUE(agentKeepsBarrierClearance(layout, firstFrameAgent, firstFrameAgent.radius * 0.95));
+
+    for (int i = 0; i < 12 && !runner.complete(); ++i) {
+        runner.step(0.1);
+    }
+
+    SC_EXPECT_EQ(runner.frame().agents.size(), static_cast<std::size_t>(1));
+    const auto recoveredAgent = runner.frame().agents.front();
+    SC_EXPECT_TRUE(!recoveredAgent.stalled);
+    SC_EXPECT_TRUE(agentKeepsBarrierClearance(layout, recoveredAgent, recoveredAgent.radius * 0.95));
+}
+
 SC_TEST(ScenarioSimulationRunnerTraversesStairConnectionBetweenFloors) {
     safecrowd::domain::InitialPlacement2D placement;
     placement.id = "agent-1";
@@ -894,6 +1210,114 @@ SC_TEST(ScenarioSimulationRunnerDoesNotSlowAgentsOnDifferentFloorsAtSameCoordina
     SC_EXPECT_EQ(second.floorId, std::string{"L2"});
     SC_EXPECT_TRUE(first.velocity.x > 1.0);
     SC_EXPECT_TRUE(second.velocity.x < -1.0);
+}
+
+SC_TEST(ScenarioRouteToNearestExitUsesStartPositionAndLowerFloorExitDistanceForStairChoice) {
+    const auto layout = competingStairExitLayout();
+    const auto cache = safecrowd::domain::simulation_internal::buildScenarioLayoutCache(layout);
+
+    const auto lowerExitPreferred = safecrowd::domain::simulation_internal::zoneRouteToNearestExit(
+        cache,
+        {.x = 18.0, .y = 3.2},
+        "upper-room");
+    SC_EXPECT_TRUE(lowerExitPreferred.has_value());
+    const auto lowerExitRoute = lowerExitPreferred.has_value()
+        ? lowerExitPreferred->zoneIds
+        : std::vector<std::string>{};
+    SC_EXPECT_TRUE(lowerExitRoute.size() >= 2);
+    SC_EXPECT_EQ(lowerExitRoute.size() >= 2 ? lowerExitRoute[1] : std::string{}, std::string{"left-stair-upper"});
+    SC_EXPECT_EQ(lowerExitRoute.empty() ? std::string{} : lowerExitRoute.back(), std::string{"exit-left"});
+
+    const auto startPositionPreferred = safecrowd::domain::simulation_internal::zoneRouteToNearestExit(
+        cache,
+        {.x = 19.7, .y = 3.2},
+        "upper-room");
+    SC_EXPECT_TRUE(startPositionPreferred.has_value());
+    const auto startPositionRoute = startPositionPreferred.has_value()
+        ? startPositionPreferred->zoneIds
+        : std::vector<std::string>{};
+    SC_EXPECT_TRUE(startPositionRoute.size() >= 2);
+    SC_EXPECT_EQ(startPositionRoute.size() >= 2 ? startPositionRoute[1] : std::string{}, std::string{"right-stair-upper"});
+    SC_EXPECT_EQ(startPositionRoute.empty() ? std::string{} : startPositionRoute.back(), std::string{"exit-left"});
+}
+
+SC_TEST(ScenarioRouteToNearestExitPrefersNearestExitPortalOverExitZoneCenter) {
+    const auto layout = adjacentExitPortalChoiceLayout();
+    const auto cache = safecrowd::domain::simulation_internal::buildScenarioLayoutCache(layout);
+
+    const auto route = safecrowd::domain::simulation_internal::zoneRouteToNearestExit(
+        cache,
+        {.x = 1.0, .y = 2.0},
+        "lower-hall");
+
+    SC_EXPECT_TRUE(route.has_value());
+    const auto zoneRoute = route.has_value() ? route->zoneIds : std::vector<std::string>{};
+    SC_EXPECT_EQ(zoneRoute.empty() ? std::string{} : zoneRoute.back(), std::string{"near-exit"});
+}
+
+SC_TEST(ScenarioRouteToNearestExitPreservesSelectedPortalForSharedExitZone) {
+    const auto layout = sharedExitMultiPortalLayout();
+    const auto cache = safecrowd::domain::simulation_internal::buildScenarioLayoutCache(layout);
+
+    const auto route = safecrowd::domain::simulation_internal::zoneRouteToNearestExit(
+        cache,
+        {.x = 2.0, .y = 6.6},
+        "lower-hall");
+
+    SC_EXPECT_TRUE(route.has_value());
+    SC_EXPECT_EQ(route.has_value() ? route->zoneIds.back() : std::string{}, std::string{"shared-exit"});
+    SC_EXPECT_EQ(route.has_value() ? route->connectionIndices.size() : std::size_t{0}, std::size_t{1});
+    const auto connectionIndex = route.has_value() && !route->connectionIndices.empty()
+        ? route->connectionIndices.front()
+        : std::size_t{0};
+    SC_EXPECT_TRUE(connectionIndex < layout.connections.size());
+    SC_EXPECT_EQ(
+        connectionIndex < layout.connections.size() ? layout.connections[connectionIndex].id : std::string{},
+        std::string{"hall-to-shared-exit-near"});
+}
+
+SC_TEST(ScenarioSimulationRunnerUsesSelectedPortalWhenExitZoneHasMultipleConnections) {
+    safecrowd::domain::InitialPlacement2D placement;
+    placement.id = "agent-1";
+    placement.zoneId = "lower-hall";
+    placement.targetAgentCount = 1;
+    placement.initialVelocity = {.x = 1.0, .y = 0.0};
+    placement.area.outline = {{.x = 2.0, .y = 6.6}};
+
+    safecrowd::domain::ScenarioDraft scenario;
+    scenario.execution.timeLimitSeconds = 4.0;
+    scenario.population.initialPlacements.push_back(placement);
+
+    safecrowd::domain::ScenarioSimulationRunner runner(sharedExitMultiPortalLayout(), scenario);
+    runner.step(0.1);
+
+    SC_EXPECT_EQ(runner.frame().agents.size(), std::size_t{1});
+    const auto& agent = runner.frame().agents.front();
+    SC_EXPECT_TRUE(agent.velocity.x > 1.0);
+    SC_EXPECT_TRUE(std::fabs(agent.velocity.y) < 0.15);
+}
+
+SC_TEST(ScenarioSimulationRunnerReplansExitChoiceAfterVerticalLanding) {
+    safecrowd::domain::InitialPlacement2D placement;
+    placement.id = "agent-1";
+    placement.floorId = "L2";
+    placement.zoneId = "upper-room";
+    placement.targetAgentCount = 1;
+    placement.initialVelocity = {.x = 0.0, .y = 1.0};
+    placement.area.outline = {{.x = 2.3, .y = 0.75}};
+
+    safecrowd::domain::ScenarioDraft scenario;
+    scenario.execution.timeLimitSeconds = 12.0;
+    scenario.population.initialPlacements.push_back(placement);
+
+    safecrowd::domain::ScenarioSimulationRunner runner(verticalLandingExitChoiceLayout(), scenario);
+    for (int i = 0; i < 120 && !runner.complete(); ++i) {
+        runner.step(0.1);
+    }
+
+    SC_EXPECT_TRUE(runner.complete());
+    SC_EXPECT_EQ(runner.resultArtifacts().exitUsage.size(), std::size_t{1});
+    SC_EXPECT_EQ(runner.resultArtifacts().exitUsage.front().exitZoneId, std::string{"near-exit"});
 }
 
 SC_TEST(ScenarioSimulationRunnerHonorsAllowedStairEntryDirection) {
@@ -1127,6 +1551,50 @@ SC_TEST(ScenarioSimulationRunnerMovesFollowingAgentsThroughDescendingUShapedStai
 
     SC_EXPECT_EQ(agentsStillOnUpperFloor, std::size_t{0});
     SC_EXPECT_EQ(stalledAgents, std::size_t{0});
+}
+
+SC_TEST(ScenarioSimulationRunnerKeepsCrowdedUShapedStairConnectionClearOfWalls) {
+    safecrowd::domain::InitialPlacement2D placement;
+    placement.id = "tight-descending-group";
+    placement.floorId = "L2";
+    placement.zoneId = "stair-l2";
+    placement.initialVelocity = {.x = 0.0, .y = -1.0};
+    placement.explicitPositions = {
+        {.x = 3.65, .y = 2.35},
+        {.x = 3.35, .y = 2.35},
+        {.x = 3.05, .y = 2.35},
+        {.x = 3.65, .y = 2.75},
+        {.x = 3.35, .y = 2.75},
+        {.x = 3.05, .y = 2.75},
+        {.x = 3.65, .y = 3.15},
+        {.x = 3.35, .y = 3.15},
+    };
+
+    safecrowd::domain::ScenarioDraft scenario;
+    scenario.population.initialPlacements.push_back(placement);
+    scenario.execution.timeLimitSeconds = 10.0;
+
+    const auto layout = descendingWestEntryUShapedStairTransitionLayout();
+    safecrowd::domain::ScenarioSimulationRunner runner(layout, scenario);
+    bool anyAgentReachedLowerFloor = false;
+    for (int i = 0; i < 100 && !runner.complete(); ++i) {
+        runner.step(0.1);
+        for (const auto& agent : runner.frame().agents) {
+            anyAgentReachedLowerFloor = anyAgentReachedLowerFloor || agent.floorId == "L1";
+            SC_EXPECT_TRUE(agentInsideAnyZoneOnFrameFloor(layout, agent));
+            SC_EXPECT_TRUE(agentKeepsBarrierClearance(layout, agent, agent.radius * 0.95));
+        }
+    }
+
+    std::size_t stalledAgents = 0;
+    for (const auto& agent : runner.frame().agents) {
+        if (agent.stalled) {
+            ++stalledAgents;
+        }
+    }
+
+    SC_EXPECT_TRUE(anyAgentReachedLowerFloor);
+    SC_EXPECT_TRUE(runner.frame().agents.empty() || stalledAgents < runner.frame().agents.size());
 }
 
 SC_TEST(ScenarioSimulationRunnerBlocksMovementAcrossBarrierSegments) {
