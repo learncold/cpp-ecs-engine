@@ -7,8 +7,6 @@
 /vcpkg_installed/
 /.deps/
 /.vendor/
-/main_latest/
-/pr_publish/
 *.user
 *.VC.db
 *.opendb  
