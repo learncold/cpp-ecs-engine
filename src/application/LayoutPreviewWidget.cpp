@@ -551,22 +551,23 @@ std::optional<safecrowd::domain::LineSegment2D> stairEntrySpanForFloor(
         return std::nullopt;
     }
 
-    if (spanOverlapsPolygonBoundary(stairZone->area, connection.centerSpan)) {
+    const auto direction = stairEntryDirectionForFloor(layout, connection, floorId);
+    const auto bounds = polygonBounds(stairZone->area);
+    if (!direction.has_value() || !bounds.valid()) {
+        return std::nullopt;
+    }
+
+    const auto directedEntrySpan = entrySpanForRectangle(
+        QRectF(QPointF(bounds.minX, bounds.minY), QPointF(bounds.maxX, bounds.maxY)).normalized(),
+        *direction);
+
+    if (spanOverlapsPolygonBoundary(stairZone->area, connection.centerSpan)
+        && (*direction == safecrowd::domain::StairEntryDirection::Unspecified
+            || segmentsShareSpan(connection.centerSpan, directedEntrySpan.start, directedEntrySpan.end))) {
         return connection.centerSpan;
     }
 
-    const auto direction = stairEntryDirectionForFloor(layout, connection, floorId);
-    if (!direction.has_value()) {
-        return std::nullopt;
-    }
-
-    const auto bounds = polygonBounds(stairZone->area);
-    if (!bounds.valid()) {
-        return std::nullopt;
-    }
-    return entrySpanForRectangle(
-        QRectF(QPointF(bounds.minX, bounds.minY), QPointF(bounds.maxX, bounds.maxY)).normalized(),
-        *direction);
+    return directedEntrySpan;
 }
 
 std::optional<QPointF> stairEntryOutsideSampleForFloor(
@@ -584,19 +585,22 @@ std::optional<QPointF> stairEntryOutsideSampleForFloor(
         return std::nullopt;
     }
 
-    if (spanOverlapsPolygonBoundary(stairZone->area, connection.centerSpan)) {
+    const auto direction = stairEntryDirectionForFloor(layout, connection, floorId);
+    const auto bounds = polygonBounds(stairZone->area);
+    if (!direction.has_value() || !bounds.valid()) {
+        return std::nullopt;
+    }
+
+    const auto directedEntrySpan = entrySpanForRectangle(
+        QRectF(QPointF(bounds.minX, bounds.minY), QPointF(bounds.maxX, bounds.maxY)).normalized(),
+        *direction);
+
+    if (spanOverlapsPolygonBoundary(stairZone->area, connection.centerSpan)
+        && (*direction == safecrowd::domain::StairEntryDirection::Unspecified
+            || segmentsShareSpan(connection.centerSpan, directedEntrySpan.start, directedEntrySpan.end))) {
         return outsideSampleForBoundarySpan(stairZone->area, connection.centerSpan);
     }
 
-    const auto direction = stairEntryDirectionForFloor(layout, connection, floorId);
-    if (!direction.has_value()) {
-        return std::nullopt;
-    }
-
-    const auto bounds = polygonBounds(stairZone->area);
-    if (!bounds.valid()) {
-        return std::nullopt;
-    }
     return entryOutsideSample(
         QRectF(QPointF(bounds.minX, bounds.minY), QPointF(bounds.maxX, bounds.maxY)).normalized(),
         *direction);
@@ -1932,7 +1936,10 @@ void autoConnectRoomToStairEntries(
         }
 
         const auto candidates = zonesContainingPoint(layout, *outsideSample, floorId, 0.35);
-        if (std::find(candidates.begin(), candidates.end(), *roomIndex) == candidates.end()) {
+        const bool roomContainsOutsideSample =
+            std::find(candidates.begin(), candidates.end(), *roomIndex) != candidates.end();
+        const bool roomTouchesEntrySpan = spanOverlapsPolygonBoundary(layout.zones[*roomIndex].area, *entrySpan);
+        if (!roomContainsOutsideSample && !roomTouchesEntrySpan) {
             continue;
         }
 

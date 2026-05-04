@@ -86,6 +86,7 @@ private:
     std::optional<LayoutCanvasBounds> collectBounds() const;
     LayoutCanvasTransform currentTransform(const LayoutCanvasBounds& bounds) const;
     QRectF previewViewport() const;
+    bool switchFloorByWheel(QWheelEvent* event);
     void selectFloorForElement(const QString& elementId);
     safecrowd::domain::Point2D unmapPoint(const QPointF& point) const;
     QString zoneAt(const safecrowd::domain::Point2D& point) const;
