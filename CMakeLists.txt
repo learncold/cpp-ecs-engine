@@ -19,7 +19,7 @@ if (SAFECROWD_BUILD_APP)
     set(CMAKE_AUTOUIC ON)
     set(CMAKE_AUTORCC ON)
 
-    find_package(Qt6 CONFIG REQUIRED COMPONENTS Core Gui Widgets)
+    find_package(Qt6 CONFIG REQUIRED COMPONENTS Core Gui Widgets Svg)
     qt_standard_project_setup()
 endif()
 
@@ -193,6 +193,7 @@ if (SAFECROWD_BUILD_APP)
         src/application/ScenarioResultWidget.h
         src/application/ScenarioRunWidget.h
         src/application/SimulationCanvasWidget.h
+        src/application/ToolIconResources.h
         src/application/UiStyle.h
         src/application/WorkspaceShell.h
         src/application/IssueCardWidget.cpp
@@ -214,6 +215,8 @@ if (SAFECROWD_BUILD_APP)
         src/application/ScenarioResultWidget.cpp
         src/application/ScenarioRunWidget.cpp
         src/application/SimulationCanvasWidget.cpp
+        src/application/ToolIconResources.cpp
+        src/application/ToolIcons.qrc
         src/application/UiStyle.cpp
         src/application/WorkspaceShell.cpp
     )
@@ -226,7 +229,7 @@ if (SAFECROWD_BUILD_APP)
     set_target_properties(safecrowd_app PROPERTIES
         AUTOMOC OFF
         AUTOUIC OFF
-        AUTORCC OFF
+        AUTORCC ON
     )
 
     target_link_libraries(safecrowd_app
@@ -234,6 +237,7 @@ if (SAFECROWD_BUILD_APP)
             safecrowd_domain
             Qt6::Core
             Qt6::Gui
+            Qt6::Svg
             Qt6::Widgets
     )
 

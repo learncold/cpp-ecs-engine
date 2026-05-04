@@ -8,6 +8,7 @@
 
 #include "application/LayoutCanvasRendering.h"
 #include "application/LayoutCanvasSnapping.h"
+#include "application/ToolIconResources.h"
 
 #include <QCoreApplication>
 #include <QCheckBox>
@@ -1973,7 +1974,52 @@ void autoConnectRoomToStairEntries(
     }
 }
 
+QString layoutToolIconResourcePath(const QString& glyph) {
+    if (glyph == "select") {
+        return QStringLiteral(":/tool-icons/layout-authoring/select.svg");
+    }
+    if (glyph == "reset") {
+        return QStringLiteral(":/tool-icons/layout-authoring/reset-view.svg");
+    }
+    if (glyph == "add") {
+        return QStringLiteral(":/tool-icons/layout-authoring/add-floor.svg");
+    }
+    if (glyph == "grid") {
+        return QStringLiteral(":/tool-icons/layout-authoring/grid-snap.svg");
+    }
+    if (glyph == "room") {
+        return QStringLiteral(":/tool-icons/layout-authoring/draw-room.svg");
+    }
+    if (glyph == "exit") {
+        return QStringLiteral(":/tool-icons/layout-authoring/draw-exit.svg");
+    }
+    if (glyph == "wall") {
+        return QStringLiteral(":/tool-icons/layout-authoring/draw-wall.svg");
+    }
+    if (glyph == "obstruction") {
+        return QStringLiteral(":/tool-icons/layout-authoring/draw-obstruction.svg");
+    }
+    if (glyph == "door") {
+        return QStringLiteral(":/tool-icons/layout-authoring/draw-door.svg");
+    }
+    if (glyph == "stair") {
+        return QStringLiteral(":/tool-icons/layout-authoring/draw-stair-ramp.svg");
+    }
+    if (glyph == "u-stair") {
+        return QStringLiteral(":/tool-icons/layout-authoring/draw-u-stair.svg");
+    }
+    return {};
+}
+
 QIcon makeToolIcon(const QString& glyph, const QColor& color, bool filled = false) {
+    const auto resourcePath = layoutToolIconResourcePath(glyph);
+    if (!resourcePath.isEmpty()) {
+        const auto icon = makeSvgToolIcon(resourcePath, color, QSize(24, 24));
+        if (!icon.isNull()) {
+            return icon;
+        }
+    }
+
     QPixmap pixmap(24, 24);
     pixmap.fill(Qt::transparent);
 

@@ -21,6 +21,7 @@
 #include "application/NavigationTreeWidget.h"
 #include "application/ScenarioCanvasWidget.h"
 #include "application/ScenarioRunWidget.h"
+#include "application/ToolIconResources.h"
 #include "application/UiStyle.h"
 #include "application/WorkspaceShell.h"
 
@@ -168,6 +169,22 @@ QIcon makeLayoutIcon(const QColor& color) {
     return QIcon(pixmap);
 }
 
+QIcon crowdTreeIcon(const QString& resourcePath, const QColor& color) {
+    return makeSvgToolIcon(resourcePath, color, QSize(18, 18));
+}
+
+QIcon individualCrowdTreeIcon() {
+    return crowdTreeIcon(
+        QStringLiteral(":/tool-icons/scenario-authoring/individual-occupant.svg"),
+        QColor("#1f5fae"));
+}
+
+QIcon groupCrowdTreeIcon() {
+    return crowdTreeIcon(
+        QStringLiteral(":/tool-icons/scenario-authoring/add-occupant-group.svg"),
+        QColor("#1f5fae"));
+}
+
 std::vector<NavigationTreeNode> buildCrowdTree(const ScenarioAuthoringWidget::ScenarioState* scenario) {
     if (scenario == nullptr || scenario->crowdPlacements.empty()) {
         return {};
@@ -186,6 +203,7 @@ std::vector<NavigationTreeNode> buildCrowdTree(const ScenarioAuthoringWidget::Sc
                               .arg(placement.zoneId)
                               .arg(placement.velocity.x, 0, 'f', 2)
                               .arg(placement.velocity.y, 0, 'f', 2),
+                .icon = individualCrowdTreeIcon(),
             });
         }
 
@@ -200,6 +218,7 @@ std::vector<NavigationTreeNode> buildCrowdTree(const ScenarioAuthoringWidget::Sc
             .detail = QString("Velocity: (%1, %2)")
                           .arg(placement.velocity.x, 0, 'f', 2)
                           .arg(placement.velocity.y, 0, 'f', 2),
+            .icon = group ? groupCrowdTreeIcon() : individualCrowdTreeIcon(),
             .children = group ? std::move(occupants) : std::vector<NavigationTreeNode>{},
             .expanded = false,
         });

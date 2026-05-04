@@ -3,6 +3,7 @@
 #include <functional>
 #include <vector>
 
+#include <QIcon>
 #include <QSet>
 #include <QString>
 #include <QWidget>
@@ -13,6 +14,7 @@ struct NavigationTreeNode {
     QString label{};
     QString id{};
     QString detail{};
+    QIcon icon{};
     std::vector<NavigationTreeNode> children{};
     bool expanded{true};
     bool selectable{true};

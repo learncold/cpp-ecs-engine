@@ -9,6 +9,7 @@
 #include <QVBoxLayout>
 
 #include "application/NavigationTreeWidget.h"
+#include "application/ToolIconResources.h"
 
 namespace safecrowd::application {
 namespace {
@@ -23,6 +24,43 @@ bool matchesFloor(const std::string& elementFloorId, const std::string& floorId)
     return floorId.empty() || elementFloorId.empty() || elementFloorId == floorId;
 }
 
+QIcon treeIcon(const QString& resourcePath, const QColor& color) {
+    return makeSvgToolIcon(resourcePath, color, QSize(18, 18));
+}
+
+QIcon floorIcon() {
+    return treeIcon(QStringLiteral(":/tool-icons/layout-authoring/floor.svg"), QColor("#4f5d6b"));
+}
+
+QIcon zoneIcon(const safecrowd::domain::Zone2D& zone) {
+    if (zone.kind == safecrowd::domain::ZoneKind::Exit) {
+        return treeIcon(QStringLiteral(":/tool-icons/layout-authoring/draw-exit.svg"), QColor("#2d8f5b"));
+    }
+    if (zone.kind == safecrowd::domain::ZoneKind::Stair || zone.isStair || zone.isRamp) {
+        return treeIcon(QStringLiteral(":/tool-icons/layout-authoring/draw-stair-ramp.svg"), QColor("#6a5d9f"));
+    }
+    return treeIcon(QStringLiteral(":/tool-icons/layout-authoring/draw-room.svg"), QColor("#2f5d8a"));
+}
+
+QIcon barrierIcon(const safecrowd::domain::Barrier2D& barrier) {
+    return barrier.geometry.closed
+        ? treeIcon(QStringLiteral(":/tool-icons/layout-authoring/draw-obstruction.svg"), QColor("#6c4f38"))
+        : treeIcon(QStringLiteral(":/tool-icons/layout-authoring/draw-wall.svg"), QColor("#4f5d6b"));
+}
+
+QIcon connectionIcon(const safecrowd::domain::Connection2D& connection) {
+    if (connection.kind == safecrowd::domain::ConnectionKind::Stair
+        || connection.kind == safecrowd::domain::ConnectionKind::Ramp
+        || connection.isStair
+        || connection.isRamp) {
+        return treeIcon(QStringLiteral(":/tool-icons/layout-authoring/draw-stair-ramp.svg"), QColor("#6a5d9f"));
+    }
+    if (connection.kind == safecrowd::domain::ConnectionKind::Exit) {
+        return treeIcon(QStringLiteral(":/tool-icons/layout-authoring/draw-exit.svg"), QColor("#2d8f5b"));
+    }
+    return treeIcon(QStringLiteral(":/tool-icons/layout-authoring/draw-door.svg"), QColor("#8e6b23"));
+}
+
 QString zoneLabel(const safecrowd::domain::Zone2D& zone) {
     const auto id = QString::fromStdString(zone.id);
     const auto label = QString::fromStdString(zone.label);
@@ -34,6 +72,7 @@ NavigationTreeNode makeZoneNode(const safecrowd::domain::Zone2D& zone) {
         .label = zoneLabel(zone),
         .id = QString::fromStdString(zone.id),
         .detail = QString("Zone: %1").arg(QString::fromStdString(zone.id)),
+        .icon = zoneIcon(zone),
         .expanded = false,
     };
 }
@@ -63,6 +102,7 @@ NavigationTreeNode makeSection(const QString& label, std::vector<NavigationTreeN
     return {
         .label = label,
         .id = id,
+        .icon = floorIcon(),
         .children = std::move(children),
         .expanded = false,
         .selectable = !id.isEmpty(),
@@ -173,6 +213,7 @@ std::vector<NavigationTreeNode> roomChildren(
             .label = QString("%1  -  %2").arg(kind, barrierLabel(barrier)),
             .id = QString::fromStdString(barrier.id),
             .detail = QString("%1: %2").arg(kind, QString::fromStdString(barrier.id)),
+            .icon = barrierIcon(barrier),
         });
     }
 
@@ -185,6 +226,7 @@ std::vector<NavigationTreeNode> roomChildren(
             .label = QString("Door  -  %1").arg(connectionLabel(connection)),
             .id = QString::fromStdString(connection.id),
             .detail = QString("Door: %1").arg(QString::fromStdString(connection.id)),
+            .icon = connectionIcon(connection),
         });
     }
 
@@ -234,6 +276,7 @@ std::vector<NavigationTreeNode> buildLayoutTree(const safecrowd::domain::Facilit
             nodes.push_back({
                 .label = "Layout",
                 .id = "layout",
+                .icon = floorIcon(),
                 .children = std::move(rooms),
                 .expanded = false,
                 .selectable = false,

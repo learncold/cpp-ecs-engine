@@ -1,0 +1,23 @@
+<RCC>
+    <qresource prefix="/">
+        <file alias="tool-icons/layout-authoring/select.svg">../../assets/tool-icon-candidates/layout-authoring/select__02_lucide_square-dashed-mouse-pointer.svg</file>
+        <file alias="tool-icons/layout-authoring/reset-view.svg">../../assets/tool-icon-candidates/layout-authoring/reset-view__01_lucide_rotate-ccw.svg</file>
+        <file alias="tool-icons/layout-authoring/add-floor.svg">../../assets/tool-icon-candidates/layout-authoring/add-floor__01_lucide_layers-plus.svg</file>
+        <file alias="tool-icons/layout-authoring/floor.svg">../../assets/tool-icon-candidates/layout-authoring/layers.svg</file>
+        <file alias="tool-icons/layout-authoring/grid-snap.svg">../../assets/tool-icon-candidates/layout-authoring/grid-snap__01_lucide_grid-3x3.svg</file>
+        <file alias="tool-icons/layout-authoring/draw-room.svg">../../assets/tool-icon-candidates/layout-authoring/draw-room__01_lucide_square.svg</file>
+        <file alias="tool-icons/layout-authoring/draw-exit.svg">../../assets/tool-icon-candidates/layout-authoring/draw-exit__01_lucide_square-arrow-right-exit.svg</file>
+        <file alias="tool-icons/layout-authoring/draw-wall.svg">../../assets/tool-icon-candidates/layout-authoring/draw-wall__02_tabler_wall.svg</file>
+        <file alias="tool-icons/layout-authoring/draw-obstruction.svg">../../assets/tool-icon-candidates/layout-authoring/draw-obstruction__01.svg</file>
+        <file alias="tool-icons/layout-authoring/draw-door.svg">../../assets/tool-icon-candidates/layout-authoring/draw-door__01_lucide_door-open.svg</file>
+        <file alias="tool-icons/layout-authoring/draw-stair-ramp.svg">../../assets/tool-icon-candidates/layout-authoring/draw-stair-ramp__01_tabler_stairs.svg</file>
+        <file alias="tool-icons/layout-authoring/draw-u-stair.svg">../../assets/tool-icon-candidates/layout-authoring/draw-u-stair__01.svg</file>
+        <file alias="tool-icons/scenario-authoring/select.svg">../../assets/tool-icon-candidates/scenario-authoring/select__01_lucide_mouse-pointer-2.svg</file>
+        <file alias="tool-icons/scenario-authoring/add-individual-occupant.svg">../../assets/tool-icon-candidates/scenario-authoring/add-individual-occupant__01_lucide_user-round-plus.svg</file>
+        <file alias="tool-icons/scenario-authoring/individual-occupant.svg">../../assets/tool-icon-candidates/scenario-authoring/user-round.svg</file>
+        <file alias="tool-icons/scenario-authoring/add-occupant-group.svg">../../assets/tool-icon-candidates/scenario-authoring/add-occupant-group__01_lucide_users-round.svg</file>
+        <file alias="tool-icons/scenario-authoring/block-door.svg">../../assets/tool-icon-candidates/scenario-authoring/block-door__01_lucide_door-closed-locked.svg</file>
+        <file alias="tool-icons/etc/pencil-ruler.svg">../../assets/tool-icon-candidates/etc/pencil-ruler.svg</file>
+        <file alias="tool-icons/etc/panel-right.svg">../../assets/tool-icon-candidates/etc/panel-right.svg</file>
+    </qresource>
+</RCC>

@@ -17,6 +17,7 @@
 #include <QVBoxLayout>
 #include <QWidget>
 
+#include "application/ToolIconResources.h"
 #include "application/UiStyle.h"
 
 namespace safecrowd::application {
@@ -93,6 +94,17 @@ QPushButton* createPanelBackButton(QWidget* parent) {
         " background: #eef3f8;"
         "}");
     return button;
+}
+
+QIcon workspaceShellIcon(const QString& resourcePath, const QColor& color, QSize size = QSize(22, 22)) {
+    return makeSvgToolIcon(resourcePath, color, size);
+}
+
+QIcon navigationTabIcon(const WorkspaceNavigationTab& tab) {
+    if (tab.id == "layout") {
+        return workspaceShellIcon(QStringLiteral(":/tool-icons/etc/pencil-ruler.svg"), QColor("#1f5fae"));
+    }
+    return tab.icon;
 }
 
 }  // namespace
@@ -210,6 +222,11 @@ void WorkspaceShell::initialize(const WorkspaceShellOptions& options) {
         reviewPanelToggleButton_->setFont(ui::font(ui::FontRole::Body));
         reviewPanelToggleButton_->setCursor(Qt::PointingHandCursor);
         reviewPanelToggleButton_->setMinimumHeight(32);
+        reviewPanelToggleButton_->setIcon(workspaceShellIcon(
+            QStringLiteral(":/tool-icons/etc/panel-right.svg"),
+            QColor("#16202b"),
+            QSize(20, 20)));
+        reviewPanelToggleButton_->setIconSize(QSize(20, 20));
         reviewPanelToggleButton_->setStyleSheet(
             "QPushButton {"
             " background: #ffffff;"
@@ -297,8 +314,9 @@ QWidget* WorkspaceShell::createNavigationTabRail() {
         button->setCursor(Qt::PointingHandCursor);
         button->setFixedSize(navigationRailWidth_, navigationRailWidth_);
         button->setFont(ui::font(ui::FontRole::Caption));
-        if (!tab.icon.isNull()) {
-            button->setIcon(tab.icon);
+        const auto icon = navigationTabIcon(tab);
+        if (!icon.isNull()) {
+            button->setIcon(icon);
             button->setIconSize(QSize(22, 22));
         } else {
             button->setText(tab.label);

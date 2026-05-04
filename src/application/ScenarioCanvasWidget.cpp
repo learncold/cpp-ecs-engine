@@ -1,5 +1,7 @@
 #include "application/ScenarioCanvasWidget.h"
 
+#include "application/ToolIconResources.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -314,7 +316,31 @@ QRectF groupMarkerBounds(const ScenarioCrowdPlacement& placement, const LayoutCa
     return bounds.adjusted(-7.0, -7.0, 7.0, 7.0);
 }
 
+QString scenarioToolIconResourcePath(const QString& type) {
+    if (type == "select") {
+        return QStringLiteral(":/tool-icons/scenario-authoring/select.svg");
+    }
+    if (type == "individual") {
+        return QStringLiteral(":/tool-icons/scenario-authoring/add-individual-occupant.svg");
+    }
+    if (type == "group") {
+        return QStringLiteral(":/tool-icons/scenario-authoring/add-occupant-group.svg");
+    }
+    if (type == "block") {
+        return QStringLiteral(":/tool-icons/scenario-authoring/block-door.svg");
+    }
+    return {};
+}
+
 QIcon makeToolIcon(const QString& type, const QColor& color) {
+    const auto resourcePath = scenarioToolIconResourcePath(type);
+    if (!resourcePath.isEmpty()) {
+        const auto icon = makeSvgToolIcon(resourcePath, color, QSize(22, 22));
+        if (!icon.isNull()) {
+            return icon;
+        }
+    }
+
     QPixmap pixmap(44, 44);
     pixmap.fill(Qt::transparent);
     QPainter painter(&pixmap);

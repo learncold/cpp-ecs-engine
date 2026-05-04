@@ -6,6 +6,9 @@
       "features": [
         "widgets"
       ]
+    },
+    {
+      "name": "qtsvg"
     }
   ]
 }

@@ -239,6 +239,9 @@ QTreeWidgetItem* addTreeNode(
     QTreeWidgetItem** selectedItem) {
     auto* item = new QTreeWidgetItem(parentItem);
     item->setText(0, node.label);
+    if (!node.icon.isNull()) {
+        item->setIcon(0, node.icon);
+    }
     item->setToolTip(0, node.detail.isEmpty() ? node.label : node.detail);
     item->setData(0, kIdRole, node.id);
     item->setData(0, kSelectableRole, node.selectable);
@@ -300,6 +303,7 @@ NavigationTreeWidget::NavigationTreeWidget(
     tree->setFocusPolicy(interactive ? Qt::StrongFocus : Qt::NoFocus);
     tree->setEditTriggers(QAbstractItemView::NoEditTriggers);
     tree->setUniformRowHeights(false);
+    tree->setIconSize(QSize(18, 18));
     tree->setFont(ui::font(ui::FontRole::Body));
     tree->setItemDelegate(new NavigationTreeDelegate(tree));
     tree->setStyleSheet(navigationTreeStyleSheet(interactive));
