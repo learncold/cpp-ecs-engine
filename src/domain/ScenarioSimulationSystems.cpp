@@ -414,6 +414,20 @@ void ScenarioFrameSyncSystem::update(engine::EngineWorld& world, const engine::E
 
     if (resources.contains<ScenarioResultArtifactsResource>()) {
         auto& result = resources.get<ScenarioResultArtifactsResource>();
+        auto maybeStoreTimingKeyframe = [&](const std::optional<double>& seconds,
+                                            std::optional<SimulationFrame>& destination) {
+            if (!seconds.has_value() || destination.has_value()) {
+                return;
+            }
+            SimulationFrame keyframe = frame;
+            keyframe.elapsedSeconds = *seconds;
+            destination = std::move(keyframe);
+        };
+        maybeStoreTimingKeyframe(result.artifacts.timingSummary.t90Seconds,
+                                result.artifacts.timingSummary.t90Frame);
+        maybeStoreTimingKeyframe(result.artifacts.timingSummary.t95Seconds,
+                                result.artifacts.timingSummary.t95Frame);
+
         const auto shouldRecordReplay =
             result.artifacts.replayFrames.empty()
             || frame.elapsedSeconds + 1e-9 >= result.nextReplaySampleTimeSeconds
