@@ -102,6 +102,7 @@ SimulationCanvasWidget::SimulationCanvasWidget(safecrowd::domain::FacilityLayout
     setFocusPolicy(Qt::StrongFocus);
     setMinimumSize(520, 360);
     setStyleSheet("QWidget { background: #f4f7fb; }");
+    camera_.setAllowLeftDragPan(true);
     currentFloorId_ = defaultFloorId(layout_);
     layoutBounds_ = collectLayoutCanvasBounds(layout_, currentFloorId_);
     QCoreApplication::instance()->installEventFilter(this);
@@ -214,6 +215,7 @@ void SimulationCanvasWidget::keyReleaseEvent(QKeyEvent* event) {
 void SimulationCanvasWidget::mouseDoubleClickEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton) {
         camera_.reset();
+        unsetCursor();
         layoutCacheValid_ = false;
         update();
         event->accept();
@@ -234,6 +236,7 @@ void SimulationCanvasWidget::mouseMoveEvent(QMouseEvent* event) {
 void SimulationCanvasWidget::mousePressEvent(QMouseEvent* event) {
     setFocus(Qt::MouseFocusReason);
     if (camera_.beginPan(event)) {
+        setCursor(Qt::SizeAllCursor);
         return;
     }
     QWidget::mousePressEvent(event);
@@ -241,6 +244,7 @@ void SimulationCanvasWidget::mousePressEvent(QMouseEvent* event) {
 
 void SimulationCanvasWidget::mouseReleaseEvent(QMouseEvent* event) {
     if (camera_.finishPan(event)) {
+        unsetCursor();
         return;
     }
     QWidget::mouseReleaseEvent(event);

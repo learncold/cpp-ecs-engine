@@ -440,7 +440,8 @@ bool LayoutCanvasCamera::handleKeyRelease(QKeyEvent* event) {
 }
 
 bool LayoutCanvasCamera::beginPan(QMouseEvent* event) {
-    if (event->button() != Qt::MiddleButton && !(event->button() == Qt::LeftButton && spacePressed_)) {
+    if (event->button() != Qt::MiddleButton
+        && !(event->button() == Qt::LeftButton && (spacePressed_ || allowLeftDragPan_))) {
         return false;
     }
 
@@ -495,6 +496,9 @@ bool LayoutCanvasCamera::zoomAt(QWheelEvent* event, const LayoutCanvasBounds& bo
 void LayoutCanvasCamera::reset() {
     zoom_ = 1.0;
     panOffset_ = {};
+    panning_ = false;
+    panButton_ = Qt::NoButton;
+    lastMousePosition_ = {};
 }
 
 void includeLayoutCanvasPoint(LayoutCanvasBounds& bounds, const safecrowd::domain::Point2D& point) {

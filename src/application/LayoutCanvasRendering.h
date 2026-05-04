@@ -61,6 +61,10 @@ public:
     bool zoomAt(QWheelEvent* event, const LayoutCanvasBounds& bounds, const QRectF& viewport);
     void reset();
 
+    void setAllowLeftDragPan(bool allow) noexcept {
+        allowLeftDragPan_ = allow;
+    }
+
     double zoom() const noexcept {
         return zoom_;
     }
@@ -88,6 +92,7 @@ private:
     Qt::MouseButton panButton_{Qt::NoButton};
     bool panning_{false};
     bool spacePressed_{false};
+    bool allowLeftDragPan_{false};
 };
 
 void includeLayoutCanvasPoint(LayoutCanvasBounds& bounds, const safecrowd::domain::Point2D& point);
