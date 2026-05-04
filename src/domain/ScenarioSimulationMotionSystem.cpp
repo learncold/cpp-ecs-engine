@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <unordered_set>
@@ -94,8 +95,7 @@ public:
             const auto target = routeWaypointTarget(route, position.value);
             const auto distance = distanceBetween(position.value, target);
             if (distance <= kArrivalEpsilon) {
-                position.value = target;
-                advanceRouteWaypoint(route, target);
+                position.value = advanceRouteWaypoint(layoutCache, route, target);
                 velocity.value = {};
                 continue;
             }
@@ -159,10 +159,12 @@ public:
             const auto stepVelocity =
                 clampedToLength(plan.velocity, std::min(maxSpeed, remainingDistance / clampedDelta));
             const auto previousPosition = position.value;
+            const auto movementClearance = currentWaypointIsVertical(route) ? 0.0 : static_cast<double>(agent.radius);
             const auto nextPosition = constrainedMove(
                 cachedLayoutForFloor(layoutCache, route.currentFloorId),
                 previousPosition,
-                previousPosition + (stepVelocity * clampedDelta));
+                previousPosition + (stepVelocity * clampedDelta),
+                movementClearance);
             position.value = nextPosition;
             velocity.value = (nextPosition - previousPosition) * (1.0 / clampedDelta);
             updateDisplayFloor(route, nextPosition);
@@ -221,6 +223,105 @@ private:
             return connection != nullptr && connection->directionality == TravelDirection::Closed;
         }
         return false;
+    }
+
+    bool verticalPassageCrossed(
+        const ScenarioLayoutCacheResource& layoutCache,
+        const EvacuationRoute& route,
+        const Point2D& position) const {
+        if (route.nextWaypointIndex >= route.waypointPassages.size()
+            || route.nextWaypointIndex >= route.waypointFromZoneIds.size()
+            || route.nextWaypointIndex >= route.waypointZoneIds.size()) {
+            return false;
+        }
+
+        const auto& passage = route.waypointPassages[route.nextWaypointIndex];
+        if (lengthSquaredOf(passage) <= 1e-9) {
+            return false;
+        }
+
+        const auto* fromZone = findCachedZone(layoutCache, route.waypointFromZoneIds[route.nextWaypointIndex]);
+        const auto* toZone = findCachedZone(layoutCache, route.waypointZoneIds[route.nextWaypointIndex]);
+        if (fromZone == nullptr || toZone == nullptr) {
+            return false;
+        }
+
+        auto normal = normalizedOr(perpendicularLeft(passage.end - passage.start), {});
+        if (lengthOf(normal) <= 1e-9) {
+            return false;
+        }
+        const auto towardToZone = polygonCenter(toZone->area) - midpoint(passage);
+        if (lengthOf(towardToZone) <= kArrivalEpsilon) {
+            return false;
+        }
+        if (dot(normal, towardToZone) < 0.0) {
+            normal = normal * -1.0;
+        }
+
+        return dot(position - midpoint(passage), normal) > kPortalCrossingEpsilon;
+    }
+
+    Point2D verticalTransitionLandingPoint(
+        const ScenarioLayoutCacheResource& layoutCache,
+        const EvacuationRoute& route,
+        std::size_t reachedIndex,
+        const Point2D& reachedPoint) const {
+        if (reachedIndex >= route.waypointVerticalTransitions.size()
+            || !route.waypointVerticalTransitions[reachedIndex]
+            || reachedIndex >= route.waypointPassages.size()
+            || reachedIndex >= route.waypointFromZoneIds.size()
+            || reachedIndex >= route.waypointZoneIds.size()) {
+            return reachedPoint;
+        }
+
+        const auto* fromZone = findCachedZone(layoutCache, route.waypointFromZoneIds[reachedIndex]);
+        const auto* toZone = findCachedZone(layoutCache, route.waypointZoneIds[reachedIndex]);
+        if (fromZone == nullptr || toZone == nullptr) {
+            return reachedPoint;
+        }
+
+        const auto& passage = route.waypointPassages[reachedIndex];
+        if (lengthSquaredOf(passage) <= 1e-9) {
+            return reachedPoint;
+        }
+
+        const auto landingOnPassage = closestPointOnSegment(reachedPoint, passage.start, passage.end);
+        auto boundaryDistance = [](const Zone2D& zone, const Point2D& point) {
+            auto bestDistance = std::numeric_limits<double>::max();
+            if (zone.area.outline.size() < 2) {
+                return bestDistance;
+            }
+            for (std::size_t index = 0; index < zone.area.outline.size(); ++index) {
+                const auto& start = zone.area.outline[index];
+                const auto& end = zone.area.outline[(index + 1) % zone.area.outline.size()];
+                bestDistance = std::min(bestDistance, distanceBetween(point, closestPointOnSegment(point, start, end)));
+            }
+            return bestDistance;
+        };
+        if (pointInRing(toZone->area.outline, landingOnPassage)
+            && boundaryDistance(*toZone, landingOnPassage) > kArrivalEpsilon) {
+            return landingOnPassage;
+        }
+
+        const auto passageDirection = passage.end - passage.start;
+        auto normal = normalizedOr(perpendicularLeft(passageDirection), {});
+        if (lengthOf(normal) <= 1e-9) {
+            return reachedPoint;
+        }
+
+        const auto towardTargetZone = polygonCenter(toZone->area) - midpoint(passage);
+        if (dot(normal, towardTargetZone) < 0.0) {
+            normal = normal * -1.0;
+        }
+
+        for (const auto offset : {0.2, 0.45, 0.75, 1.1, 1.6}) {
+            const auto candidate = landingOnPassage + (normal * offset);
+            if (pointInRing(toZone->area.outline, candidate)) {
+                return candidate;
+            }
+        }
+
+        return reachedPoint;
     }
 
     RoutePlan routePlanToNearestExit(
@@ -299,17 +400,21 @@ private:
         return plan;
     }
 
-    void advanceRouteWaypoint(EvacuationRoute& route, const Point2D& reachedPoint) const {
+    Point2D advanceRouteWaypoint(
+        const ScenarioLayoutCacheResource& layoutCache,
+        EvacuationRoute& route,
+        const Point2D& reachedPoint) const {
         if (route.nextWaypointIndex >= route.waypoints.size()) {
-            return;
+            return reachedPoint;
         }
 
         const auto reachedIndex = route.nextWaypointIndex;
+        const auto advancedPoint = verticalTransitionLandingPoint(layoutCache, route, reachedIndex, reachedPoint);
         if (reachedIndex < route.waypointFloorIds.size() && !route.waypointFloorIds[reachedIndex].empty()) {
             route.currentFloorId = route.waypointFloorIds[reachedIndex];
         }
         route.displayFloorId = route.currentFloorId;
-        route.currentSegmentStart = reachedPoint;
+        route.currentSegmentStart = advancedPoint;
         ++route.nextWaypointIndex;
         if (route.nextWaypointIndex < route.waypoints.size()) {
             route.previousDistanceToWaypoint =
@@ -319,6 +424,7 @@ private:
         }
         route.stalledSeconds = 0.0;
         route.nextSegmentReplanSeconds = 0.0;
+        return advancedPoint;
     }
 
     bool waypointHasTransition(const EvacuationRoute& route) const {
@@ -377,13 +483,16 @@ private:
                 continue;
             }
 
-            const auto& position = query.get<Position>(entity);
+            auto& position = query.get<Position>(entity);
             const auto& agent = query.get<Agent>(entity);
             auto& route = query.get<EvacuationRoute>(entity);
             while (route.nextWaypointIndex < route.waypoints.size()) {
-                const auto& floorLayout = cachedLayoutForFloor(layoutCache, route.currentFloorId);
-                if (routePassageCrossed(floorLayout, route, position.value, agent.radius)) {
-                    advanceRouteWaypoint(route, position.value);
+                const bool verticalTransition = currentWaypointIsVertical(route);
+                const bool passageCrossed = verticalTransition
+                    ? verticalPassageCrossed(layoutCache, route, position.value)
+                    : routePassageCrossed(cachedLayoutForFloor(layoutCache, route.currentFloorId), route, position.value, agent.radius);
+                if (passageCrossed) {
+                    position.value = advanceRouteWaypoint(layoutCache, route, position.value);
                     continue;
                 }
 
@@ -393,24 +502,24 @@ private:
                 const auto distance = distanceToRouteWaypoint(route, position.value);
 
                 if (distance <= kArrivalEpsilon) {
-                    advanceRouteWaypoint(route, target);
+                    position.value = advanceRouteWaypoint(layoutCache, route, target);
                     continue;
                 }
 
                 if (segmentLengthSquared > 1e-9) {
                     const auto projection = dot(position.value - route.currentSegmentStart, segment);
-                    if (projection >= segmentLengthSquared - kWaypointCrossingEpsilon) {
-                        advanceRouteWaypoint(route, position.value);
+                    if (!verticalTransition && projection >= segmentLengthSquared - kWaypointCrossingEpsilon) {
+                        position.value = advanceRouteWaypoint(layoutCache, route, position.value);
                         continue;
                     }
-                    if (shouldAdvanceByBypassingWaypoint(
+                    if (!verticalTransition && shouldAdvanceByBypassingWaypoint(
                             route,
                             position,
                             agent,
                             segment,
                             segmentLengthSquared,
                             projection)) {
-                        advanceRouteWaypoint(route, position.value);
+                        position.value = advanceRouteWaypoint(layoutCache, route, position.value);
                         continue;
                     }
                 }
@@ -426,12 +535,13 @@ private:
                     route.stalledSeconds += deltaSeconds;
                 }
 
-                if (route.stalledSeconds >= kWaypointStallSeconds
+                if (!verticalTransition
+                    && route.stalledSeconds >= kWaypointStallSeconds
                     && route.nextWaypointIndex + 1 < route.waypoints.size()
                     && segmentLengthSquared > 1e-9) {
                     const auto projection = dot(position.value - route.currentSegmentStart, segment);
                     if (projection > segmentLengthSquared * 0.45) {
-                        advanceRouteWaypoint(route, position.value);
+                        position.value = advanceRouteWaypoint(layoutCache, route, position.value);
                         continue;
                     }
                 }
@@ -452,7 +562,7 @@ private:
                 continue;
             }
 
-            const auto& position = query.get<Position>(entity);
+            auto& position = query.get<Position>(entity);
             auto& route = query.get<EvacuationRoute>(entity);
             const auto currentZoneId = zoneAt(layoutCache, position.value, route.currentFloorId);
             while (!currentZoneId.empty() && route.nextWaypointIndex < route.waypointZoneIds.size()) {
@@ -468,7 +578,7 @@ private:
                 }
 
                 while (route.nextWaypointIndex <= matchedIndex && route.nextWaypointIndex < route.waypoints.size()) {
-                    advanceRouteWaypoint(route, position.value);
+                    position.value = advanceRouteWaypoint(layoutCache, route, position.value);
                 }
             }
         }
@@ -746,14 +856,20 @@ private:
                     if (agentCollisionFloorId(secondRoute) != firstCollisionFloorId) {
                         continue;
                     }
+                    const auto firstClearance =
+                        currentWaypointIsVertical(firstRoute) ? 0.0 : static_cast<double>(firstAgent.radius);
+                    const auto secondClearance =
+                        currentWaypointIsVertical(secondRoute) ? 0.0 : static_cast<double>(secondAgent.radius);
                     firstPosition.value = constrainedMove(
                         cachedLayoutForFloor(layoutCache, firstRoute.currentFloorId),
                         firstPosition.value,
-                        firstPosition.value + (direction * push));
+                        firstPosition.value + (direction * push),
+                        firstClearance);
                     secondPosition.value = constrainedMove(
                         cachedLayoutForFloor(layoutCache, secondRoute.currentFloorId),
                         secondPosition.value,
-                        secondPosition.value - (direction * push));
+                        secondPosition.value - (direction * push),
+                        secondClearance);
                 }
             }
         }

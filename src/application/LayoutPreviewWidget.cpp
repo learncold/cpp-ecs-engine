@@ -449,6 +449,12 @@ QPointF entryOutsideSample(const QRectF& rectangle, safecrowd::domain::StairEntr
 std::optional<std::vector<std::pair<safecrowd::domain::Point2D, safecrowd::domain::Point2D>>> barrierSegmentsAfterGap(
     const safecrowd::domain::Barrier2D& barrier,
     const safecrowd::domain::LineSegment2D& gap);
+bool spanOverlapsPolygonBoundary(
+    const safecrowd::domain::Polygon2D& polygon,
+    const safecrowd::domain::LineSegment2D& span);
+std::optional<QPointF> outsideSampleForBoundarySpan(
+    const safecrowd::domain::Polygon2D& polygon,
+    const safecrowd::domain::LineSegment2D& span);
 
 bool isVerticalLink(const safecrowd::domain::Connection2D& connection) {
     return connection.kind == safecrowd::domain::ConnectionKind::Stair
@@ -468,6 +474,23 @@ const safecrowd::domain::Zone2D* findZoneById(
         return zone.id == zoneId;
     });
     return it == layout.zones.end() ? nullptr : &(*it);
+}
+
+bool connectionVisibleOnFloor(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const safecrowd::domain::Connection2D& connection,
+    const QString& floorId) {
+    if (matchesFloor(connection.floorId, floorId)) {
+        return true;
+    }
+    if (!isVerticalLink(connection)) {
+        return false;
+    }
+
+    const auto* fromZone = findZoneById(layout, connection.fromZoneId);
+    const auto* toZone = findZoneById(layout, connection.toZoneId);
+    return (fromZone != nullptr && matchesFloor(fromZone->floorId, floorId))
+        || (toZone != nullptr && matchesFloor(toZone->floorId, floorId));
 }
 
 std::optional<std::size_t> findZoneIndexById(
@@ -517,8 +540,7 @@ std::optional<safecrowd::domain::LineSegment2D> stairEntrySpanForFloor(
     const safecrowd::domain::FacilityLayout2D& layout,
     const safecrowd::domain::Connection2D& connection,
     const std::string& floorId) {
-    const auto direction = stairEntryDirectionForFloor(layout, connection, floorId);
-    if (!direction.has_value()) {
+    if (!isVerticalLink(connection)) {
         return std::nullopt;
     }
 
@@ -526,6 +548,15 @@ std::optional<safecrowd::domain::LineSegment2D> stairEntrySpanForFloor(
     const auto* toZone = findZoneById(layout, connection.toZoneId);
     const auto* stairZone = fromZone != nullptr && fromZone->floorId == floorId ? fromZone : toZone;
     if (stairZone == nullptr || !isVerticalZone(*stairZone)) {
+        return std::nullopt;
+    }
+
+    if (spanOverlapsPolygonBoundary(stairZone->area, connection.centerSpan)) {
+        return connection.centerSpan;
+    }
+
+    const auto direction = stairEntryDirectionForFloor(layout, connection, floorId);
+    if (!direction.has_value()) {
         return std::nullopt;
     }
 
@@ -542,8 +573,7 @@ std::optional<QPointF> stairEntryOutsideSampleForFloor(
     const safecrowd::domain::FacilityLayout2D& layout,
     const safecrowd::domain::Connection2D& connection,
     const std::string& floorId) {
-    const auto direction = stairEntryDirectionForFloor(layout, connection, floorId);
-    if (!direction.has_value()) {
+    if (!isVerticalLink(connection)) {
         return std::nullopt;
     }
 
@@ -551,6 +581,15 @@ std::optional<QPointF> stairEntryOutsideSampleForFloor(
     const auto* toZone = findZoneById(layout, connection.toZoneId);
     const auto* stairZone = fromZone != nullptr && fromZone->floorId == floorId ? fromZone : toZone;
     if (stairZone == nullptr || !isVerticalZone(*stairZone)) {
+        return std::nullopt;
+    }
+
+    if (spanOverlapsPolygonBoundary(stairZone->area, connection.centerSpan)) {
+        return outsideSampleForBoundarySpan(stairZone->area, connection.centerSpan);
+    }
+
+    const auto direction = stairEntryDirectionForFloor(layout, connection, floorId);
+    if (!direction.has_value()) {
         return std::nullopt;
     }
 
@@ -712,6 +751,62 @@ bool pointInPolygon(const safecrowd::domain::Polygon2D& polygon, const QPointF& 
     }
 
     return true;
+}
+
+bool spanOverlapsPolygonBoundary(
+    const safecrowd::domain::Polygon2D& polygon,
+    const safecrowd::domain::LineSegment2D& span) {
+    const auto spanLength = std::hypot(span.end.x - span.start.x, span.end.y - span.start.y);
+    if (spanLength <= kGeometryEpsilon) {
+        return false;
+    }
+
+    const auto checkRing = [&](const auto& ring) {
+        if (ring.size() < 2) {
+            return false;
+        }
+        for (std::size_t index = 0; index < ring.size(); ++index) {
+            if (segmentsShareSpan(span, ring[index], ring[(index + 1) % ring.size()])) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    if (checkRing(polygon.outline)) {
+        return true;
+    }
+    return std::any_of(polygon.holes.begin(), polygon.holes.end(), checkRing);
+}
+
+std::optional<QPointF> outsideSampleForBoundarySpan(
+    const safecrowd::domain::Polygon2D& polygon,
+    const safecrowd::domain::LineSegment2D& span) {
+    const auto dx = span.end.x - span.start.x;
+    const auto dy = span.end.y - span.start.y;
+    const auto length = std::hypot(dx, dy);
+    if (length <= kGeometryEpsilon) {
+        return std::nullopt;
+    }
+
+    const QPointF center(
+        (span.start.x + span.end.x) * 0.5,
+        (span.start.y + span.end.y) * 0.5);
+    constexpr double sampleOffset = 0.45;
+    const QPointF normalA(-dy / length * sampleOffset, dx / length * sampleOffset);
+    const QPointF normalB(dy / length * sampleOffset, -dx / length * sampleOffset);
+    const QPointF sampleA = center + normalA;
+    const QPointF sampleB = center + normalB;
+    const bool sampleAInside = pointInPolygon(polygon, sampleA);
+    const bool sampleBInside = pointInPolygon(polygon, sampleB);
+
+    if (!sampleAInside && sampleBInside) {
+        return sampleA;
+    }
+    if (!sampleBInside && sampleAInside) {
+        return sampleB;
+    }
+    return std::nullopt;
 }
 
 double distanceToLineSegmentWorld(const QPointF& point, const safecrowd::domain::Point2D& start, const safecrowd::domain::Point2D& end) {
@@ -1970,7 +2065,7 @@ std::optional<QString> hitTestConnection(
     std::optional<QString> bestId;
 
     for (const auto& connection : layout.connections) {
-        if (!matchesFloor(connection.floorId, floorId)) {
+        if (!connectionVisibleOnFloor(layout, connection, floorId)) {
             continue;
         }
         const auto start = transform.map(connection.centerSpan.start);
@@ -2057,7 +2152,7 @@ bool selectedConnectionContainsContextPoint(
 
     for (const auto& connection : layout.connections) {
         const auto connectionId = QString::fromStdString(connection.id);
-        if (!selectedConnectionIds.contains(connectionId) || !matchesFloor(connection.floorId, floorId)) {
+        if (!selectedConnectionIds.contains(connectionId) || !connectionVisibleOnFloor(layout, connection, floorId)) {
             continue;
         }
 
@@ -2744,7 +2839,7 @@ void LayoutPreviewWidget::paintEvent(QPaintEvent* event) {
                 }
             }
             for (const auto& connection : importResult_.layout->connections) {
-                if (!matchesFloor(connection.floorId, currentFloorId())) {
+                if (!connectionVisibleOnFloor(*importResult_.layout, connection, currentFloorId())) {
                     continue;
                 }
                 const auto id = QString::fromStdString(connection.id);
@@ -4336,7 +4431,7 @@ void LayoutPreviewWidget::selectElementsInRect(const QRectF& screenRect, const L
         }
     }
     for (const auto& connection : layout.connections) {
-        if (!matchesFloor(connection.floorId, floorId)) {
+        if (!connectionVisibleOnFloor(layout, connection, floorId)) {
             continue;
         }
         if (strokedPathIntersectsRect(linePath(connection.centerSpan, transform), screenRect, kSelectionStrokeWidthPixels)) {
