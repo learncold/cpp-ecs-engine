@@ -376,6 +376,73 @@ std::vector<LineSegment2D> stairEntryBarrierSegments(const Zone2D& zone, StairEn
     return segments;
 }
 
+std::vector<LineSegment2D> barrierSegmentAfterConnectionGap(
+    const LineSegment2D& segment,
+    const LineSegment2D& gap) {
+    const auto segmentDelta = segment.end - segment.start;
+    const auto segmentLength = lengthOf(segmentDelta);
+    if (segmentLength <= kGeometryEpsilon) {
+        return {};
+    }
+
+    if (std::fabs(cross(segment.start, segment.end, gap.start)) > kGeometryEpsilon
+        || std::fabs(cross(segment.start, segment.end, gap.end)) > kGeometryEpsilon) {
+        return {segment};
+    }
+
+    const auto direction = segmentDelta * (1.0 / segmentLength);
+    auto gapStart = dot(gap.start - segment.start, direction);
+    auto gapEnd = dot(gap.end - segment.start, direction);
+    if (gapStart > gapEnd) {
+        std::swap(gapStart, gapEnd);
+    }
+
+    const auto overlapStart = std::max(0.0, gapStart);
+    const auto overlapEnd = std::min(segmentLength, gapEnd);
+    if (overlapEnd <= overlapStart + kGeometryEpsilon) {
+        return {segment};
+    }
+
+    std::vector<LineSegment2D> remaining;
+    if (overlapStart > kGeometryEpsilon) {
+        remaining.push_back({
+            .start = segment.start,
+            .end = segment.start + (direction * overlapStart),
+        });
+    }
+    if (overlapEnd < segmentLength - kGeometryEpsilon) {
+        remaining.push_back({
+            .start = segment.start + (direction * overlapEnd),
+            .end = segment.end,
+        });
+    }
+    return remaining;
+}
+
+std::vector<LineSegment2D> clipStairEntryBarrierSegment(
+    const LineSegment2D& segment,
+    const FacilityLayout2D& source,
+    const Zone2D& stairZone) {
+    std::vector<LineSegment2D> remaining{segment};
+    for (const auto& connection : source.connections) {
+        if (!isVerticalConnection(connection)
+            || (connection.fromZoneId != stairZone.id && connection.toZoneId != stairZone.id)) {
+            continue;
+        }
+
+        std::vector<LineSegment2D> next;
+        for (const auto& candidate : remaining) {
+            auto clipped = barrierSegmentAfterConnectionGap(candidate, connection.centerSpan);
+            next.insert(next.end(), clipped.begin(), clipped.end());
+        }
+        remaining = std::move(next);
+        if (remaining.empty()) {
+            break;
+        }
+    }
+    return remaining;
+}
+
 void appendStairEntryBarriers(FacilityLayout2D& filtered, const FacilityLayout2D& source, const std::string& floorId) {
     int suffix = 1;
     for (const auto& connection : source.connections) {
@@ -394,12 +461,14 @@ void appendStairEntryBarriers(FacilityLayout2D& filtered, const FacilityLayout2D
         }
 
         for (const auto& segment : stairEntryBarrierSegments(*stairZone, direction)) {
-            filtered.barriers.push_back({
-                .id = connection.id + "-entry-wall-" + std::to_string(suffix++),
-                .floorId = stairZone->floorId,
-                .geometry = {.vertices = {segment.start, segment.end}},
-                .blocksMovement = true,
-            });
+            for (const auto& clippedSegment : clipStairEntryBarrierSegment(segment, source, *stairZone)) {
+                filtered.barriers.push_back({
+                    .id = connection.id + "-entry-wall-" + std::to_string(suffix++),
+                    .floorId = stairZone->floorId,
+                    .geometry = {.vertices = {clippedSegment.start, clippedSegment.end}},
+                    .blocksMovement = true,
+                });
+            }
         }
     }
 }
@@ -995,7 +1064,7 @@ bool pointInsideClosedBarrier(const FacilityLayout2D& layout, const Point2D& poi
 }
 
 bool pointHasClearance(const FacilityLayout2D& layout, const Point2D& point, double clearance) {
-    if (!pointInAnyZone(layout, point) || pointInsideClosedBarrier(layout, point)) {
+    if ((!layout.zones.empty() && !pointInAnyZone(layout, point)) || pointInsideClosedBarrier(layout, point)) {
         return false;
     }
 
@@ -1371,18 +1440,29 @@ std::vector<Point2D> buildPath(const FacilityLayout2D& layout, const Point2D& st
     return path;
 }
 
-Point2D constrainedMove(const FacilityLayout2D& layout, const Point2D& from, const Point2D& to) {
-    if (!movementCrossesBarrier(layout, from, to)) {
+Point2D constrainedMove(const FacilityLayout2D& layout, const Point2D& from, const Point2D& to, double clearance) {
+    const auto effectiveClearance = std::max(0.0, clearance);
+    auto validDestination = [&](const Point2D& point) {
+        if (effectiveClearance > 0.0) {
+            return pointHasClearance(layout, point, effectiveClearance);
+        }
+        return (layout.zones.empty() || pointInAnyZone(layout, point)) && !pointInsideClosedBarrier(layout, point);
+    };
+    auto validMove = [&](const Point2D& candidate) {
+        return validDestination(candidate) && !movementCrossesBarrier(layout, from, candidate);
+    };
+
+    if (validMove(to)) {
         return to;
     }
 
     const Point2D xOnly{.x = to.x, .y = from.y};
-    if (!movementCrossesBarrier(layout, from, xOnly)) {
+    if (validMove(xOnly)) {
         return xOnly;
     }
 
     const Point2D yOnly{.x = from.x, .y = to.y};
-    if (!movementCrossesBarrier(layout, from, yOnly)) {
+    if (validMove(yOnly)) {
         return yOnly;
     }
 
@@ -1392,11 +1472,11 @@ Point2D constrainedMove(const FacilityLayout2D& layout, const Point2D& from, con
     for (int i = 0; i < 8; ++i) {
         const auto t = (low + high) * 0.5;
         const auto candidate = from + ((to - from) * t);
-        if (movementCrossesBarrier(layout, from, candidate)) {
-            high = t;
-        } else {
+        if (validMove(candidate)) {
             low = t;
             best = candidate;
+        } else {
+            high = t;
         }
     }
     return best;

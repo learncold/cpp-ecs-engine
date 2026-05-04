@@ -161,6 +161,6 @@ Point2D barrierSeparationVelocity(const FacilityLayout2D& layout, const Position
 bool movementCrossesBarrier(const FacilityLayout2D& layout, const Point2D& from, const Point2D& to);
 bool lineOfSightClear(const FacilityLayout2D& layout, const Point2D& from, const Point2D& to, double clearance);
 std::vector<Point2D> buildPath(const FacilityLayout2D& layout, const Point2D& start, const Point2D& goal, double clearance);
-Point2D constrainedMove(const FacilityLayout2D& layout, const Point2D& from, const Point2D& to);
+Point2D constrainedMove(const FacilityLayout2D& layout, const Point2D& from, const Point2D& to, double clearance = 0.0);
 
 }  // namespace safecrowd::domain::simulation_internal
