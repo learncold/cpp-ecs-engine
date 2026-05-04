@@ -348,7 +348,10 @@ SC_TEST(ScenarioSimulationRunnerSeparatesOverlappingAgents) {
     scenario.population.initialPlacements.push_back(second);
 
     safecrowd::domain::ScenarioSimulationRunner runner(safecrowd::domain::DemoLayouts::demoFacility(), scenario);
-    runner.step(0.1);
+    // Social-force repulsion separates coincident agents over physical time
+    // rather than instantly via a relaxation pass; step long enough for the
+    // contact-range exponential force to push them apart by a body diameter.
+    runner.step(0.6);
 
     SC_EXPECT_EQ(runner.frame().agents.size(), static_cast<std::size_t>(2));
     const auto dx = runner.frame().agents[0].position.x - runner.frame().agents[1].position.x;
@@ -535,7 +538,10 @@ SC_TEST(ScenarioSimulationRunnerDoesNotSlowAgentsOnDifferentFloorsAtSameCoordina
     scenario.execution.timeLimitSeconds = 5.0;
 
     safecrowd::domain::ScenarioSimulationRunner runner(overlappingTwoFloorExitLayout(), scenario);
-    runner.step(0.1);
+    // Social-force driving accelerates over the relaxation time tau (~0.5 s).
+    // Step long enough for both agents to settle above 1 m/s, but short enough
+    // that neither reaches its exit zone (which would zero the velocity).
+    runner.step(0.8);
 
     const auto& agents = runner.frame().agents;
     SC_EXPECT_EQ(agents.size(), std::size_t{2});

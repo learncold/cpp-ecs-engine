@@ -103,10 +103,6 @@ public:
             const auto routeDirection = (target - position.value) * (1.0 / distance);
             const auto maxSpeed = effectiveMaxSpeed(layoutCache, agent, route, position.value);
             const auto desiredVelocity = routeDirection * maxSpeed;
-            double speedScale = 1.0;
-            const auto neighborRadius = std::max(
-                static_cast<double>(agent.radius) + kDefaultAgentRadius + kPersonalSpaceBuffer,
-                kHeadOnLookAheadDistance);
             const auto collisionFloorId = agentCollisionFloorId(route);
             const auto neighborCandidates = resources.contains<ScenarioAgentSpatialIndexResource>()
                 ? scenarioNearbyAgents(
@@ -114,33 +110,28 @@ public:
                     resources.get<ScenarioAgentSpatialIndexResource>(),
                     position.value,
                     collisionFloorId,
-                    neighborRadius)
-                : nearbyAgents(query, localNeighborIndex, position.value, collisionFloorId, neighborRadius);
-            const auto avoidanceVelocity =
-                forwardPreservingAgentAvoidanceVelocity(
+                    kSocialForceAgentInteractionRadius)
+                : nearbyAgents(
                     query,
-                    entity,
-                    neighborCandidates,
-                    desiredVelocity,
-                    clampedDelta,
-                    speedScale);
-            const auto barrierVelocity = barrierSeparationVelocity(floorLayout, position, agent);
-            auto finalVelocity = (desiredVelocity * speedScale) + avoidanceVelocity + barrierVelocity;
-            const auto lateral = perpendicularLeft(routeDirection);
-            if (dot(finalVelocity, routeDirection) < 0.0) {
-                finalVelocity = (routeDirection * (static_cast<double>(agent.maxSpeed) * 0.15))
-                    + (lateral * dot(finalVelocity, lateral));
-            }
-            const auto forwardComponent = dot(finalVelocity, routeDirection);
-            const auto lateralComponent = dot(finalVelocity, lateral);
-            const auto maxLateralComponent = maxSpeed * 0.55;
-            if (std::fabs(lateralComponent) > maxLateralComponent) {
-                finalVelocity = (routeDirection * std::max(0.0, forwardComponent))
-                    + (lateral * std::clamp(lateralComponent, -maxLateralComponent, maxLateralComponent));
-            }
+                    localNeighborIndex,
+                    position.value,
+                    collisionFloorId,
+                    kSocialForceAgentInteractionRadius);
+
+            // Helbing-Molnár social force model: integrate driving + repulsion
+            // accelerations with semi-implicit Euler. Velocity carried over from
+            // the previous frame supplies the v_current term.
+            const auto driving = socialForceDriving(desiredVelocity, velocity.value);
+            const auto agentRepulsion =
+                socialForceAgentRepulsion(query, entity, neighborCandidates, velocity.value);
+            const auto wallRepulsion = socialForceWallRepulsion(floorLayout, position, agent);
+            auto acceleration = driving + agentRepulsion + wallRepulsion;
+            acceleration = clampedToLength(acceleration, kSocialForceMaxAcceleration);
+            const auto integratedVelocity =
+                clampedToLength(velocity.value + (acceleration * clampedDelta), maxSpeed);
             plans.push_back({
                 .entity = entity,
-                .velocity = clampedToLength(finalVelocity, maxSpeed),
+                .velocity = integratedVelocity,
             });
         }
 
@@ -168,7 +159,6 @@ public:
             updateDisplayFloor(route, nextPosition);
         }
 
-        resolveAgentOverlaps(query, entities, layoutCache);
         advanceRoutesForCurrentZones(query, entities, layoutCache);
         advanceRoutesForWaypointProgress(query, clampedDelta, entities, layoutCache);
         advanceClock(query, clock, entities, clampedDelta);
@@ -690,75 +680,6 @@ private:
         }
     }
 
-    void resolveAgentOverlaps(
-        engine::WorldQuery& query,
-        const std::vector<engine::Entity>& entities,
-        const ScenarioLayoutCacheResource& layoutCache) const {
-        for (int iteration = 0; iteration < kOverlapRelaxationIterations; ++iteration) {
-            const auto spatialIndex = buildAgentSpatialIndex(query, entities, 1.0);
-            std::unordered_set<unsigned long long> checkedPairs;
-            checkedPairs.reserve(entities.size() * 4);
-            for (const auto first : entities) {
-                auto& firstStatus = query.get<EvacuationStatus>(first);
-                if (firstStatus.evacuated) {
-                    continue;
-                }
-
-                auto& firstPosition = query.get<Position>(first);
-                const auto& firstAgent = query.get<Agent>(first);
-                const auto& firstRoute = query.get<EvacuationRoute>(first);
-                const auto firstCollisionFloorId = agentCollisionFloorId(firstRoute);
-                const auto candidates = nearbyAgents(
-                    query,
-                    spatialIndex,
-                    firstPosition.value,
-                    firstCollisionFloorId,
-                    static_cast<double>(firstAgent.radius) + kDefaultAgentRadius);
-                for (const auto second : candidates) {
-                    if (first == second) {
-                        continue;
-                    }
-                    const auto minIndex = std::min(first.index, second.index);
-                    const auto maxIndex = std::max(first.index, second.index);
-                    const auto pairKey = (static_cast<unsigned long long>(minIndex) << 32)
-                        ^ static_cast<unsigned int>(maxIndex);
-                    if (!checkedPairs.insert(pairKey).second) {
-                        continue;
-                    }
-
-                    auto& secondStatus = query.get<EvacuationStatus>(second);
-                    if (firstStatus.evacuated || secondStatus.evacuated) {
-                        continue;
-                    }
-
-                    auto& secondPosition = query.get<Position>(second);
-                    const auto& secondAgent = query.get<Agent>(second);
-                    const auto delta = firstPosition.value - secondPosition.value;
-                    const auto distance = lengthOf(delta);
-                    const auto minimumDistance = static_cast<double>(firstAgent.radius + secondAgent.radius);
-                    if (distance >= minimumDistance) {
-                        continue;
-                    }
-
-                    const auto direction = normalizedOr(delta, deterministicFallbackDirection(first));
-                    const auto push = std::min(0.08, (minimumDistance - distance) * 0.35);
-                    const auto& secondRoute = query.get<EvacuationRoute>(second);
-                    if (agentCollisionFloorId(secondRoute) != firstCollisionFloorId) {
-                        continue;
-                    }
-                    firstPosition.value = constrainedMove(
-                        cachedLayoutForFloor(layoutCache, firstRoute.currentFloorId),
-                        firstPosition.value,
-                        firstPosition.value + (direction * push));
-                    secondPosition.value = constrainedMove(
-                        cachedLayoutForFloor(layoutCache, secondRoute.currentFloorId),
-                        secondPosition.value,
-                        secondPosition.value - (direction * push));
-                }
-            }
-        }
-    }
-
     void advanceClock(
         engine::WorldQuery& query,
         ScenarioSimulationClockResource& clock,
@@ -807,7 +728,7 @@ private:
 
     std::optional<ScenarioLayoutCacheResource> layoutCache_{};
 };
-
+
 
 
 }  // namespace

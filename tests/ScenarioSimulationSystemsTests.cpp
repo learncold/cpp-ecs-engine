@@ -1,5 +1,6 @@
 #include "TestSupport.h"
 
+#include <cmath>
 #include <memory>
 #include <string>
 
@@ -384,7 +385,6 @@ SC_TEST(ScenarioSimulationMotionSystem_SkipsIntermediateWaypointWhenCrowdPushesA
     const auto entities = runtime.world().query().view<
         safecrowd::domain::Position,
         safecrowd::domain::Velocity,
-        safecrowd::domain::AvoidanceState,
         safecrowd::domain::EvacuationRoute>();
     SC_EXPECT_EQ(entities.size(), std::size_t{1});
     const auto entity = entities.front();
@@ -395,7 +395,7 @@ SC_TEST(ScenarioSimulationMotionSystem_SkipsIntermediateWaypointWhenCrowdPushesA
     SC_EXPECT_TRUE(velocity.value.x > 0.0);
 }
 
-SC_TEST(ScenarioSimulationMotionSystem_UsesStableHeadOnAvoidance) {
+SC_TEST(ScenarioSimulationMotionSystem_HeadOnAgentsSeparateLaterally) {
     std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
     seeds.push_back({
         .position = {.value = {.x = -0.4, .y = 0.0}},
@@ -449,10 +449,16 @@ SC_TEST(ScenarioSimulationMotionSystem_UsesStableHeadOnAvoidance) {
     runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.2});
     runtime.stepFrame(0.0);
 
+    // Step the simulation a few times so the social-force tangent bias has
+    // room to translate into measurable lateral velocity.
+    for (int frame = 0; frame < 10; ++frame) {
+        runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.2});
+        runtime.stepFrame(0.0);
+    }
+
     const auto entities = runtime.world().query().view<
         safecrowd::domain::Position,
         safecrowd::domain::Velocity,
-        safecrowd::domain::AvoidanceState,
         safecrowd::domain::EvacuationRoute>();
     SC_EXPECT_EQ(entities.size(), std::size_t{2});
 
@@ -460,14 +466,18 @@ SC_TEST(ScenarioSimulationMotionSystem_UsesStableHeadOnAvoidance) {
     const auto second = entities[1];
     const auto& firstVelocity = runtime.world().query().get<safecrowd::domain::Velocity>(first);
     const auto& secondVelocity = runtime.world().query().get<safecrowd::domain::Velocity>(second);
-    const auto& firstAvoidance = runtime.world().query().get<safecrowd::domain::AvoidanceState>(first);
-    const auto& secondAvoidance = runtime.world().query().get<safecrowd::domain::AvoidanceState>(second);
+    const auto& firstPosition = runtime.world().query().get<safecrowd::domain::Position>(first);
+    const auto& secondPosition = runtime.world().query().get<safecrowd::domain::Position>(second);
 
+    // Both agents must keep heading toward their goals (positive/negative x).
     SC_EXPECT_TRUE(firstVelocity.value.x > 0.0);
     SC_EXPECT_TRUE(secondVelocity.value.x < 0.0);
+    // Symmetry-breaker should drive them onto opposite sides of the original axis.
     SC_EXPECT_TRUE(firstVelocity.value.y * secondVelocity.value.y < 0.0);
-    SC_EXPECT_TRUE(firstAvoidance.preferredSide != 0);
-    SC_EXPECT_EQ(firstAvoidance.preferredSide, secondAvoidance.preferredSide);
+    // No body overlap: distance must stay above the sum of radii.
+    const auto dx = firstPosition.value.x - secondPosition.value.x;
+    const auto dy = firstPosition.value.y - secondPosition.value.y;
+    SC_EXPECT_TRUE(std::sqrt(dx * dx + dy * dy) >= 0.5);
 }
 
 SC_TEST(ScenarioControlSystem_BlocksConnectionsUsingScenarioClock) {
