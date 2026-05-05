@@ -49,6 +49,8 @@ constexpr int kPropertyPanelHeight = 42;
 constexpr int kSideToolbarWidth = 44;
 constexpr int kToolbarButtonSize = 44;
 const QColor kSelectionHighlightColor("#0b3d78");
+const QColor kExitAccentColor("#2d8f5b");
+const QColor kDoorAccentColor("#ff8c00");
 
 QRectF previewViewport(const QRect& widgetRect) {
     return layoutCanvasViewport(widgetRect, kSideToolbarWidth + 16, kTopToolbarHeight + kPropertyPanelHeight + 16, 16, 16);
@@ -2922,8 +2924,11 @@ void LayoutPreviewWidget::paintEvent(QPaintEvent* event) {
             drawLine(painter, wall.segment, transform);
         }
 
-        painter.setPen(QPen(QColor(66, 156, 96), 2.5, Qt::DashLine));
         for (const auto& opening : importResult_.canonicalGeometry->openings) {
+            const auto openingColor = opening.kind == safecrowd::domain::OpeningKind::Doorway
+                ? kDoorAccentColor
+                : QColor(66, 156, 96);
+            painter.setPen(QPen(openingColor, 3.0, Qt::DashLine));
             drawLine(painter, opening.span, transform);
         }
     }
@@ -5042,10 +5047,10 @@ void LayoutPreviewWidget::setupToolbars() {
     topLayout->addStretch(1);
 
     roomToolButton_ = makeButton(sideToolbar_, sideLayout, makeToolIcon("room", QColor("#2f5d8a")), "Draw Room");
-    exitToolButton_ = makeButton(sideToolbar_, sideLayout, makeToolIcon("exit", QColor("#2d8f5b")), "Draw Exit");
+    exitToolButton_ = makeButton(sideToolbar_, sideLayout, makeToolIcon("exit", kExitAccentColor), "Draw Exit");
     wallToolButton_ = makeButton(sideToolbar_, sideLayout, makeToolIcon("wall", QColor("#4f5d6b")), "Draw Wall");
     obstructionToolButton_ = makeButton(sideToolbar_, sideLayout, makeToolIcon("obstruction", QColor("#6c4f38")), "Draw Obstruction");
-    doorToolButton_ = makeButton(sideToolbar_, sideLayout, makeToolIcon("door", QColor("#8e6b23")), "Draw Door");
+    doorToolButton_ = makeButton(sideToolbar_, sideLayout, makeToolIcon("door", kDoorAccentColor), "Draw Door");
     stairToolButton_ = makeButton(sideToolbar_, sideLayout, makeToolIcon("stair", QColor("#6a5d9f")), "Draw Stair/Ramp");
     uStairToolButton_ = makeButton(sideToolbar_, sideLayout, makeToolIcon("u-stair", QColor("#4f46a5")), "Draw U-shaped Stair");
     sideLayout->addStretch(1);

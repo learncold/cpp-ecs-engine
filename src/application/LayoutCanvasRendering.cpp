@@ -16,6 +16,9 @@
 namespace safecrowd::application {
 namespace {
 
+const QColor kDoorStrokeColor("#ff8c00");
+const QColor kOpeningStrokeColor("#2f6fb2");
+
 bool matchesFloor(const std::string& elementFloorId, const std::string& floorId) {
     return floorId.empty() || elementFloorId.empty() || elementFloorId == floorId;
 }
@@ -25,6 +28,13 @@ bool isVerticalConnection(const safecrowd::domain::Connection2D& connection) {
         || connection.kind == safecrowd::domain::ConnectionKind::Ramp
         || connection.isStair
         || connection.isRamp;
+}
+
+QColor connectionStrokeColor(const safecrowd::domain::Connection2D& connection) {
+    if (connection.kind == safecrowd::domain::ConnectionKind::Doorway) {
+        return kDoorStrokeColor;
+    }
+    return kOpeningStrokeColor;
 }
 
 const safecrowd::domain::Zone2D* findZone(
@@ -763,11 +773,11 @@ void drawFacilityLayoutCanvas(QPainter& painter, const safecrowd::domain::Facili
         painter.drawPath(layoutCanvasPolygonPath(zone.area, transform));
     }
 
-    painter.setPen(QPen(QColor(56, 122, 186), 2.5));
     for (const auto& connection : layout.connections) {
         if (isVerticalConnection(connection) || isStairAdjacentOpening(layout, connection)) {
             continue;
         }
+        painter.setPen(QPen(connectionStrokeColor(connection), 3.0));
         drawLayoutCanvasLine(painter, connection.centerSpan, transform);
     }
 
@@ -806,11 +816,11 @@ void drawFacilityLayoutCanvas(
         }
     }
 
-    painter.setPen(QPen(QColor(56, 122, 186), 2.5));
     for (const auto& connection : layout.connections) {
         if (!isVerticalConnection(connection)
             && !isStairAdjacentOpening(layout, connection)
             && matchesFloor(connection.floorId, floorId)) {
+            painter.setPen(QPen(connectionStrokeColor(connection), 3.0));
             drawLayoutCanvasLine(painter, connection.centerSpan, transform);
         }
     }
