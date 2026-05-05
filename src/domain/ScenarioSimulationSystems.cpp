@@ -414,20 +414,6 @@ void ScenarioFrameSyncSystem::update(engine::EngineWorld& world, const engine::E
 
     if (resources.contains<ScenarioResultArtifactsResource>()) {
         auto& result = resources.get<ScenarioResultArtifactsResource>();
-        auto maybeStoreTimingKeyframe = [&](const std::optional<double>& seconds,
-                                            std::optional<SimulationFrame>& destination) {
-            if (!seconds.has_value() || destination.has_value()) {
-                return;
-            }
-            SimulationFrame keyframe = frame;
-            keyframe.elapsedSeconds = *seconds;
-            destination = std::move(keyframe);
-        };
-        maybeStoreTimingKeyframe(result.artifacts.timingSummary.t90Seconds,
-                                result.artifacts.timingSummary.t90Frame);
-        maybeStoreTimingKeyframe(result.artifacts.timingSummary.t95Seconds,
-                                result.artifacts.timingSummary.t95Frame);
-
         const auto shouldRecordReplay =
             result.artifacts.replayFrames.empty()
             || frame.elapsedSeconds + 1e-9 >= result.nextReplaySampleTimeSeconds
@@ -555,6 +541,21 @@ void ScenarioResultArtifactsSystem::update(engine::EngineWorld& world, const eng
         percentileCompletionTime(completionTimes, totalAgentCount, 0.90);
     result.artifacts.timingSummary.t95Seconds =
         percentileCompletionTime(completionTimes, totalAgentCount, 0.95);
+    if (resources.contains<ScenarioTimingKeyframesResource>()) {
+        const auto& keyframes = resources.get<ScenarioTimingKeyframesResource>();
+        if (!result.artifacts.timingSummary.t90Frame.has_value()
+            && result.artifacts.timingSummary.t90Seconds.has_value()
+            && keyframes.t90Frame.has_value()
+            && std::abs(keyframes.t90Frame->elapsedSeconds - *result.artifacts.timingSummary.t90Seconds) <= 1e-9) {
+            result.artifacts.timingSummary.t90Frame = keyframes.t90Frame;
+        }
+        if (!result.artifacts.timingSummary.t95Frame.has_value()
+            && result.artifacts.timingSummary.t95Seconds.has_value()
+            && keyframes.t95Frame.has_value()
+            && std::abs(keyframes.t95Frame->elapsedSeconds - *result.artifacts.timingSummary.t95Seconds) <= 1e-9) {
+            result.artifacts.timingSummary.t95Frame = keyframes.t95Frame;
+        }
+    }
     if (totalAgentCount > 0 && completionTimes.size() == totalAgentCount) {
         result.artifacts.timingSummary.finalEvacuationTimeSeconds =
             *std::max_element(completionTimes.begin(), completionTimes.end());
