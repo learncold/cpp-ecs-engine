@@ -62,6 +62,7 @@ bool isLiveValidationIssue(safecrowd::domain::ImportIssueCode code) {
     case ImportIssueCode::MissingRoom:
     case ImportIssueCode::DisconnectedWalkableArea:
     case ImportIssueCode::WidthBelowMinimum:
+    case ImportIssueCode::InvalidGeometry:
         return true;
     default:
         return false;
