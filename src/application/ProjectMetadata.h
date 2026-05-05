@@ -8,6 +8,10 @@ inline QString builtInDemoLayoutPath() {
     return QStringLiteral("safecrowd://demo/sprint1-facility");
 }
 
+inline QString builtInEvacuationScenarioDemoLayoutPath() {
+    return QStringLiteral("safecrowd://demo/evacuation-scenario");
+}
+
 struct ProjectMetadata {
     QString name{};
     QString folderPath{};
@@ -15,7 +19,11 @@ struct ProjectMetadata {
     QString savedAt{};
 
     bool isBuiltInDemo() const noexcept {
-        return layoutPath == builtInDemoLayoutPath();
+        return layoutPath == builtInDemoLayoutPath() || isBuiltInEvacuationScenarioDemo();
+    }
+
+    bool isBuiltInEvacuationScenarioDemo() const noexcept {
+        return layoutPath == builtInEvacuationScenarioDemoLayoutPath();
     }
 
     bool isBlankLayoutProject() const noexcept {
@@ -34,6 +42,13 @@ inline ProjectMetadata makeBuiltInDemoProject() {
     return {
         .name = QStringLiteral("Demo"),
         .layoutPath = builtInDemoLayoutPath(),
+    };
+}
+
+inline ProjectMetadata makeBuiltInEvacuationScenarioDemoProject() {
+    return {
+        .name = QStringLiteral("Evacuation Scenario Demo"),
+        .layoutPath = builtInEvacuationScenarioDemoLayoutPath(),
     };
 }
 

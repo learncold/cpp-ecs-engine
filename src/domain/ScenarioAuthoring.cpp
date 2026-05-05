@@ -10,17 +10,38 @@ bool pointsEqual(const Point2D& lhs, const Point2D& rhs) {
     return lhs.x == rhs.x && lhs.y == rhs.y;
 }
 
+bool pointVectorsEqual(const std::vector<Point2D>& lhs, const std::vector<Point2D>& rhs) {
+    if (lhs.size() != rhs.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < lhs.size(); ++i) {
+        if (!pointsEqual(lhs[i], rhs[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool polygonsEqual(const Polygon2D& lhs, const Polygon2D& rhs) {
+    if (!pointVectorsEqual(lhs.outline, rhs.outline) || lhs.holes.size() != rhs.holes.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < lhs.holes.size(); ++i) {
+        if (!pointVectorsEqual(lhs.holes[i], rhs.holes[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool placementsEqual(const InitialPlacement2D& lhs, const InitialPlacement2D& rhs) {
     if (lhs.id != rhs.id || lhs.zoneId != rhs.zoneId || lhs.floorId != rhs.floorId
         || lhs.targetAgentCount != rhs.targetAgentCount
+        || !pointsEqual(lhs.initialVelocity, rhs.initialVelocity)
         || lhs.distribution != rhs.distribution
-        || lhs.explicitPositions.size() != rhs.explicitPositions.size()) {
+        || !polygonsEqual(lhs.area, rhs.area)
+        || !pointVectorsEqual(lhs.explicitPositions, rhs.explicitPositions)) {
         return false;
-    }
-    for (std::size_t i = 0; i < lhs.explicitPositions.size(); ++i) {
-        if (!pointsEqual(lhs.explicitPositions[i], rhs.explicitPositions[i])) {
-            return false;
-        }
     }
     return true;
 }

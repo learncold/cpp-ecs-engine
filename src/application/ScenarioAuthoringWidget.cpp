@@ -85,6 +85,112 @@ QString blockScheduleSummary(const safecrowd::domain::ConnectionBlockDraft& bloc
     return intervals.join(", ");
 }
 
+int draftOccupantCount(const safecrowd::domain::ScenarioDraft& scenario) {
+    int total = 0;
+    for (const auto& placement : scenario.population.initialPlacements) {
+        total += static_cast<int>(placement.targetAgentCount);
+    }
+    return total;
+}
+
+QString signedDelta(int delta) {
+    return delta > 0 ? QString("+%1").arg(delta) : QString::number(delta);
+}
+
+QString countChangeSummary(const QString& label, int baseline, int variant) {
+    const int delta = variant - baseline;
+    if (delta == 0) {
+        return QString("%1 details changed").arg(label);
+    }
+    return QString("%1 %2 (%3 -> %4)").arg(label, signedDelta(delta)).arg(baseline).arg(variant);
+}
+
+QString boolValue(bool value) {
+    return value ? "on" : "off";
+}
+
+QString buildChangeSummaryLine(
+    const safecrowd::domain::ScenarioDraft& baseline,
+    const safecrowd::domain::ScenarioDraft& variant,
+    const std::string& key) {
+    if (key == "population.placements") {
+        const auto baselinePlacements = static_cast<int>(baseline.population.initialPlacements.size());
+        const auto variantPlacements = static_cast<int>(variant.population.initialPlacements.size());
+        QStringList parts;
+        const int occupantDelta = draftOccupantCount(variant) - draftOccupantCount(baseline);
+        if (occupantDelta != 0) {
+            parts << QString("%1 occupants").arg(signedDelta(occupantDelta));
+        }
+        if (baselinePlacements != variantPlacements) {
+            parts << countChangeSummary("placements", baselinePlacements, variantPlacements);
+        }
+        if (parts.isEmpty()) {
+            parts << "placement details changed";
+        }
+        return QString("population.placements (%1)").arg(parts.join(", "));
+    }
+    if (key == "environment.reducedVisibility") {
+        return QString("environment.reducedVisibility (%1 -> %2)")
+            .arg(boolValue(baseline.environment.reducedVisibility), boolValue(variant.environment.reducedVisibility));
+    }
+    if (key == "environment.familiarityProfile") {
+        return QString("environment.familiarityProfile (%1 -> %2)")
+            .arg(QString::fromStdString(baseline.environment.familiarityProfile),
+                 QString::fromStdString(variant.environment.familiarityProfile));
+    }
+    if (key == "environment.guidanceProfile") {
+        return QString("environment.guidanceProfile (%1 -> %2)")
+            .arg(QString::fromStdString(baseline.environment.guidanceProfile),
+                 QString::fromStdString(variant.environment.guidanceProfile));
+    }
+    if (key == "control.events") {
+        return QString("control.events (%1)")
+            .arg(countChangeSummary("events", static_cast<int>(baseline.control.events.size()),
+                                    static_cast<int>(variant.control.events.size())));
+    }
+    if (key == "control.connectionBlocks") {
+        return QString("control.connectionBlocks (%1)")
+            .arg(countChangeSummary("blocks", static_cast<int>(baseline.control.connectionBlocks.size()),
+                                    static_cast<int>(variant.control.connectionBlocks.size())));
+    }
+    if (key == "execution.timeLimit") {
+        return QString("execution.timeLimit (%1s -> %2s)")
+            .arg(baseline.execution.timeLimitSeconds, 0, 'f', 1)
+            .arg(variant.execution.timeLimitSeconds, 0, 'f', 1);
+    }
+    if (key == "execution.sampleInterval") {
+        return QString("execution.sampleInterval (%1s -> %2s)")
+            .arg(baseline.execution.sampleIntervalSeconds, 0, 'f', 1)
+            .arg(variant.execution.sampleIntervalSeconds, 0, 'f', 1);
+    }
+    if (key == "execution.repeatCount") {
+        return QString("execution.repeatCount (%1 -> %2)")
+            .arg(baseline.execution.repeatCount)
+            .arg(variant.execution.repeatCount);
+    }
+    if (key == "execution.baseSeed") {
+        return QString("execution.baseSeed (%1 -> %2)")
+            .arg(baseline.execution.baseSeed)
+            .arg(variant.execution.baseSeed);
+    }
+    if (key == "execution.recordOccupantHistory") {
+        return QString("execution.recordOccupantHistory (%1 -> %2)")
+            .arg(boolValue(baseline.execution.recordOccupantHistory),
+                 boolValue(variant.execution.recordOccupantHistory));
+    }
+    return QString::fromStdString(key);
+}
+
+QStringList buildChangeSummaryLines(
+    const safecrowd::domain::ScenarioDraft& baseline,
+    const safecrowd::domain::ScenarioDraft& variant) {
+    QStringList changes;
+    for (const auto& key : variant.variationDiffKeys) {
+        changes << buildChangeSummaryLine(baseline, variant, key);
+    }
+    return changes;
+}
+
 int totalOccupantCount(const ScenarioAuthoringWidget::ScenarioState& scenario) {
     int total = 0;
     for (const auto& placement : scenario.crowdPlacements) {
@@ -451,7 +557,7 @@ void ScenarioAuthoringWidget::addEventDraft(const QString& name, const QString& 
         .targetSummary = target.toStdString(),
     });
     scenario->draft.control.events = scenario->events;
-    recomputeVariationDiffKeysIfAlternative(*scenario);
+    recomputeDiffKeysAfterScenarioChanged(*scenario);
     refreshNavigationPanel();
     refreshInspector();
 }
@@ -476,7 +582,9 @@ void ScenarioAuthoringWidget::createScenarioWithName(const QString& name, int so
         scenario.crowdPlacements = source.crowdPlacements;
         scenario.startText = source.startText;
         scenario.destinationText = source.destinationText;
-        scenario.baseScenarioId = QString::fromStdString(source.draft.scenarioId);
+        scenario.baseScenarioId = source.draft.role == safecrowd::domain::ScenarioRole::Alternative
+            ? source.baseScenarioId
+            : QString::fromStdString(source.draft.scenarioId);
         scenario.stagedForRun = false;
     } else {
         scenario.draft.role = safecrowd::domain::ScenarioRole::Baseline;
@@ -500,6 +608,7 @@ void ScenarioAuthoringWidget::createScenarioWithName(const QString& name, int so
 
     scenarios_.push_back(std::move(scenario));
     currentScenarioIndex_ = static_cast<int>(scenarios_.size()) - 1;
+    recomputeVariationDiffKeysIfAlternative(scenarios_.back());
     refreshScenarioSwitcher();
     refreshCanvas();
     refreshNavigationPanel();
@@ -561,7 +670,7 @@ void ScenarioAuthoringWidget::refreshCanvas() {
             return;
         }
         current->draft.control.connectionBlocks = blocks;
-        recomputeVariationDiffKeysIfAlternative(*current);
+        recomputeDiffKeysAfterScenarioChanged(*current);
         refreshNavigationPanel();
         refreshInspector();
     });
@@ -603,8 +712,16 @@ void ScenarioAuthoringWidget::refreshInspector() {
             changesLabel_->setText("Alternative scenario (no baseline link)");
         } else {
             QStringList changes;
-            for (const auto& key : scenario->draft.variationDiffKeys) {
-                changes << QString::fromStdString(key);
+            const auto baseId = scenario->baseScenarioId.toStdString();
+            const auto baselineIt = std::find_if(scenarios_.begin(), scenarios_.end(), [&](const auto& candidate) {
+                return candidate.draft.scenarioId == baseId;
+            });
+            if (baselineIt != scenarios_.end()) {
+                changes = buildChangeSummaryLines(baselineIt->draft, scenario->draft);
+            } else {
+                for (const auto& key : scenario->draft.variationDiffKeys) {
+                    changes << QString::fromStdString(key);
+                }
             }
             if (changes.isEmpty()) {
                 changesLabel_->setText(QString("Based on: %1\nNo changed fields yet")
@@ -861,9 +978,27 @@ void ScenarioAuthoringWidget::updateCurrentScenarioPlacements(const std::vector<
         scenario->stagedForRun = false;
     }
 
-    recomputeVariationDiffKeysIfAlternative(*scenario);
+    recomputeDiffKeysAfterScenarioChanged(*scenario);
     refreshNavigationPanel();
     refreshInspector();
+}
+
+void ScenarioAuthoringWidget::recomputeDiffKeysAfterScenarioChanged(ScenarioState& scenario) {
+    recomputeVariationDiffKeysIfAlternative(scenario);
+    if (scenario.draft.role == safecrowd::domain::ScenarioRole::Baseline) {
+        recomputeDependentVariationDiffKeys(QString::fromStdString(scenario.draft.scenarioId));
+    }
+}
+
+void ScenarioAuthoringWidget::recomputeDependentVariationDiffKeys(const QString& baselineId) {
+    if (baselineId.isEmpty()) {
+        return;
+    }
+    for (auto& scenario : scenarios_) {
+        if (scenario.baseScenarioId == baselineId) {
+            recomputeVariationDiffKeysIfAlternative(scenario);
+        }
+    }
 }
 
 void ScenarioAuthoringWidget::recomputeVariationDiffKeysIfAlternative(ScenarioState& scenario) const {

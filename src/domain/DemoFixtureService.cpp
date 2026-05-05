@@ -22,6 +22,16 @@ DemoFixture DemoFixtureService::createSprint1DemoFixture() const {
         .targetAgentCount = 100,
     });
 
+    fixture.baselineScenario.scenarioId = "scenario-1";
+    fixture.baselineScenario.name = "Sprint 1 baseline";
+    fixture.baselineScenario.role = ScenarioRole::Baseline;
+    fixture.baselineScenario.population = fixture.population;
+    fixture.baselineScenario.execution.timeLimitSeconds = 600.0;
+    fixture.baselineScenario.execution.sampleIntervalSeconds = 1.0;
+    fixture.baselineScenario.execution.repeatCount = 1;
+    fixture.baselineScenario.execution.baseSeed = 1;
+    fixture.baselineScenario.sourceTemplateId = "after-sprint-1-baseline";
+
     return fixture;
 }
 

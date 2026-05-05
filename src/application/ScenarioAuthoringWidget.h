@@ -81,6 +81,8 @@ private:
     void refreshNavigationPanel();
     void refreshRightPanel();
     void refreshScenarioSwitcher();
+    void recomputeDiffKeysAfterScenarioChanged(ScenarioState& scenario);
+    void recomputeDependentVariationDiffKeys(const QString& baselineId);
     void recomputeVariationDiffKeysIfAlternative(ScenarioState& scenario) const;
     void runFirstStagedBaselineScenario();
     void stageCurrentScenario();

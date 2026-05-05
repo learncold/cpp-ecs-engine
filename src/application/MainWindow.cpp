@@ -14,12 +14,14 @@
 #include "application/ScenarioAuthoringWidget.h"
 #include "application/ScenarioResultWidget.h"
 #include "application/ScenarioRunWidget.h"
+#include "domain/DemoFixtureService.h"
 #include "domain/DemoLayouts.h"
 #include "domain/DxfImportService.h"
 #include "domain/ImportIssue.h"
 #include "domain/ImportOrchestrator.h"
 #include "domain/ImportValidationService.h"
 #include "domain/SafeCrowdDomain.h"
+#include "domain/ScenarioAuthoring.h"
 
 namespace safecrowd::application {
 namespace {
@@ -33,8 +35,11 @@ void applySavedReviewState(const ProjectMetadata& metadata, safecrowd::domain::I
 }
 
 safecrowd::domain::ImportResult makeDemoImportResult() {
+    safecrowd::domain::DemoFixtureService fixtureService;
+    const auto fixture = fixtureService.createSprint1DemoFixture();
+
     safecrowd::domain::ImportResult result;
-    result.layout = safecrowd::domain::DemoLayouts::demoFacility();
+    result.layout = fixture.layout;
 
     safecrowd::domain::ImportValidationService validator;
     result.issues = validator.validate(*result.layout);
@@ -42,6 +47,93 @@ safecrowd::domain::ImportResult makeDemoImportResult() {
         ? safecrowd::domain::ImportReviewStatus::Pending
         : safecrowd::domain::ImportReviewStatus::NotRequired;
     return result;
+}
+
+ProjectWorkspaceState makeEvacuationScenarioDemoWorkspace() {
+    using namespace safecrowd::domain;
+
+    safecrowd::domain::DemoFixtureService fixtureService;
+    const auto fixture = fixtureService.createSprint1DemoFixture();
+
+    auto alternative = duplicateScenarioDraft(fixture.baselineScenario, "scenario-2", "Doorway blocked alternative");
+    alternative.control.connectionBlocks.push_back({
+        .id = "block-1",
+        .connectionId = DemoLayouts::Sprint1FacilityIds::DoorwayConnectionId,
+        .intervals = {{0.0, 120.0}},
+    });
+    alternative.variationDiffKeys = computeScenarioDiffKeys(fixture.baselineScenario, alternative);
+
+    SavedScenarioAuthoringState authoring;
+    authoring.scenarios.push_back({
+        .draft = fixture.baselineScenario,
+        .baseScenarioId = {},
+        .stagedForRun = true,
+    });
+    authoring.scenarios.push_back({
+        .draft = alternative,
+        .baseScenarioId = fixture.baselineScenario.scenarioId,
+        .stagedForRun = true,
+    });
+    authoring.currentScenarioIndex = 1;
+    authoring.navigationView = SavedNavigationView::Events;
+    authoring.rightPanelMode = SavedRightPanelMode::Scenario;
+
+    SimulationFrame resultFrame;
+    resultFrame.elapsedSeconds = 96.0;
+    resultFrame.complete = true;
+    resultFrame.totalAgentCount = 100;
+    resultFrame.evacuatedAgentCount = 100;
+
+    ScenarioResultArtifacts artifacts;
+    artifacts.evacuationProgress = {
+        {.timeSeconds = 0.0, .evacuatedCount = 0, .totalCount = 100, .evacuatedRatio = 0.0},
+        {.timeSeconds = 30.0, .evacuatedCount = 24, .totalCount = 100, .evacuatedRatio = 0.24},
+        {.timeSeconds = 60.0, .evacuatedCount = 72, .totalCount = 100, .evacuatedRatio = 0.72},
+        {.timeSeconds = 96.0, .evacuatedCount = 100, .totalCount = 100, .evacuatedRatio = 1.0},
+    };
+    artifacts.replayFrames = {resultFrame};
+    artifacts.timingSummary.t50Seconds = 48.0;
+    artifacts.timingSummary.t90Seconds = 82.0;
+    artifacts.timingSummary.t95Seconds = 90.0;
+    artifacts.timingSummary.finalEvacuationTimeSeconds = 96.0;
+    artifacts.timingSummary.targetTimeSeconds = alternative.execution.timeLimitSeconds;
+    artifacts.timingSummary.marginSeconds = alternative.execution.timeLimitSeconds - 96.0;
+    artifacts.exitUsage.push_back({
+        .exitZoneId = DemoLayouts::Sprint1FacilityIds::ExitZoneId,
+        .exitLabel = "Primary exit",
+        .floorId = DemoLayouts::Sprint1FacilityIds::FloorId,
+        .evacuatedCount = 100,
+        .usageRatio = 1.0,
+        .lastExitTimeSeconds = 96.0,
+    });
+    artifacts.zoneCompletion.push_back({
+        .zoneId = DemoLayouts::Sprint1FacilityIds::MainRoomZoneId,
+        .zoneLabel = "Main room",
+        .floorId = DemoLayouts::Sprint1FacilityIds::FloorId,
+        .initialCount = 100,
+        .evacuatedCount = 100,
+        .lastCompletionTimeSeconds = 96.0,
+    });
+    artifacts.placementCompletion.push_back({
+        .placementId = "placement-1",
+        .zoneId = DemoLayouts::Sprint1FacilityIds::MainRoomZoneId,
+        .floorId = DemoLayouts::Sprint1FacilityIds::FloorId,
+        .initialCount = 100,
+        .evacuatedCount = 100,
+        .lastCompletionTimeSeconds = 96.0,
+    });
+
+    ProjectWorkspaceState workspace;
+    workspace.activeView = ProjectWorkspaceView::ScenarioResult;
+    workspace.authoring = std::move(authoring);
+    workspace.runningScenario = alternative;
+    workspace.result = SavedScenarioResultState{
+        .scenario = std::move(alternative),
+        .frame = resultFrame,
+        .risk = {},
+        .artifacts = std::move(artifacts),
+    };
+    return workspace;
 }
 
 safecrowd::domain::ImportResult makeBlankImportResult(const QString& projectName) {
@@ -314,7 +406,9 @@ void MainWindow::openProject(const ProjectMetadata& metadata) {
     }
 
     ProjectWorkspaceState workspace;
-    if (!ProjectPersistence::loadProjectWorkspace(metadata, &workspace)) {
+    if (metadata.isBuiltInEvacuationScenarioDemo()) {
+        workspace = makeEvacuationScenarioDemoWorkspace();
+    } else if (!ProjectPersistence::loadProjectWorkspace(metadata, &workspace)) {
         showLayoutReview(metadata, std::move(importResult));
         return;
     }
@@ -340,7 +434,10 @@ void MainWindow::openProject(const ProjectMetadata& metadata) {
                 workspace.result->scenario,
                 workspace.result->frame,
                 workspace.result->risk,
-                workspace.result->artifacts);
+                workspace.result->artifacts,
+                workspace.authoring.has_value()
+                    ? std::make_optional(initialStateFromSaved(*workspace.authoring, *importResult.layout))
+                    : std::nullopt);
             return;
         }
         break;
@@ -533,7 +630,8 @@ void MainWindow::showScenarioResult(
     const safecrowd::domain::ScenarioDraft& scenario,
     const safecrowd::domain::SimulationFrame& frame,
     const safecrowd::domain::ScenarioRiskSnapshot& risk,
-    const safecrowd::domain::ScenarioResultArtifacts& artifacts) {
+    const safecrowd::domain::ScenarioResultArtifacts& artifacts,
+    std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState) {
     setCentralWidget(new ScenarioResultWidget(
         currentProject_.name,
         layout,
@@ -556,6 +654,7 @@ void MainWindow::showScenarioResult(
                 showLayoutReview(currentProject_);
             }
         },
+        std::move(returnAuthoringState),
         this));
 }
 

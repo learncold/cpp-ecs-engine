@@ -91,6 +91,28 @@ SC_TEST(computeScenarioDiffKeys_detectsPopulationChange) {
     SC_EXPECT_TRUE(containsKey(keys, "population.placements"));
 }
 
+SC_TEST(computeScenarioDiffKeys_detectsPlacementAreaChange) {
+    const auto baseline = makeBaselineDraft();
+    auto variant = duplicateScenarioDraft(baseline, "scenario-2", "Variant");
+    variant.population.initialPlacements[0].area.outline.push_back({1.0, 2.0});
+
+    const auto keys = computeScenarioDiffKeys(baseline, variant);
+
+    SC_EXPECT_EQ(keys.size(), std::size_t{1});
+    SC_EXPECT_TRUE(containsKey(keys, "population.placements"));
+}
+
+SC_TEST(computeScenarioDiffKeys_detectsPlacementVelocityChange) {
+    const auto baseline = makeBaselineDraft();
+    auto variant = duplicateScenarioDraft(baseline, "scenario-2", "Variant");
+    variant.population.initialPlacements[0].initialVelocity = {0.25, 0.5};
+
+    const auto keys = computeScenarioDiffKeys(baseline, variant);
+
+    SC_EXPECT_EQ(keys.size(), std::size_t{1});
+    SC_EXPECT_TRUE(containsKey(keys, "population.placements"));
+}
+
 SC_TEST(computeScenarioDiffKeys_detectsEnvironmentChange) {
     const auto baseline = makeBaselineDraft();
     auto variant = duplicateScenarioDraft(baseline, "scenario-2", "Variant");
@@ -100,6 +122,28 @@ SC_TEST(computeScenarioDiffKeys_detectsEnvironmentChange) {
 
     SC_EXPECT_EQ(keys.size(), std::size_t{1});
     SC_EXPECT_TRUE(containsKey(keys, "environment.reducedVisibility"));
+}
+
+SC_TEST(computeScenarioDiffKeys_detectsFamiliarityProfileChange) {
+    const auto baseline = makeBaselineDraft();
+    auto variant = duplicateScenarioDraft(baseline, "scenario-2", "Variant");
+    variant.environment.familiarityProfile = "visitor";
+
+    const auto keys = computeScenarioDiffKeys(baseline, variant);
+
+    SC_EXPECT_EQ(keys.size(), std::size_t{1});
+    SC_EXPECT_TRUE(containsKey(keys, "environment.familiarityProfile"));
+}
+
+SC_TEST(computeScenarioDiffKeys_detectsGuidanceProfileChange) {
+    const auto baseline = makeBaselineDraft();
+    auto variant = duplicateScenarioDraft(baseline, "scenario-2", "Variant");
+    variant.environment.guidanceProfile = "untrained";
+
+    const auto keys = computeScenarioDiffKeys(baseline, variant);
+
+    SC_EXPECT_EQ(keys.size(), std::size_t{1});
+    SC_EXPECT_TRUE(containsKey(keys, "environment.guidanceProfile"));
 }
 
 SC_TEST(computeScenarioDiffKeys_detectsControlEventsChange) {
@@ -129,6 +173,28 @@ SC_TEST(computeScenarioDiffKeys_detectsExecutionChanges) {
     SC_EXPECT_TRUE(containsKey(keys, "execution.repeatCount"));
     SC_EXPECT_TRUE(containsKey(keys, "execution.baseSeed"));
     SC_EXPECT_EQ(keys.size(), std::size_t{3});
+}
+
+SC_TEST(computeScenarioDiffKeys_detectsSampleIntervalChange) {
+    const auto baseline = makeBaselineDraft();
+    auto variant = duplicateScenarioDraft(baseline, "scenario-2", "Variant");
+    variant.execution.sampleIntervalSeconds = 0.5;
+
+    const auto keys = computeScenarioDiffKeys(baseline, variant);
+
+    SC_EXPECT_EQ(keys.size(), std::size_t{1});
+    SC_EXPECT_TRUE(containsKey(keys, "execution.sampleInterval"));
+}
+
+SC_TEST(computeScenarioDiffKeys_detectsRecordOccupantHistoryChange) {
+    const auto baseline = makeBaselineDraft();
+    auto variant = duplicateScenarioDraft(baseline, "scenario-2", "Variant");
+    variant.execution.recordOccupantHistory = true;
+
+    const auto keys = computeScenarioDiffKeys(baseline, variant);
+
+    SC_EXPECT_EQ(keys.size(), std::size_t{1});
+    SC_EXPECT_TRUE(containsKey(keys, "execution.recordOccupantHistory"));
 }
 
 SC_TEST(computeScenarioDiffKeys_detectsConnectionBlockChange) {

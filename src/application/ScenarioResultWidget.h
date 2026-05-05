@@ -2,10 +2,12 @@
 
 #include <cstddef>
 #include <functional>
+#include <optional>
 
 #include <QString>
 #include <QWidget>
 
+#include "application/ScenarioAuthoringWidget.h"
 #include "domain/FacilityLayout2D.h"
 #include "domain/ScenarioAuthoring.h"
 #include "domain/ScenarioResultArtifacts.h"
@@ -28,6 +30,7 @@ public:
         std::function<void()> saveProjectHandler,
         std::function<void()> openProjectHandler,
         std::function<void()> backToLayoutReviewHandler,
+        std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState = std::nullopt,
         QWidget* parent = nullptr);
 
     const safecrowd::domain::ScenarioDraft& scenario() const noexcept;
@@ -53,6 +56,7 @@ private:
     safecrowd::domain::SimulationFrame frame_{};
     safecrowd::domain::ScenarioRiskSnapshot risk_{};
     safecrowd::domain::ScenarioResultArtifacts artifacts_{};
+    std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState_{};
     std::function<void()> saveProjectHandler_{};
     std::function<void()> openProjectHandler_{};
     std::function<void()> backToLayoutReviewHandler_{};

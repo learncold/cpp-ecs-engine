@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <utility>
 
 #include <QColor>
@@ -590,6 +591,7 @@ void ScenarioRunWidget::showResults() {
             }
         },
         backToLayoutReviewHandler_,
+        std::nullopt,
         this);
     rootLayout->replaceWidget(shell_, resultWidget);
     shell_->hide();
