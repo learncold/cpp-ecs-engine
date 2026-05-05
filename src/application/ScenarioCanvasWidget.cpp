@@ -188,10 +188,11 @@ QString formatRouteGuidanceTooltip(
     if (guidance.periods.empty()) {
         text.append(QStringLiteral("\n Always"));
     } else {
-        const auto& period = guidance.periods.front();
-        const auto start = std::max(0.0, period.startSeconds);
-        const auto end = std::max(start, std::max(0.0, period.endSeconds));
-        text.append(QString("\n %1s~%2s").arg(start, 0, 'f', 1).arg(end, 0, 'f', 1));
+        for (const auto& period : guidance.periods) {
+            const auto start = std::max(0.0, period.startSeconds);
+            const auto end = std::max(start, std::max(0.0, period.endSeconds));
+            text.append(QString("\n %1s~%2s").arg(start, 0, 'f', 1).arg(end, 0, 'f', 1));
+        }
     }
     text.append(QString("\n Base compliance: %1").arg(std::clamp(guidance.baseComplianceRate, 0.0, 1.0), 0, 'f', 2));
     text.append(QString("\n Strength: %1").arg(std::clamp(guidance.guidanceStrength, 0.0, 1.0), 0, 'f', 2));
