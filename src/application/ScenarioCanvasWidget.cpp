@@ -26,6 +26,7 @@
 #include <QPushButton>
 #include <QSpinBox>
 #include <QToolButton>
+#include <QToolTip>
 #include <QVBoxLayout>
 #include <QWheelEvent>
 
@@ -53,6 +54,66 @@ struct PointBounds {
 
 bool matchesFloor(const std::string& elementFloorId, const QString& floorId) {
     return floorId.isEmpty() || elementFloorId.empty() || QString::fromStdString(elementFloorId) == floorId;
+}
+
+QString formatConnectionBlockTooltip(const safecrowd::domain::ConnectionBlockDraft& block) {
+    if (block.connectionId.empty()) {
+        return {};
+    }
+
+    QString text = QStringLiteral("차단 스케줄");
+    if (block.intervals.empty()) {
+        text.append("\n- 항상 차단");
+        return text;
+    }
+
+    for (const auto& interval : block.intervals) {
+        const auto start = std::max(0.0, interval.startSeconds);
+        const auto end = std::max(start, interval.endSeconds);
+        text.append(QString("\n- %1s ~ %2s").arg(start, 0, 'f', 1).arg(end, 0, 'f', 1));
+    }
+    return text;
+}
+
+std::optional<std::size_t> hoveredConnectionBlockIndex(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const std::vector<safecrowd::domain::ConnectionBlockDraft>& blocks,
+    const LayoutCanvasTransform& transform,
+    const QString& currentFloorId,
+    const QPointF& screenPosition) {
+    constexpr double kHoverRadiusPixels = 14.0;
+
+    std::optional<std::size_t> closestIndex;
+    double closestDistanceSq = kHoverRadiusPixels * kHoverRadiusPixels;
+
+    for (std::size_t index = 0; index < blocks.size(); ++index) {
+        const auto& block = blocks[index];
+        if (block.connectionId.empty()) {
+            continue;
+        }
+
+        const auto it = std::find_if(layout.connections.begin(), layout.connections.end(), [&](const auto& connection) {
+            return connection.id == block.connectionId;
+        });
+        if (it == layout.connections.end()) {
+            continue;
+        }
+        if (!matchesFloor(it->floorId, currentFloorId)) {
+            continue;
+        }
+
+        const auto center = transform.map({.x = (it->centerSpan.start.x + it->centerSpan.end.x) * 0.5,
+                                          .y = (it->centerSpan.start.y + it->centerSpan.end.y) * 0.5});
+        const auto dx = center.x() - screenPosition.x();
+        const auto dy = center.y() - screenPosition.y();
+        const auto distanceSq = (dx * dx) + (dy * dy);
+        if (distanceSq <= closestDistanceSq) {
+            closestDistanceSq = distanceSq;
+            closestIndex = index;
+        }
+    }
+
+    return closestIndex;
 }
 
 QString defaultFloorId(const safecrowd::domain::FacilityLayout2D& layout) {
@@ -699,6 +760,12 @@ void ScenarioCanvasWidget::keyReleaseEvent(QKeyEvent* event) {
     QWidget::keyReleaseEvent(event);
 }
 
+void ScenarioCanvasWidget::leaveEvent(QEvent* event) {
+    hoveredConnectionBlockId_.clear();
+    QToolTip::hideText();
+    QWidget::leaveEvent(event);
+}
+
 void ScenarioCanvasWidget::mouseDoubleClickEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton) {
         camera_.reset();
@@ -716,16 +783,45 @@ void ScenarioCanvasWidget::mouseMoveEvent(QMouseEvent* event) {
     }
 
     if (dragging_) {
+        if (!hoveredConnectionBlockId_.isEmpty()) {
+            hoveredConnectionBlockId_.clear();
+            QToolTip::hideText();
+        }
         dragCurrent_ = event->position();
         update();
         event->accept();
         return;
     }
     if (selectionDragging_) {
+        if (!hoveredConnectionBlockId_.isEmpty()) {
+            hoveredConnectionBlockId_.clear();
+            QToolTip::hideText();
+        }
         selectionDragCurrent_ = event->position();
         update();
         event->accept();
         return;
+    }
+
+    if (const auto bounds = collectBounds(); bounds.has_value()) {
+        const auto transform = currentTransform(*bounds);
+        const auto hoveredIndex = hoveredConnectionBlockIndex(layout_, connectionBlocks_, transform, currentFloorId_, event->position());
+        if (!hoveredIndex.has_value()) {
+            if (!hoveredConnectionBlockId_.isEmpty()) {
+                hoveredConnectionBlockId_.clear();
+                QToolTip::hideText();
+            }
+        } else {
+            const auto& block = connectionBlocks_[*hoveredIndex];
+            const auto tooltip = formatConnectionBlockTooltip(block);
+            if (!tooltip.isEmpty()) {
+                const auto hoveredId = QString::fromStdString(block.id.empty() ? block.connectionId : block.id);
+                if (hoveredId != hoveredConnectionBlockId_) {
+                    hoveredConnectionBlockId_ = hoveredId;
+                    QToolTip::showText(event->globalPosition().toPoint(), tooltip, this);
+                }
+            }
+        }
     }
     QWidget::mouseMoveEvent(event);
 }

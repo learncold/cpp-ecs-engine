@@ -67,6 +67,7 @@ protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
     void keyReleaseEvent(QKeyEvent* event) override;
+    void leaveEvent(QEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
@@ -145,6 +146,7 @@ private:
     QSpinBox* groupCountSpinBox_{nullptr};
     QLabel* groupDistributionLabel_{nullptr};
     QComboBox* groupDistributionComboBox_{nullptr};
+    QString hoveredConnectionBlockId_{};
     std::function<void(const QString&)> layoutElementActivatedHandler_{};
     std::function<void(const QString&)> crowdSelectionChangedHandler_{};
     std::function<void(const std::vector<ScenarioCrowdPlacement>&)> placementsChangedHandler_{};
