@@ -81,6 +81,7 @@ private:
     void refreshNavigationPanel();
     void refreshRightPanel();
     void refreshScenarioSwitcher();
+    void recomputeVariationDiffKeysIfAlternative(ScenarioState& scenario) const;
     void runFirstStagedBaselineScenario();
     void stageCurrentScenario();
     void updateCurrentScenarioPlacements(const std::vector<ScenarioCrowdPlacement>& placements);

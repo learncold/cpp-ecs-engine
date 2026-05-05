@@ -451,6 +451,7 @@ void ScenarioAuthoringWidget::addEventDraft(const QString& name, const QString& 
         .targetSummary = target.toStdString(),
     });
     scenario->draft.control.events = scenario->events;
+    recomputeVariationDiffKeysIfAlternative(*scenario);
     refreshNavigationPanel();
     refreshInspector();
 }
@@ -465,12 +466,17 @@ void ScenarioAuthoringWidget::createScenarioWithName(const QString& name, int so
         return;
     }
 
+    const auto newScenarioId = QString("scenario-%1").arg(scenarios_.size() + 1).toStdString();
     ScenarioState scenario;
     if (sourceIndex >= 0 && sourceIndex < static_cast<int>(scenarios_.size())) {
-        scenario = scenarios_[sourceIndex];
-        scenario.baseScenarioId = QString::fromStdString(scenarios_[sourceIndex].draft.scenarioId);
-        scenario.draft.role = safecrowd::domain::ScenarioRole::Alternative;
-        scenario.draft.variationDiffKeys = {"branch.duplicated"};
+        const auto& source = scenarios_[sourceIndex];
+        scenario.draft = safecrowd::domain::duplicateScenarioDraft(
+            source.draft, newScenarioId, trimmedName.toStdString());
+        scenario.events = source.events;
+        scenario.crowdPlacements = source.crowdPlacements;
+        scenario.startText = source.startText;
+        scenario.destinationText = source.destinationText;
+        scenario.baseScenarioId = QString::fromStdString(source.draft.scenarioId);
         scenario.stagedForRun = false;
     } else {
         scenario.draft.role = safecrowd::domain::ScenarioRole::Baseline;
@@ -479,6 +485,8 @@ void ScenarioAuthoringWidget::createScenarioWithName(const QString& name, int so
         scenario.draft.execution.sampleIntervalSeconds = 1.0;
         scenario.draft.execution.repeatCount = 1;
         scenario.draft.execution.baseSeed = 1;
+        scenario.draft.name = trimmedName.toStdString();
+        scenario.draft.scenarioId = newScenarioId;
 
         const auto* destinationZone = firstDestinationZone(layout_);
         const auto* startZone = firstStartZone(layout_);
@@ -490,8 +498,6 @@ void ScenarioAuthoringWidget::createScenarioWithName(const QString& name, int so
         }
     }
 
-    scenario.draft.name = trimmedName.toStdString();
-    scenario.draft.scenarioId = QString("scenario-%1").arg(scenarios_.size() + 1).toStdString();
     scenarios_.push_back(std::move(scenario));
     currentScenarioIndex_ = static_cast<int>(scenarios_.size()) - 1;
     refreshScenarioSwitcher();
@@ -555,6 +561,7 @@ void ScenarioAuthoringWidget::refreshCanvas() {
             return;
         }
         current->draft.control.connectionBlocks = blocks;
+        recomputeVariationDiffKeysIfAlternative(*current);
         refreshNavigationPanel();
         refreshInspector();
     });
@@ -588,22 +595,24 @@ void ScenarioAuthoringWidget::refreshInspector() {
     }
 
     if (changesLabel_ != nullptr) {
-        if (!hasScenario || scenario->baseScenarioId.isEmpty()) {
+        if (!hasScenario) {
             changesLabel_->setText("Changes from baseline: none");
+        } else if (scenario->draft.role == safecrowd::domain::ScenarioRole::Baseline) {
+            changesLabel_->setText("Baseline scenario");
+        } else if (scenario->baseScenarioId.isEmpty()) {
+            changesLabel_->setText("Alternative scenario (no baseline link)");
         } else {
             QStringList changes;
-            if (!scenario->events.empty()) {
-                changes << QString("Events: %1 configured").arg(static_cast<int>(scenario->events.size()));
-            }
-            if (!scenario->draft.control.connectionBlocks.empty()) {
-                changes << QString("Blocked exits: %1 configured")
-                    .arg(static_cast<int>(scenario->draft.control.connectionBlocks.size()));
+            for (const auto& key : scenario->draft.variationDiffKeys) {
+                changes << QString::fromStdString(key);
             }
             if (changes.isEmpty()) {
-                changes << "No changed fields yet";
+                changesLabel_->setText(QString("Based on: %1\nNo changed fields yet")
+                    .arg(scenario->baseScenarioId));
+            } else {
+                changesLabel_->setText(QString("Based on: %1\nChanged:\n- %2")
+                    .arg(scenario->baseScenarioId, changes.join("\n- ")));
             }
-            changesLabel_->setText(QString("Based on: %1\nChanged:\n- %2")
-                .arg(scenario->baseScenarioId, changes.join("\n- ")));
         }
     }
 
@@ -852,8 +861,26 @@ void ScenarioAuthoringWidget::updateCurrentScenarioPlacements(const std::vector<
         scenario->stagedForRun = false;
     }
 
+    recomputeVariationDiffKeysIfAlternative(*scenario);
     refreshNavigationPanel();
     refreshInspector();
+}
+
+void ScenarioAuthoringWidget::recomputeVariationDiffKeysIfAlternative(ScenarioState& scenario) const {
+    if (scenario.draft.role != safecrowd::domain::ScenarioRole::Alternative
+        || scenario.baseScenarioId.isEmpty()) {
+        scenario.draft.variationDiffKeys.clear();
+        return;
+    }
+    const auto baseId = scenario.baseScenarioId.toStdString();
+    for (const auto& candidate : scenarios_) {
+        if (candidate.draft.scenarioId == baseId) {
+            scenario.draft.variationDiffKeys =
+                safecrowd::domain::computeScenarioDiffKeys(candidate.draft, scenario.draft);
+            return;
+        }
+    }
+    scenario.draft.variationDiffKeys.clear();
 }
 
 void ScenarioAuthoringWidget::showEmptyCanvas() {
