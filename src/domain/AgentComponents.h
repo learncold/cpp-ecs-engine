@@ -18,6 +18,7 @@ struct Agent {
     float maxSpeed{1.5f};
     std::string sourcePlacementId{};
     std::string sourceZoneId{};
+    double guidancePropensity{0.5};
 };
 
 struct Velocity {
@@ -46,7 +47,10 @@ struct EvacuationRoute {
     double nextSegmentReplanSeconds{0.0};
     std::uint64_t observedLayoutRevision{0};
     bool noExitAvailable{false};
+    bool followsGuidance{false};
     std::string destinationZoneId{};
+    std::string originalDestinationZoneId{};
+    std::string guidanceEventId{};
     std::string currentFloorId{};
     std::string displayFloorId{};
 };

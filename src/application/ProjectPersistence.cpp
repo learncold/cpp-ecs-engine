@@ -752,6 +752,54 @@ safecrowd::domain::OperationalEventDraft eventFromJson(const QJsonObject& object
     };
 }
 
+QJsonObject routeGuidanceToJson(const safecrowd::domain::RouteGuidanceDraft& guidance) {
+    QJsonObject object;
+    object["id"] = QString::fromStdString(guidance.id);
+    object["startSeconds"] = guidance.startSeconds;
+    object["endSeconds"] = guidance.endSeconds;
+    QJsonArray periods;
+    for (const auto& period : guidance.periods) {
+        QJsonObject periodObject;
+        periodObject["startSeconds"] = period.startSeconds;
+        periodObject["endSeconds"] = period.endSeconds;
+        periods.append(periodObject);
+    }
+    object["periods"] = periods;
+    object["guidedExitZoneId"] = QString::fromStdString(guidance.guidedExitZoneId);
+    object["installConnectionId"] = QString::fromStdString(guidance.installConnectionId);
+    object["baseComplianceRate"] = guidance.baseComplianceRate;
+    object["guidanceStrength"] = guidance.guidanceStrength;
+    object["maxDetourMeters"] = guidance.maxDetourMeters;
+    return object;
+}
+
+safecrowd::domain::RouteGuidanceDraft routeGuidanceFromJson(const QJsonObject& object) {
+    safecrowd::domain::RouteGuidanceDraft guidance;
+    guidance.id = object.value("id").toString().toStdString();
+    guidance.startSeconds = object.value("startSeconds").toDouble(0.0);
+    guidance.endSeconds = object.value("endSeconds").toDouble(10.0);
+    for (const auto& value : object.value("periods").toArray()) {
+        const auto periodObject = value.toObject();
+        guidance.periods.push_back({
+            .startSeconds = periodObject.value("startSeconds").toDouble(0.0),
+            .endSeconds = periodObject.value("endSeconds").toDouble(0.0),
+        });
+    }
+    if (guidance.periods.empty() && (object.contains("startSeconds") || object.contains("endSeconds"))) {
+        // Backward compatibility: older projects stored a single scalar period.
+        guidance.periods.push_back({
+            .startSeconds = guidance.startSeconds,
+            .endSeconds = guidance.endSeconds,
+        });
+    }
+    guidance.guidedExitZoneId = object.value("guidedExitZoneId").toString().toStdString();
+    guidance.installConnectionId = object.value("installConnectionId").toString().toStdString();
+    guidance.baseComplianceRate = object.value("baseComplianceRate").toDouble(0.5);
+    guidance.guidanceStrength = object.value("guidanceStrength").toDouble(0.55);
+    guidance.maxDetourMeters = object.value("maxDetourMeters").toDouble(20.0);
+    return guidance;
+}
+
 QJsonObject connectionBlockIntervalToJson(const safecrowd::domain::ConnectionBlockIntervalDraft& interval) {
     QJsonObject object;
     object["startSeconds"] = interval.startSeconds;
@@ -796,6 +844,12 @@ QJsonObject controlPlanToJson(const safecrowd::domain::ControlPlan& control) {
     }
     object["events"] = events;
 
+    QJsonArray routeGuidances;
+    for (const auto& guidance : control.routeGuidances) {
+        routeGuidances.append(routeGuidanceToJson(guidance));
+    }
+    object["routeGuidances"] = routeGuidances;
+
     QJsonArray connectionBlocks;
     for (const auto& block : control.connectionBlocks) {
         connectionBlocks.append(connectionBlockToJson(block));
@@ -808,6 +862,9 @@ safecrowd::domain::ControlPlan controlPlanFromJson(const QJsonObject& object) {
     safecrowd::domain::ControlPlan control;
     for (const auto& value : object.value("events").toArray()) {
         control.events.push_back(eventFromJson(value.toObject()));
+    }
+    for (const auto& value : object.value("routeGuidances").toArray()) {
+        control.routeGuidances.push_back(routeGuidanceFromJson(value.toObject()));
     }
     for (const auto& value : object.value("connectionBlocks").toArray()) {
         control.connectionBlocks.push_back(connectionBlockFromJson(value.toObject()));

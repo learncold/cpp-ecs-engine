@@ -199,6 +199,7 @@ ScenarioRunWidget::ScenarioRunWidget(
     });
     canvas_ = new SimulationCanvasWidget(layout_, shell_);
     canvas_->setConnectionBlocks(scenario_.control.connectionBlocks);
+    canvas_->setRouteGuidances(scenario_.control.routeGuidances);
     canvas_->setFrame(runner_.frame());
     shell_->setCanvas(canvas_);
     shell_->setReviewPanel(createRunPanel());

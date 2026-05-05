@@ -28,6 +28,23 @@ struct OperationalEventDraft {
     std::string targetSummary{};
 };
 
+struct RouteGuidancePeriodDraft {
+    double startSeconds{0.0};
+    double endSeconds{0.0};
+};
+
+struct RouteGuidanceDraft {
+    std::string id{};
+    double startSeconds{0.0};
+    double endSeconds{10.0};
+    std::vector<RouteGuidancePeriodDraft> periods{};
+    std::string guidedExitZoneId{};
+    std::string installConnectionId{};
+    double baseComplianceRate{0.5};
+    double guidanceStrength{0.55};
+    double maxDetourMeters{20.0};
+};
+
 struct ConnectionBlockIntervalDraft {
     double startSeconds{0.0};
     double endSeconds{0.0};
@@ -41,6 +58,7 @@ struct ConnectionBlockDraft {
 
 struct ControlPlan {
     std::vector<OperationalEventDraft> events{};
+    std::vector<RouteGuidanceDraft> routeGuidances{};
     std::vector<ConnectionBlockDraft> connectionBlocks{};
 };
 

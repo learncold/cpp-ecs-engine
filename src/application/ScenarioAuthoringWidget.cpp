@@ -283,6 +283,69 @@ std::vector<NavigationTreeNode> buildEventsTree(
         });
     }
 
+    const auto& routeGuidances = scenario->draft.control.routeGuidances;
+    if (!routeGuidances.empty()) {
+        std::vector<NavigationTreeNode> nodes;
+        nodes.reserve(routeGuidances.size());
+        for (const auto& guidance : routeGuidances) {
+            const auto guidanceId = QString::fromStdString(guidance.id);
+            const auto doorLabel = guidance.installConnectionId.empty()
+                ? QString{}
+                : connectionLabelForId(layout, guidance.installConnectionId);
+            const auto exitLabel = guidance.guidedExitZoneId.empty()
+                ? QStringLiteral("Nearest exit")
+                : zoneName(layout, guidance.guidedExitZoneId);
+            QString periodSummary = QStringLiteral("Always");
+            if (!guidance.periods.empty()) {
+                periodSummary = blockScheduleSummary(safecrowd::domain::ConnectionBlockDraft{
+                    .intervals = [&]() {
+                        std::vector<safecrowd::domain::ConnectionBlockIntervalDraft> intervals;
+                        intervals.reserve(guidance.periods.size());
+                        for (const auto& period : guidance.periods) {
+                            intervals.push_back({
+                                .startSeconds = std::max(0.0, period.startSeconds),
+                                .endSeconds = std::max(0.0, period.endSeconds),
+                            });
+                        }
+                        return intervals;
+                    }(),
+                });
+            }
+
+            std::vector<NavigationTreeNode> children;
+            children.reserve(doorLabel.isEmpty() ? 2u : 3u);
+            children.push_back({
+                .label = QString("Exit  -  %1").arg(exitLabel),
+                .id = QString("%1/exit").arg(guidanceId),
+            });
+            if (!doorLabel.isEmpty()) {
+                children.push_back({
+                    .label = QString("Door  -  %1").arg(doorLabel),
+                    .id = QString("%1/door").arg(guidanceId),
+                });
+            }
+            children.push_back({
+                .label = QString("Period  -  %1").arg(periodSummary),
+                .id = QString("%1/period").arg(guidanceId),
+            });
+
+            nodes.push_back({
+                .label = QString("Guidance  -  %1").arg(doorLabel.isEmpty() ? exitLabel : doorLabel),
+                .id = guidanceId,
+                .detail = QString("Period: %1").arg(periodSummary),
+                .children = std::move(children),
+                .expanded = true,
+            });
+        }
+
+        sections.push_back({
+            .label = QString("Route Guidance (%1)").arg(static_cast<int>(routeGuidances.size())),
+            .children = std::move(nodes),
+            .expanded = true,
+            .selectable = false,
+        });
+    }
+
     const auto& connectionBlocks = scenario->draft.control.connectionBlocks;
     if (!connectionBlocks.empty()) {
         std::vector<NavigationTreeNode> blocks;
@@ -558,6 +621,16 @@ void ScenarioAuthoringWidget::refreshCanvas() {
         refreshNavigationPanel();
         refreshInspector();
     });
+    canvas_->setRouteGuidances(scenario->draft.control.routeGuidances);
+    canvas_->setRouteGuidancesChangedHandler([this](const std::vector<safecrowd::domain::RouteGuidanceDraft>& guidances) {
+        auto* current = currentScenario();
+        if (current == nullptr) {
+            return;
+        }
+        current->draft.control.routeGuidances = guidances;
+        refreshNavigationPanel();
+        refreshInspector();
+    });
     if (!selectedLayoutElementId_.isEmpty()) {
         canvas_->focusLayoutElement(selectedLayoutElementId_);
     } else if (!selectedCrowdElementId_.isEmpty()) {
@@ -576,13 +649,15 @@ void ScenarioAuthoringWidget::refreshInspector() {
         } else {
             const int people = totalOccupantCount(*scenario);
             const auto blockCount = static_cast<int>(scenario->draft.control.connectionBlocks.size());
-            scenarioSummaryLabel_->setText(QString("Name: %1\nRole: %2\nPopulation: %3\nStart: %4\nDestination: %5\nEvents: %6\nBlocked exits: %7")
+            const auto guidanceCount = static_cast<int>(scenario->draft.control.routeGuidances.size());
+            scenarioSummaryLabel_->setText(QString("Name: %1\nRole: %2\nPopulation: %3\nStart: %4\nDestination: %5\nEvents: %6\nRoute guidance: %7\nBlocked exits: %8")
                 .arg(
                     QString::fromStdString(scenario->draft.name),
                     scenario->draft.role == safecrowd::domain::ScenarioRole::Baseline ? "Baseline" : "Alternative")
                 .arg(people)
                 .arg(scenario->startText, scenario->destinationText)
                 .arg(static_cast<int>(scenario->events.size()))
+                .arg(guidanceCount)
                 .arg(blockCount));
         }
     }
@@ -598,6 +673,10 @@ void ScenarioAuthoringWidget::refreshInspector() {
             if (!scenario->draft.control.connectionBlocks.empty()) {
                 changes << QString("Blocked exits: %1 configured")
                     .arg(static_cast<int>(scenario->draft.control.connectionBlocks.size()));
+            }
+            if (!scenario->draft.control.routeGuidances.empty()) {
+                changes << QString("Route guidance: %1 configured")
+                    .arg(static_cast<int>(scenario->draft.control.routeGuidances.size()));
             }
             if (changes.isEmpty()) {
                 changes << "No changed fields yet";

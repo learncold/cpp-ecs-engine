@@ -92,6 +92,9 @@ std::unique_ptr<engine::EngineSystem> makeScenarioControlSystem(
     FacilityLayout2D baseLayout,
     std::vector<ConnectionBlockDraft> blocks);
 std::unique_ptr<engine::EngineSystem> makeScenarioSimulationMotionSystem(FacilityLayout2D layout);
+std::unique_ptr<engine::EngineSystem> makeScenarioSimulationMotionSystem(
+    FacilityLayout2D layout,
+    std::vector<RouteGuidanceDraft> routeGuidances);
 std::unique_ptr<engine::EngineSystem> makeScenarioRiskMetricsSystem(FacilityLayout2D layout);
 
 class ScenarioAgentSpawnSystem final : public engine::EngineSystem {

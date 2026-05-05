@@ -849,6 +849,154 @@ std::optional<ZoneRouteToExit> zoneRouteToNearestExit(
     return route;
 }
 
+std::optional<ZoneRouteResult> zoneRouteToExit(
+    const ScenarioLayoutCacheResource& cache,
+    const Point2D& startPosition,
+    const std::string& startZoneId,
+    const std::string& exitZoneId) {
+    if (startZoneId.empty() || exitZoneId.empty()) {
+        return std::nullopt;
+    }
+
+    if (startZoneId == exitZoneId) {
+        return ZoneRouteResult{.route = ZoneRouteToExit{.zoneIds = {startZoneId}}, .distance = 0.0};
+    }
+
+    if (const auto* exitZone = findCachedZone(cache, exitZoneId); exitZone == nullptr || exitZone->kind != ZoneKind::Exit) {
+        return std::nullopt;
+    }
+
+    auto stateKey = [](const std::string& zoneId, std::size_t entryConnectionIndex) {
+        return zoneId + '\x1f' + std::to_string(entryConnectionIndex);
+    };
+
+    constexpr double kDefaultVerticalRouteCost = 3.0;
+    constexpr std::size_t kStartConnectionIndex = static_cast<std::size_t>(-1);
+
+    auto verticalRouteCost = [&](const Connection2D& connection) {
+        if (!isVerticalConnection(connection)) {
+            return 0.0;
+        }
+
+        const auto fromFloorId = cachedFloorIdForZone(cache, connection.fromZoneId);
+        const auto toFloorId = cachedFloorIdForZone(cache, connection.toZoneId);
+        if (fromFloorId.empty() || toFloorId.empty() || fromFloorId == toFloorId) {
+            return kDefaultVerticalRouteCost;
+        }
+
+        const auto elevationDelta = std::fabs(floorElevation(cache.layout, fromFloorId) - floorElevation(cache.layout, toFloorId));
+        return elevationDelta > kGeometryEpsilon ? elevationDelta : kDefaultVerticalRouteCost;
+    };
+
+    struct QueueItem {
+        double distance{0.0};
+        std::string key{};
+        std::string zoneId{};
+        Point2D point{};
+        std::size_t entryConnectionIndex{static_cast<std::size_t>(-1)};
+
+        bool operator>(const QueueItem& other) const noexcept {
+            return distance > other.distance;
+        }
+    };
+
+    std::unordered_map<std::string, double> distances;
+    distances.reserve(cache.layout.connections.size() + 1);
+    std::unordered_map<std::string, std::string> previous;
+    previous.reserve(cache.layout.connections.size() + 1);
+    std::unordered_map<std::string, std::string> stateZones;
+    stateZones.reserve(cache.layout.connections.size() + 1);
+    std::unordered_map<std::string, std::size_t> stateConnectionIndices;
+    stateConnectionIndices.reserve(cache.layout.connections.size() + 1);
+    std::priority_queue<QueueItem, std::vector<QueueItem>, std::greater<QueueItem>> queue;
+
+    const auto startKey = stateKey(startZoneId, kStartConnectionIndex);
+    distances[startKey] = 0.0;
+    stateZones[startKey] = startZoneId;
+    stateConnectionIndices[startKey] = kStartConnectionIndex;
+    queue.push({
+        .distance = 0.0,
+        .key = startKey,
+        .zoneId = startZoneId,
+        .point = startPosition,
+        .entryConnectionIndex = kStartConnectionIndex,
+    });
+
+    double bestExitDistance = std::numeric_limits<double>::max();
+    std::string bestExitKey;
+
+    while (!queue.empty()) {
+        const auto current = queue.top();
+        queue.pop();
+
+        if (current.distance > bestExitDistance + 1e-12) {
+            continue;
+        }
+
+        const auto bestIt = distances.find(current.key);
+        if (bestIt == distances.end() || current.distance > bestIt->second + 1e-12) {
+            continue;
+        }
+
+        if (current.zoneId == exitZoneId) {
+            if (current.distance + 1e-12 < bestExitDistance) {
+                bestExitDistance = current.distance;
+                bestExitKey = current.key;
+            }
+            continue;
+        }
+
+        for (const auto& traversal : cachedTraversalsForZone(cache, current.zoneId)) {
+            if (traversal.nextZoneId.empty() || traversal.connectionIndex >= cache.layout.connections.size()) {
+                continue;
+            }
+
+            const auto& connection = cache.layout.connections[traversal.connectionIndex];
+            const auto portal = midpoint(connection.centerSpan);
+            const auto nextDistance = current.distance + distanceBetween(current.point, portal) + verticalRouteCost(connection);
+            const auto nextKey = stateKey(traversal.nextZoneId, traversal.connectionIndex);
+            const auto distanceIt = distances.find(nextKey);
+            if (distanceIt == distances.end() || nextDistance + 1e-12 < distanceIt->second) {
+                distances[nextKey] = nextDistance;
+                previous[nextKey] = current.key;
+                stateZones[nextKey] = traversal.nextZoneId;
+                stateConnectionIndices[nextKey] = traversal.connectionIndex;
+                queue.push({
+                    .distance = nextDistance,
+                    .key = nextKey,
+                    .zoneId = traversal.nextZoneId,
+                    .point = portal,
+                    .entryConnectionIndex = traversal.connectionIndex,
+                });
+            }
+        }
+    }
+
+    if (bestExitKey.empty()) {
+        return std::nullopt;
+    }
+
+    ZoneRouteToExit route;
+    for (auto key = bestExitKey; !key.empty();) {
+        const auto zoneIt = stateZones.find(key);
+        if (zoneIt != stateZones.end()) {
+            route.zoneIds.push_back(zoneIt->second);
+        }
+        const auto connectionIt = stateConnectionIndices.find(key);
+        if (connectionIt != stateConnectionIndices.end() && connectionIt->second != kStartConnectionIndex) {
+            route.connectionIndices.push_back(connectionIt->second);
+        }
+        const auto previousIt = previous.find(key);
+        key = previousIt == previous.end() ? std::string{} : previousIt->second;
+    }
+    std::reverse(route.zoneIds.begin(), route.zoneIds.end());
+    std::reverse(route.connectionIndices.begin(), route.connectionIndices.end());
+    if (route.zoneIds.empty() || route.connectionIndices.size() + 1 != route.zoneIds.size()) {
+        return std::nullopt;
+    }
+    return ZoneRouteResult{.route = std::move(route), .distance = bestExitDistance};
+}
+
 double speedOf(const Point2D& velocity) {
     const auto speed = std::hypot(velocity.x, velocity.y);
     return speed > 0.0 ? speed : kDefaultAgentSpeed;
