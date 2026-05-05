@@ -24,6 +24,8 @@ struct EvacuationTimingSummary {
     std::optional<double> finalEvacuationTimeSeconds{};
     double targetTimeSeconds{0.0};
     std::optional<double> marginSeconds{};
+    std::optional<SimulationFrame> t90Frame{};
+    std::optional<SimulationFrame> t95Frame{};
 };
 
 struct DensityCellMetric {

@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -69,6 +70,11 @@ struct ScenarioResultArtifactsResource {
     bool densityTrackingInitialized{false};
     double lastDensitySampleTimeSeconds{0.0};
     std::unordered_map<long long, DensityCellMetric> peakDensityCellsByAddress{};
+};
+
+struct ScenarioTimingKeyframesResource {
+    std::optional<SimulationFrame> t90Frame{};
+    std::optional<SimulationFrame> t95Frame{};
 };
 
 struct ScenarioAgentSeed {
