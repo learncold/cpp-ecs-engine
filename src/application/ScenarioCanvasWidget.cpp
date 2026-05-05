@@ -61,9 +61,9 @@ QString formatConnectionBlockTooltip(const safecrowd::domain::ConnectionBlockDra
         return {};
     }
 
-    QString text = QStringLiteral("차단 스케줄");
+    QString text = QStringLiteral("Block schedule");
     if (block.intervals.empty()) {
-        text.append("\n- 항상 차단");
+        text.append("\n- Always");
         return text;
     }
 
