@@ -96,7 +96,7 @@ FacilityLayout2D demoFacility() {
     Connection2D roomConnection;
     roomConnection.id = Sprint1FacilityIds::OpeningConnectionId;
     roomConnection.floorId = Sprint1FacilityIds::FloorId;
-    roomConnection.kind = ConnectionKind::Opening;
+    roomConnection.kind = ConnectionKind::Doorway;
     roomConnection.fromZoneId = mainRoom.id;
     roomConnection.toZoneId = sideRoom.id;
     roomConnection.effectiveWidth = 3.0;

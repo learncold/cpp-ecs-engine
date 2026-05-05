@@ -19,6 +19,14 @@ bool containsConnectionKind(
     });
 }
 
+std::size_t countConnectionKind(
+    const std::vector<safecrowd::domain::Connection2D>& connections,
+    safecrowd::domain::ConnectionKind kind) {
+    return static_cast<std::size_t>(std::count_if(connections.begin(), connections.end(), [&](const auto& connection) {
+        return connection.kind == kind;
+    }));
+}
+
 bool containsZoneId(
     const std::vector<safecrowd::domain::Zone2D>& zones,
     const std::string& id) {
@@ -72,7 +80,7 @@ SC_TEST(DemoFixtureServiceBuildsSprint1Fixture) {
     }));
 
     SC_EXPECT_EQ(layout.connections.size(), std::size_t{3});
-    SC_EXPECT_TRUE(containsConnectionKind(layout.connections, safecrowd::domain::ConnectionKind::Opening));
+    SC_EXPECT_EQ(countConnectionKind(layout.connections, safecrowd::domain::ConnectionKind::Doorway), std::size_t{2});
     SC_EXPECT_TRUE(containsConnectionKind(layout.connections, safecrowd::domain::ConnectionKind::Doorway));
     SC_EXPECT_TRUE(containsConnectionKind(layout.connections, safecrowd::domain::ConnectionKind::Exit));
     SC_EXPECT_EQ(layout.barriers.size(), std::size_t{14});
