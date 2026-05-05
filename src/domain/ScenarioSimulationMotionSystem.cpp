@@ -69,13 +69,26 @@ public:
         replanBlockedExitRoutes(query, entities, layoutCache, clock.elapsedSeconds, layoutRevision);
         replanBlockedRouteSegments(query, entities, layoutCache, clock.elapsedSeconds, layoutRevision);
 
+        if (!resources.contains<ScenarioTimingKeyframesResource>()) {
+            resources.set(ScenarioTimingKeyframesResource{});
+        }
+        auto& timingKeyframes = resources.get<ScenarioTimingKeyframesResource>();
+        const auto totalAgentCount = entities.size();
+        const auto t90TargetCount = static_cast<std::size_t>(std::ceil(static_cast<double>(totalAgentCount) * 0.90));
+        const auto t95TargetCount = static_cast<std::size_t>(std::ceil(static_cast<double>(totalAgentCount) * 0.95));
+
+        std::size_t evacuatedAtStartCount = 0;
+        std::size_t newlyEvacuatedCount = 0;
         for (const auto entity : entities) {
             auto& position = query.get<Position>(entity);
-            const auto& agent = query.get<Agent>(entity);
             auto& velocity = query.get<Velocity>(entity);
             auto& route = query.get<EvacuationRoute>(entity);
             auto& status = query.get<EvacuationStatus>(entity);
             if (status.evacuated) {
+                ++evacuatedAtStartCount;
+                continue;
+            }
+            if (route.destinationZoneId.empty()) {
                 continue;
             }
 
@@ -85,6 +98,76 @@ public:
                 status.evacuated = true;
                 status.completionTimeSeconds = clock.elapsedSeconds;
                 velocity.value = {};
+                ++newlyEvacuatedCount;
+            }
+        }
+
+        const auto evacuatedAfterCount = evacuatedAtStartCount + newlyEvacuatedCount;
+        const bool shouldCaptureT90 = t90TargetCount > 0
+            && !timingKeyframes.t90Frame.has_value()
+            && evacuatedAtStartCount < t90TargetCount
+            && evacuatedAfterCount >= t90TargetCount;
+        const bool shouldCaptureT95 = t95TargetCount > 0
+            && !timingKeyframes.t95Frame.has_value()
+            && evacuatedAtStartCount < t95TargetCount
+            && evacuatedAfterCount >= t95TargetCount;
+        if (shouldCaptureT90 || shouldCaptureT95) {
+            SimulationFrame keyframe;
+            keyframe.elapsedSeconds = clock.elapsedSeconds;
+            keyframe.totalAgentCount = totalAgentCount;
+            keyframe.evacuatedAgentCount = evacuatedAfterCount;
+            keyframe.complete = totalAgentCount > 0 && evacuatedAfterCount >= totalAgentCount;
+
+            const auto view = query.view<Position, Agent, Velocity, EvacuationStatus>();
+            keyframe.agents.reserve(view.size());
+            for (const auto entity : view) {
+                const auto& status = query.get<EvacuationStatus>(entity);
+                if (status.evacuated) {
+                    continue;
+                }
+                const auto& position = query.get<Position>(entity);
+                const auto& velocity = query.get<Velocity>(entity);
+                const auto& agent = query.get<Agent>(entity);
+                const auto* route = query.contains<EvacuationRoute>(entity) ? &query.get<EvacuationRoute>(entity) : nullptr;
+                keyframe.agents.push_back({
+                    .id = entity.index,
+                    .position = position.value,
+                    .velocity = velocity.value,
+                    .radius = agent.radius,
+                    .floorId = route != nullptr
+                        ? (!route->displayFloorId.empty()
+                            ? route->displayFloorId
+                            : route->currentFloorId)
+                        : std::string{},
+                    .stalled = route != nullptr
+                        && scenarioAgentStalled(simulation_internal::lengthOf(velocity.value), route->stalledSeconds),
+                });
+            }
+
+            if (shouldCaptureT90) {
+                timingKeyframes.t90Frame = keyframe;
+            }
+            if (shouldCaptureT95) {
+                timingKeyframes.t95Frame = keyframe;
+            }
+            if (resources.contains<ScenarioResultArtifactsResource>()) {
+                auto& result = resources.get<ScenarioResultArtifactsResource>();
+                if (shouldCaptureT90 && !result.artifacts.timingSummary.t90Frame.has_value()) {
+                    result.artifacts.timingSummary.t90Frame = timingKeyframes.t90Frame;
+                }
+                if (shouldCaptureT95 && !result.artifacts.timingSummary.t95Frame.has_value()) {
+                    result.artifacts.timingSummary.t95Frame = timingKeyframes.t95Frame;
+                }
+            }
+        }
+
+        for (const auto entity : entities) {
+            auto& position = query.get<Position>(entity);
+            const auto& agent = query.get<Agent>(entity);
+            auto& velocity = query.get<Velocity>(entity);
+            auto& route = query.get<EvacuationRoute>(entity);
+            auto& status = query.get<EvacuationStatus>(entity);
+            if (status.evacuated) {
                 continue;
             }
 
@@ -106,6 +189,7 @@ public:
                 continue;
             }
 
+            const auto& floorLayout = cachedLayoutForFloor(layoutCache, route.currentFloorId);
             const auto routeDirection = (target - position.value) * (1.0 / distance);
             const auto maxSpeed = effectiveMaxSpeed(layoutCache, agent, route, position.value);
             const auto desiredVelocity = routeDirection * maxSpeed;

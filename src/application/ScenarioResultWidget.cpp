@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <functional>
 #include <utility>
 
 #include <QAbstractItemView>
@@ -15,9 +16,11 @@
 #include <QIcon>
 #include <QLabel>
 #include <QLinearGradient>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPixmap>
+#include <QPointer>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSizePolicy>
@@ -97,11 +100,16 @@ public:
         setMinimumHeight(150);
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         setToolTip("Remaining occupant curve. T90/T95 indicate when 90%/95% of occupants have evacuated.");
+        setMouseTracking(true);
     }
 
     void setCurrentTimeSeconds(std::optional<double> seconds) {
         currentTimeSeconds_ = seconds;
         update();
+    }
+
+    void setTimingMarkerActivatedHandler(std::function<void(double)> handler) {
+        timingMarkerActivatedHandler_ = std::move(handler);
     }
 
 protected:
@@ -175,10 +183,99 @@ protected:
             QString("%1 / %2 remaining by %3 sec")
                 .arg(static_cast<int>(remainingCount))
                 .arg(static_cast<int>(last.totalCount))
-                .arg(last.timeSeconds, 0, 'f', 1));
+                 .arg(last.timeSeconds, 0, 'f', 1));
+    }
+
+    void mouseMoveEvent(QMouseEvent* event) override {
+        if (event == nullptr) {
+            return;
+        }
+        const bool hover = timingMarkerHitSeconds(event->position()).has_value();
+        setCursor(hover ? Qt::PointingHandCursor : Qt::ArrowCursor);
+        QWidget::mouseMoveEvent(event);
+    }
+
+    void leaveEvent(QEvent* event) override {
+        unsetCursor();
+        QWidget::leaveEvent(event);
+    }
+
+    void mousePressEvent(QMouseEvent* event) override {
+        if (event == nullptr || event->button() != Qt::LeftButton) {
+            QWidget::mousePressEvent(event);
+            return;
+        }
+        const auto seconds = timingMarkerHitSeconds(event->position());
+        if (!seconds.has_value()) {
+            QWidget::mousePressEvent(event);
+            return;
+        }
+        event->accept();
+        if (timingMarkerActivatedHandler_) {
+            timingMarkerActivatedHandler_(*seconds);
+        }
     }
 
 private:
+    QRectF plotRect() const {
+        return QRectF(rect()).adjusted(34, 18, -14, -28);
+    }
+
+    double maxTimeSeconds() const {
+        if (artifacts_.evacuationProgress.empty()) {
+            return 1.0;
+        }
+        const auto maxTimeIt = std::max_element(
+            artifacts_.evacuationProgress.begin(),
+            artifacts_.evacuationProgress.end(),
+            [](const auto& lhs, const auto& rhs) {
+                return lhs.timeSeconds < rhs.timeSeconds;
+            });
+        return std::max(1.0, maxTimeIt->timeSeconds);
+    }
+
+    QRectF markerHitRegion(const QRectF& plot, double maxTime, double seconds) const {
+        const auto x = plot.left() + (std::clamp(seconds / maxTime, 0.0, 1.0) * plot.width());
+        const QRectF lineHit(x - 6.0, plot.top(), 12.0, plot.height());
+        const QRectF labelHit(x - 4.0, plot.top() - 2.0, 70.0, 22.0);
+        return lineHit.united(labelHit);
+    }
+
+    std::optional<double> timingMarkerHitSeconds(const QPointF& position) const {
+        const QRectF plot = plotRect();
+        if (!plot.contains(position)) {
+            return std::nullopt;
+        }
+
+        const auto maxTime = maxTimeSeconds();
+        struct Candidate {
+            double seconds;
+            double distance;
+        };
+        std::optional<Candidate> best;
+        auto consider = [&](const std::optional<double>& markerSeconds) {
+            if (!markerSeconds.has_value()) {
+                return;
+            }
+            const auto region = markerHitRegion(plot, maxTime, *markerSeconds);
+            if (!region.contains(position)) {
+                return;
+            }
+            const auto x = plot.left() + (std::clamp(*markerSeconds / maxTime, 0.0, 1.0) * plot.width());
+            const auto distance = std::abs(position.x() - x);
+            if (!best.has_value() || distance < best->distance) {
+                best = Candidate{.seconds = *markerSeconds, .distance = distance};
+            }
+        };
+
+        consider(artifacts_.timingSummary.t90Seconds);
+        consider(artifacts_.timingSummary.t95Seconds);
+        if (!best.has_value()) {
+            return std::nullopt;
+        }
+        return best->seconds;
+    }
+
     void drawTimingMarker(
         QPainter& painter,
         const QRectF& plot,
@@ -215,6 +312,7 @@ private:
 
     safecrowd::domain::ScenarioResultArtifacts artifacts_{};
     std::optional<double> currentTimeSeconds_{};
+    std::function<void(double)> timingMarkerActivatedHandler_{};
 };
 
 class DensityLegendWidget final : public QWidget {
@@ -969,6 +1067,30 @@ QWidget* createResultCanvasPanel(
     auto* replayControls = new ResultReplayControls(replayFramesForResult(artifacts, frame), canvas, progressWidget, panel);
     if (replayControlsOut != nullptr) {
         *replayControlsOut = replayControls;
+    }
+    if (progressWidget != nullptr) {
+        const QPointer<ResultReplayControls> replayControlsGuard(replayControls);
+        const auto t90Seconds = artifacts.timingSummary.t90Seconds;
+        const auto t95Seconds = artifacts.timingSummary.t95Seconds;
+        const auto t90Frame = artifacts.timingSummary.t90Frame;
+        const auto t95Frame = artifacts.timingSummary.t95Frame;
+        progressWidget->setTimingMarkerActivatedHandler([replayControlsGuard, t90Seconds, t95Seconds, t90Frame, t95Frame](double seconds) {
+            if (replayControlsGuard != nullptr) {
+                if (t90Seconds.has_value()
+                    && t90Frame.has_value()
+                    && std::abs(seconds - *t90Seconds) <= 1e-6) {
+                    replayControlsGuard->showFrame(*t90Frame);
+                    return;
+                }
+                if (t95Seconds.has_value()
+                    && t95Frame.has_value()
+                    && std::abs(seconds - *t95Seconds) <= 1e-6) {
+                    replayControlsGuard->showFrame(*t95Frame);
+                    return;
+                }
+                replayControlsGuard->showClosestFrameAtSeconds(seconds);
+            }
+        });
     }
     layout->addWidget(replayControls);
     layout->addWidget(graphPanel, 1);

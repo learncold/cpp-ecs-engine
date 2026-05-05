@@ -1040,6 +1040,12 @@ QJsonObject resultArtifactsToJson(const safecrowd::domain::ScenarioResultArtifac
     timing["t90Seconds"] = optionalDoubleToJson(artifacts.timingSummary.t90Seconds);
     timing["t95Seconds"] = optionalDoubleToJson(artifacts.timingSummary.t95Seconds);
     timing["finalEvacuationTimeSeconds"] = optionalDoubleToJson(artifacts.timingSummary.finalEvacuationTimeSeconds);
+    if (artifacts.timingSummary.t90Frame.has_value()) {
+        timing["t90Frame"] = simulationFrameToJson(*artifacts.timingSummary.t90Frame);
+    }
+    if (artifacts.timingSummary.t95Frame.has_value()) {
+        timing["t95Frame"] = simulationFrameToJson(*artifacts.timingSummary.t95Frame);
+    }
     object["timingSummary"] = timing;
     return object;
 }
@@ -1064,6 +1070,12 @@ safecrowd::domain::ScenarioResultArtifacts resultArtifactsFromJson(const QJsonOb
     artifacts.timingSummary.t90Seconds = optionalDoubleFromJson(timing.value("t90Seconds"));
     artifacts.timingSummary.t95Seconds = optionalDoubleFromJson(timing.value("t95Seconds"));
     artifacts.timingSummary.finalEvacuationTimeSeconds = optionalDoubleFromJson(timing.value("finalEvacuationTimeSeconds"));
+    if (timing.value("t90Frame").isObject()) {
+        artifacts.timingSummary.t90Frame = simulationFrameFromJson(timing.value("t90Frame").toObject());
+    }
+    if (timing.value("t95Frame").isObject()) {
+        artifacts.timingSummary.t95Frame = simulationFrameFromJson(timing.value("t95Frame").toObject());
+    }
     return artifacts;
 }
 
