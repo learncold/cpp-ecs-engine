@@ -51,6 +51,7 @@ protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
     void keyReleaseEvent(QKeyEvent* event) override;
+    void leaveEvent(QEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
@@ -95,6 +96,8 @@ private:
     double layoutCacheZoom_{0.0};
     double layoutCacheDevicePixelRatio_{0.0};
     bool layoutCacheValid_{false};
+
+    std::string hoveredConnectionBlockId_{};
 };
 
 }  // namespace safecrowd::application
