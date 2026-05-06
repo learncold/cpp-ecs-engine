@@ -2615,6 +2615,12 @@ void LayoutPreviewWidget::keyPressEvent(QKeyEvent* event) {
         }
     }
 
+    if (event->key() == Qt::Key_Escape && toolMode_ != ToolMode::Select) {
+        setToolMode(ToolMode::Select);
+        event->accept();
+        return;
+    }
+
     QWidget::keyPressEvent(event);
 }
 
@@ -5081,13 +5087,16 @@ void LayoutPreviewWidget::setupToolbars() {
         gridSpacingMeters_ = gridSpacingComboBox_->itemData(index).toDouble();
         update();
     });
-    connect(roomToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::DrawRoom); });
-    connect(exitToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::DrawExit); });
-    connect(wallToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::DrawWall); });
-    connect(obstructionToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::DrawObstruction); });
-    connect(doorToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::DrawDoor); });
-    connect(stairToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::DrawStair); });
-    connect(uStairToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::DrawUStair); });
+    const auto toggleToolMode = [this](ToolMode mode) {
+        setToolMode(toolMode_ == mode ? ToolMode::Select : mode);
+    };
+    connect(roomToolButton_, &QToolButton::clicked, this, [this, toggleToolMode]() { toggleToolMode(ToolMode::DrawRoom); });
+    connect(exitToolButton_, &QToolButton::clicked, this, [this, toggleToolMode]() { toggleToolMode(ToolMode::DrawExit); });
+    connect(wallToolButton_, &QToolButton::clicked, this, [this, toggleToolMode]() { toggleToolMode(ToolMode::DrawWall); });
+    connect(obstructionToolButton_, &QToolButton::clicked, this, [this, toggleToolMode]() { toggleToolMode(ToolMode::DrawObstruction); });
+    connect(doorToolButton_, &QToolButton::clicked, this, [this, toggleToolMode]() { toggleToolMode(ToolMode::DrawDoor); });
+    connect(stairToolButton_, &QToolButton::clicked, this, [this, toggleToolMode]() { toggleToolMode(ToolMode::DrawStair); });
+    connect(uStairToolButton_, &QToolButton::clicked, this, [this, toggleToolMode]() { toggleToolMode(ToolMode::DrawUStair); });
     connect(roomAutoWallsCheckBox_, &QCheckBox::toggled, this, [this](bool checked) {
         roomAutoWallsEnabled_ = checked;
     });
