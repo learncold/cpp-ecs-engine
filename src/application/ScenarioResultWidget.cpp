@@ -1459,6 +1459,9 @@ void ScenarioResultWidget::rerunScenario() {
         saveProjectHandler_,
         openProjectHandler_,
         backToLayoutReviewHandler_,
+        frame_,
+        risk_,
+        artifacts_,
         this);
 
     rootLayout->replaceWidget(shell_, runWidget);

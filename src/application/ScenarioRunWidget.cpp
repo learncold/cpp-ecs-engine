@@ -181,6 +181,35 @@ ScenarioRunWidget::ScenarioRunWidget(
       saveProjectHandler_(std::move(saveProjectHandler)),
       openProjectHandler_(std::move(openProjectHandler)),
       backToLayoutReviewHandler_(std::move(backToLayoutReviewHandler)) {
+    setupUi();
+}
+
+ScenarioRunWidget::ScenarioRunWidget(
+    const QString& projectName,
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const safecrowd::domain::ScenarioDraft& scenario,
+    std::function<void()> saveProjectHandler,
+    std::function<void()> openProjectHandler,
+    std::function<void()> backToLayoutReviewHandler,
+    safecrowd::domain::SimulationFrame cachedResultFrame,
+    safecrowd::domain::ScenarioRiskSnapshot cachedResultRisk,
+    safecrowd::domain::ScenarioResultArtifacts cachedResultArtifacts,
+    QWidget* parent)
+    : QWidget(parent),
+      projectName_(projectName),
+      layout_(layout),
+      scenario_(scenario),
+      runner_(layout_, scenario_),
+      cachedResultFrame_(std::move(cachedResultFrame)),
+      cachedResultRisk_(std::move(cachedResultRisk)),
+      cachedResultArtifacts_(std::move(cachedResultArtifacts)),
+      saveProjectHandler_(std::move(saveProjectHandler)),
+      openProjectHandler_(std::move(openProjectHandler)),
+      backToLayoutReviewHandler_(std::move(backToLayoutReviewHandler)) {
+    setupUi();
+}
+
+void ScenarioRunWidget::setupUi() {
     auto* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
@@ -275,6 +304,12 @@ QWidget* ScenarioRunWidget::createRunPanel() {
 
     layout->addStretch(1);
 
+    skipResultButton_ = new QPushButton("Skip for Result", panel);
+    skipResultButton_->setFont(ui::font(ui::FontRole::Body));
+    skipResultButton_->setStyleSheet(ui::secondaryButtonStyleSheet());
+    skipResultButton_->setEnabled(false);
+    layout->addWidget(skipResultButton_);
+
     resultButton_ = new QPushButton("View Results", panel);
     resultButton_->setFont(ui::font(ui::FontRole::Body));
     resultButton_->setStyleSheet(ui::primaryButtonStyleSheet());
@@ -286,6 +321,9 @@ QWidget* ScenarioRunWidget::createRunPanel() {
     });
     connect(stopButton_, &QPushButton::clicked, this, [this]() {
         stopRun();
+    });
+    connect(skipResultButton_, &QPushButton::clicked, this, [this]() {
+        runToCompletion();
     });
     connect(resultButton_, &QPushButton::clicked, this, [this]() {
         showResults();
@@ -324,6 +362,12 @@ void ScenarioRunWidget::returnToAuthoring() {
     shell_->deleteLater();
     shell_ = nullptr;
     canvas_ = nullptr;
+}
+
+bool ScenarioRunWidget::hasCachedResult() const noexcept {
+    return cachedResultFrame_.has_value()
+        && cachedResultRisk_.has_value()
+        && cachedResultArtifacts_.has_value();
 }
 
 void ScenarioRunWidget::refreshStatus() {
@@ -390,24 +434,75 @@ void ScenarioRunWidget::refreshStatus() {
     if (stopButton_ != nullptr) {
         stopButton_->setEnabled(frame.totalAgentCount > 0);
     }
-    if (resultButton_ != nullptr) {
-        resultButton_->setEnabled(frame.complete && frame.totalAgentCount > 0);
+    if (skipResultButton_ != nullptr) {
+        skipResultButton_->setEnabled(frame.totalAgentCount > 0 && !frame.complete && !hasCachedResult());
     }
+    if (resultButton_ != nullptr) {
+        const auto cachedAgentCount = hasCachedResult() ? cachedResultFrame_->totalAgentCount : 0;
+        resultButton_->setEnabled(
+            (frame.complete && frame.totalAgentCount > 0)
+            || cachedAgentCount > 0);
+    }
+}
+
+bool ScenarioRunWidget::runToCompletion() {
+    if (timer_ != nullptr) {
+        timer_->stop();
+    }
+
+    const auto remainingSeconds = std::max(0.0, runner_.timeLimitSeconds() - runner_.frame().elapsedSeconds);
+    const auto maxSteps = static_cast<int>(std::ceil(remainingSeconds / kSimulationDeltaSeconds)) + 2;
+    for (int step = 0; step < maxSteps && !runner_.complete(); ++step) {
+        runner_.step(kSimulationDeltaSeconds);
+    }
+
+    if (canvas_ != nullptr) {
+        canvas_->setFrame(runner_.frame());
+    }
+    if (runner_.complete()) {
+        storeResultCache(runner_);
+    }
+    refreshStatus();
+    return runner_.complete();
+}
+
+void ScenarioRunWidget::storeResultCache(const safecrowd::domain::ScenarioSimulationRunner& runner) {
+    cachedResultFrame_ = runner.frame();
+    cachedResultRisk_ = runner.resultRiskSnapshot();
+    cachedResultArtifacts_ = runner.resultArtifacts();
 }
 
 void ScenarioRunWidget::stopRun() {
     paused_ = true;
     runner_.reset(layout_, scenario_);
+    cachedResultFrame_.reset();
+    cachedResultRisk_.reset();
+    cachedResultArtifacts_.reset();
     canvas_->setFrame(runner_.frame());
     refreshStatus();
     timer_->start();
 }
 
 void ScenarioRunWidget::showResults() {
-    const auto& frame = runner_.frame();
-    if (frame.totalAgentCount == 0 || !frame.complete) {
+    if (runner_.frame().totalAgentCount == 0 && !hasCachedResult()) {
         return;
     }
+
+    const auto* resultFrame = &runner_.frame();
+    const auto* resultRisk = &runner_.resultRiskSnapshot();
+    const auto* resultArtifacts = &runner_.resultArtifacts();
+    if (!runner_.complete() && hasCachedResult()) {
+        resultFrame = &*cachedResultFrame_;
+        resultRisk = &*cachedResultRisk_;
+        resultArtifacts = &*cachedResultArtifacts_;
+    } else if (!runner_.complete()) {
+        return;
+    } else {
+        resultFrame = &runner_.frame();
+        resultRisk = &runner_.resultRiskSnapshot();
+        resultArtifacts = &runner_.resultArtifacts();
+    }
+
     if (timer_ != nullptr) {
         timer_->stop();
     }
@@ -421,9 +516,9 @@ void ScenarioRunWidget::showResults() {
         projectName_,
         layout_,
         scenario_,
-        runner_.frame(),
-        runner_.resultRiskSnapshot(),
-        runner_.resultArtifacts(),
+        *resultFrame,
+        *resultRisk,
+        *resultArtifacts,
         [this]() {
             if (saveProjectHandler_) {
                 saveProjectHandler_();
