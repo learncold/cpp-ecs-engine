@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 
+#include <QColor>
 #include <QVBoxLayout>
 
 #include "application/NavigationTreeWidget.h"
@@ -15,6 +16,8 @@ namespace safecrowd::application {
 namespace {
 
 constexpr double kGeometryEpsilon = 1e-4;
+const QColor kExitAccentColor("#2d8f5b");
+const QColor kDoorAccentColor("#ff8c00");
 
 QString floorActionId(const std::string& floorId) {
     return QString("floor:%1").arg(QString::fromStdString(floorId));
@@ -34,7 +37,7 @@ QIcon floorIcon() {
 
 QIcon zoneIcon(const safecrowd::domain::Zone2D& zone) {
     if (zone.kind == safecrowd::domain::ZoneKind::Exit) {
-        return treeIcon(QStringLiteral(":/tool-icons/layout-authoring/draw-exit.svg"), QColor("#2d8f5b"));
+        return treeIcon(QStringLiteral(":/tool-icons/layout-authoring/draw-exit.svg"), kExitAccentColor);
     }
     if (zone.kind == safecrowd::domain::ZoneKind::Stair || zone.isStair || zone.isRamp) {
         return treeIcon(QStringLiteral(":/tool-icons/layout-authoring/draw-stair-ramp.svg"), QColor("#6a5d9f"));
@@ -56,9 +59,9 @@ QIcon connectionIcon(const safecrowd::domain::Connection2D& connection) {
         return treeIcon(QStringLiteral(":/tool-icons/layout-authoring/draw-stair-ramp.svg"), QColor("#6a5d9f"));
     }
     if (connection.kind == safecrowd::domain::ConnectionKind::Exit) {
-        return treeIcon(QStringLiteral(":/tool-icons/layout-authoring/draw-exit.svg"), QColor("#2d8f5b"));
+        return treeIcon(QStringLiteral(":/tool-icons/layout-authoring/draw-exit.svg"), kExitAccentColor);
     }
-    return treeIcon(QStringLiteral(":/tool-icons/layout-authoring/draw-door.svg"), QColor("#8e6b23"));
+    return treeIcon(QStringLiteral(":/tool-icons/layout-authoring/draw-door.svg"), kDoorAccentColor);
 }
 
 QString zoneLabel(const safecrowd::domain::Zone2D& zone) {
