@@ -654,6 +654,10 @@ private:
         const ScenarioLayoutCacheResource& layoutCache,
         double elapsedSeconds,
         std::uint64_t derivedSeed) {
+        // Keep this small to avoid frame spikes when guidance toggles.
+        // Higher values converge faster but may cause noticeable hitching with many agents.
+        constexpr std::size_t kGuidanceReplanBudgetPerFrame = 50;
+
         const auto active = activeRouteGuidance(elapsedSeconds);
         std::string activeId;
         if (active.has_value() && active->guidance != nullptr) {
@@ -663,42 +667,32 @@ private:
                 activeId.append(std::to_string(active->periodIndex));
             }
         }
-        if (activeId == activeRouteGuidanceId_) {
-            return;
-        }
-        activeRouteGuidanceId_ = activeId;
 
-        if (!active.has_value() || active->guidance == nullptr) {
-            for (const auto entity : entities) {
-                const auto& status = query.get<EvacuationStatus>(entity);
-                if (status.evacuated) {
-                    continue;
-                }
-
-                const auto& position = query.get<Position>(entity);
-                auto& route = query.get<EvacuationRoute>(entity);
-                route.guidanceEventId.clear();
-                route.followsGuidance = false;
-
-                if (!route.originalDestinationZoneId.empty()) {
-                    const auto startZoneId = zoneAt(layoutCache, position.value, route.currentFloorId);
-                    if (!startZoneId.empty()) {
-                        RoutePlan plan = routePlanToExit(layoutCache, position.value, startZoneId, route.originalDestinationZoneId);
-                        if (plan.destinationZoneId.empty()) {
-                            plan = routePlanToNearestExit(layoutCache, position.value, startZoneId);
-                        }
-                        if (!plan.destinationZoneId.empty()) {
-                            replaceRouteWithPlan(route, plan, position.value);
-                        }
-                    }
-                }
+        if (activeId != activeRouteGuidanceId_) {
+            activeRouteGuidanceId_ = activeId;
+            guidanceReplanCursor_ = 0;
+            guidanceReplanSeed_ = derivedSeed;
+            if (active.has_value() && active->guidance != nullptr) {
+                guidanceReplanGuidance_ = *active->guidance;
+            } else {
+                guidanceReplanGuidance_.reset();
             }
+            guidanceReplanIdHash_ = fnv1a64(activeId);
+            guidanceReplanPending_ = true;
+        }
+
+        if (!guidanceReplanPending_ || guidanceReplanCursor_ >= entities.size()) {
             return;
         }
 
-        const auto* activeGuidance = active->guidance;
-        const auto activeIdHash = fnv1a64(activeId);
-        for (const auto entity : entities) {
+        const auto endIndex = std::min<std::size_t>(entities.size(), guidanceReplanCursor_ + kGuidanceReplanBudgetPerFrame);
+
+        const RouteGuidanceDraft* activeGuidance = guidanceReplanGuidance_.has_value() ? &*guidanceReplanGuidance_ : nullptr;
+        const auto activeIdHash = guidanceReplanIdHash_;
+        const auto stableSeed = guidanceReplanSeed_;
+
+        for (std::size_t i = guidanceReplanCursor_; i < endIndex; ++i) {
+            const auto entity = entities[i];
             const auto& status = query.get<EvacuationStatus>(entity);
             if (status.evacuated) {
                 continue;
@@ -716,6 +710,31 @@ private:
                 continue;
             }
 
+            if (activeGuidance == nullptr) {
+                route.guidanceEventId.clear();
+                route.followsGuidance = false;
+
+                std::string desiredExit = route.originalDestinationZoneId;
+                if (desiredExit.empty()) {
+                    continue;
+                }
+
+                if (route.destinationZoneId == desiredExit && !route.waypoints.empty()) {
+                    continue;
+                }
+
+                RoutePlan plan = routePlanToExit(layoutCache, position.value, startZoneId, desiredExit);
+                if (plan.destinationZoneId.empty()) {
+                    plan = routePlanToNearestExit(layoutCache, position.value, startZoneId);
+                }
+                if (plan.destinationZoneId.empty()) {
+                    continue;
+                }
+                replaceRouteWithPlan(route, plan, position.value);
+                route.nextExitReplanSeconds = elapsedSeconds + 0.25;
+                continue;
+            }
+
             bool guidedExitValid = false;
             if (!activeGuidance->guidedExitZoneId.empty()) {
                 if (const auto* exitZone = findCachedZone(layoutCache, activeGuidance->guidedExitZoneId);
@@ -724,20 +743,24 @@ private:
                 }
             }
 
+            // Detour estimation can be expensive; skip it unless guidance has a detour limit.
             double detourMeters = 0.0;
             if (guidedExitValid && !route.originalDestinationZoneId.empty()) {
-                const auto originalDistance =
-                    zoneDistanceToExit(layoutCache, position.value, startZoneId, route.originalDestinationZoneId);
-                const auto guidedDistance =
-                    zoneDistanceToExit(layoutCache, position.value, startZoneId, activeGuidance->guidedExitZoneId);
-                if (originalDistance.has_value() && guidedDistance.has_value()) {
-                    detourMeters = std::max(0.0, *guidedDistance - *originalDistance);
+                // Use a cheap approximation for detour to avoid expensive graph searches when guidance toggles.
+                // This detour is only used for compliance probability; the actual route still uses full planning.
+                const auto* originalExit = findCachedZone(layoutCache, route.originalDestinationZoneId);
+                const auto* guidedExit = findCachedZone(layoutCache, activeGuidance->guidedExitZoneId);
+                if (originalExit != nullptr && guidedExit != nullptr && originalExit->kind == ZoneKind::Exit
+                    && guidedExit->kind == ZoneKind::Exit) {
+                    const auto originalDistance = distanceBetween(position.value, polygonCenter(originalExit->area));
+                    const auto guidedDistance = distanceBetween(position.value, polygonCenter(guidedExit->area));
+                    detourMeters = std::max(0.0, guidedDistance - originalDistance);
                 }
             }
 
             const auto pFollow = complianceProbability(*activeGuidance, agent, detourMeters);
             const auto u = uniform01(
-                derivedSeed
+                stableSeed
                 ^ activeIdHash
                 ^ (static_cast<std::uint64_t>(entity.index) << 1U)
                 ^ static_cast<std::uint64_t>(entity.generation));
@@ -753,6 +776,10 @@ private:
                 desiredExit = route.originalDestinationZoneId;
             }
 
+            if (!desiredExit.empty() && route.destinationZoneId == desiredExit && !route.waypoints.empty()) {
+                continue;
+            }
+
             RoutePlan plan;
             if (!desiredExit.empty()) {
                 plan = routePlanToExit(layoutCache, position.value, startZoneId, desiredExit);
@@ -765,6 +792,11 @@ private:
             }
             replaceRouteWithPlan(route, plan, position.value);
             route.nextExitReplanSeconds = elapsedSeconds + 0.25;
+        }
+
+        guidanceReplanCursor_ = endIndex;
+        if (guidanceReplanCursor_ >= entities.size()) {
+            guidanceReplanPending_ = false;
         }
     }
 
@@ -1552,8 +1584,14 @@ private:
     std::optional<ScenarioLayoutCacheResource> layoutCache_{};
     std::vector<RouteGuidanceDraft> routeGuidances_{};
     std::string activeRouteGuidanceId_{};
+    bool guidanceReplanPending_{false};
+    std::size_t guidanceReplanCursor_{0};
+    std::optional<RouteGuidanceDraft> guidanceReplanGuidance_{};
+    std::uint64_t guidanceReplanSeed_{0U};
+    std::uint64_t guidanceReplanIdHash_{0U};
 };
-
+
+
 
 
 }  // namespace
