@@ -2,10 +2,10 @@
 
 #include <algorithm>
 #include <cmath>
-#include <limits>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace safecrowd::domain {
@@ -13,6 +13,7 @@ namespace {
 
 constexpr double kMinimumConnectionWidth = 0.9;
 constexpr double kConnectionBoundaryTolerance = 0.25;
+constexpr double kGeometryEpsilon = 1e-9;
 
 struct Vector2D {
     double x{0.0};
@@ -35,13 +36,6 @@ Vector2D subtract(const Point2D& lhs, const Point2D& rhs) {
     };
 }
 
-Point2D add(const Point2D& point, const Vector2D& delta) {
-    return {
-        .x = point.x + delta.x,
-        .y = point.y + delta.y,
-    };
-}
-
 Vector2D scale(const Vector2D& value, double factor) {
     return {
         .x = value.x * factor,
@@ -51,6 +45,10 @@ Vector2D scale(const Vector2D& value, double factor) {
 
 double dot(const Vector2D& lhs, const Vector2D& rhs) {
     return (lhs.x * rhs.x) + (lhs.y * rhs.y);
+}
+
+double cross(const Vector2D& lhs, const Vector2D& rhs) {
+    return (lhs.x * rhs.y) - (lhs.y * rhs.x);
 }
 
 double length(const Vector2D& value) {
@@ -70,63 +68,118 @@ double distanceBetween(const Point2D& lhs, const Point2D& rhs) {
     return length(subtract(lhs, rhs));
 }
 
-Point2D segmentMidpoint(const LineSegment2D& segment) {
-    return {
-        .x = (segment.start.x + segment.end.x) * 0.5,
-        .y = (segment.start.y + segment.end.y) * 0.5,
-    };
+double distancePointToLine(const Point2D& point, const LineSegment2D& line) {
+    const auto direction = subtract(line.end, line.start);
+    const auto lineLength = length(direction);
+    if (lineLength <= kGeometryEpsilon) {
+        return distanceBetween(point, line.start);
+    }
+
+    return std::abs(cross(subtract(point, line.start), direction)) / lineLength;
 }
 
-Vector2D segmentNormal(const LineSegment2D& segment) {
-    const auto direction = normalize(subtract(segment.end, segment.start));
-    return {
-        .x = -direction.y,
-        .y = direction.x,
-    };
+double projectPoint(const Point2D& point, const Vector2D& axis) {
+    return point.x * axis.x + point.y * axis.y;
+}
+
+std::pair<double, double> projectedInterval(const LineSegment2D& segment, const Vector2D& axis) {
+    const auto start = projectPoint(segment.start, axis);
+    const auto end = projectPoint(segment.end, axis);
+    return {std::min(start, end), std::max(start, end)};
 }
 
 double distancePointToSegment(const Point2D& point, const LineSegment2D& segment) {
-    const auto dx = segment.end.x - segment.start.x;
-    const auto dy = segment.end.y - segment.start.y;
-    const auto lengthSquared = dx * dx + dy * dy;
-    if (lengthSquared <= 1e-12) {
+    const auto direction = subtract(segment.end, segment.start);
+    const auto lengthSquared = dot(direction, direction);
+    if (lengthSquared <= kGeometryEpsilon) {
         return distanceBetween(point, segment.start);
     }
 
-    const auto t = std::clamp(
-        ((point.x - segment.start.x) * dx + (point.y - segment.start.y) * dy) / lengthSquared,
-        0.0,
-        1.0);
+    const auto t = std::clamp(dot(subtract(point, segment.start), direction) / lengthSquared, 0.0, 1.0);
     const Point2D projected{
-        .x = segment.start.x + t * dx,
-        .y = segment.start.y + t * dy,
+        .x = segment.start.x + (direction.x * t),
+        .y = segment.start.y + (direction.y * t),
     };
     return distanceBetween(point, projected);
 }
 
-double distancePointToRingBoundary(const Point2D& point, const std::vector<Point2D>& ring) {
-    if (ring.empty()) {
-        return std::numeric_limits<double>::infinity();
+bool spansIntersect(const LineSegment2D& lhs, const LineSegment2D& rhs) {
+    const auto lhsDirection = subtract(lhs.end, lhs.start);
+    const auto rhsDirection = subtract(rhs.end, rhs.start);
+    const auto denominator = cross(lhsDirection, rhsDirection);
+
+    if (std::abs(denominator) <= kGeometryEpsilon) {
+        if (distancePointToLine(lhs.start, rhs) > kConnectionBoundaryTolerance
+            || distancePointToLine(lhs.end, rhs) > kConnectionBoundaryTolerance) {
+            return false;
+        }
+
+        const auto axis = normalize(rhsDirection);
+        const auto lhsInterval = projectedInterval(lhs, axis);
+        const auto rhsInterval = projectedInterval(rhs, axis);
+        const auto overlap =
+            std::min(lhsInterval.second, rhsInterval.second) - std::max(lhsInterval.first, rhsInterval.first);
+        return overlap > kGeometryEpsilon;
     }
 
-    auto bestDistance = std::numeric_limits<double>::infinity();
+    const auto delta = subtract(rhs.start, lhs.start);
+    const auto lhsFraction = cross(delta, rhsDirection) / denominator;
+    const auto rhsFraction = cross(delta, lhsDirection) / denominator;
+    return lhsFraction >= -kGeometryEpsilon
+        && lhsFraction <= 1.0 + kGeometryEpsilon
+        && rhsFraction >= -kGeometryEpsilon
+        && rhsFraction <= 1.0 + kGeometryEpsilon;
+}
+
+bool spanContactsBoundary(const LineSegment2D& span, const LineSegment2D& boundary) {
+    const auto spanDirection = subtract(span.end, span.start);
+    const auto boundaryDirection = subtract(boundary.end, boundary.start);
+    if (length(spanDirection) <= kGeometryEpsilon || length(boundaryDirection) <= kGeometryEpsilon) {
+        return false;
+    }
+
+    if (spansIntersect(span, boundary)) {
+        return true;
+    }
+
+    const auto bestDistance = std::min({
+        distancePointToSegment(span.start, boundary),
+        distancePointToSegment(span.end, boundary),
+        distancePointToSegment(boundary.start, span),
+        distancePointToSegment(boundary.end, span),
+    });
+    return bestDistance <= kConnectionBoundaryTolerance;
+}
+
+bool spanContactsRingBoundary(const LineSegment2D& span, const std::vector<Point2D>& ring) {
+    if (ring.size() < 2) {
+        return false;
+    }
+
     for (std::size_t index = 0; index < ring.size(); ++index) {
-        const auto& start = ring[index];
-        const auto& end = ring[(index + 1) % ring.size()];
-        bestDistance = std::min(bestDistance, distancePointToSegment(point, {.start = start, .end = end}));
+        const LineSegment2D boundary{
+            .start = ring[index],
+            .end = ring[(index + 1) % ring.size()],
+        };
+        if (spanContactsBoundary(span, boundary)) {
+            return true;
+        }
     }
-    return bestDistance;
+
+    return false;
 }
 
-double distancePointToPolygonBoundary(const Point2D& point, const Polygon2D& polygon) {
-    auto bestDistance = distancePointToRingBoundary(point, polygon.outline);
-    for (const auto& hole : polygon.holes) {
-        bestDistance = std::min(bestDistance, distancePointToRingBoundary(point, hole));
+bool spanContactsPolygonBoundary(const LineSegment2D& span, const Polygon2D& polygon) {
+    if (spanContactsRingBoundary(span, polygon.outline)) {
+        return true;
     }
-    return bestDistance;
+
+    return std::any_of(polygon.holes.begin(), polygon.holes.end(), [&](const auto& hole) {
+        return spanContactsRingBoundary(span, hole);
+    });
 }
 
-bool pointInRingInclusive(const Point2D& point, const std::vector<Point2D>& ring) {
+bool pointInRing(const Point2D& point, const std::vector<Point2D>& ring) {
     if (ring.size() < 3) {
         return false;
     }
@@ -135,17 +188,13 @@ bool pointInRingInclusive(const Point2D& point, const std::vector<Point2D>& ring
     for (std::size_t index = 0, previous = ring.size() - 1; index < ring.size(); previous = index++) {
         const auto& start = ring[previous];
         const auto& end = ring[index];
-        if (distancePointToSegment(point, {.start = start, .end = end}) <= kConnectionBoundaryTolerance) {
-            return true;
-        }
-
         const bool crossesY = (start.y > point.y) != (end.y > point.y);
         if (!crossesY) {
             continue;
         }
 
         const auto xAtPointY = start.x + ((point.y - start.y) * (end.x - start.x) / (end.y - start.y));
-        if (point.x <= xAtPointY + 1e-12) {
+        if (point.x <= xAtPointY + kGeometryEpsilon) {
             inside = !inside;
         }
     }
@@ -153,13 +202,13 @@ bool pointInRingInclusive(const Point2D& point, const std::vector<Point2D>& ring
     return inside;
 }
 
-bool pointInPolygonInclusive(const Point2D& point, const Polygon2D& polygon) {
-    if (!pointInRingInclusive(point, polygon.outline)) {
+bool pointInPolygon(const Point2D& point, const Polygon2D& polygon) {
+    if (!pointInRing(point, polygon.outline)) {
         return false;
     }
 
     for (const auto& hole : polygon.holes) {
-        if (pointInRingInclusive(point, hole)) {
+        if (pointInRing(point, hole)) {
             return false;
         }
     }
@@ -167,27 +216,10 @@ bool pointInPolygonInclusive(const Point2D& point, const Polygon2D& polygon) {
     return true;
 }
 
-bool spanTouchesPolygon(const LineSegment2D& span, const Polygon2D& polygon) {
-    const auto midpoint = segmentMidpoint(span);
-    const auto normal = segmentNormal(span);
-    const double probeDistance = std::max(0.35, distanceBetween(span.start, span.end) * 0.35);
-
-    const std::vector<Point2D> probes = {
-        span.start,
-        span.end,
-        midpoint,
-        add(midpoint, scale(normal, probeDistance)),
-        add(midpoint, scale(normal, -probeDistance)),
-    };
-
-    for (const auto& probe : probes) {
-        if (pointInPolygonInclusive(probe, polygon)
-            || distancePointToPolygonBoundary(probe, polygon) <= kConnectionBoundaryTolerance) {
-            return true;
-        }
-    }
-
-    return false;
+bool spanInteractsWithPolygon(const LineSegment2D& span, const Polygon2D& polygon) {
+    return spanContactsPolygonBoundary(span, polygon)
+        || pointInPolygon(span.start, polygon)
+        || pointInPolygon(span.end, polygon);
 }
 
 const Zone2D* findZoneById(const FacilityLayout2D& layout, const std::string& zoneId) {
@@ -209,12 +241,14 @@ bool connectionSpanMatchesReferencedZones(const FacilityLayout2D& layout, const 
     }
 
     if (connection.kind == ConnectionKind::Exit) {
+        const auto* exitZone = fromZone->kind == ZoneKind::Exit ? fromZone : toZone;
         const auto* walkableZone = fromZone->kind == ZoneKind::Exit ? toZone : fromZone;
-        return spanTouchesPolygon(connection.centerSpan, walkableZone->area);
+        return spanContactsPolygonBoundary(connection.centerSpan, walkableZone->area)
+            && spanInteractsWithPolygon(connection.centerSpan, exitZone->area);
     }
 
-    return spanTouchesPolygon(connection.centerSpan, fromZone->area)
-        && spanTouchesPolygon(connection.centerSpan, toZone->area);
+    return spanContactsPolygonBoundary(connection.centerSpan, fromZone->area)
+        && spanContactsPolygonBoundary(connection.centerSpan, toZone->area);
 }
 
 bool canTravel(const Connection2D& connection, const std::string& fromZoneId, const std::string& toZoneId) {
@@ -391,7 +425,7 @@ std::vector<ImportIssue> ImportValidationService::validate(const FacilityLayout2
         if (!connectionSpanMatchesReferencedZones(layout, connection)) {
             issues.push_back({
                 .severity = ImportIssueSeverity::Error,
-                .code = ImportIssueCode::InvalidGeometry,
+                .code = ImportIssueCode::ConnectionSpanMisaligned,
                 .message = "Connection span is not aligned with the referenced zone boundary.",
                 .sourceId = connection.id,
                 .targetId = connection.toZoneId,

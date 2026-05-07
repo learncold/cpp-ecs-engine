@@ -58,6 +58,20 @@ double spanLength(const safecrowd::domain::LineSegment2D& span) {
     return std::sqrt(dx * dx + dy * dy);
 }
 
+void translatePolygon(safecrowd::domain::Polygon2D& polygon, double dx, double dy) {
+    auto translateRing = [&](std::vector<safecrowd::domain::Point2D>& ring) {
+        for (auto& point : ring) {
+            point.x += dx;
+            point.y += dy;
+        }
+    };
+
+    translateRing(polygon.outline);
+    for (auto& hole : polygon.holes) {
+        translateRing(hole);
+    }
+}
+
 }  // namespace
 
 SC_TEST(DemoFixtureServiceBuildsSprint1Fixture) {
@@ -109,15 +123,32 @@ SC_TEST(DemoLayoutRejectsMovedConnectionSpan) {
     });
     SC_EXPECT_TRUE(it != layout.connections.end());
 
-    it->centerSpan.start.x += 2.0;
-    it->centerSpan.end.x += 2.0;
+    it->centerSpan.start.x += 1.0;
+    it->centerSpan.end.x += 1.0;
 
     safecrowd::domain::ImportValidationService validator;
     const auto issues = validator.validate(layout);
     SC_EXPECT_TRUE(containsBlockingIssue(
         issues,
-        safecrowd::domain::ImportIssueCode::InvalidGeometry,
+        safecrowd::domain::ImportIssueCode::ConnectionSpanMisaligned,
         safecrowd::domain::DemoLayouts::Sprint1FacilityIds::OpeningConnectionId));
+}
+
+SC_TEST(DemoLayoutRejectsMovedExitZone) {
+    auto layout = safecrowd::domain::DemoLayouts::demoFacility();
+    auto it = std::find_if(layout.zones.begin(), layout.zones.end(), [](const auto& zone) {
+        return zone.id == safecrowd::domain::DemoLayouts::Sprint1FacilityIds::ExitZoneId;
+    });
+    SC_EXPECT_TRUE(it != layout.zones.end());
+
+    translatePolygon(it->area, 2.0, 0.0);
+
+    safecrowd::domain::ImportValidationService validator;
+    const auto issues = validator.validate(layout);
+    SC_EXPECT_TRUE(containsBlockingIssue(
+        issues,
+        safecrowd::domain::ImportIssueCode::ConnectionSpanMisaligned,
+        safecrowd::domain::DemoLayouts::Sprint1FacilityIds::ExitConnectionId));
 }
 
 SC_TEST(DemoLayoutsProvidesRuntimeFacilityLayout) {

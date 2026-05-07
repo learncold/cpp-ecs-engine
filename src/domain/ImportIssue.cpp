@@ -47,6 +47,8 @@ const char* toString(ImportIssueCode code) noexcept {
         return "UnmappedElement";
     case ImportIssueCode::InvalidFloorReference:
         return "InvalidFloorReference";
+    case ImportIssueCode::ConnectionSpanMisaligned:
+        return "ConnectionSpanMisaligned";
     }
 
     return "Unknown";
