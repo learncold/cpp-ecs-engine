@@ -15,7 +15,6 @@
 #include "application/ScenarioResultWidget.h"
 #include "application/ScenarioRunWidget.h"
 #include "domain/DemoFixtureService.h"
-#include "domain/DemoLayouts.h"
 #include "domain/DxfImportService.h"
 #include "domain/ImportIssue.h"
 #include "domain/ImportOrchestrator.h"
@@ -53,15 +52,7 @@ ProjectWorkspaceState makeEvacuationScenarioDemoWorkspace() {
     using namespace safecrowd::domain;
 
     safecrowd::domain::DemoFixtureService fixtureService;
-    const auto fixture = fixtureService.createSprint1DemoFixture();
-
-    auto alternative = duplicateScenarioDraft(fixture.baselineScenario, "scenario-2", "Doorway blocked alternative");
-    alternative.control.connectionBlocks.push_back({
-        .id = "block-1",
-        .connectionId = DemoLayouts::Sprint1FacilityIds::DoorwayConnectionId,
-        .intervals = {{0.0, 60.0}},
-    });
-    alternative.variationDiffKeys = computeScenarioDiffKeys(fixture.baselineScenario, alternative);
+    auto fixture = fixtureService.createSprint1BlockedDoorResultFixture();
 
     SavedScenarioAuthoringState authoring;
     authoring.scenarios.push_back({
@@ -70,7 +61,7 @@ ProjectWorkspaceState makeEvacuationScenarioDemoWorkspace() {
         .stagedForRun = true,
     });
     authoring.scenarios.push_back({
-        .draft = alternative,
+        .draft = fixture.alternativeScenario,
         .baseScenarioId = fixture.baselineScenario.scenarioId,
         .stagedForRun = true,
     });
@@ -78,60 +69,15 @@ ProjectWorkspaceState makeEvacuationScenarioDemoWorkspace() {
     authoring.navigationView = SavedNavigationView::Events;
     authoring.rightPanelMode = SavedRightPanelMode::Scenario;
 
-    SimulationFrame resultFrame;
-    resultFrame.elapsedSeconds = 96.0;
-    resultFrame.complete = true;
-    resultFrame.totalAgentCount = 100;
-    resultFrame.evacuatedAgentCount = 100;
-
-    ScenarioResultArtifacts artifacts;
-    artifacts.evacuationProgress = {
-        {.timeSeconds = 0.0, .evacuatedCount = 0, .totalCount = 100, .evacuatedRatio = 0.0},
-        {.timeSeconds = 30.0, .evacuatedCount = 24, .totalCount = 100, .evacuatedRatio = 0.24},
-        {.timeSeconds = 60.0, .evacuatedCount = 72, .totalCount = 100, .evacuatedRatio = 0.72},
-        {.timeSeconds = 96.0, .evacuatedCount = 100, .totalCount = 100, .evacuatedRatio = 1.0},
-    };
-    artifacts.replayFrames = {resultFrame};
-    artifacts.timingSummary.t50Seconds = 48.0;
-    artifacts.timingSummary.t90Seconds = 82.0;
-    artifacts.timingSummary.t95Seconds = 90.0;
-    artifacts.timingSummary.finalEvacuationTimeSeconds = 96.0;
-    artifacts.timingSummary.targetTimeSeconds = alternative.execution.timeLimitSeconds;
-    artifacts.timingSummary.marginSeconds = alternative.execution.timeLimitSeconds - 96.0;
-    artifacts.exitUsage.push_back({
-        .exitZoneId = DemoLayouts::Sprint1FacilityIds::ExitZoneId,
-        .exitLabel = "Primary exit",
-        .floorId = DemoLayouts::Sprint1FacilityIds::FloorId,
-        .evacuatedCount = 100,
-        .usageRatio = 1.0,
-        .lastExitTimeSeconds = 96.0,
-    });
-    artifacts.zoneCompletion.push_back({
-        .zoneId = DemoLayouts::Sprint1FacilityIds::MainRoomZoneId,
-        .zoneLabel = "Main room",
-        .floorId = DemoLayouts::Sprint1FacilityIds::FloorId,
-        .initialCount = 100,
-        .evacuatedCount = 100,
-        .lastCompletionTimeSeconds = 96.0,
-    });
-    artifacts.placementCompletion.push_back({
-        .placementId = "placement-1",
-        .zoneId = DemoLayouts::Sprint1FacilityIds::MainRoomZoneId,
-        .floorId = DemoLayouts::Sprint1FacilityIds::FloorId,
-        .initialCount = 100,
-        .evacuatedCount = 100,
-        .lastCompletionTimeSeconds = 96.0,
-    });
-
     ProjectWorkspaceState workspace;
     workspace.activeView = ProjectWorkspaceView::ScenarioResult;
     workspace.authoring = std::move(authoring);
-    workspace.runningScenario = alternative;
+    workspace.runningScenario = fixture.alternativeScenario;
     workspace.result = SavedScenarioResultState{
-        .scenario = std::move(alternative),
-        .frame = resultFrame,
-        .risk = {},
-        .artifacts = std::move(artifacts),
+        .scenario = std::move(fixture.alternativeScenario),
+        .frame = std::move(fixture.frame),
+        .risk = std::move(fixture.risk),
+        .artifacts = std::move(fixture.artifacts),
     };
     return workspace;
 }
@@ -221,6 +167,30 @@ ScenarioAuthoringWidget::RightPanelMode rightPanelModeFromSaved(SavedRightPanelM
     }
 }
 
+SavedNavigationView savedNavigationViewFromInitial(ScenarioAuthoringWidget::NavigationView view) {
+    switch (view) {
+    case ScenarioAuthoringWidget::NavigationView::Crowd:
+        return SavedNavigationView::Crowd;
+    case ScenarioAuthoringWidget::NavigationView::Events:
+        return SavedNavigationView::Events;
+    case ScenarioAuthoringWidget::NavigationView::Layout:
+    default:
+        return SavedNavigationView::Layout;
+    }
+}
+
+SavedRightPanelMode savedRightPanelModeFromInitial(ScenarioAuthoringWidget::RightPanelMode mode) {
+    switch (mode) {
+    case ScenarioAuthoringWidget::RightPanelMode::None:
+        return SavedRightPanelMode::None;
+    case ScenarioAuthoringWidget::RightPanelMode::Run:
+        return SavedRightPanelMode::Run;
+    case ScenarioAuthoringWidget::RightPanelMode::Scenario:
+    default:
+        return SavedRightPanelMode::Scenario;
+    }
+}
+
 ScenarioAuthoringWidget::ScenarioState scenarioStateFromSaved(
     const SavedScenarioState& saved,
     const safecrowd::domain::FacilityLayout2D& layout) {
@@ -272,6 +242,24 @@ ScenarioAuthoringWidget::InitialState initialStateFromSaved(
         initial.currentScenarioIndex = initial.scenarios.empty() ? -1 : 0;
     }
     return initial;
+}
+
+SavedScenarioAuthoringState savedStateFromInitial(const ScenarioAuthoringWidget::InitialState& initial) {
+    SavedScenarioAuthoringState saved;
+    saved.currentScenarioIndex = initial.currentScenarioIndex;
+    saved.navigationView = savedNavigationViewFromInitial(initial.navigationView);
+    saved.rightPanelMode = savedRightPanelModeFromInitial(initial.rightPanelMode);
+    saved.scenarios.reserve(initial.scenarios.size());
+    for (const auto& scenario : initial.scenarios) {
+        auto draft = scenario.draft;
+        draft.control.events = scenario.events;
+        saved.scenarios.push_back({
+            .draft = std::move(draft),
+            .baseScenarioId = scenario.baseScenarioId.toStdString(),
+            .stagedForRun = scenario.stagedForRun,
+        });
+    }
+    return saved;
 }
 
 template <typename Widget>
@@ -423,7 +411,12 @@ void MainWindow::openProject(const ProjectMetadata& metadata) {
         break;
     case ProjectWorkspaceView::ScenarioRun:
         if (workspace.runningScenario.has_value()) {
-            showScenarioRun(*importResult.layout, *workspace.runningScenario);
+            showScenarioRun(
+                *importResult.layout,
+                *workspace.runningScenario,
+                workspace.authoring.has_value()
+                    ? std::make_optional(initialStateFromSaved(*workspace.authoring, *importResult.layout))
+                    : std::nullopt);
             return;
         }
         break;
@@ -486,6 +479,9 @@ void MainWindow::saveCurrentProject() {
         workspace.authoring = authoringWidget->currentSavedState();
     } else if (auto* resultWidget = visibleChild<ScenarioResultWidget>(centralWidget())) {
         workspace.activeView = ProjectWorkspaceView::ScenarioResult;
+        if (resultWidget->returnAuthoringState().has_value()) {
+            workspace.authoring = savedStateFromInitial(*resultWidget->returnAuthoringState());
+        }
         workspace.result = SavedScenarioResultState{
             .scenario = resultWidget->scenario(),
             .frame = resultWidget->frame(),
@@ -494,6 +490,9 @@ void MainWindow::saveCurrentProject() {
         };
     } else if (auto* runWidget = visibleChild<ScenarioRunWidget>(centralWidget())) {
         workspace.activeView = ProjectWorkspaceView::ScenarioRun;
+        if (runWidget->returnAuthoringState().has_value()) {
+            workspace.authoring = savedStateFromInitial(*runWidget->returnAuthoringState());
+        }
         workspace.runningScenario = runWidget->scenario();
     }
 
@@ -602,7 +601,8 @@ void MainWindow::showScenarioAuthoring(
 
 void MainWindow::showScenarioRun(
     const safecrowd::domain::FacilityLayout2D& layout,
-    const safecrowd::domain::ScenarioDraft& scenario) {
+    const safecrowd::domain::ScenarioDraft& scenario,
+    std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState) {
     setCentralWidget(new ScenarioRunWidget(
         currentProject_.name,
         layout,
@@ -622,7 +622,8 @@ void MainWindow::showScenarioRun(
                 showLayoutReview(currentProject_);
             }
         },
-        this));
+        this,
+        std::move(returnAuthoringState)));
 }
 
 void MainWindow::showScenarioResult(

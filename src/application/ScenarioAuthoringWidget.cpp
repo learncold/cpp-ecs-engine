@@ -652,6 +652,21 @@ SavedScenarioAuthoringState ScenarioAuthoringWidget::currentSavedState() const {
     return state;
 }
 
+ScenarioAuthoringWidget::InitialState ScenarioAuthoringWidget::currentInitialState() const {
+    InitialState state;
+    state.currentScenarioIndex = currentScenarioIndex_;
+    state.navigationView = navigationView_;
+    state.rightPanelMode = rightPanelMode_;
+    state.scenarios.reserve(scenarios_.size());
+    for (const auto& scenario : scenarios_) {
+        auto copy = scenario;
+        copy.draft.control.events = copy.events;
+        copy.stagedForRun = copy.stagedForRun && scenarioHasOccupants(copy);
+        state.scenarios.push_back(std::move(copy));
+    }
+    return state;
+}
+
 void ScenarioAuthoringWidget::addEventDraft(const QString& name, const QString& trigger, const QString& target) {
     auto* scenario = currentScenario();
     if (scenario == nullptr) {
@@ -1067,7 +1082,8 @@ void ScenarioAuthoringWidget::runFirstStagedBaselineScenario() {
         saveProjectHandler_,
         openProjectHandler_,
         backToLayoutReviewHandler_,
-        this);
+        this,
+        currentInitialState());
     rootLayout->replaceWidget(shell_, runWidget);
     shell_->hide();
     shell_->deleteLater();

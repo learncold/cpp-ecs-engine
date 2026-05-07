@@ -69,6 +69,7 @@ public:
         QWidget* parent = nullptr);
 
     SavedScenarioAuthoringState currentSavedState() const;
+    InitialState currentInitialState() const;
 
 private:
     void initializeUi(bool promptForScenario);

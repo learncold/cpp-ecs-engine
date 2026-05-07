@@ -37,6 +37,7 @@ public:
     const safecrowd::domain::SimulationFrame& frame() const noexcept;
     const safecrowd::domain::ScenarioRiskSnapshot& risk() const noexcept;
     const safecrowd::domain::ScenarioResultArtifacts& artifacts() const noexcept;
+    const std::optional<ScenarioAuthoringWidget::InitialState>& returnAuthoringState() const noexcept;
 
 private:
     enum class ResultNavigationView {

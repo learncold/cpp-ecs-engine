@@ -8,6 +8,7 @@
 #include "domain/DemoFixtureService.h"
 #include "domain/ImportIssue.h"
 #include "domain/ImportValidationService.h"
+#include "domain/ScenarioAuthoring.h"
 
 namespace {
 
@@ -72,6 +73,14 @@ void translatePolygon(safecrowd::domain::Polygon2D& polygon, double dx, double d
     }
 }
 
+bool containsDiffKey(
+    const safecrowd::domain::ScenarioDraft& scenario,
+    const std::string& key) {
+    return std::any_of(scenario.variationDiffKeys.begin(), scenario.variationDiffKeys.end(), [&](const auto& diffKey) {
+        return diffKey == key;
+    });
+}
+
 }  // namespace
 
 SC_TEST(DemoFixtureServiceBuildsSprint1Fixture) {
@@ -120,6 +129,63 @@ SC_TEST(DemoFixtureServiceBuildsSprint1Fixture) {
     safecrowd::domain::ImportValidationService validator;
     const auto issues = validator.validate(layout);
     SC_EXPECT_TRUE(!safecrowd::domain::hasBlockingImportIssue(issues));
+}
+
+SC_TEST(DemoFixtureBlockedDoorResultFixturePreservesScenarioAndResultData) {
+    safecrowd::domain::DemoFixtureService service;
+    const auto fixture = service.createSprint1BlockedDoorResultFixture();
+    const auto& replayFrames = fixture.artifacts.replayFrames;
+
+    SC_EXPECT_EQ(fixture.baselineScenario.role, safecrowd::domain::ScenarioRole::Baseline);
+    SC_EXPECT_EQ(fixture.alternativeScenario.role, safecrowd::domain::ScenarioRole::Alternative);
+    SC_EXPECT_EQ(fixture.alternativeScenario.control.connectionBlocks.size(), std::size_t{1});
+    SC_EXPECT_EQ(
+        fixture.alternativeScenario.control.connectionBlocks.front().connectionId,
+        std::string(safecrowd::domain::DemoLayouts::Sprint1FacilityIds::DoorwayConnectionId));
+    SC_EXPECT_TRUE(containsDiffKey(fixture.alternativeScenario, "control.connectionBlocks"));
+
+    SC_EXPECT_TRUE(fixture.frame.complete);
+    SC_EXPECT_EQ(fixture.frame.totalAgentCount, std::size_t{100});
+    SC_EXPECT_EQ(fixture.frame.evacuatedAgentCount, std::size_t{100});
+    SC_EXPECT_EQ(fixture.risk.completionRisk, safecrowd::domain::ScenarioRiskLevel::High);
+    SC_EXPECT_TRUE(!fixture.risk.hotspots.empty());
+    SC_EXPECT_TRUE(!fixture.risk.bottlenecks.empty());
+    SC_EXPECT_TRUE(!fixture.artifacts.evacuationProgress.empty());
+    SC_EXPECT_TRUE(replayFrames.size() > std::size_t{1});
+    for (std::size_t index = 1; index < replayFrames.size(); ++index) {
+        SC_EXPECT_TRUE(replayFrames[index - 1].elapsedSeconds < replayFrames[index].elapsedSeconds);
+    }
+    SC_EXPECT_NEAR(replayFrames.back().elapsedSeconds, fixture.frame.elapsedSeconds, 1e-9);
+    SC_EXPECT_EQ(replayFrames.back().complete, fixture.frame.complete);
+    SC_EXPECT_EQ(replayFrames.back().totalAgentCount, fixture.frame.totalAgentCount);
+    SC_EXPECT_EQ(replayFrames.back().evacuatedAgentCount, fixture.frame.evacuatedAgentCount);
+    SC_EXPECT_TRUE(std::any_of(replayFrames.begin(), replayFrames.end() - 1, [](const auto& frame) {
+        return !frame.agents.empty();
+    }));
+    SC_EXPECT_TRUE(fixture.artifacts.timingSummary.finalEvacuationTimeSeconds.has_value());
+    SC_EXPECT_TRUE(fixture.artifacts.timingSummary.t90Frame.has_value());
+    SC_EXPECT_TRUE(fixture.artifacts.timingSummary.t95Frame.has_value());
+    SC_EXPECT_NEAR(
+        fixture.artifacts.timingSummary.t90Frame->elapsedSeconds,
+        *fixture.artifacts.timingSummary.t90Seconds,
+        1e-9);
+    SC_EXPECT_NEAR(
+        fixture.artifacts.timingSummary.t95Frame->elapsedSeconds,
+        *fixture.artifacts.timingSummary.t95Seconds,
+        1e-9);
+    SC_EXPECT_TRUE(
+        std::any_of(fixture.risk.hotspots.begin(), fixture.risk.hotspots.end(), [](const auto& hotspot) {
+            return hotspot.detectionFrame.has_value();
+        })
+        || std::any_of(fixture.risk.bottlenecks.begin(), fixture.risk.bottlenecks.end(), [](const auto& bottleneck) {
+            return bottleneck.detectionFrame.has_value();
+        }));
+    SC_EXPECT_TRUE(
+        !fixture.artifacts.densitySummary.peakCells.empty()
+        || !fixture.artifacts.densitySummary.peakField.cells.empty());
+    SC_EXPECT_TRUE(!fixture.artifacts.exitUsage.empty());
+    SC_EXPECT_TRUE(!fixture.artifacts.zoneCompletion.empty());
+    SC_EXPECT_TRUE(!fixture.artifacts.placementCompletion.empty());
 }
 
 SC_TEST(DemoLayoutRejectsMovedConnectionSpan) {

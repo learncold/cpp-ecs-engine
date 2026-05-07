@@ -1448,6 +1448,10 @@ const safecrowd::domain::ScenarioResultArtifacts& ScenarioResultWidget::artifact
     return artifacts_;
 }
 
+const std::optional<ScenarioAuthoringWidget::InitialState>& ScenarioResultWidget::returnAuthoringState() const noexcept {
+    return returnAuthoringState_;
+}
+
 void ScenarioResultWidget::rerunScenario() {
     auto* rootLayout = qobject_cast<QVBoxLayout*>(layout());
     if (rootLayout == nullptr || shell_ == nullptr) {

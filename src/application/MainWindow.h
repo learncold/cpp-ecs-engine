@@ -39,7 +39,8 @@ private:
         ScenarioAuthoringWidget::InitialState initialState);
     void showScenarioRun(
         const safecrowd::domain::FacilityLayout2D& layout,
-        const safecrowd::domain::ScenarioDraft& scenario);
+        const safecrowd::domain::ScenarioDraft& scenario,
+        std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState = std::nullopt);
     void showScenarioResult(
         const safecrowd::domain::FacilityLayout2D& layout,
         const safecrowd::domain::ScenarioDraft& scenario,

@@ -268,6 +268,10 @@ const safecrowd::domain::ScenarioDraft& ScenarioRunWidget::scenario() const noex
     return scenario_;
 }
 
+const std::optional<ScenarioAuthoringWidget::InitialState>& ScenarioRunWidget::returnAuthoringState() const noexcept {
+    return returnAuthoringState_;
+}
+
 QWidget* ScenarioRunWidget::createRunPanel() {
     auto* panel = new QWidget(shell_);
     auto* layout = new QVBoxLayout(panel);
