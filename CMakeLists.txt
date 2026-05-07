@@ -81,6 +81,7 @@ add_library(safecrowd_domain STATIC
     src/domain/Geometry2D.h
     src/domain/PopulationSpec.h
     src/domain/ScenarioAuthoring.h
+    src/domain/ScenarioAuthoring.cpp
     src/domain/ScenarioRiskMetrics.h
     src/domain/ScenarioRiskMetrics.cpp
     src/domain/ScenarioRiskMetricsSystem.cpp
@@ -154,6 +155,7 @@ if (BUILD_TESTING)
         tests/ResourceStoreTests.cpp
         tests/DeterministicRngTests.cpp
         tests/ScenarioSimulationRunnerTests.cpp
+        tests/ScenarioAuthoringTests.cpp
     )
 
     target_include_directories(safecrowd_tests

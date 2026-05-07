@@ -9,6 +9,7 @@
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
+#include <QLayoutItem>
 #include <QMessageBox>
 #include <QPainter>
 #include <QPushButton>
@@ -83,6 +84,226 @@ QString blockScheduleSummary(const safecrowd::domain::ConnectionBlockDraft& bloc
         intervals << QString("%1s - %2s").arg(interval.startSeconds, 0, 'f', 1).arg(interval.endSeconds, 0, 'f', 1);
     }
     return intervals.join(", ");
+}
+
+int draftOccupantCount(const safecrowd::domain::ScenarioDraft& scenario) {
+    int total = 0;
+    for (const auto& placement : scenario.population.initialPlacements) {
+        total += static_cast<int>(placement.targetAgentCount);
+    }
+    return total;
+}
+
+QString signedDelta(int delta) {
+    return delta > 0 ? QString("+%1").arg(delta) : QString::number(delta);
+}
+
+QString countChangeSummary(const QString& label, int baseline, int variant) {
+    const int delta = variant - baseline;
+    if (delta == 0) {
+        return QString("%1 details changed").arg(label);
+    }
+    return QString("%1 %2 (%3 -> %4)").arg(label, signedDelta(delta)).arg(baseline).arg(variant);
+}
+
+QString boolValue(bool value) {
+    return value ? "on" : "off";
+}
+
+QString buildChangeSummaryLine(
+    const safecrowd::domain::ScenarioDraft& baseline,
+    const safecrowd::domain::ScenarioDraft& variant,
+    const std::string& key) {
+    if (key == "population.placements") {
+        const auto baselinePlacements = static_cast<int>(baseline.population.initialPlacements.size());
+        const auto variantPlacements = static_cast<int>(variant.population.initialPlacements.size());
+        QStringList parts;
+        const int occupantDelta = draftOccupantCount(variant) - draftOccupantCount(baseline);
+        if (occupantDelta != 0) {
+            parts << QString("%1 occupants").arg(signedDelta(occupantDelta));
+        }
+        if (baselinePlacements != variantPlacements) {
+            parts << countChangeSummary("placements", baselinePlacements, variantPlacements);
+        }
+        if (parts.isEmpty()) {
+            parts << "placement details changed";
+        }
+        return QString("population.placements (%1)").arg(parts.join(", "));
+    }
+    if (key == "environment.reducedVisibility") {
+        return QString("environment.reducedVisibility (%1 -> %2)")
+            .arg(boolValue(baseline.environment.reducedVisibility), boolValue(variant.environment.reducedVisibility));
+    }
+    if (key == "environment.familiarityProfile") {
+        return QString("environment.familiarityProfile (%1 -> %2)")
+            .arg(QString::fromStdString(baseline.environment.familiarityProfile),
+                 QString::fromStdString(variant.environment.familiarityProfile));
+    }
+    if (key == "environment.guidanceProfile") {
+        return QString("environment.guidanceProfile (%1 -> %2)")
+            .arg(QString::fromStdString(baseline.environment.guidanceProfile),
+                 QString::fromStdString(variant.environment.guidanceProfile));
+    }
+    if (key == "control.events") {
+        return QString("control.events (%1)")
+            .arg(countChangeSummary("events", static_cast<int>(baseline.control.events.size()),
+                                    static_cast<int>(variant.control.events.size())));
+    }
+    if (key == "control.connectionBlocks") {
+        return QString("control.connectionBlocks (%1)")
+            .arg(countChangeSummary("blocks", static_cast<int>(baseline.control.connectionBlocks.size()),
+                                    static_cast<int>(variant.control.connectionBlocks.size())));
+    }
+    if (key == "execution.timeLimit") {
+        return QString("execution.timeLimit (%1s -> %2s)")
+            .arg(baseline.execution.timeLimitSeconds, 0, 'f', 1)
+            .arg(variant.execution.timeLimitSeconds, 0, 'f', 1);
+    }
+    if (key == "execution.sampleInterval") {
+        return QString("execution.sampleInterval (%1s -> %2s)")
+            .arg(baseline.execution.sampleIntervalSeconds, 0, 'f', 1)
+            .arg(variant.execution.sampleIntervalSeconds, 0, 'f', 1);
+    }
+    if (key == "execution.repeatCount") {
+        return QString("execution.repeatCount (%1 -> %2)")
+            .arg(baseline.execution.repeatCount)
+            .arg(variant.execution.repeatCount);
+    }
+    if (key == "execution.baseSeed") {
+        return QString("execution.baseSeed (%1 -> %2)")
+            .arg(baseline.execution.baseSeed)
+            .arg(variant.execution.baseSeed);
+    }
+    if (key == "execution.recordOccupantHistory") {
+        return QString("execution.recordOccupantHistory (%1 -> %2)")
+            .arg(boolValue(baseline.execution.recordOccupantHistory),
+                 boolValue(variant.execution.recordOccupantHistory));
+    }
+    return QString::fromStdString(key);
+}
+
+QString changeCategoryLabel(const std::string& key) {
+    if (key.rfind("population.", 0) == 0) {
+        return "Crowd";
+    }
+    if (key.rfind("environment.", 0) == 0) {
+        return "Layout";
+    }
+    if (key.rfind("control.", 0) == 0) {
+        return "Events";
+    }
+    if (key.rfind("execution.", 0) == 0) {
+        return "Run";
+    }
+    return "Change";
+}
+
+QString compactChangeSummary(const QString& summary) {
+    auto compact = summary;
+    compact.replace("population.placements", "crowd placements");
+    compact.replace("environment.reducedVisibility", "layout visibility");
+    compact.replace("environment.familiarityProfile", "layout familiarity");
+    compact.replace("environment.guidanceProfile", "layout guidance");
+    compact.replace("control.events", "events");
+    compact.replace("control.connectionBlocks", "blocked events");
+    compact.replace("execution.timeLimit", "run time limit");
+    compact.replace("execution.sampleInterval", "run sample interval");
+    compact.replace("execution.repeatCount", "run repeat count");
+    compact.replace("execution.baseSeed", "run base seed");
+    compact.replace("execution.recordOccupantHistory", "run occupant history");
+    return compact;
+}
+
+QStringList buildChangeSummaryLines(
+    const safecrowd::domain::ScenarioDraft& baseline,
+    const safecrowd::domain::ScenarioDraft& variant) {
+    QStringList changes;
+    for (const auto& key : variant.variationDiffKeys) {
+        changes << buildChangeSummaryLine(baseline, variant, key);
+    }
+    return changes;
+}
+
+void clearLayout(QLayout* layout) {
+    if (layout == nullptr) {
+        return;
+    }
+    while (auto* item = layout->takeAt(0)) {
+        if (auto* widget = item->widget()) {
+            widget->deleteLater();
+        }
+        delete item;
+    }
+}
+
+QFrame* createInspectorCard(QWidget* parent) {
+    auto* card = new QFrame(parent);
+    card->setStyleSheet(
+        "QFrame { background: #ffffff; border: 1px solid #d7e0ea; border-radius: 12px; }"
+        "QLabel { background: transparent; border: 0; }");
+    card->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+    return card;
+}
+
+QLabel* createRoleBadge(const QString& text, bool alternative, QWidget* parent) {
+    auto* badge = createLabel(text, parent, ui::FontRole::Caption);
+    badge->setAlignment(Qt::AlignCenter);
+    badge->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
+    badge->setStyleSheet(alternative
+        ? "QLabel { background: #fff7ed; border: 1px solid #fed7aa; border-radius: 9px; color: #9a3412; padding: 3px 8px; }"
+        : "QLabel { background: #e6eef8; border: 1px solid #b8c6d6; border-radius: 9px; color: #1f5fae; padding: 3px 8px; }");
+    return badge;
+}
+
+void addMetaRow(QVBoxLayout* layout, const QString& label, const QString& value, QWidget* parent) {
+    auto* row = new QWidget(parent);
+    auto* rowLayout = new QHBoxLayout(row);
+    rowLayout->setContentsMargins(0, 0, 0, 0);
+    rowLayout->setSpacing(8);
+
+    auto* labelWidget = createLabel(label, row, ui::FontRole::Caption);
+    labelWidget->setStyleSheet(ui::subtleTextStyleSheet());
+    labelWidget->setMinimumWidth(62);
+    labelWidget->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Preferred);
+    auto* valueWidget = createLabel(value.isEmpty() ? "-" : value, row, ui::FontRole::Body);
+    valueWidget->setStyleSheet(ui::mutedTextStyleSheet());
+    valueWidget->setMinimumWidth(0);
+    valueWidget->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+
+    rowLayout->addWidget(labelWidget);
+    rowLayout->addWidget(valueWidget, 1);
+    layout->addWidget(row);
+}
+
+void addStatusMessage(QVBoxLayout* layout, const QString& text, QWidget* parent) {
+    auto* message = createLabel(text, parent, ui::FontRole::Body);
+    message->setStyleSheet(ui::mutedTextStyleSheet());
+    layout->addWidget(message);
+}
+
+void addDiffRow(QVBoxLayout* layout, const QString& category, const QString& summary, QWidget* parent) {
+    auto* row = new QFrame(parent);
+    row->setStyleSheet(
+        "QFrame { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; }"
+        "QLabel { background: transparent; border: 0; }");
+    auto* rowLayout = new QVBoxLayout(row);
+    rowLayout->setContentsMargins(7, 6, 7, 7);
+    rowLayout->setSpacing(5);
+
+    auto* categoryBadge = createLabel(category, row, ui::FontRole::Caption);
+    categoryBadge->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    categoryBadge->setStyleSheet(
+        "QLabel { background: #e6eef8; border: 1px solid #c9d5e2; border-radius: 8px; color: #1f5fae; padding: 3px 7px; }");
+    categoryBadge->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
+
+    auto* summaryLabel = createLabel(summary, row, ui::FontRole::Caption);
+    summaryLabel->setStyleSheet(ui::mutedTextStyleSheet());
+    summaryLabel->setMinimumWidth(0);
+    summaryLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+
+    rowLayout->addWidget(categoryBadge);
+    rowLayout->addWidget(summaryLabel);
+    layout->addWidget(row);
 }
 
 int totalOccupantCount(const ScenarioAuthoringWidget::ScenarioState& scenario) {
@@ -451,6 +672,7 @@ void ScenarioAuthoringWidget::addEventDraft(const QString& name, const QString& 
         .targetSummary = target.toStdString(),
     });
     scenario->draft.control.events = scenario->events;
+    recomputeDiffKeysAfterScenarioChanged(*scenario);
     refreshNavigationPanel();
     refreshInspector();
 }
@@ -465,12 +687,19 @@ void ScenarioAuthoringWidget::createScenarioWithName(const QString& name, int so
         return;
     }
 
+    const auto newScenarioId = QString("scenario-%1").arg(scenarios_.size() + 1).toStdString();
     ScenarioState scenario;
     if (sourceIndex >= 0 && sourceIndex < static_cast<int>(scenarios_.size())) {
-        scenario = scenarios_[sourceIndex];
-        scenario.baseScenarioId = QString::fromStdString(scenarios_[sourceIndex].draft.scenarioId);
-        scenario.draft.role = safecrowd::domain::ScenarioRole::Alternative;
-        scenario.draft.variationDiffKeys = {"branch.duplicated"};
+        const auto& source = scenarios_[sourceIndex];
+        scenario.draft = safecrowd::domain::duplicateScenarioDraft(
+            source.draft, newScenarioId, trimmedName.toStdString());
+        scenario.events = source.events;
+        scenario.crowdPlacements = source.crowdPlacements;
+        scenario.startText = source.startText;
+        scenario.destinationText = source.destinationText;
+        scenario.baseScenarioId = source.draft.role == safecrowd::domain::ScenarioRole::Alternative
+            ? source.baseScenarioId
+            : QString::fromStdString(source.draft.scenarioId);
         scenario.stagedForRun = false;
     } else {
         scenario.draft.role = safecrowd::domain::ScenarioRole::Baseline;
@@ -479,6 +708,8 @@ void ScenarioAuthoringWidget::createScenarioWithName(const QString& name, int so
         scenario.draft.execution.sampleIntervalSeconds = 1.0;
         scenario.draft.execution.repeatCount = 1;
         scenario.draft.execution.baseSeed = 1;
+        scenario.draft.name = trimmedName.toStdString();
+        scenario.draft.scenarioId = newScenarioId;
 
         const auto* destinationZone = firstDestinationZone(layout_);
         const auto* startZone = firstStartZone(layout_);
@@ -490,10 +721,9 @@ void ScenarioAuthoringWidget::createScenarioWithName(const QString& name, int so
         }
     }
 
-    scenario.draft.name = trimmedName.toStdString();
-    scenario.draft.scenarioId = QString("scenario-%1").arg(scenarios_.size() + 1).toStdString();
     scenarios_.push_back(std::move(scenario));
     currentScenarioIndex_ = static_cast<int>(scenarios_.size()) - 1;
+    recomputeVariationDiffKeysIfAlternative(scenarios_.back());
     refreshScenarioSwitcher();
     refreshCanvas();
     refreshNavigationPanel();
@@ -555,6 +785,7 @@ void ScenarioAuthoringWidget::refreshCanvas() {
             return;
         }
         current->draft.control.connectionBlocks = blocks;
+        recomputeDiffKeysAfterScenarioChanged(*current);
         refreshNavigationPanel();
         refreshInspector();
     });
@@ -570,40 +801,74 @@ void ScenarioAuthoringWidget::refreshInspector() {
     const auto* scenario = currentScenario();
     const bool hasScenario = scenario != nullptr;
 
-    if (scenarioSummaryLabel_ != nullptr) {
-        if (!hasScenario) {
-            scenarioSummaryLabel_->setText("No scenario selected");
-        } else {
-            const int people = totalOccupantCount(*scenario);
-            const auto blockCount = static_cast<int>(scenario->draft.control.connectionBlocks.size());
-            scenarioSummaryLabel_->setText(QString("Name: %1\nRole: %2\nPopulation: %3\nStart: %4\nDestination: %5\nEvents: %6\nBlocked exits: %7")
-                .arg(
-                    QString::fromStdString(scenario->draft.name),
-                    scenario->draft.role == safecrowd::domain::ScenarioRole::Baseline ? "Baseline" : "Alternative")
-                .arg(people)
-                .arg(scenario->startText, scenario->destinationText)
-                .arg(static_cast<int>(scenario->events.size()))
-                .arg(blockCount));
+    if (scenarioOverviewPanel_ != nullptr) {
+        auto* panelLayout = qobject_cast<QVBoxLayout*>(scenarioOverviewPanel_->layout());
+        clearLayout(panelLayout);
+        if (panelLayout != nullptr) {
+            auto* card = createInspectorCard(scenarioOverviewPanel_);
+            auto* cardLayout = new QVBoxLayout(card);
+            cardLayout->setContentsMargins(12, 11, 12, 11);
+            cardLayout->setSpacing(8);
+
+            if (!hasScenario) {
+                addStatusMessage(cardLayout, "No scenario selected", card);
+            } else {
+                const bool alternative = scenario->draft.role == safecrowd::domain::ScenarioRole::Alternative;
+                cardLayout->addWidget(createRoleBadge(alternative ? "Alternative" : "Baseline", alternative, card));
+
+                auto* nameLabel = createLabel(QString::fromStdString(scenario->draft.name), card, ui::FontRole::SectionTitle);
+                nameLabel->setMinimumWidth(0);
+                nameLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+                cardLayout->addWidget(nameLabel);
+
+                addMetaRow(cardLayout, "Population", QString::number(totalOccupantCount(*scenario)), card);
+                addMetaRow(cardLayout, "Events", QString::number(static_cast<int>(scenario->events.size())), card);
+                addMetaRow(cardLayout, "Blocked", QString::number(static_cast<int>(scenario->draft.control.connectionBlocks.size())), card);
+                addMetaRow(cardLayout, "Start", scenario->startText, card);
+                addMetaRow(cardLayout, "Destination", scenario->destinationText, card);
+                if (alternative && !scenario->baseScenarioId.isEmpty()) {
+                    addMetaRow(cardLayout, "Based on", scenario->baseScenarioId, card);
+                }
+            }
+            panelLayout->addWidget(card);
         }
     }
 
-    if (changesLabel_ != nullptr) {
-        if (!hasScenario || scenario->baseScenarioId.isEmpty()) {
-            changesLabel_->setText("Changes from baseline: none");
-        } else {
-            QStringList changes;
-            if (!scenario->events.empty()) {
-                changes << QString("Events: %1 configured").arg(static_cast<int>(scenario->events.size()));
+    if (scenarioDiffPanel_ != nullptr) {
+        auto* panelLayout = qobject_cast<QVBoxLayout*>(scenarioDiffPanel_->layout());
+        clearLayout(panelLayout);
+        if (panelLayout != nullptr) {
+            auto* card = createInspectorCard(scenarioDiffPanel_);
+            auto* cardLayout = new QVBoxLayout(card);
+            cardLayout->setContentsMargins(10, 10, 10, 10);
+            cardLayout->setSpacing(7);
+
+            auto* title = createLabel("Changes", card, ui::FontRole::SectionTitle);
+            cardLayout->addWidget(title);
+
+            if (!hasScenario) {
+                addStatusMessage(cardLayout, "No scenario selected", card);
+            } else if (scenario->draft.role == safecrowd::domain::ScenarioRole::Baseline) {
+                addStatusMessage(cardLayout, "Baseline scenario", card);
+            } else if (scenario->baseScenarioId.isEmpty()) {
+                addStatusMessage(cardLayout, "Alternative scenario / no baseline link", card);
+            } else {
+                const auto baseId = scenario->baseScenarioId.toStdString();
+                const auto baselineIt = std::find_if(scenarios_.begin(), scenarios_.end(), [&](const auto& candidate) {
+                    return candidate.draft.scenarioId == baseId;
+                });
+                if (scenario->draft.variationDiffKeys.empty()) {
+                    addStatusMessage(cardLayout, "No changed fields yet", card);
+                } else {
+                    for (const auto& key : scenario->draft.variationDiffKeys) {
+                        const auto summary = baselineIt != scenarios_.end()
+                            ? buildChangeSummaryLine(baselineIt->draft, scenario->draft, key)
+                            : QString::fromStdString(key);
+                        addDiffRow(cardLayout, changeCategoryLabel(key), compactChangeSummary(summary), card);
+                    }
+                }
             }
-            if (!scenario->draft.control.connectionBlocks.empty()) {
-                changes << QString("Blocked exits: %1 configured")
-                    .arg(static_cast<int>(scenario->draft.control.connectionBlocks.size()));
-            }
-            if (changes.isEmpty()) {
-                changes << "No changed fields yet";
-            }
-            changesLabel_->setText(QString("Based on: %1\nChanged:\n- %2")
-                .arg(scenario->baseScenarioId, changes.join("\n- ")));
+            panelLayout->addWidget(card);
         }
     }
 
@@ -747,8 +1012,8 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
 
 void ScenarioAuthoringWidget::refreshRightPanel() {
     scenarioSwitcher_ = nullptr;
-    scenarioSummaryLabel_ = nullptr;
-    changesLabel_ = nullptr;
+    scenarioOverviewPanel_ = nullptr;
+    scenarioDiffPanel_ = nullptr;
     newScenarioButton_ = nullptr;
     stageScenarioButton_ = nullptr;
     stagedScenariosLabel_ = nullptr;
@@ -852,8 +1117,44 @@ void ScenarioAuthoringWidget::updateCurrentScenarioPlacements(const std::vector<
         scenario->stagedForRun = false;
     }
 
+    recomputeDiffKeysAfterScenarioChanged(*scenario);
     refreshNavigationPanel();
     refreshInspector();
+}
+
+void ScenarioAuthoringWidget::recomputeDiffKeysAfterScenarioChanged(ScenarioState& scenario) {
+    recomputeVariationDiffKeysIfAlternative(scenario);
+    if (scenario.draft.role == safecrowd::domain::ScenarioRole::Baseline) {
+        recomputeDependentVariationDiffKeys(QString::fromStdString(scenario.draft.scenarioId));
+    }
+}
+
+void ScenarioAuthoringWidget::recomputeDependentVariationDiffKeys(const QString& baselineId) {
+    if (baselineId.isEmpty()) {
+        return;
+    }
+    for (auto& scenario : scenarios_) {
+        if (scenario.baseScenarioId == baselineId) {
+            recomputeVariationDiffKeysIfAlternative(scenario);
+        }
+    }
+}
+
+void ScenarioAuthoringWidget::recomputeVariationDiffKeysIfAlternative(ScenarioState& scenario) const {
+    if (scenario.draft.role != safecrowd::domain::ScenarioRole::Alternative
+        || scenario.baseScenarioId.isEmpty()) {
+        scenario.draft.variationDiffKeys.clear();
+        return;
+    }
+    const auto baseId = scenario.baseScenarioId.toStdString();
+    for (const auto& candidate : scenarios_) {
+        if (candidate.draft.scenarioId == baseId) {
+            scenario.draft.variationDiffKeys =
+                safecrowd::domain::computeScenarioDiffKeys(candidate.draft, scenario.draft);
+            return;
+        }
+    }
+    scenario.draft.variationDiffKeys.clear();
 }
 
 void ScenarioAuthoringWidget::showEmptyCanvas() {
@@ -924,13 +1225,17 @@ QWidget* ScenarioAuthoringWidget::createScenarioPanel() {
     newScenarioButton_->setStyleSheet(ui::secondaryButtonStyleSheet());
     inspectorLayout->addWidget(newScenarioButton_);
 
-    scenarioSummaryLabel_ = createLabel("", inspector);
-    scenarioSummaryLabel_->setStyleSheet(ui::mutedTextStyleSheet());
-    inspectorLayout->addWidget(scenarioSummaryLabel_);
+    scenarioOverviewPanel_ = new QWidget(inspector);
+    auto* overviewLayout = new QVBoxLayout(scenarioOverviewPanel_);
+    overviewLayout->setContentsMargins(0, 0, 0, 0);
+    overviewLayout->setSpacing(0);
+    inspectorLayout->addWidget(scenarioOverviewPanel_);
 
-    changesLabel_ = createLabel("", inspector);
-    changesLabel_->setStyleSheet(ui::mutedTextStyleSheet());
-    inspectorLayout->addWidget(changesLabel_);
+    scenarioDiffPanel_ = new QWidget(inspector);
+    auto* diffLayout = new QVBoxLayout(scenarioDiffPanel_);
+    diffLayout->setContentsMargins(0, 0, 0, 0);
+    diffLayout->setSpacing(0);
+    inspectorLayout->addWidget(scenarioDiffPanel_);
 
     stageScenarioButton_ = new QPushButton("Stage Scenario", inspector);
     stageScenarioButton_->setFont(ui::font(ui::FontRole::Body));

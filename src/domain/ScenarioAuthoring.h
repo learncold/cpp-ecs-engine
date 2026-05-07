@@ -72,4 +72,11 @@ struct ProjectWorkspaceSnapshot {
     std::vector<ScenarioDraft> scenarios{};
 };
 
+ScenarioDraft duplicateScenarioDraft(const ScenarioDraft& source,
+                                    std::string newScenarioId,
+                                    std::string newName);
+
+std::vector<std::string> computeScenarioDiffKeys(const ScenarioDraft& baseline,
+                                                 const ScenarioDraft& variant);
+
 }  // namespace safecrowd::domain

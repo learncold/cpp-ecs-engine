@@ -110,6 +110,12 @@ SC_TEST(DemoFixtureServiceBuildsSprint1Fixture) {
     SC_EXPECT_EQ(population.initialPlacements.front().zoneId, std::string(safecrowd::domain::DemoLayouts::Sprint1FacilityIds::MainRoomZoneId));
     SC_EXPECT_EQ(population.initialPlacements.front().targetAgentCount, std::size_t{100});
     SC_EXPECT_EQ(population.initialPlacements.front().area.outline.size(), std::size_t{4});
+    SC_EXPECT_EQ(fixture.baselineScenario.scenarioId, std::string("scenario-1"));
+    SC_EXPECT_EQ(fixture.baselineScenario.name, std::string("Sprint 1 baseline"));
+    SC_EXPECT_EQ(fixture.baselineScenario.role, safecrowd::domain::ScenarioRole::Baseline);
+    SC_EXPECT_EQ(fixture.baselineScenario.population.initialPlacements.size(), std::size_t{1});
+    SC_EXPECT_EQ(fixture.baselineScenario.population.initialPlacements.front().targetAgentCount, std::size_t{100});
+    SC_EXPECT_EQ(fixture.baselineScenario.execution.timeLimitSeconds, 600.0);
 
     safecrowd::domain::ImportValidationService validator;
     const auto issues = validator.validate(layout);

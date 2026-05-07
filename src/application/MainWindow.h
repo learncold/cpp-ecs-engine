@@ -45,7 +45,8 @@ private:
         const safecrowd::domain::ScenarioDraft& scenario,
         const safecrowd::domain::SimulationFrame& frame,
         const safecrowd::domain::ScenarioRiskSnapshot& risk,
-        const safecrowd::domain::ScenarioResultArtifacts& artifacts);
+        const safecrowd::domain::ScenarioResultArtifacts& artifacts,
+        std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState = std::nullopt);
 
     safecrowd::domain::SafeCrowdDomain& domain_;
     ProjectMetadata currentProject_{};

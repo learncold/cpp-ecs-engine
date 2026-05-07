@@ -81,6 +81,9 @@ private:
     void refreshNavigationPanel();
     void refreshRightPanel();
     void refreshScenarioSwitcher();
+    void recomputeDiffKeysAfterScenarioChanged(ScenarioState& scenario);
+    void recomputeDependentVariationDiffKeys(const QString& baselineId);
+    void recomputeVariationDiffKeysIfAlternative(ScenarioState& scenario) const;
     void runFirstStagedBaselineScenario();
     void stageCurrentScenario();
     void updateCurrentScenarioPlacements(const std::vector<ScenarioCrowdPlacement>& placements);
@@ -107,8 +110,8 @@ private:
     WorkspaceShell* shell_{nullptr};
     ScenarioCanvasWidget* canvas_{nullptr};
     QComboBox* scenarioSwitcher_{nullptr};
-    QLabel* scenarioSummaryLabel_{nullptr};
-    QLabel* changesLabel_{nullptr};
+    QWidget* scenarioOverviewPanel_{nullptr};
+    QWidget* scenarioDiffPanel_{nullptr};
     QLabel* stagedScenariosLabel_{nullptr};
     QPushButton* newScenarioButton_{nullptr};
     QPushButton* stageScenarioButton_{nullptr};

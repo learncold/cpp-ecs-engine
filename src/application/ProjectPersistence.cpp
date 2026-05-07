@@ -1211,6 +1211,7 @@ void updateLiveValidationIssues(safecrowd::domain::ImportResult* importResult) {
 QList<ProjectMetadata> ProjectPersistence::loadRecentProjects() {
     QList<ProjectMetadata> projects;
     projects.push_back(makeBuiltInDemoProject());
+    projects.push_back(makeBuiltInEvacuationScenarioDemoProject());
 
     const auto document = readJsonDocument(recentProjectsPath());
     if (!document.isObject()) {

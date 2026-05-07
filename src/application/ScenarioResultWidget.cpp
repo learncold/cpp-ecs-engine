@@ -1281,6 +1281,7 @@ ScenarioResultWidget::ScenarioResultWidget(
     std::function<void()> saveProjectHandler,
     std::function<void()> openProjectHandler,
     std::function<void()> backToLayoutReviewHandler,
+    std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState,
     QWidget* parent)
     : QWidget(parent),
       projectName_(std::move(projectName)),
@@ -1289,6 +1290,7 @@ ScenarioResultWidget::ScenarioResultWidget(
       frame_(std::move(frame)),
       risk_(std::move(risk)),
       artifacts_(std::move(artifacts)),
+      returnAuthoringState_(std::move(returnAuthoringState)),
       saveProjectHandler_(std::move(saveProjectHandler)),
       openProjectHandler_(std::move(openProjectHandler)),
       backToLayoutReviewHandler_(std::move(backToLayoutReviewHandler)) {
@@ -1462,7 +1464,8 @@ void ScenarioResultWidget::rerunScenario() {
         frame_,
         risk_,
         artifacts_,
-        this);
+        this,
+        returnAuthoringState_);
 
     rootLayout->replaceWidget(shell_, runWidget);
     shell_->hide();
@@ -1476,10 +1479,12 @@ void ScenarioResultWidget::navigateToAuthoring(bool showRunPanel) {
         return;
     }
 
-    ScenarioAuthoringWidget::InitialState initial;
-    initial.scenarios.push_back(scenarioStateFromDraft(scenario_, layout_));
-    initial.currentScenarioIndex = 0;
-    initial.navigationView = ScenarioAuthoringWidget::NavigationView::Layout;
+    auto initial = returnAuthoringState_.value_or(ScenarioAuthoringWidget::InitialState{});
+    if (initial.scenarios.empty()) {
+        initial.scenarios.push_back(scenarioStateFromDraft(scenario_, layout_));
+        initial.currentScenarioIndex = 0;
+        initial.navigationView = ScenarioAuthoringWidget::NavigationView::Layout;
+    }
     initial.rightPanelMode = showRunPanel
         ? ScenarioAuthoringWidget::RightPanelMode::Run
         : ScenarioAuthoringWidget::RightPanelMode::Scenario;
