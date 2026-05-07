@@ -838,8 +838,8 @@ SC_TEST(ScenarioSimulationMotionSystem_KeepsVerticalLandingOnPortalLine) {
     const auto& route = runtime.world().query().get<safecrowd::domain::EvacuationRoute>(entity);
     SC_EXPECT_EQ(route.currentFloorId, std::string{"L1"});
     SC_EXPECT_EQ(route.nextWaypointIndex, std::size_t{1});
-    SC_EXPECT_NEAR(position.value.x, 1.0, 1e-9);
-    SC_EXPECT_NEAR(position.value.y, 1.0, 1e-9);
+    SC_EXPECT_NEAR(position.value.x, 1.0, 0.002);
+    SC_EXPECT_NEAR(position.value.y, 1.0, 0.002);
 }
 
 SC_TEST(ScenarioSimulationMotionSystem_DoesNotAdvanceVerticalTransitionOutsidePassageSpan) {

@@ -1567,6 +1567,64 @@ SC_TEST(ScenarioSimulationRunnerDoesNotSnapDuringUShapedStairFloorTransition) {
     SC_EXPECT_TRUE(observedTransition);
 }
 
+SC_TEST(ScenarioSimulationRunnerMovesOffUShapedStairPortalAfterLanding) {
+    safecrowd::domain::InitialPlacement2D placement;
+    placement.id = "descending-agent";
+    placement.floorId = "L2";
+    placement.zoneId = "stair-l2";
+    placement.targetAgentCount = 1;
+    placement.initialVelocity = {.x = 0.0, .y = -1.0};
+    placement.area.outline = {{.x = 3.35, .y = 2.35}};
+
+    safecrowd::domain::ScenarioDraft scenario;
+    scenario.population.initialPlacements.push_back(placement);
+    scenario.execution.timeLimitSeconds = 4.0;
+
+    const auto layout = descendingWestEntryUShapedStairTransitionLayout();
+    safecrowd::domain::ScenarioSimulationRunner runner(layout, scenario);
+
+    bool observedTransition = false;
+    for (int i = 0; i < 40 && !runner.complete(); ++i) {
+        const auto previousFloor = runner.frame().agents.empty()
+            ? std::string{}
+            : runner.frame().agents.front().floorId;
+        runner.step(0.1);
+        if (runner.frame().agents.empty()) {
+            break;
+        }
+
+        const auto current = runner.frame().agents.front();
+        if (previousFloor == "L2" && current.floorId == "L1") {
+            observedTransition = true;
+            SC_EXPECT_NEAR(current.position.y, 2.0, 1e-6);
+            break;
+        }
+    }
+    SC_EXPECT_TRUE(observedTransition);
+
+    double lowestY = runner.frame().agents.empty()
+        ? 2.0
+        : runner.frame().agents.front().position.y;
+    bool observedMovementOffPortal = false;
+    for (int i = 0; i < 10 && !runner.complete(); ++i) {
+        runner.step(0.1);
+        if (runner.frame().agents.empty()) {
+            observedMovementOffPortal = true;
+            break;
+        }
+
+        const auto current = runner.frame().agents.front();
+        lowestY = std::min(lowestY, current.position.y);
+        if (current.floorId == "L1" && current.position.y < 1.98) {
+            observedMovementOffPortal = true;
+            break;
+        }
+    }
+
+    SC_EXPECT_TRUE(observedMovementOffPortal);
+    SC_EXPECT_TRUE(lowestY < 1.98);
+}
+
 SC_TEST(ScenarioSimulationRunnerQueuesCrowdedUShapedStairFloorTransitions) {
     safecrowd::domain::InitialPlacement2D placement;
     placement.id = "descending-crowd";

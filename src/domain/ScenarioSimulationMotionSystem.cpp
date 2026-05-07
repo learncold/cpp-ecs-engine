@@ -415,6 +415,101 @@ private:
         return dot(velocity.value, barrierVelocity) > 0.01;
     }
 
+    const Zone2D* verticalEndpointZoneForCurrentFloor(
+        const ScenarioLayoutCacheResource& layoutCache,
+        const Connection2D& connection,
+        const std::string& floorId) const {
+        const auto fromFloorId = cachedFloorIdForZone(layoutCache, connection.fromZoneId);
+        if (fromFloorId == floorId) {
+            return findCachedZone(layoutCache, connection.fromZoneId);
+        }
+
+        const auto toFloorId = cachedFloorIdForZone(layoutCache, connection.toZoneId);
+        if (toFloorId == floorId) {
+            return findCachedZone(layoutCache, connection.toZoneId);
+        }
+        return nullptr;
+    }
+
+    Point2D constrainedMoveOutOfVerticalPortalContact(
+        const ScenarioLayoutCacheResource& layoutCache,
+        const EvacuationRoute& route,
+        const Point2D& from,
+        const Point2D& to,
+        double clearance) const {
+        const auto& layout = cachedLayoutForFloor(layoutCache, route.currentFloorId);
+        const auto releaseDistance = std::max(clearance + kPathClearance, kPortalCrossingEpsilon * 2.0);
+        const Connection2D* portalConnection = nullptr;
+        const Zone2D* endpointZone = nullptr;
+        for (const auto& connection : layoutCache.layout.connections) {
+            if (!isVerticalConnection(connection)) {
+                continue;
+            }
+
+            const auto* candidateZone = verticalEndpointZoneForCurrentFloor(layoutCache, connection, route.currentFloorId);
+            if (candidateZone == nullptr) {
+                continue;
+            }
+            const auto startDistance = distanceBetween(
+                route.currentSegmentStart,
+                closestPointOnSegment(route.currentSegmentStart, connection.centerSpan.start, connection.centerSpan.end));
+            const auto fromDistance = distanceBetween(
+                from,
+                closestPointOnSegment(from, connection.centerSpan.start, connection.centerSpan.end));
+            if (startDistance <= releaseDistance && fromDistance <= releaseDistance) {
+                portalConnection = &connection;
+                endpointZone = candidateZone;
+                break;
+            }
+        }
+        if (portalConnection == nullptr || endpointZone == nullptr) {
+            return from;
+        }
+
+        const auto normal = verticalTransitionNormal(portalConnection->centerSpan, *endpointZone, route.currentSegmentStart);
+        if (!normal.has_value()) {
+            return from;
+        }
+
+        auto validPortalRelease = [&](const Point2D& candidate) {
+            const auto movement = candidate - from;
+            if (dot(movement, *normal) < -kGeometryEpsilon) {
+                return false;
+            }
+            return pointInRing(endpointZone->area.outline, candidate)
+                && !movementCrossesBarrier(layout, from, candidate);
+        };
+
+        if (validPortalRelease(to)) {
+            return to;
+        }
+
+        const Point2D xOnly{.x = to.x, .y = from.y};
+        if (validPortalRelease(xOnly)) {
+            return xOnly;
+        }
+
+        const Point2D yOnly{.x = from.x, .y = to.y};
+        if (validPortalRelease(yOnly)) {
+            return yOnly;
+        }
+
+        Point2D best = from;
+        double low = 0.0;
+        double high = 1.0;
+        for (int i = 0; i < 8; ++i) {
+            const auto t = (low + high) * 0.5;
+            const auto candidate = from + ((to - from) * t);
+            if (validPortalRelease(candidate)) {
+                low = t;
+                best = candidate;
+            } else {
+                high = t;
+            }
+        }
+        return best;
+    }
+
     Point2D constrainedMoveForCurrentWaypoint(
         const ScenarioLayoutCacheResource& layoutCache,
         const EvacuationRoute& route,
@@ -423,7 +518,11 @@ private:
         double clearance) const {
         const auto& layout = cachedLayoutForFloor(layoutCache, route.currentFloorId);
         if (!currentWaypointIsVertical(route)) {
-            return constrainedMove(layout, from, to, clearance);
+            const auto constrained = constrainedMove(layout, from, to, clearance);
+            if (distanceBetween(constrained, from) > kGeometryEpsilon) {
+                return constrained;
+            }
+            return constrainedMoveOutOfVerticalPortalContact(layoutCache, route, from, to, clearance);
         }
 
         return constrainedMoveWithBarrierClearance(layout, from, to, clearance);
