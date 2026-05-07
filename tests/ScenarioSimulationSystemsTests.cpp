@@ -395,6 +395,17 @@ safecrowd::domain::FacilityLayout2D verticalPortalTransitionLayout() {
     return layout;
 }
 
+safecrowd::domain::FacilityLayout2D verticalPortalTransitionLayoutWithBlockedLandingClearance() {
+    auto layout = verticalPortalTransitionLayout();
+    layout.barriers.push_back({
+        .id = "target-landing-clearance-barrier",
+        .floorId = "L1",
+        .geometry = {.vertices = {{0.0, 0.95}, {2.0, 0.95}}},
+        .blocksMovement = true,
+    });
+    return layout;
+}
+
 }  // namespace
 
 SC_TEST(ScenarioAgentSpawnSystem_ConfiguresClockAndSpawnsAgentSeeds) {
@@ -719,6 +730,118 @@ SC_TEST(ScenarioSimulationMotionSystem_DoesNotBypassStalledVerticalTransition) {
     SC_EXPECT_EQ(route.nextWaypointIndex, std::size_t{0});
 }
 
+SC_TEST(ScenarioSimulationMotionSystem_DoesNotAdvanceVerticalTransitionBeforePortalPlane) {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    seeds.push_back({
+        .position = {.value = {.x = 1.0, .y = 1.004}},
+        .agent = {.radius = 0.25f, .maxSpeed = 1.0f},
+        .velocity = {.value = {}},
+        .route = {
+            .waypoints = {{.x = 1.0, .y = 1.0}, {.x = 1.8, .y = 0.5}},
+            .waypointPassages = {
+                {{.x = 0.6, .y = 1.0}, {.x = 1.4, .y = 1.0}},
+                {{.x = 1.8, .y = 0.5}, {.x = 1.8, .y = 0.5}},
+            },
+            .waypointFromZoneIds = {"upper-stair", ""},
+            .waypointZoneIds = {"lower-stair", "missing-exit"},
+            .waypointFloorIds = {"L1", "L1"},
+            .waypointConnectionIds = {"vertical-stair", ""},
+            .waypointVerticalTransitions = {true, false},
+            .nextWaypointIndex = 0,
+            .currentSegmentStart = {.x = 1.0, .y = 1.8},
+            .previousDistanceToWaypoint = 0.004,
+            .destinationZoneId = "missing-exit",
+            .currentFloorId = "L2",
+            .displayFloorId = "L2",
+        },
+        .status = {},
+    });
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 19,
+    });
+    const auto layout = verticalPortalTransitionLayout();
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioSimulationMotionSystem(layout),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.001});
+    runtime.stepFrame(0.0);
+
+    const auto entities = runtime.world().query().view<
+        safecrowd::domain::Position,
+        safecrowd::domain::Velocity,
+        safecrowd::domain::AvoidanceState,
+        safecrowd::domain::EvacuationRoute>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{1});
+    const auto& route = runtime.world().query().get<safecrowd::domain::EvacuationRoute>(entities.front());
+    SC_EXPECT_EQ(route.currentFloorId, std::string{"L2"});
+    SC_EXPECT_EQ(route.nextWaypointIndex, std::size_t{0});
+}
+
+SC_TEST(ScenarioSimulationMotionSystem_DoesNotUseFarLandingFallbackForVerticalTransition) {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    seeds.push_back({
+        .position = {.value = {.x = 1.0, .y = 1.0}},
+        .agent = {.radius = 0.25f, .maxSpeed = 1.0f},
+        .velocity = {.value = {}},
+        .route = {
+            .waypoints = {{.x = 1.0, .y = 1.0}, {.x = 1.8, .y = 0.5}},
+            .waypointPassages = {
+                {{.x = 0.6, .y = 1.0}, {.x = 1.4, .y = 1.0}},
+                {{.x = 1.8, .y = 0.5}, {.x = 1.8, .y = 0.5}},
+            },
+            .waypointFromZoneIds = {"upper-stair", ""},
+            .waypointZoneIds = {"lower-stair", "missing-exit"},
+            .waypointFloorIds = {"L1", "L1"},
+            .waypointConnectionIds = {"vertical-stair", ""},
+            .waypointVerticalTransitions = {true, false},
+            .nextWaypointIndex = 0,
+            .currentSegmentStart = {.x = 1.0, .y = 1.8},
+            .previousDistanceToWaypoint = 0.0,
+            .destinationZoneId = "missing-exit",
+            .currentFloorId = "L2",
+            .displayFloorId = "L2",
+        },
+        .status = {},
+    });
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 20,
+    });
+    const auto layout = verticalPortalTransitionLayoutWithBlockedLandingClearance();
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioSimulationMotionSystem(layout),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.001});
+    runtime.stepFrame(0.0);
+
+    const auto entities = runtime.world().query().view<
+        safecrowd::domain::Position,
+        safecrowd::domain::Velocity,
+        safecrowd::domain::AvoidanceState,
+        safecrowd::domain::EvacuationRoute>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{1});
+    const auto entity = entities.front();
+    const auto& position = runtime.world().query().get<safecrowd::domain::Position>(entity);
+    const auto& route = runtime.world().query().get<safecrowd::domain::EvacuationRoute>(entity);
+    SC_EXPECT_EQ(route.currentFloorId, std::string{"L2"});
+    SC_EXPECT_EQ(route.nextWaypointIndex, std::size_t{0});
+    SC_EXPECT_NEAR(position.value.x, 1.0, 1e-9);
+    SC_EXPECT_NEAR(position.value.y, 1.0, 1e-9);
+}
+
 SC_TEST(ScenarioSimulationMotionSystem_DoesNotAdvanceVerticalTransitionOutsidePassageSpan) {
     std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
     seeds.push_back({
@@ -900,6 +1023,82 @@ SC_TEST(ScenarioSimulationMotionSystem_UsesStableHeadOnAvoidance) {
     SC_EXPECT_TRUE(firstVelocity.value.y * secondVelocity.value.y < 0.0);
     SC_EXPECT_TRUE(firstAvoidance.preferredSide != 0);
     SC_EXPECT_EQ(firstAvoidance.preferredSide, secondAvoidance.preferredSide);
+}
+
+SC_TEST(ScenarioSimulationMotionSystem_UsesPhysicsBucketForCrossFloorHeadOnAvoidance) {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    seeds.push_back({
+        .position = {.value = {.x = -0.4, .y = 0.0}},
+        .agent = {.radius = 0.25f, .maxSpeed = 1.0f},
+        .velocity = {.value = {}},
+        .route = {
+            .waypoints = {{.x = 1.0, .y = 0.0}},
+            .waypointPassages = {{{.x = 1.0, .y = 0.0}, {.x = 1.0, .y = 0.0}}},
+            .waypointFromZoneIds = {""},
+            .waypointZoneIds = {"missing"},
+            .nextWaypointIndex = 0,
+            .currentSegmentStart = {.x = -0.4, .y = 0.0},
+            .previousDistanceToWaypoint = 1.4,
+            .destinationZoneId = "missing",
+            .currentFloorId = "L1",
+            .displayFloorId = "L1",
+            .physicsFloorId = "vertical:stair-vertical",
+        },
+        .status = {},
+    });
+    seeds.push_back({
+        .position = {.value = {.x = 0.4, .y = 0.0}},
+        .agent = {.radius = 0.25f, .maxSpeed = 1.0f},
+        .velocity = {.value = {}},
+        .route = {
+            .waypoints = {{.x = -1.0, .y = 0.0}},
+            .waypointPassages = {{{.x = -1.0, .y = 0.0}, {.x = -1.0, .y = 0.0}}},
+            .waypointFromZoneIds = {""},
+            .waypointZoneIds = {"missing"},
+            .nextWaypointIndex = 0,
+            .currentSegmentStart = {.x = 0.4, .y = 0.0},
+            .previousDistanceToWaypoint = 1.4,
+            .destinationZoneId = "missing",
+            .currentFloorId = "L2",
+            .displayFloorId = "L2",
+            .physicsFloorId = "vertical:stair-vertical",
+        },
+        .status = {},
+    });
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 18,
+    });
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+
+    runtime.play();
+    runtime.stepFrame(0.0);
+
+    auto& query = runtime.world().query();
+    const auto entities = query.view<
+        safecrowd::domain::Position,
+        safecrowd::domain::Velocity,
+        safecrowd::domain::AvoidanceState,
+        safecrowd::domain::EvacuationRoute>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{2});
+
+    const auto first = entities[0];
+    const auto second = entities[1];
+    double speedScale = 1.0;
+    const auto avoidanceVelocity = safecrowd::domain::simulation_internal::forwardPreservingAgentAvoidanceVelocity(
+        query,
+        first,
+        {second},
+        {.x = 1.0, .y = 0.0},
+        0.2,
+        speedScale);
+    const auto& avoidance = query.get<safecrowd::domain::AvoidanceState>(first);
+
+    SC_EXPECT_TRUE(speedScale < 1.0);
+    SC_EXPECT_TRUE(avoidanceVelocity.y != 0.0);
+    SC_EXPECT_TRUE(avoidance.preferredSide != 0);
 }
 
 SC_TEST(ScenarioControlSystem_BlocksConnectionsUsingScenarioClock) {

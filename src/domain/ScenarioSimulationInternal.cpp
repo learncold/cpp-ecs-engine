@@ -1096,8 +1096,7 @@ Point2D forwardPreservingAgentAvoidanceVelocity(
 
         bool headOn = false;
         if (route.nextWaypointIndex < route.waypoints.size() && distance <= kHeadOnLookAheadDistance) {
-            if (otherRoute.currentFloorId == route.currentFloorId
-                && otherRoute.nextWaypointIndex < otherRoute.waypoints.size()) {
+            if (otherRoute.nextWaypointIndex < otherRoute.waypoints.size()) {
                 const auto otherTarget = routeWaypointTarget(otherRoute, otherPosition.value);
                 const auto otherTargetDistance = distanceBetween(otherPosition.value, otherTarget);
                 if (otherTargetDistance > kArrivalEpsilon) {

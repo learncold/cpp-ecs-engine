@@ -256,6 +256,7 @@ public:
             updateDisplayFloor(route, nextPosition);
         }
 
+        advanceVerticalRoutesAtPortal(query, entities, layoutCache);
         updateAgentPhysicsFloorIds(query, layoutCache, entities);
         resolveAgentOverlaps(query, entities, layoutCache);
         advanceRoutesForCurrentZones(query, entities, layoutCache);
@@ -271,7 +272,6 @@ private:
     static constexpr double kNoExitReplanCooldownSeconds = 7.0;
     static constexpr double kSegmentReplanCooldownSeconds = 0.25;
     static constexpr double kFailedSegmentReplanCooldownSeconds = 1.25;
-    static constexpr double kVerticalPortalContactTolerance = kPortalCrossingEpsilon * 0.25;
 
     struct RoutePlan {
         std::vector<Point2D> waypoints{};
@@ -320,6 +320,29 @@ private:
         return false;
     }
 
+    std::optional<Point2D> verticalTransitionNormal(
+        const LineSegment2D& passage,
+        const Zone2D& toZone,
+        const Point2D& transitionStartPoint) const {
+        auto normal = normalizedOr(perpendicularLeft(passage.end - passage.start), {});
+        if (lengthOf(normal) <= 1e-9) {
+            return std::nullopt;
+        }
+
+        const auto passageMidpoint = midpoint(passage);
+        auto towardTarget = polygonCenter(toZone.area) - passageMidpoint;
+        if (lengthOf(towardTarget) <= kArrivalEpsilon) {
+            towardTarget = passageMidpoint - transitionStartPoint;
+        }
+        if (lengthOf(towardTarget) <= kArrivalEpsilon) {
+            return std::nullopt;
+        }
+        if (dot(normal, towardTarget) < 0.0) {
+            normal = normal * -1.0;
+        }
+        return normal;
+    }
+
     bool verticalPassageCrossed(
         const ScenarioLayoutCacheResource& layoutCache,
         const EvacuationRoute& route,
@@ -336,26 +359,15 @@ private:
             return false;
         }
 
-        const auto* fromZone = findCachedZone(layoutCache, route.waypointFromZoneIds[route.nextWaypointIndex]);
         const auto* toZone = findCachedZone(layoutCache, route.waypointZoneIds[route.nextWaypointIndex]);
-        if (fromZone == nullptr || toZone == nullptr) {
+        if (toZone == nullptr) {
             return false;
         }
 
-        auto normal = normalizedOr(perpendicularLeft(passage.end - passage.start), {});
-        if (lengthOf(normal) <= 1e-9) {
-            return false;
-        }
+        const auto normal = verticalTransitionNormal(passage, *toZone, route.currentSegmentStart);
         const auto passageMidpoint = midpoint(passage);
-        auto towardCrossing = polygonCenter(toZone->area) - passageMidpoint;
-        if (lengthOf(towardCrossing) <= kArrivalEpsilon) {
-            towardCrossing = passageMidpoint - route.currentSegmentStart;
-        }
-        if (lengthOf(towardCrossing) <= kArrivalEpsilon) {
+        if (!normal.has_value()) {
             return false;
-        }
-        if (dot(normal, towardCrossing) < 0.0) {
-            normal = normal * -1.0;
         }
 
         const auto passageVector = passage.end - passage.start;
@@ -367,7 +379,7 @@ private:
             return false;
         }
 
-        return dot(position - passageMidpoint, normal) >= -kVerticalPortalContactTolerance;
+        return dot(position - passageMidpoint, *normal) >= -kGeometryEpsilon;
     }
 
     Point2D velocityWithBarrierEscape(
@@ -421,6 +433,7 @@ private:
         const ScenarioLayoutCacheResource& layoutCache,
         const EvacuationRoute& route,
         std::size_t reachedIndex,
+        const Point2D& transitionStartPoint,
         const Point2D& reachedPoint,
         double clearance) const {
         if (reachedIndex >= route.waypointVerticalTransitions.size()
@@ -431,9 +444,8 @@ private:
             return reachedPoint;
         }
 
-        const auto* fromZone = findCachedZone(layoutCache, route.waypointFromZoneIds[reachedIndex]);
         const auto* toZone = findCachedZone(layoutCache, route.waypointZoneIds[reachedIndex]);
-        if (fromZone == nullptr || toZone == nullptr) {
+        if (toZone == nullptr) {
             return reachedPoint;
         }
 
@@ -445,48 +457,43 @@ private:
         const auto landingOnPassage = closestPointOnSegment(reachedPoint, passage.start, passage.end);
         const auto targetFloorId = cachedFloorIdForZone(layoutCache, toZone->id);
         const auto& targetLayout = cachedLayoutForFloor(layoutCache, targetFloorId);
-        const auto passageDirection = passage.end - passage.start;
-        const auto tangent = normalizedOr(passageDirection, {});
-        auto normal = normalizedOr(perpendicularLeft(passageDirection), {});
-        if (lengthOf(normal) <= 1e-9) {
+        const auto normal = verticalTransitionNormal(passage, *toZone, transitionStartPoint);
+        if (!normal.has_value()) {
             return reachedPoint;
-        }
-
-        const auto towardTargetZone = polygonCenter(toZone->area) - midpoint(passage);
-        if (dot(normal, towardTargetZone) < 0.0) {
-            normal = normal * -1.0;
         }
 
         auto validLanding = [&](const Point2D& candidate) {
             return pointInRing(toZone->area.outline, candidate)
                 && pointHasBarrierClearance(targetLayout, candidate, clearance);
         };
-        if (validLanding(reachedPoint)) {
+        const auto portalDistance = dot(reachedPoint - midpoint(passage), *normal);
+        if (portalDistance > kGeometryEpsilon && validLanding(reachedPoint)) {
             return reachedPoint;
         }
 
         const auto minimalOffset = kPortalCrossingEpsilon * 1.25;
-        const auto reachedPointInsideTarget = reachedPoint + (normal * minimalOffset);
+        const auto reachedPointInsideTarget = reachedPoint + (*normal * minimalOffset);
         if (validLanding(reachedPointInsideTarget)) {
             return reachedPointInsideTarget;
         }
 
-        const auto passageInsideTarget = landingOnPassage + (normal * minimalOffset);
+        const auto passageInsideTarget = landingOnPassage + (*normal * minimalOffset);
         if (validLanding(passageInsideTarget)) {
             return passageInsideTarget;
         }
 
-        const auto baseOffset = std::max(clearance + kPathClearance, 0.2);
-        const double offsets[] = {baseOffset, 0.45, 0.75, 1.1, 1.6};
-        const double slideUnit = std::max(clearance + kPathClearance, 0.25);
-        const double slides[] = {0.0, slideUnit, -slideUnit, slideUnit * 2.0, slideUnit * -2.0};
-        for (const auto offset : offsets) {
-            for (const auto slide : slides) {
-                const auto candidate = landingOnPassage + (normal * offset) + (tangent * slide);
-                if (validLanding(candidate)) {
-                    return candidate;
-                }
-            }
+        const auto clearanceOffset = std::max(clearance + kPathClearance, minimalOffset);
+        auto validClearanceNudge = [&](const Point2D& start, const Point2D& candidate) {
+            return validLanding(candidate)
+                && !movementCrossesBarrier(targetLayout, start, candidate);
+        };
+        const auto reachedPointWithClearance = reachedPoint + (*normal * clearanceOffset);
+        if (validClearanceNudge(reachedPointInsideTarget, reachedPointWithClearance)) {
+            return reachedPointWithClearance;
+        }
+        const auto passageWithClearance = landingOnPassage + (*normal * clearanceOffset);
+        if (validClearanceNudge(passageInsideTarget, passageWithClearance)) {
+            return passageWithClearance;
         }
 
         return std::nullopt;
@@ -496,6 +503,7 @@ private:
         const ScenarioLayoutCacheResource& layoutCache,
         const EvacuationRoute& route,
         std::size_t reachedIndex,
+        const Point2D& transitionStartPoint,
         const Point2D& reachedPoint,
         double clearance) const {
         if (reachedIndex >= route.waypointVerticalTransitions.size()
@@ -506,9 +514,8 @@ private:
             return reachedPoint;
         }
 
-        const auto* fromZone = findCachedZone(layoutCache, route.waypointFromZoneIds[reachedIndex]);
         const auto* toZone = findCachedZone(layoutCache, route.waypointZoneIds[reachedIndex]);
-        if (fromZone == nullptr || toZone == nullptr) {
+        if (toZone == nullptr) {
             return reachedPoint;
         }
 
@@ -522,14 +529,9 @@ private:
         const auto& targetLayout = cachedLayoutForFloor(layoutCache, targetFloorId);
         const auto passageDirection = passage.end - passage.start;
         const auto tangent = normalizedOr(passageDirection, {});
-        auto normal = normalizedOr(perpendicularLeft(passageDirection), {});
-        if (lengthOf(normal) <= 1e-9) {
+        const auto normal = verticalTransitionNormal(passage, *toZone, transitionStartPoint);
+        if (!normal.has_value()) {
             return reachedPoint;
-        }
-
-        const auto towardTargetZone = polygonCenter(toZone->area) - midpoint(passage);
-        if (dot(normal, towardTargetZone) < 0.0) {
-            normal = normal * -1.0;
         }
 
         auto validLanding = [&](const Point2D& candidate) {
@@ -543,7 +545,7 @@ private:
         const double slides[] = {0.0, slideUnit, -slideUnit, slideUnit * 2.0, slideUnit * -2.0};
         for (const auto offset : offsets) {
             for (const auto slide : slides) {
-                const auto candidate = landingOnPassage + (normal * offset) + (tangent * slide);
+                const auto candidate = landingOnPassage + (*normal * offset) + (tangent * slide);
                 if (validLanding(candidate)) {
                     return candidate;
                 }
@@ -703,12 +705,14 @@ private:
         }
 
         const auto reachedIndex = route.nextWaypointIndex;
+        const auto transitionStartPoint = route.currentSegmentStart;
         const auto completedVerticalTransition = reachedIndex < route.waypointVerticalTransitions.size()
             && route.waypointVerticalTransitions[reachedIndex];
         const auto landingPoint = verticalTransitionLandingPoint(
             layoutCache,
             route,
             reachedIndex,
+            transitionStartPoint,
             reachedPoint,
             static_cast<double>(agent.radius));
         if (!landingPoint.has_value()) {
@@ -729,6 +733,7 @@ private:
                 layoutCache,
                 route,
                 reachedIndex,
+                transitionStartPoint,
                 advancedPoint,
                 static_cast<double>(agent.radius)).value_or(advancedPoint)
             : advancedPoint;
@@ -898,6 +903,33 @@ private:
 
                 route.previousDistanceToWaypoint = std::min(route.previousDistanceToWaypoint, distance);
                 break;
+            }
+        }
+    }
+
+    void advanceVerticalRoutesAtPortal(
+        engine::WorldQuery& query,
+        const std::vector<engine::Entity>& entities,
+        const ScenarioLayoutCacheResource& layoutCache) const {
+        for (const auto entity : entities) {
+            const auto& status = query.get<EvacuationStatus>(entity);
+            if (status.evacuated) {
+                continue;
+            }
+
+            auto& position = query.get<Position>(entity);
+            const auto& agent = query.get<Agent>(entity);
+            auto& route = query.get<EvacuationRoute>(entity);
+            while (route.nextWaypointIndex < route.waypoints.size() && currentWaypointIsVertical(route)) {
+                if (!verticalPassageCrossed(layoutCache, route, position.value, agent.radius)) {
+                    break;
+                }
+
+                const auto advance = advanceRouteWaypoint(layoutCache, route, agent, position.value);
+                position.value = advance.position;
+                if (!advance.advanced) {
+                    break;
+                }
             }
         }
     }
