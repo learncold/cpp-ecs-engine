@@ -6,6 +6,7 @@
 #include <QString>
 #include <QWidget>
 
+#include "application/ScenarioAuthoringWidget.h"
 #include "domain/FacilityLayout2D.h"
 #include "domain/ScenarioAuthoring.h"
 #include "domain/ScenarioSimulationRunner.h"
@@ -29,7 +30,8 @@ public:
         std::function<void()> saveProjectHandler,
         std::function<void()> openProjectHandler,
         std::function<void()> backToLayoutReviewHandler,
-        QWidget* parent = nullptr);
+        QWidget* parent = nullptr,
+        std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState = std::nullopt);
     explicit ScenarioRunWidget(
         const QString& projectName,
         const safecrowd::domain::FacilityLayout2D& layout,
@@ -40,7 +42,8 @@ public:
         safecrowd::domain::SimulationFrame cachedResultFrame,
         safecrowd::domain::ScenarioRiskSnapshot cachedResultRisk,
         safecrowd::domain::ScenarioResultArtifacts cachedResultArtifacts,
-        QWidget* parent = nullptr);
+        QWidget* parent = nullptr,
+        std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState = std::nullopt);
 
     const safecrowd::domain::ScenarioDraft& scenario() const noexcept;
 
@@ -67,6 +70,7 @@ private:
     std::function<void()> saveProjectHandler_{};
     std::function<void()> openProjectHandler_{};
     std::function<void()> backToLayoutReviewHandler_{};
+    std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState_{};
     WorkspaceShell* shell_{nullptr};
     SimulationCanvasWidget* canvas_{nullptr};
     QTimer* timer_{nullptr};

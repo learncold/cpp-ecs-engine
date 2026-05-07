@@ -1464,7 +1464,8 @@ void ScenarioResultWidget::rerunScenario() {
         frame_,
         risk_,
         artifacts_,
-        this);
+        this,
+        returnAuthoringState_);
 
     rootLayout->replaceWidget(shell_, runWidget);
     shell_->hide();

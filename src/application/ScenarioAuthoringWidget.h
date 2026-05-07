@@ -110,8 +110,8 @@ private:
     WorkspaceShell* shell_{nullptr};
     ScenarioCanvasWidget* canvas_{nullptr};
     QComboBox* scenarioSwitcher_{nullptr};
-    QLabel* scenarioSummaryLabel_{nullptr};
-    QLabel* changesLabel_{nullptr};
+    QWidget* scenarioOverviewPanel_{nullptr};
+    QWidget* scenarioDiffPanel_{nullptr};
     QLabel* stagedScenariosLabel_{nullptr};
     QPushButton* newScenarioButton_{nullptr};
     QPushButton* stageScenarioButton_{nullptr};

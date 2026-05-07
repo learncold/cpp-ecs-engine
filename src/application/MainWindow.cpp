@@ -59,7 +59,7 @@ ProjectWorkspaceState makeEvacuationScenarioDemoWorkspace() {
     alternative.control.connectionBlocks.push_back({
         .id = "block-1",
         .connectionId = DemoLayouts::Sprint1FacilityIds::DoorwayConnectionId,
-        .intervals = {{0.0, 120.0}},
+        .intervals = {{0.0, 60.0}},
     });
     alternative.variationDiffKeys = computeScenarioDiffKeys(fixture.baselineScenario, alternative);
 

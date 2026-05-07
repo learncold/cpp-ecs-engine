@@ -178,7 +178,8 @@ ScenarioRunWidget::ScenarioRunWidget(
     std::function<void()> saveProjectHandler,
     std::function<void()> openProjectHandler,
     std::function<void()> backToLayoutReviewHandler,
-    QWidget* parent)
+    QWidget* parent,
+    std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState)
     : QWidget(parent),
       projectName_(projectName),
       layout_(layout),
@@ -186,7 +187,8 @@ ScenarioRunWidget::ScenarioRunWidget(
       runner_(layout_, scenario_),
       saveProjectHandler_(std::move(saveProjectHandler)),
       openProjectHandler_(std::move(openProjectHandler)),
-      backToLayoutReviewHandler_(std::move(backToLayoutReviewHandler)) {
+      backToLayoutReviewHandler_(std::move(backToLayoutReviewHandler)),
+      returnAuthoringState_(std::move(returnAuthoringState)) {
     setupUi();
 }
 
@@ -200,7 +202,8 @@ ScenarioRunWidget::ScenarioRunWidget(
     safecrowd::domain::SimulationFrame cachedResultFrame,
     safecrowd::domain::ScenarioRiskSnapshot cachedResultRisk,
     safecrowd::domain::ScenarioResultArtifacts cachedResultArtifacts,
-    QWidget* parent)
+    QWidget* parent,
+    std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState)
     : QWidget(parent),
       projectName_(projectName),
       layout_(layout),
@@ -211,7 +214,8 @@ ScenarioRunWidget::ScenarioRunWidget(
       cachedResultArtifacts_(std::move(cachedResultArtifacts)),
       saveProjectHandler_(std::move(saveProjectHandler)),
       openProjectHandler_(std::move(openProjectHandler)),
-      backToLayoutReviewHandler_(std::move(backToLayoutReviewHandler)) {
+      backToLayoutReviewHandler_(std::move(backToLayoutReviewHandler)),
+      returnAuthoringState_(std::move(returnAuthoringState)) {
     setupUi();
 }
 
@@ -353,10 +357,12 @@ void ScenarioRunWidget::returnToAuthoring() {
         return;
     }
 
-    ScenarioAuthoringWidget::InitialState initial;
-    initial.scenarios.push_back(scenarioStateFromDraft(scenario_, layout_));
-    initial.currentScenarioIndex = 0;
-    initial.navigationView = ScenarioAuthoringWidget::NavigationView::Layout;
+    auto initial = returnAuthoringState_.value_or(ScenarioAuthoringWidget::InitialState{});
+    if (initial.scenarios.empty()) {
+        initial.scenarios.push_back(scenarioStateFromDraft(scenario_, layout_));
+        initial.currentScenarioIndex = 0;
+        initial.navigationView = ScenarioAuthoringWidget::NavigationView::Layout;
+    }
     initial.rightPanelMode = ScenarioAuthoringWidget::RightPanelMode::Scenario;
 
     auto* authoringWidget = new ScenarioAuthoringWidget(
@@ -591,7 +597,7 @@ void ScenarioRunWidget::showResults() {
             }
         },
         backToLayoutReviewHandler_,
-        std::nullopt,
+        returnAuthoringState_,
         this);
     rootLayout->replaceWidget(shell_, resultWidget);
     shell_->hide();
