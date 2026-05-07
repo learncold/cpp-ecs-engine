@@ -3,6 +3,9 @@
 #include "domain/FacilityLayout2D.h"
 #include "domain/PopulationSpec.h"
 #include "domain/ScenarioAuthoring.h"
+#include "domain/ScenarioResultArtifacts.h"
+#include "domain/ScenarioRiskMetrics.h"
+#include "domain/ScenarioSimulationFrame.h"
 
 namespace safecrowd::domain {
 
@@ -12,9 +15,20 @@ struct DemoFixture {
     ScenarioDraft baselineScenario{};
 };
 
+struct DemoScenarioResultFixture {
+    FacilityLayout2D layout{};
+    PopulationSpec population{};
+    ScenarioDraft baselineScenario{};
+    ScenarioDraft alternativeScenario{};
+    SimulationFrame frame{};
+    ScenarioRiskSnapshot risk{};
+    ScenarioResultArtifacts artifacts{};
+};
+
 class DemoFixtureService {
 public:
     DemoFixture createSprint1DemoFixture() const;
+    DemoScenarioResultFixture createSprint1BlockedDoorResultFixture() const;
 };
 
 }  // namespace safecrowd::domain

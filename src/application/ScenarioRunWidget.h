@@ -46,6 +46,7 @@ public:
         std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState = std::nullopt);
 
     const safecrowd::domain::ScenarioDraft& scenario() const noexcept;
+    const std::optional<ScenarioAuthoringWidget::InitialState>& returnAuthoringState() const noexcept;
 
 private:
     QWidget* createRunPanel();
