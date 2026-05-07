@@ -1555,6 +1555,7 @@ SC_TEST(ScenarioSimulationRunnerDoesNotSnapDuringUShapedStairFloorTransition) {
         if (previous.floorId == "L2" && current.floorId == "L1") {
             const auto displacement = testDistanceBetween(previous.position, current.position);
             SC_EXPECT_TRUE(displacement <= 0.18);
+            SC_EXPECT_NEAR(current.position.y, 2.0, 1e-6);
             SC_EXPECT_TRUE(current.position.y > 1.90);
             SC_EXPECT_TRUE(current.position.y < 2.05);
             observedTransition = true;

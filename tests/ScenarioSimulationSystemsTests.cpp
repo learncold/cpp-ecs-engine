@@ -784,7 +784,7 @@ SC_TEST(ScenarioSimulationMotionSystem_DoesNotAdvanceVerticalTransitionBeforePor
     SC_EXPECT_EQ(route.nextWaypointIndex, std::size_t{0});
 }
 
-SC_TEST(ScenarioSimulationMotionSystem_DoesNotUseFarLandingFallbackForVerticalTransition) {
+SC_TEST(ScenarioSimulationMotionSystem_KeepsVerticalLandingOnPortalLine) {
     std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
     seeds.push_back({
         .position = {.value = {.x = 1.0, .y = 1.0}},
@@ -836,8 +836,8 @@ SC_TEST(ScenarioSimulationMotionSystem_DoesNotUseFarLandingFallbackForVerticalTr
     const auto entity = entities.front();
     const auto& position = runtime.world().query().get<safecrowd::domain::Position>(entity);
     const auto& route = runtime.world().query().get<safecrowd::domain::EvacuationRoute>(entity);
-    SC_EXPECT_EQ(route.currentFloorId, std::string{"L2"});
-    SC_EXPECT_EQ(route.nextWaypointIndex, std::size_t{0});
+    SC_EXPECT_EQ(route.currentFloorId, std::string{"L1"});
+    SC_EXPECT_EQ(route.nextWaypointIndex, std::size_t{1});
     SC_EXPECT_NEAR(position.value.x, 1.0, 1e-9);
     SC_EXPECT_NEAR(position.value.y, 1.0, 1e-9);
 }

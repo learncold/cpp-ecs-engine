@@ -434,8 +434,7 @@ private:
         const EvacuationRoute& route,
         std::size_t reachedIndex,
         const Point2D& transitionStartPoint,
-        const Point2D& reachedPoint,
-        double clearance) const {
+        const Point2D& reachedPoint) const {
         if (reachedIndex >= route.waypointVerticalTransitions.size()
             || !route.waypointVerticalTransitions[reachedIndex]
             || reachedIndex >= route.waypointPassages.size()
@@ -454,49 +453,17 @@ private:
             return reachedPoint;
         }
 
-        const auto landingOnPassage = closestPointOnSegment(reachedPoint, passage.start, passage.end);
-        const auto targetFloorId = cachedFloorIdForZone(layoutCache, toZone->id);
-        const auto& targetLayout = cachedLayoutForFloor(layoutCache, targetFloorId);
         const auto normal = verticalTransitionNormal(passage, *toZone, transitionStartPoint);
         if (!normal.has_value()) {
             return reachedPoint;
         }
 
-        auto validLanding = [&](const Point2D& candidate) {
-            return pointInRing(toZone->area.outline, candidate)
-                && pointHasBarrierClearance(targetLayout, candidate, clearance);
-        };
         const auto portalDistance = dot(reachedPoint - midpoint(passage), *normal);
-        if (portalDistance > kGeometryEpsilon && validLanding(reachedPoint)) {
+        if (portalDistance > kGeometryEpsilon) {
             return reachedPoint;
         }
 
-        const auto minimalOffset = kPortalCrossingEpsilon * 1.25;
-        const auto reachedPointInsideTarget = reachedPoint + (*normal * minimalOffset);
-        if (validLanding(reachedPointInsideTarget)) {
-            return reachedPointInsideTarget;
-        }
-
-        const auto passageInsideTarget = landingOnPassage + (*normal * minimalOffset);
-        if (validLanding(passageInsideTarget)) {
-            return passageInsideTarget;
-        }
-
-        const auto clearanceOffset = std::max(clearance + kPathClearance, minimalOffset);
-        auto validClearanceNudge = [&](const Point2D& start, const Point2D& candidate) {
-            return validLanding(candidate)
-                && !movementCrossesBarrier(targetLayout, start, candidate);
-        };
-        const auto reachedPointWithClearance = reachedPoint + (*normal * clearanceOffset);
-        if (validClearanceNudge(reachedPointInsideTarget, reachedPointWithClearance)) {
-            return reachedPointWithClearance;
-        }
-        const auto passageWithClearance = landingOnPassage + (*normal * clearanceOffset);
-        if (validClearanceNudge(passageInsideTarget, passageWithClearance)) {
-            return passageWithClearance;
-        }
-
-        return std::nullopt;
+        return reachedPoint + (*normal * (kGeometryEpsilon - portalDistance));
     }
 
     std::optional<Point2D> verticalTransitionPlanningPoint(
@@ -713,8 +680,7 @@ private:
             route,
             reachedIndex,
             transitionStartPoint,
-            reachedPoint,
-            static_cast<double>(agent.radius));
+            reachedPoint);
         if (!landingPoint.has_value()) {
             return {.position = reachedPoint, .advanced = false};
         }
