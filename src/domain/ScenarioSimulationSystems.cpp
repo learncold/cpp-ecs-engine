@@ -327,6 +327,14 @@ void ScenarioSpatialIndexSystem::update(engine::EngineWorld& world, const engine
 
     auto& query = world.query();
     auto& resources = world.resources();
+    if (resources.contains<ScenarioLayoutCacheResource>()) {
+        const auto routeEntities = query.view<Position, Agent, EvacuationRoute, EvacuationStatus>();
+        simulation_internal::updateAgentPhysicsFloorIds(
+            query,
+            resources.get<ScenarioLayoutCacheResource>(),
+            routeEntities);
+    }
+
     ScenarioAgentSpatialIndexResource index;
     index.cellSize = cellSize_;
 

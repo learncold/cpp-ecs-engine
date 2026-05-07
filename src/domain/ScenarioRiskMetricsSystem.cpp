@@ -216,7 +216,7 @@ public:
                 ++snapshot.stalledAgentCount;
             }
 
-            const auto floorId = agentCollisionFloorId(route);
+            const auto floorId = agentDisplayFloorId(route);
             const auto address = riskCellAddress(position.value, floorId);
             auto& cell = cells[riskCellKey(address)];
             if (cell.agentCount == 0) {
@@ -365,7 +365,7 @@ private:
                 const auto& position = query.get<Position>(entity);
                 const auto& velocity = query.get<Velocity>(entity);
                 const auto& route = query.get<EvacuationRoute>(entity);
-                if (agentCollisionFloorId(route) != metric.floorId) {
+                if (agentDisplayFloorId(route) != metric.floorId) {
                     continue;
                 }
                 const auto distanceToConnection = distanceBetween(

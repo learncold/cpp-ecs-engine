@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "domain/AgentComponents.h"
 #include "domain/ScenarioSimulationInternal.h"
@@ -59,6 +60,46 @@ public:
 
     void update(safecrowd::engine::EngineWorld&, const safecrowd::engine::EngineStepContext&) override {
     }
+};
+
+class ConfigureConnectedStairEndpointAgentsSystem final : public safecrowd::engine::EngineSystem {
+public:
+    explicit ConfigureConnectedStairEndpointAgentsSystem(safecrowd::domain::FacilityLayout2D layout)
+        : layout_(std::move(layout)) {
+    }
+
+    void configure(safecrowd::engine::EngineWorld& world) override {
+        world.resources().set(safecrowd::domain::ScenarioSimulationClockResource{
+            .elapsedSeconds = 0.0,
+            .timeLimitSeconds = 10.0,
+            .complete = false,
+        });
+        world.resources().set(safecrowd::domain::simulation_internal::buildScenarioLayoutCache(layout_));
+        world.commands().spawnEntity(
+            safecrowd::domain::Position{.value = {.x = 1.0, .y = 1.0}},
+            safecrowd::domain::Agent{.radius = 0.25f, .maxSpeed = 1.5f},
+            safecrowd::domain::Velocity{},
+            safecrowd::domain::EvacuationRoute{.currentFloorId = "L1", .displayFloorId = "L1"},
+            safecrowd::domain::EvacuationStatus{});
+        world.commands().spawnEntity(
+            safecrowd::domain::Position{.value = {.x = 1.0, .y = 1.0}},
+            safecrowd::domain::Agent{.radius = 0.25f, .maxSpeed = 1.5f},
+            safecrowd::domain::Velocity{},
+            safecrowd::domain::EvacuationRoute{.currentFloorId = "L2", .displayFloorId = "L2"},
+            safecrowd::domain::EvacuationStatus{});
+        world.commands().spawnEntity(
+            safecrowd::domain::Position{.value = {.x = 1.0, .y = 1.0}},
+            safecrowd::domain::Agent{.radius = 0.25f, .maxSpeed = 1.5f},
+            safecrowd::domain::Velocity{},
+            safecrowd::domain::EvacuationRoute{.currentFloorId = "L3", .displayFloorId = "L3"},
+            safecrowd::domain::EvacuationStatus{});
+    }
+
+    void update(safecrowd::engine::EngineWorld&, const safecrowd::engine::EngineStepContext&) override {
+    }
+
+private:
+    safecrowd::domain::FacilityLayout2D layout_{};
 };
 
 class ConfigureEvacuatedAgentsSystem final : public safecrowd::engine::EngineSystem {
@@ -285,6 +326,44 @@ safecrowd::domain::FacilityLayout2D overlappingFloorBottleneckLayout() {
     return layout;
 }
 
+safecrowd::domain::FacilityLayout2D connectedStairPhysicsBucketLayout() {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.floors.push_back({.id = "L1", .label = "Floor 1"});
+    layout.floors.push_back({.id = "L2", .label = "Floor 2", .elevationMeters = 3.5});
+    layout.floors.push_back({.id = "L3", .label = "Floor 3", .elevationMeters = 7.0});
+    layout.zones.push_back({
+        .id = "stair-l1",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Stair,
+        .area = {.outline = {{0.0, 0.0}, {2.0, 0.0}, {2.0, 2.0}, {0.0, 2.0}}},
+        .isStair = true,
+    });
+    layout.zones.push_back({
+        .id = "stair-l2",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ZoneKind::Stair,
+        .area = {.outline = {{0.0, 0.0}, {2.0, 0.0}, {2.0, 2.0}, {0.0, 2.0}}},
+        .isStair = true,
+    });
+    layout.zones.push_back({
+        .id = "room-l3",
+        .floorId = "L3",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .area = {.outline = {{0.0, 0.0}, {2.0, 0.0}, {2.0, 2.0}, {0.0, 2.0}}},
+    });
+    layout.connections.push_back({
+        .id = "stair-vertical",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ConnectionKind::Stair,
+        .fromZoneId = "stair-l1",
+        .toZoneId = "stair-l2",
+        .effectiveWidth = 1.0,
+        .isStair = true,
+        .centerSpan = {{0.6, 1.0}, {1.4, 1.0}},
+    });
+    return layout;
+}
+
 }  // namespace
 
 SC_TEST(ScenarioAgentSpawnSystem_ConfiguresClockAndSpawnsAgentSeeds) {
@@ -386,6 +465,40 @@ SC_TEST(ScenarioSpatialIndexSystem_SeparatesNearbyAgentsByFloor) {
     SC_EXPECT_EQ(l1Nearby.size(), std::size_t{1});
     SC_EXPECT_EQ(l2Nearby.size(), std::size_t{1});
     SC_EXPECT_TRUE(l1Nearby.front() != l2Nearby.front());
+}
+
+SC_TEST(ScenarioSpatialIndexSystem_MergesConnectedStairEndpointsIntoVerticalBucket) {
+    const auto layout = connectedStairPhysicsBucketLayout();
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 32,
+    });
+    runtime.addSystem(std::make_unique<ConfigureConnectedStairEndpointAgentsSystem>(layout));
+    runtime.addSystem(
+        std::make_unique<safecrowd::domain::ScenarioSpatialIndexSystem>(1.0),
+        {.phase = safecrowd::engine::UpdatePhase::PreSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(1.0 / 30.0);
+
+    const auto& index = runtime.world().resources().get<safecrowd::domain::ScenarioAgentSpatialIndexResource>();
+    auto verticalNearby = safecrowd::domain::scenarioNearbyAgents(
+        runtime.world().query(),
+        index,
+        {.x = 1.0, .y = 1.0},
+        "vertical:stair-vertical",
+        0.4);
+    auto disconnectedNearby = safecrowd::domain::scenarioNearbyAgents(
+        runtime.world().query(),
+        index,
+        {.x = 1.0, .y = 1.0},
+        "L3",
+        0.4);
+
+    SC_EXPECT_EQ(verticalNearby.size(), std::size_t{2});
+    SC_EXPECT_EQ(disconnectedNearby.size(), std::size_t{1});
 }
 
 SC_TEST(ScenarioClockSystem_AdvancesClockResourceOnFixedSteps) {
@@ -736,6 +849,53 @@ SC_TEST(ScenarioRiskMetricsSystem_FiltersBottlenecksByConnectionFloor) {
         runtime.world().resources().get<safecrowd::domain::ScenarioRiskMetricsResource>().snapshot;
     SC_EXPECT_EQ(snapshot.bottlenecks.size(), std::size_t{1});
     SC_EXPECT_EQ(snapshot.bottlenecks.front().connectionId, std::string{"door-l2"});
+    SC_EXPECT_EQ(snapshot.bottlenecks.front().floorId, std::string{"L2"});
+}
+
+SC_TEST(ScenarioRiskMetricsSystem_UsesDisplayFloorForVirtualPhysicsBuckets) {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    for (int index = 0; index < 5; ++index) {
+        seeds.push_back({
+            .position = {.value = {.x = 0.75 + (static_cast<double>(index) * 0.03), .y = 0.0}},
+            .agent = {.radius = 0.25f, .maxSpeed = 1.0f},
+            .velocity = {.value = {}},
+            .route = {
+                .waypoints = {{.x = 1.0, .y = 0.0}},
+                .waypointPassages = {{{.x = 1.0, .y = -0.4}, {.x = 1.0, .y = 0.4}}},
+                .waypointFromZoneIds = {"room-l2"},
+                .waypointZoneIds = {"exit-l2"},
+                .nextWaypointIndex = 0,
+                .currentSegmentStart = {.x = 0.75, .y = 0.0},
+                .previousDistanceToWaypoint = 0.25,
+                .stalledSeconds = 1.0,
+                .destinationZoneId = "exit-l2",
+                .currentFloorId = "L2",
+                .displayFloorId = "L2",
+                .physicsFloorId = "vertical:stair-vertical",
+            },
+            .status = {},
+        });
+    }
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 36,
+    });
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioRiskMetricsSystem(overlappingFloorBottleneckLayout()),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(0.0);
+
+    const auto& snapshot =
+        runtime.world().resources().get<safecrowd::domain::ScenarioRiskMetricsResource>().snapshot;
+    SC_EXPECT_TRUE(!snapshot.hotspots.empty());
+    SC_EXPECT_EQ(snapshot.hotspots.front().floorId, std::string{"L2"});
+    SC_EXPECT_TRUE(!snapshot.bottlenecks.empty());
     SC_EXPECT_EQ(snapshot.bottlenecks.front().floorId, std::string{"L2"});
 }
 

@@ -49,6 +49,7 @@ struct EvacuationRoute {
     std::string destinationZoneId{};
     std::string currentFloorId{};
     std::string displayFloorId{};
+    std::string physicsFloorId{};
 };
 
 struct EvacuationStatus {

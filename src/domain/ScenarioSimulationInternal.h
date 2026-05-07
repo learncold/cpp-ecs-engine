@@ -146,7 +146,12 @@ std::string cachedFloorIdForZone(const ScenarioLayoutCacheResource& cache, const
 const std::vector<ScenarioConnectionTraversal>& cachedTraversalsForZone(
     const ScenarioLayoutCacheResource& cache,
     const std::string& zoneId);
+std::string agentDisplayFloorId(const EvacuationRoute& route);
 std::string agentCollisionFloorId(const EvacuationRoute& route);
+void updateAgentPhysicsFloorIds(
+    engine::WorldQuery& query,
+    const ScenarioLayoutCacheResource& cache,
+    const std::vector<engine::Entity>& entities);
 std::string zoneAt(const ScenarioLayoutCacheResource& cache, const Point2D& point, const std::string& floorId);
 bool routePassageCrossed(const FacilityLayout2D& layout, const EvacuationRoute& route, const Point2D& position, double agentRadius);
 double speedOf(const Point2D& velocity);

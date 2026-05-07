@@ -611,8 +611,121 @@ const std::vector<ScenarioConnectionTraversal>& cachedTraversalsForZone(
     return it == cache.traversableConnectionsByZone.end() ? empty : it->second;
 }
 
-std::string agentCollisionFloorId(const EvacuationRoute& route) {
+std::string agentDisplayFloorId(const EvacuationRoute& route) {
     return route.displayFloorId.empty() ? route.currentFloorId : route.displayFloorId;
+}
+
+std::string agentCollisionFloorId(const EvacuationRoute& route) {
+    return route.physicsFloorId.empty() ? agentDisplayFloorId(route) : route.physicsFloorId;
+}
+
+bool zoneIsStairOrRamp(const Zone2D& zone) {
+    return zone.kind == ZoneKind::Stair || zone.isStair || zone.isRamp;
+}
+
+std::string verticalPhysicsFloorId(const Connection2D& connection) {
+    return connection.id.empty() ? std::string{} : "vertical:" + connection.id;
+}
+
+const Connection2D* findConnectionById(const ScenarioLayoutCacheResource& cache, const std::string& connectionId) {
+    if (connectionId.empty()) {
+        return nullptr;
+    }
+    const auto it = std::find_if(cache.layout.connections.begin(), cache.layout.connections.end(), [&](const auto& connection) {
+        return connection.id == connectionId;
+    });
+    return it == cache.layout.connections.end() ? nullptr : &(*it);
+}
+
+const Connection2D* currentVerticalConnection(const ScenarioLayoutCacheResource& cache, const EvacuationRoute& route) {
+    if (route.nextWaypointIndex >= route.waypointVerticalTransitions.size()
+        || !route.waypointVerticalTransitions[route.nextWaypointIndex]
+        || route.nextWaypointIndex >= route.waypointConnectionIds.size()) {
+        return nullptr;
+    }
+
+    const auto* connection = findConnectionById(cache, route.waypointConnectionIds[route.nextWaypointIndex]);
+    return connection != nullptr && isVerticalConnection(*connection) ? connection : nullptr;
+}
+
+std::string physicsFloorIdForVerticalConnection(const Connection2D* connection) {
+    if (connection == nullptr || !isVerticalConnection(*connection)) {
+        return {};
+    }
+    return verticalPhysicsFloorId(*connection);
+}
+
+std::string physicsFloorIdForPositionInEndpointZone(
+    const ScenarioLayoutCacheResource& cache,
+    const Point2D& position,
+    const Agent& agent,
+    const EvacuationRoute& route) {
+    const auto currentFloorId = route.currentFloorId.empty() ? agentDisplayFloorId(route) : route.currentFloorId;
+    const auto currentZoneId = zoneAt(cache, position, currentFloorId);
+    if (currentZoneId.empty()) {
+        return {};
+    }
+
+    const auto* currentZone = findCachedZone(cache, currentZoneId);
+    if (currentZone == nullptr) {
+        return {};
+    }
+
+    const auto endpointIsStairOrRamp = zoneIsStairOrRamp(*currentZone);
+    const auto influenceRadius = std::max(
+        kHeadOnLookAheadDistance,
+        static_cast<double>(agent.radius) + kDefaultAgentRadius + kPersonalSpaceBuffer);
+
+    const Connection2D* bestConnection = nullptr;
+    double bestDistance = std::numeric_limits<double>::infinity();
+    for (const auto& traversal : cachedTraversalsForZone(cache, currentZoneId)) {
+        if (traversal.connectionIndex >= cache.layout.connections.size()) {
+            continue;
+        }
+
+        const auto& connection = cache.layout.connections[traversal.connectionIndex];
+        if (!isVerticalConnection(connection)) {
+            continue;
+        }
+
+        const auto distanceToPassage = distancePointToSegment(position, connection.centerSpan.start, connection.centerSpan.end);
+        if (!endpointIsStairOrRamp && distanceToPassage > influenceRadius) {
+            continue;
+        }
+        if (distanceToPassage < bestDistance) {
+            bestConnection = &connection;
+            bestDistance = distanceToPassage;
+        }
+    }
+
+    return physicsFloorIdForVerticalConnection(bestConnection);
+}
+
+void updateAgentPhysicsFloorIds(
+    engine::WorldQuery& query,
+    const ScenarioLayoutCacheResource& cache,
+    const std::vector<engine::Entity>& entities) {
+    for (const auto entity : entities) {
+        if (!query.contains<Position>(entity)
+            || !query.contains<Agent>(entity)
+            || !query.contains<EvacuationRoute>(entity)
+            || !query.contains<EvacuationStatus>(entity)) {
+            continue;
+        }
+        if (query.get<EvacuationStatus>(entity).evacuated) {
+            query.get<EvacuationRoute>(entity).physicsFloorId.clear();
+            continue;
+        }
+
+        const auto& position = query.get<Position>(entity);
+        const auto& agent = query.get<Agent>(entity);
+        auto& route = query.get<EvacuationRoute>(entity);
+        auto physicsFloorId = physicsFloorIdForVerticalConnection(currentVerticalConnection(cache, route));
+        if (physicsFloorId.empty()) {
+            physicsFloorId = physicsFloorIdForPositionInEndpointZone(cache, position.value, agent, route);
+        }
+        route.physicsFloorId = std::move(physicsFloorId);
+    }
 }
 
 std::string zoneAt(const ScenarioLayoutCacheResource& cache, const Point2D& point, const std::string& floorId) {
