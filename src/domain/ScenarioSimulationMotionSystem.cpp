@@ -208,11 +208,12 @@ public:
                     desiredVelocity,
                     clampedDelta,
                     speedScale);
-            const auto barrierVelocity = barrierSeparationVelocity(floorLayout, position, agent);
+            const auto barrierReferenceSpeed = std::max(maxSpeed, static_cast<double>(agent.maxSpeed) * 0.75);
+            const auto barrierVelocity = barrierSeparationVelocity(floorLayout, position, agent, barrierReferenceSpeed);
             auto finalVelocity = (desiredVelocity * speedScale) + avoidanceVelocity + barrierVelocity;
             const auto lateral = perpendicularLeft(routeDirection);
             if (dot(finalVelocity, routeDirection) < 0.0) {
-                finalVelocity = (routeDirection * (static_cast<double>(agent.maxSpeed) * 0.15))
+                finalVelocity = (routeDirection * (maxSpeed * 0.15))
                     + (lateral * dot(finalVelocity, lateral));
             }
             const auto forwardComponent = dot(finalVelocity, routeDirection);
@@ -405,8 +406,9 @@ private:
         const FacilityLayout2D& layout,
         const Position& position,
         const Agent& agent,
-        const Velocity& velocity) const {
-        const auto barrierVelocity = barrierSeparationVelocity(layout, position, agent);
+        const Velocity& velocity,
+        double referenceSpeed) const {
+        const auto barrierVelocity = barrierSeparationVelocity(layout, position, agent, referenceSpeed);
         const auto barrierSpeed = lengthOf(barrierVelocity);
         if (barrierSpeed <= 1e-9 || lengthOf(velocity.value) <= kScenarioStalledSpeedThreshold) {
             return false;
@@ -941,7 +943,10 @@ private:
                         cachedLayoutForFloor(layoutCache, route.currentFloorId),
                         position,
                         agent,
-                        velocity)) {
+                        velocity,
+                        std::max(
+                            effectiveMaxSpeed(layoutCache, agent, route, position.value),
+                            static_cast<double>(agent.maxSpeed) * 0.75))) {
                     route.stalledSeconds = 0.0;
                     route.previousDistanceToWaypoint = std::min(route.previousDistanceToWaypoint, distance);
                     break;
@@ -1298,6 +1303,10 @@ private:
 
                     auto& secondPosition = query.get<Position>(second);
                     const auto& secondAgent = query.get<Agent>(second);
+                    const auto& secondRoute = query.get<EvacuationRoute>(second);
+                    if (agentCollisionFloorId(secondRoute) != firstCollisionFloorId) {
+                        continue;
+                    }
                     const auto delta = firstPosition.value - secondPosition.value;
                     const auto distance = lengthOf(delta);
                     const auto minimumDistance = static_cast<double>(firstAgent.radius + secondAgent.radius);
@@ -1307,10 +1316,6 @@ private:
 
                     const auto direction = normalizedOr(delta, deterministicFallbackDirection(first));
                     const auto push = std::min(0.08, (minimumDistance - distance) * 0.35);
-                    const auto& secondRoute = query.get<EvacuationRoute>(second);
-                    if (agentCollisionFloorId(secondRoute) != firstCollisionFloorId) {
-                        continue;
-                    }
                     const auto firstTarget = firstPosition.value + (direction * push);
                     const auto secondTarget = secondPosition.value - (direction * push);
                     firstPosition.value = constrainedMoveForCurrentWaypoint(

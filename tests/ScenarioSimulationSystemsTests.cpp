@@ -1,6 +1,7 @@
 #include "TestSupport.h"
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <string>
 #include <utility>
@@ -64,8 +65,11 @@ public:
 
 class ConfigureConnectedStairEndpointAgentsSystem final : public safecrowd::engine::EngineSystem {
 public:
-    explicit ConfigureConnectedStairEndpointAgentsSystem(safecrowd::domain::FacilityLayout2D layout)
-        : layout_(std::move(layout)) {
+    ConfigureConnectedStairEndpointAgentsSystem(
+        safecrowd::domain::FacilityLayout2D layout,
+        safecrowd::domain::Point2D position)
+        : layout_(std::move(layout))
+        , position_(position) {
     }
 
     void configure(safecrowd::engine::EngineWorld& world) override {
@@ -76,19 +80,19 @@ public:
         });
         world.resources().set(safecrowd::domain::simulation_internal::buildScenarioLayoutCache(layout_));
         world.commands().spawnEntity(
-            safecrowd::domain::Position{.value = {.x = 1.0, .y = 1.0}},
+            safecrowd::domain::Position{.value = position_},
             safecrowd::domain::Agent{.radius = 0.25f, .maxSpeed = 1.5f},
             safecrowd::domain::Velocity{},
             safecrowd::domain::EvacuationRoute{.currentFloorId = "L1", .displayFloorId = "L1"},
             safecrowd::domain::EvacuationStatus{});
         world.commands().spawnEntity(
-            safecrowd::domain::Position{.value = {.x = 1.0, .y = 1.0}},
+            safecrowd::domain::Position{.value = position_},
             safecrowd::domain::Agent{.radius = 0.25f, .maxSpeed = 1.5f},
             safecrowd::domain::Velocity{},
             safecrowd::domain::EvacuationRoute{.currentFloorId = "L2", .displayFloorId = "L2"},
             safecrowd::domain::EvacuationStatus{});
         world.commands().spawnEntity(
-            safecrowd::domain::Position{.value = {.x = 1.0, .y = 1.0}},
+            safecrowd::domain::Position{.value = position_},
             safecrowd::domain::Agent{.radius = 0.25f, .maxSpeed = 1.5f},
             safecrowd::domain::Velocity{},
             safecrowd::domain::EvacuationRoute{.currentFloorId = "L3", .displayFloorId = "L3"},
@@ -100,6 +104,7 @@ public:
 
 private:
     safecrowd::domain::FacilityLayout2D layout_{};
+    safecrowd::domain::Point2D position_{};
 };
 
 class ConfigureEvacuatedAgentsSystem final : public safecrowd::engine::EngineSystem {
@@ -335,21 +340,21 @@ safecrowd::domain::FacilityLayout2D connectedStairPhysicsBucketLayout() {
         .id = "stair-l1",
         .floorId = "L1",
         .kind = safecrowd::domain::ZoneKind::Stair,
-        .area = {.outline = {{0.0, 0.0}, {2.0, 0.0}, {2.0, 2.0}, {0.0, 2.0}}},
+        .area = {.outline = {{0.0, 0.0}, {2.0, 0.0}, {2.0, 4.0}, {0.0, 4.0}}},
         .isStair = true,
     });
     layout.zones.push_back({
         .id = "stair-l2",
         .floorId = "L2",
         .kind = safecrowd::domain::ZoneKind::Stair,
-        .area = {.outline = {{0.0, 0.0}, {2.0, 0.0}, {2.0, 2.0}, {0.0, 2.0}}},
+        .area = {.outline = {{0.0, 0.0}, {2.0, 0.0}, {2.0, 4.0}, {0.0, 4.0}}},
         .isStair = true,
     });
     layout.zones.push_back({
         .id = "room-l3",
         .floorId = "L3",
         .kind = safecrowd::domain::ZoneKind::Room,
-        .area = {.outline = {{0.0, 0.0}, {2.0, 0.0}, {2.0, 2.0}, {0.0, 2.0}}},
+        .area = {.outline = {{0.0, 0.0}, {2.0, 0.0}, {2.0, 4.0}, {0.0, 4.0}}},
     });
     layout.connections.push_back({
         .id = "stair-vertical",
@@ -516,7 +521,9 @@ SC_TEST(ScenarioSpatialIndexSystem_MergesConnectedStairEndpointsIntoVerticalBuck
         .maxCatchUpSteps = 1,
         .baseSeed = 32,
     });
-    runtime.addSystem(std::make_unique<ConfigureConnectedStairEndpointAgentsSystem>(layout));
+    runtime.addSystem(std::make_unique<ConfigureConnectedStairEndpointAgentsSystem>(
+        layout,
+        safecrowd::domain::Point2D{.x = 1.0, .y = 1.0}));
     runtime.addSystem(
         std::make_unique<safecrowd::domain::ScenarioSpatialIndexSystem>(1.0),
         {.phase = safecrowd::engine::UpdatePhase::PreSimulation,
@@ -541,6 +548,49 @@ SC_TEST(ScenarioSpatialIndexSystem_MergesConnectedStairEndpointsIntoVerticalBuck
 
     SC_EXPECT_EQ(verticalNearby.size(), std::size_t{2});
     SC_EXPECT_EQ(disconnectedNearby.size(), std::size_t{1});
+}
+
+SC_TEST(ScenarioSpatialIndexSystem_SeparatesConnectedStairEndpointsAwayFromVerticalPortal) {
+    const auto layout = connectedStairPhysicsBucketLayout();
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 33,
+    });
+    runtime.addSystem(std::make_unique<ConfigureConnectedStairEndpointAgentsSystem>(
+        layout,
+        safecrowd::domain::Point2D{.x = 1.0, .y = 3.5}));
+    runtime.addSystem(
+        std::make_unique<safecrowd::domain::ScenarioSpatialIndexSystem>(1.0),
+        {.phase = safecrowd::engine::UpdatePhase::PreSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(1.0 / 30.0);
+
+    const auto& index = runtime.world().resources().get<safecrowd::domain::ScenarioAgentSpatialIndexResource>();
+    auto verticalNearby = safecrowd::domain::scenarioNearbyAgents(
+        runtime.world().query(),
+        index,
+        {.x = 1.0, .y = 3.5},
+        "vertical:stair-vertical",
+        0.4);
+    auto l1Nearby = safecrowd::domain::scenarioNearbyAgents(
+        runtime.world().query(),
+        index,
+        {.x = 1.0, .y = 3.5},
+        "L1",
+        0.4);
+    auto l2Nearby = safecrowd::domain::scenarioNearbyAgents(
+        runtime.world().query(),
+        index,
+        {.x = 1.0, .y = 3.5},
+        "L2",
+        0.4);
+
+    SC_EXPECT_EQ(verticalNearby.size(), std::size_t{0});
+    SC_EXPECT_EQ(l1Nearby.size(), std::size_t{1});
+    SC_EXPECT_EQ(l2Nearby.size(), std::size_t{1});
 }
 
 SC_TEST(ScenarioClockSystem_AdvancesClockResourceOnFixedSteps) {
@@ -1099,6 +1149,104 @@ SC_TEST(ScenarioSimulationMotionSystem_UsesPhysicsBucketForCrossFloorHeadOnAvoid
     SC_EXPECT_TRUE(speedScale < 1.0);
     SC_EXPECT_TRUE(avoidanceVelocity.y != 0.0);
     SC_EXPECT_TRUE(avoidance.preferredSide != 0);
+}
+
+SC_TEST(ScenarioSimulationMotionSystem_ScalesAvoidanceByDesiredSpeed) {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    seeds.push_back({
+        .position = {.value = {.x = -0.05, .y = 0.0}},
+        .agent = {.radius = 0.25f, .maxSpeed = 1.5f},
+        .velocity = {.value = {}},
+        .route = {
+            .waypoints = {{.x = 1.0, .y = 0.0}},
+            .waypointPassages = {{{.x = 1.0, .y = 0.0}, {.x = 1.0, .y = 0.0}}},
+            .waypointFromZoneIds = {""},
+            .waypointZoneIds = {"missing"},
+            .nextWaypointIndex = 0,
+            .currentSegmentStart = {.x = -0.05, .y = 0.0},
+            .previousDistanceToWaypoint = 1.05,
+            .destinationZoneId = "missing",
+            .currentFloorId = "L1",
+            .displayFloorId = "L1",
+            .physicsFloorId = "vertical:stair-vertical",
+        },
+        .status = {},
+    });
+    seeds.push_back({
+        .position = {.value = {.x = 0.05, .y = 0.0}},
+        .agent = {.radius = 0.25f, .maxSpeed = 1.5f},
+        .velocity = {.value = {}},
+        .route = {
+            .waypoints = {{.x = -1.0, .y = 0.0}},
+            .waypointPassages = {{{.x = -1.0, .y = 0.0}, {.x = -1.0, .y = 0.0}}},
+            .waypointFromZoneIds = {""},
+            .waypointZoneIds = {"missing"},
+            .nextWaypointIndex = 0,
+            .currentSegmentStart = {.x = 0.05, .y = 0.0},
+            .previousDistanceToWaypoint = 1.05,
+            .destinationZoneId = "missing",
+            .currentFloorId = "L2",
+            .displayFloorId = "L2",
+            .physicsFloorId = "vertical:stair-vertical",
+        },
+        .status = {},
+    });
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 34,
+    });
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+
+    runtime.play();
+    runtime.stepFrame(0.0);
+
+    auto& query = runtime.world().query();
+    const auto entities = query.view<
+        safecrowd::domain::Position,
+        safecrowd::domain::Velocity,
+        safecrowd::domain::AvoidanceState,
+        safecrowd::domain::EvacuationRoute>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{2});
+
+    double speedScale = 1.0;
+    const auto avoidanceVelocity = safecrowd::domain::simulation_internal::forwardPreservingAgentAvoidanceVelocity(
+        query,
+        entities[1],
+        {entities[0]},
+        {.x = -0.8, .y = 0.0},
+        0.2,
+        speedScale);
+
+    SC_EXPECT_TRUE(std::fabs(avoidanceVelocity.y) > 0.0);
+    SC_EXPECT_TRUE(std::fabs(avoidanceVelocity.y) <= (0.8 * 0.45) + 1e-9);
+}
+
+SC_TEST(ScenarioSimulationMotionSystem_ScalesBarrierSeparationByReferenceSpeed) {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.barriers.push_back({
+        .id = "wall",
+        .floorId = "L1",
+        .geometry = {.vertices = {{.x = -1.0, .y = 0.0}, {.x = 1.0, .y = 0.0}}},
+        .blocksMovement = true,
+    });
+    const safecrowd::domain::Position position{.value = {.x = 0.0, .y = 0.1}};
+    const safecrowd::domain::Agent agent{.radius = 0.25f, .maxSpeed = 1.5f};
+
+    const auto stairScaled = safecrowd::domain::simulation_internal::barrierSeparationVelocity(
+        layout,
+        position,
+        agent,
+        0.8);
+    const auto normalScaled = safecrowd::domain::simulation_internal::barrierSeparationVelocity(
+        layout,
+        position,
+        agent,
+        1.5);
+
+    SC_EXPECT_TRUE(std::fabs(stairScaled.y) > 0.0);
+    SC_EXPECT_TRUE(std::fabs(stairScaled.y) < std::fabs(normalScaled.y));
 }
 
 SC_TEST(ScenarioControlSystem_BlocksConnectionsUsingScenarioClock) {

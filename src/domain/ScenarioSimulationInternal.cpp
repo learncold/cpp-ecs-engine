@@ -619,10 +619,6 @@ std::string agentCollisionFloorId(const EvacuationRoute& route) {
     return route.physicsFloorId.empty() ? agentDisplayFloorId(route) : route.physicsFloorId;
 }
 
-bool zoneIsStairOrRamp(const Zone2D& zone) {
-    return zone.kind == ZoneKind::Stair || zone.isStair || zone.isRamp;
-}
-
 std::string verticalPhysicsFloorId(const Connection2D& connection) {
     return connection.id.empty() ? std::string{} : "vertical:" + connection.id;
 }
@@ -671,7 +667,6 @@ std::string physicsFloorIdForPositionInEndpointZone(
         return {};
     }
 
-    const auto endpointIsStairOrRamp = zoneIsStairOrRamp(*currentZone);
     const auto influenceRadius = std::max(
         kHeadOnLookAheadDistance,
         static_cast<double>(agent.radius) + kDefaultAgentRadius + kPersonalSpaceBuffer);
@@ -689,7 +684,7 @@ std::string physicsFloorIdForPositionInEndpointZone(
         }
 
         const auto distanceToPassage = distancePointToSegment(position, connection.centerSpan.start, connection.centerSpan.end);
-        if (!endpointIsStairOrRamp && distanceToPassage > influenceRadius) {
+        if (distanceToPassage > influenceRadius) {
             continue;
         }
         if (distanceToPassage < bestDistance) {
@@ -1144,10 +1139,10 @@ Point2D forwardPreservingAgentAvoidanceVelocity(
                     : std::max(0.55, 1.0 - (pressure * 0.35)));
             const auto sideStepMultiplier = shouldYield ? 1.35 : 0.85;
             lateralCorrection = lateralCorrection + (lateral * (
-                side * pressure * sideStepMultiplier * kAvoidanceLateralStrength * static_cast<double>(agent.maxSpeed)));
+                side * pressure * sideStepMultiplier * kAvoidanceLateralStrength * desiredSpeed));
         } else {
             lateralCorrection = lateralCorrection + (lateral * (
-                side * pressure * kAvoidanceLateralStrength * static_cast<double>(agent.maxSpeed)));
+                side * pressure * kAvoidanceLateralStrength * desiredSpeed));
         }
     }
 
@@ -1155,12 +1150,17 @@ Point2D forwardPreservingAgentAvoidanceVelocity(
         avoidance.preferredSide = 0;
     }
 
-    return clampedToLength(lateralCorrection, static_cast<double>(agent.maxSpeed) * 0.45);
+    return clampedToLength(lateralCorrection, desiredSpeed * 0.45);
 }
 
-Point2D barrierSeparationVelocity(const FacilityLayout2D& layout, const Position& position, const Agent& agent) {
+Point2D barrierSeparationVelocity(
+    const FacilityLayout2D& layout,
+    const Position& position,
+    const Agent& agent,
+    double referenceSpeed) {
     Point2D correction{};
     const auto keepoutDistance = static_cast<double>(agent.radius) + kBarrierAvoidanceBuffer;
+    const auto separationSpeed = std::max(0.0, referenceSpeed);
 
     for (const auto& barrier : layout.barriers) {
         if (!barrier.blocksMovement || barrier.geometry.vertices.size() < 2) {
@@ -1175,7 +1175,7 @@ Point2D barrierSeparationVelocity(const FacilityLayout2D& layout, const Position
             if (distance < keepoutDistance) {
                 const auto direction = normalizedOr(delta, deterministicFallbackDirection({static_cast<engine::EntityIndex>(index + 1), 0}));
                 const auto pressure = (keepoutDistance - distance) / keepoutDistance;
-                correction = correction + (direction * (pressure * kBarrierAvoidanceStrength * static_cast<double>(agent.maxSpeed)));
+                correction = correction + (direction * (pressure * kBarrierAvoidanceStrength * separationSpeed));
             }
         }
 
@@ -1186,7 +1186,7 @@ Point2D barrierSeparationVelocity(const FacilityLayout2D& layout, const Position
             if (distance < keepoutDistance || pointInRing(vertices, position.value)) {
                 const auto direction = normalizedOr(delta, {.x = 0.0, .y = 1.0});
                 const auto pressure = distance < keepoutDistance ? (keepoutDistance - distance) / keepoutDistance : 1.0;
-                correction = correction + (direction * (pressure * kBarrierAvoidanceStrength * static_cast<double>(agent.maxSpeed)));
+                correction = correction + (direction * (pressure * kBarrierAvoidanceStrength * separationSpeed));
             }
         }
     }
