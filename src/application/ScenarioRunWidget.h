@@ -49,7 +49,8 @@ private:
     void returnToAuthoring();
     bool hasCachedResult() const noexcept;
     void refreshStatus();
-    bool runToCompletion();
+    void advanceFastForwardToResult();
+    void startFastForwardToResult();
     void storeResultCache(const safecrowd::domain::ScenarioSimulationRunner& runner);
     void setupUi();
     void showResults();
@@ -80,8 +81,9 @@ private:
     QLabel* bottleneckLabel_{nullptr};
     QPushButton* pauseButton_{nullptr};
     QPushButton* stopButton_{nullptr};
-    QPushButton* skipResultButton_{nullptr};
+    QPushButton* fastForwardButton_{nullptr};
     QPushButton* resultButton_{nullptr};
+    bool fastForwardingToResult_{false};
     bool paused_{false};
 };
 
