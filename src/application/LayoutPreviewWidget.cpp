@@ -985,6 +985,14 @@ double polygonArea(const QPolygonF& polygon) {
     return std::abs(area) * 0.5;
 }
 
+double painterFillArea(const QPainterPath& path) {
+    double area = 0.0;
+    for (const auto& polygon : path.toFillPolygons()) {
+        area += std::abs(polygonArea(polygon));
+    }
+    return area;
+}
+
 std::vector<safecrowd::domain::Polygon2D> polygonsFromFillPath(const QPainterPath& path) {
     std::vector<safecrowd::domain::Polygon2D> polygons;
 
@@ -1802,8 +1810,6 @@ QString createExitZoneAtDoor(
     const safecrowd::domain::Point2D& gapEnd,
     const QPointF& outsideDirection,
     const std::string& floorId) {
-    const auto zoneId = nextZoneId(layout);
-    const auto zoneNumber = static_cast<int>(layout.zones.size()) + 1;
     const auto width = std::hypot(gapEnd.x - gapStart.x, gapEnd.y - gapStart.y);
     const auto depth = std::max(0.75, width * 0.6);
 
@@ -1811,19 +1817,49 @@ QString createExitZoneAtDoor(
     const QPointF b(gapEnd.x, gapEnd.y);
     const QPointF offset = outsideDirection * depth;
 
+    const safecrowd::domain::Polygon2D candidatePolygon{
+        .outline = {
+            {.x = a.x(), .y = a.y()},
+            {.x = b.x(), .y = b.y()},
+            {.x = b.x() + offset.x(), .y = b.y() + offset.y()},
+            {.x = a.x() + offset.x(), .y = a.y() + offset.y()},
+        },
+    };
+
+    const QPainterPath candidatePath = worldPolygonPath(candidatePolygon);
+    const double candidateArea = painterFillArea(candidatePath);
+    constexpr double kExitZoneOverlapAreaThreshold = 0.02;
+    constexpr double kExitZoneOverlapRatioThreshold = 0.08;
+
+    double bestOverlapArea = 0.0;
+    QString bestOverlapZoneId;
+    for (const auto& zone : layout.zones) {
+        if (zone.kind != safecrowd::domain::ZoneKind::Exit || zone.floorId != floorId) {
+            continue;
+        }
+        const QPainterPath overlap = candidatePath.intersected(worldPolygonPath(zone.area));
+        const double overlapArea = painterFillArea(overlap);
+        if (overlapArea > bestOverlapArea) {
+            bestOverlapArea = overlapArea;
+            bestOverlapZoneId = QString::fromStdString(zone.id);
+        }
+    }
+
+    if (!bestOverlapZoneId.isEmpty() && bestOverlapArea > kExitZoneOverlapAreaThreshold) {
+        const double ratio = candidateArea > kGeometryEpsilon ? bestOverlapArea / candidateArea : 1.0;
+        if (ratio >= kExitZoneOverlapRatioThreshold) {
+            return bestOverlapZoneId;
+        }
+    }
+
+    const auto zoneId = nextZoneId(layout);
+    const auto zoneNumber = static_cast<int>(layout.zones.size()) + 1;
     layout.zones.push_back({
         .id = zoneId.toStdString(),
         .floorId = floorId,
         .kind = safecrowd::domain::ZoneKind::Exit,
         .label = QString("Exit %1").arg(zoneNumber).toStdString(),
-        .area = safecrowd::domain::Polygon2D{
-            .outline = {
-                {.x = a.x(), .y = a.y()},
-                {.x = b.x(), .y = b.y()},
-                {.x = b.x() + offset.x(), .y = b.y() + offset.y()},
-                {.x = a.x() + offset.x(), .y = a.y() + offset.y()},
-            },
-        },
+        .area = candidatePolygon,
         .defaultCapacity = 20u,
     });
 
@@ -2358,6 +2394,194 @@ std::optional<QString> hitTestCanonicalWallBarrier(
     }
 
     return bestBarrierId;
+}
+
+struct DoorSpanCorrectionResult {
+    safecrowd::domain::LineSegment2D span{};
+    QString barrierId{};
+};
+
+constexpr double kDoorSpanSupportSnapToleranceMeters = 0.35;
+
+std::optional<DoorSpanCorrectionResult> correctedDoorSpanOnAxisAlignedSupport(
+    const safecrowd::domain::Point2D& supportStart,
+    const safecrowd::domain::Point2D& supportEnd,
+    const QString& barrierId,
+    const safecrowd::domain::LineSegment2D& rawSpan) {
+    const bool supportVertical = nearlyEqual(supportStart.x, supportEnd.x);
+    const bool supportHorizontal = nearlyEqual(supportStart.y, supportEnd.y);
+    if (!supportVertical && !supportHorizontal) {
+        return std::nullopt;
+    }
+
+    const QPointF startPoint(rawSpan.start.x, rawSpan.start.y);
+    const QPointF endPoint(rawSpan.end.x, rawSpan.end.y);
+    const auto projectedStart = projectOntoSegment(startPoint, supportStart, supportEnd);
+    const auto projectedEnd = projectOntoSegment(endPoint, supportStart, supportEnd);
+    if (!projectedStart.has_value() || !projectedEnd.has_value()) {
+        return std::nullopt;
+    }
+
+    safecrowd::domain::LineSegment2D corrected{
+        .start = {.x = projectedStart->x(), .y = projectedStart->y()},
+        .end = {.x = projectedEnd->x(), .y = projectedEnd->y()},
+    };
+    if (supportVertical) {
+        corrected.start.x = supportStart.x;
+        corrected.end.x = supportStart.x;
+        if (corrected.end.y < corrected.start.y) {
+            std::swap(corrected.start, corrected.end);
+        }
+    } else {
+        corrected.start.y = supportStart.y;
+        corrected.end.y = supportStart.y;
+        if (corrected.end.x < corrected.start.x) {
+            std::swap(corrected.start, corrected.end);
+        }
+    }
+
+    const auto length = std::hypot(corrected.end.x - corrected.start.x, corrected.end.y - corrected.start.y);
+    if (length < kMinimumDoorWidth) {
+        return std::nullopt;
+    }
+
+    return DoorSpanCorrectionResult{
+        .span = corrected,
+        .barrierId = barrierId,
+    };
+}
+
+std::optional<DoorSpanCorrectionResult> correctedDoorSpanForPlacement(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const QString& floorId,
+    const safecrowd::domain::LineSegment2D& rawSpan) {
+    const QPointF midpoint(
+        (rawSpan.start.x + rawSpan.end.x) * 0.5,
+        (rawSpan.start.y + rawSpan.end.y) * 0.5);
+
+    double bestDistance = std::numeric_limits<double>::max();
+    std::optional<DoorSpanCorrectionResult> best;
+
+    const auto considerSupport = [&](const safecrowd::domain::Point2D& a, const safecrowd::domain::Point2D& b, const QString& barrierId) {
+        const auto distance = distanceToLineSegmentWorld(midpoint, a, b);
+        if (distance > kDoorSpanSupportSnapToleranceMeters || distance >= bestDistance) {
+            return;
+        }
+
+        const auto candidate = correctedDoorSpanOnAxisAlignedSupport(a, b, barrierId, rawSpan);
+        if (!candidate.has_value()) {
+            return;
+        }
+
+        bestDistance = distance;
+        best = *candidate;
+    };
+
+    const auto considerExitBoundarySupport = [&](const safecrowd::domain::Point2D& a, const safecrowd::domain::Point2D& b) {
+        const auto distance = distanceToLineSegmentWorld(midpoint, a, b);
+        if (distance > kDoorSpanSupportSnapToleranceMeters || distance >= bestDistance) {
+            return;
+        }
+
+        const auto candidate = correctedDoorSpanOnAxisAlignedSupport(a, b, {}, rawSpan);
+        if (!candidate.has_value()) {
+            return;
+        }
+
+        const auto neighbors = doorNeighborsAcrossSegment(layout, candidate->span.start, candidate->span.end, floorId);
+        if (neighbors.firstSide.empty() || neighbors.secondSide.empty()) {
+            return;
+        }
+
+        const auto sideHasExit = [&](const std::vector<std::size_t>& indices) {
+            return std::any_of(indices.begin(), indices.end(), [&](std::size_t index) {
+                return layout.zones[index].kind == safecrowd::domain::ZoneKind::Exit;
+            });
+        };
+        const auto sideHasNonExit = [&](const std::vector<std::size_t>& indices) {
+            return std::any_of(indices.begin(), indices.end(), [&](std::size_t index) {
+                return layout.zones[index].kind != safecrowd::domain::ZoneKind::Exit;
+            });
+        };
+
+        const bool hasExit = sideHasExit(neighbors.firstSide) || sideHasExit(neighbors.secondSide);
+        const bool hasNonExit = sideHasNonExit(neighbors.firstSide) || sideHasNonExit(neighbors.secondSide);
+        if (!hasExit || !hasNonExit) {
+            return;
+        }
+
+        bestDistance = distance;
+        best = *candidate;
+    };
+
+    // Prefer aligning to existing Exit zone boundaries when present.
+    for (const auto& zone : layout.zones) {
+        if (!matchesFloor(zone.floorId, floorId) || zone.kind != safecrowd::domain::ZoneKind::Exit) {
+            continue;
+        }
+        const auto& outline = zone.area.outline;
+        if (outline.size() < 2) {
+            continue;
+        }
+        for (std::size_t i = 0; i < outline.size(); ++i) {
+            const auto& a = outline[i];
+            const auto& b = outline[(i + 1) % outline.size()];
+            if (std::hypot(b.x - a.x, b.y - a.y) <= kGeometryEpsilon) {
+                continue;
+            }
+            considerExitBoundarySupport(a, b);
+        }
+    }
+
+    // Fallback: align to nearest axis-aligned wall barrier segment.
+    for (const auto& barrier : layout.barriers) {
+        if (!matchesFloor(barrier.floorId, floorId)
+            || barrier.geometry.closed
+            || barrier.geometry.vertices.size() != 2) {
+            continue;
+        }
+        const auto& a = barrier.geometry.vertices[0];
+        const auto& b = barrier.geometry.vertices[1];
+        considerSupport(a, b, QString::fromStdString(barrier.id));
+    }
+
+    if (best.has_value()) {
+        return best;
+    }
+
+    // Last resort: if the user drew a slightly tilted span, coerce it to the dominant axis.
+    const auto dx = rawSpan.end.x - rawSpan.start.x;
+    const auto dy = rawSpan.end.y - rawSpan.start.y;
+    if (std::hypot(dx, dy) < kMinimumDoorWidth) {
+        return std::nullopt;
+    }
+
+    const bool preferHorizontal = std::abs(dx) >= std::abs(dy);
+    safecrowd::domain::LineSegment2D corrected = rawSpan;
+    if (preferHorizontal) {
+        const auto y = (rawSpan.start.y + rawSpan.end.y) * 0.5;
+        corrected.start.y = y;
+        corrected.end.y = y;
+        if (corrected.end.x < corrected.start.x) {
+            std::swap(corrected.start, corrected.end);
+        }
+    } else {
+        const auto x = (rawSpan.start.x + rawSpan.end.x) * 0.5;
+        corrected.start.x = x;
+        corrected.end.x = x;
+        if (corrected.end.y < corrected.start.y) {
+            std::swap(corrected.start, corrected.end);
+        }
+    }
+
+    if (std::hypot(corrected.end.x - corrected.start.x, corrected.end.y - corrected.start.y) < kMinimumDoorWidth) {
+        return std::nullopt;
+    }
+
+    return DoorSpanCorrectionResult{
+        .span = corrected,
+        .barrierId = {},
+    };
 }
 
 }  // namespace
@@ -3814,27 +4038,25 @@ bool LayoutPreviewWidget::createDoorSegment(const QPointF& startWorld, const QPo
         return false;
     }
 
-    safecrowd::domain::LineSegment2D span{
+    const safecrowd::domain::LineSegment2D rawSpan{
         .start = {.x = startWorld.x(), .y = startWorld.y()},
         .end = {.x = endWorld.x(), .y = endWorld.y()},
     };
-    if (std::hypot(span.end.x - span.start.x, span.end.y - span.start.y) < kMinimumDoorWidth) {
+    if (std::hypot(rawSpan.end.x - rawSpan.start.x, rawSpan.end.y - rawSpan.start.y) < kMinimumDoorWidth) {
         return false;
-    }
-
-    const bool vertical = nearlyEqual(span.start.x, span.end.x);
-    const bool horizontal = nearlyEqual(span.start.y, span.end.y);
-    if (!vertical && !horizontal) {
-        return false;
-    }
-
-    if (vertical && span.end.y < span.start.y) {
-        std::swap(span.start, span.end);
-    } else if (horizontal && span.end.x < span.start.x) {
-        std::swap(span.start, span.end);
     }
 
     auto& layout = *importResult_.layout;
+    const auto corrected = correctedDoorSpanForPlacement(layout, currentFloorId(), rawSpan);
+    if (!corrected.has_value()) {
+        return false;
+    }
+
+    const auto& span = corrected->span;
+    if (!corrected->barrierId.isEmpty()) {
+        return createDoorSpan(corrected->barrierId, span.start, span.end);
+    }
+
     const auto barrierIndex = barrierIndexCoveringSpan(layout, span, currentFloorId());
     if (barrierIndex.has_value()) {
         const auto barrierId = QString::fromStdString(layout.barriers[*barrierIndex].id);
