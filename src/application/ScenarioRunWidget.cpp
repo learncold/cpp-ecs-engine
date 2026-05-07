@@ -5,6 +5,7 @@
 #include <utility>
 
 #include <QColor>
+#include <QElapsedTimer>
 #include <QIcon>
 #include <QLabel>
 #include <QHBoxLayout>
@@ -25,6 +26,10 @@ namespace safecrowd::application {
 namespace {
 
 constexpr double kSimulationDeltaSeconds = 1.0 / 30.0;
+constexpr int kPlaybackTimerIntervalMs = 33;
+constexpr int kFastForwardTimerIntervalMs = 0;
+constexpr int kFastForwardStepBudgetMs = 8;
+constexpr int kFastForwardMaxStepsPerTick = 240;
 
 enum class TransportIconKind {
     Play,
@@ -181,6 +186,35 @@ ScenarioRunWidget::ScenarioRunWidget(
       saveProjectHandler_(std::move(saveProjectHandler)),
       openProjectHandler_(std::move(openProjectHandler)),
       backToLayoutReviewHandler_(std::move(backToLayoutReviewHandler)) {
+    setupUi();
+}
+
+ScenarioRunWidget::ScenarioRunWidget(
+    const QString& projectName,
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const safecrowd::domain::ScenarioDraft& scenario,
+    std::function<void()> saveProjectHandler,
+    std::function<void()> openProjectHandler,
+    std::function<void()> backToLayoutReviewHandler,
+    safecrowd::domain::SimulationFrame cachedResultFrame,
+    safecrowd::domain::ScenarioRiskSnapshot cachedResultRisk,
+    safecrowd::domain::ScenarioResultArtifacts cachedResultArtifacts,
+    QWidget* parent)
+    : QWidget(parent),
+      projectName_(projectName),
+      layout_(layout),
+      scenario_(scenario),
+      runner_(layout_, scenario_),
+      cachedResultFrame_(std::move(cachedResultFrame)),
+      cachedResultRisk_(std::move(cachedResultRisk)),
+      cachedResultArtifacts_(std::move(cachedResultArtifacts)),
+      saveProjectHandler_(std::move(saveProjectHandler)),
+      openProjectHandler_(std::move(openProjectHandler)),
+      backToLayoutReviewHandler_(std::move(backToLayoutReviewHandler)) {
+    setupUi();
+}
+
+void ScenarioRunWidget::setupUi() {
     auto* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
@@ -206,8 +240,12 @@ ScenarioRunWidget::ScenarioRunWidget(
     rootLayout->addWidget(shell_);
 
     timer_ = new QTimer(this);
-    timer_->setInterval(33);
+    timer_->setInterval(kPlaybackTimerIntervalMs);
     connect(timer_, &QTimer::timeout, this, [this]() {
+        if (fastForwardingToResult_) {
+            advanceFastForwardToResult();
+            return;
+        }
         if (!paused_) {
             runner_.step(kSimulationDeltaSeconds);
             canvas_->setFrame(runner_.frame());
@@ -275,6 +313,12 @@ QWidget* ScenarioRunWidget::createRunPanel() {
 
     layout->addStretch(1);
 
+    fastForwardButton_ = new QPushButton("Fast Forward to Result", panel);
+    fastForwardButton_->setFont(ui::font(ui::FontRole::Body));
+    fastForwardButton_->setStyleSheet(ui::secondaryButtonStyleSheet());
+    fastForwardButton_->setEnabled(false);
+    layout->addWidget(fastForwardButton_);
+
     resultButton_ = new QPushButton("View Results", panel);
     resultButton_->setFont(ui::font(ui::FontRole::Body));
     resultButton_->setStyleSheet(ui::primaryButtonStyleSheet());
@@ -287,6 +331,9 @@ QWidget* ScenarioRunWidget::createRunPanel() {
     connect(stopButton_, &QPushButton::clicked, this, [this]() {
         stopRun();
     });
+    connect(fastForwardButton_, &QPushButton::clicked, this, [this]() {
+        startFastForwardToResult();
+    });
     connect(resultButton_, &QPushButton::clicked, this, [this]() {
         showResults();
     });
@@ -295,6 +342,7 @@ QWidget* ScenarioRunWidget::createRunPanel() {
 }
 
 void ScenarioRunWidget::returnToAuthoring() {
+    fastForwardingToResult_ = false;
     if (timer_ != nullptr) {
         timer_->stop();
     }
@@ -326,13 +374,22 @@ void ScenarioRunWidget::returnToAuthoring() {
     canvas_ = nullptr;
 }
 
+bool ScenarioRunWidget::hasCachedResult() const noexcept {
+    return cachedResultFrame_.has_value()
+        && cachedResultRisk_.has_value()
+        && cachedResultArtifacts_.has_value();
+}
+
 void ScenarioRunWidget::refreshStatus() {
     const auto& frame = runner_.frame();
     if (scenarioLabel_ != nullptr) {
         scenarioLabel_->setText(QString("Scenario: %1").arg(QString::fromStdString(scenario_.name)));
     }
     if (statusLabel_ != nullptr) {
-        statusLabel_->setText(QString("Status: %1").arg(frame.complete ? "Complete" : paused_ ? "Paused" : "Running"));
+        statusLabel_->setText(QString("Status: %1").arg(
+            frame.complete
+                ? "Complete"
+                : fastForwardingToResult_ ? "Fast forwarding" : paused_ ? "Paused" : "Running"));
     }
     if (elapsedLabel_ != nullptr) {
         elapsedLabel_->setText(QString("Elapsed: %1 / %2 sec")
@@ -385,29 +442,127 @@ void ScenarioRunWidget::refreshStatus() {
             QColor("#16202b")));
         pauseButton_->setToolTip(paused_ ? "Resume simulation" : "Pause simulation");
         pauseButton_->setAccessibleName(paused_ ? "Resume simulation" : "Pause simulation");
-        pauseButton_->setEnabled(!frame.complete);
+        pauseButton_->setEnabled(!frame.complete && !fastForwardingToResult_);
     }
     if (stopButton_ != nullptr) {
         stopButton_->setEnabled(frame.totalAgentCount > 0);
     }
-    if (resultButton_ != nullptr) {
-        resultButton_->setEnabled(frame.complete && frame.totalAgentCount > 0);
+    if (fastForwardButton_ != nullptr) {
+        fastForwardButton_->setEnabled(
+            frame.totalAgentCount > 0
+            && !frame.complete
+            && !hasCachedResult()
+            && !fastForwardingToResult_);
     }
+    if (resultButton_ != nullptr) {
+        const auto cachedAgentCount = hasCachedResult() ? cachedResultFrame_->totalAgentCount : 0;
+        resultButton_->setEnabled(
+            !fastForwardingToResult_
+            && ((frame.complete && frame.totalAgentCount > 0)
+                || cachedAgentCount > 0));
+    }
+}
+
+void ScenarioRunWidget::startFastForwardToResult() {
+    if (runner_.complete()) {
+        storeResultCache(runner_);
+        refreshStatus();
+        return;
+    }
+    if (runner_.frame().totalAgentCount == 0 || hasCachedResult()) {
+        refreshStatus();
+        return;
+    }
+
+    fastForwardingToResult_ = true;
+    paused_ = true;
+    if (timer_ != nullptr) {
+        timer_->stop();
+        timer_->setInterval(kFastForwardTimerIntervalMs);
+        timer_->start();
+    }
+    refreshStatus();
+}
+
+void ScenarioRunWidget::advanceFastForwardToResult() {
+    if (!fastForwardingToResult_) {
+        return;
+    }
+
+    QElapsedTimer elapsed;
+    elapsed.start();
+    int steps = 0;
+    while (!runner_.complete()
+           && steps < kFastForwardMaxStepsPerTick
+           && elapsed.elapsed() < kFastForwardStepBudgetMs) {
+        runner_.step(kSimulationDeltaSeconds);
+        ++steps;
+    }
+
+    if (canvas_ != nullptr) {
+        canvas_->setFrame(runner_.frame());
+    }
+
+    if (runner_.complete()) {
+        fastForwardingToResult_ = false;
+        if (timer_ != nullptr) {
+            timer_->stop();
+            timer_->setInterval(kPlaybackTimerIntervalMs);
+        }
+        storeResultCache(runner_);
+    }
+    refreshStatus();
+}
+
+void ScenarioRunWidget::storeResultCache(const safecrowd::domain::ScenarioSimulationRunner& runner) {
+    cachedResultFrame_ = runner.frame();
+    cachedResultRisk_ = runner.resultRiskSnapshot();
+    cachedResultArtifacts_ = runner.resultArtifacts();
 }
 
 void ScenarioRunWidget::stopRun() {
+    fastForwardingToResult_ = false;
     paused_ = true;
+    if (timer_ != nullptr) {
+        timer_->stop();
+        timer_->setInterval(kPlaybackTimerIntervalMs);
+    }
     runner_.reset(layout_, scenario_);
-    canvas_->setFrame(runner_.frame());
+    cachedResultFrame_.reset();
+    cachedResultRisk_.reset();
+    cachedResultArtifacts_.reset();
+    if (canvas_ != nullptr) {
+        canvas_->setFrame(runner_.frame());
+    }
     refreshStatus();
-    timer_->start();
+    if (timer_ != nullptr) {
+        timer_->start();
+    }
 }
 
 void ScenarioRunWidget::showResults() {
-    const auto& frame = runner_.frame();
-    if (frame.totalAgentCount == 0 || !frame.complete) {
+    if (fastForwardingToResult_) {
         return;
     }
+    if (runner_.frame().totalAgentCount == 0 && !hasCachedResult()) {
+        return;
+    }
+
+    const auto* resultFrame = &runner_.frame();
+    const auto* resultRisk = &runner_.resultRiskSnapshot();
+    const auto* resultArtifacts = &runner_.resultArtifacts();
+    if (!runner_.complete() && hasCachedResult()) {
+        resultFrame = &*cachedResultFrame_;
+        resultRisk = &*cachedResultRisk_;
+        resultArtifacts = &*cachedResultArtifacts_;
+    } else if (!runner_.complete()) {
+        return;
+    } else {
+        resultFrame = &runner_.frame();
+        resultRisk = &runner_.resultRiskSnapshot();
+        resultArtifacts = &runner_.resultArtifacts();
+    }
+
     if (timer_ != nullptr) {
         timer_->stop();
     }
@@ -421,9 +576,9 @@ void ScenarioRunWidget::showResults() {
         projectName_,
         layout_,
         scenario_,
-        runner_.frame(),
-        runner_.resultRiskSnapshot(),
-        runner_.resultArtifacts(),
+        *resultFrame,
+        *resultRisk,
+        *resultArtifacts,
         [this]() {
             if (saveProjectHandler_) {
                 saveProjectHandler_();
@@ -444,7 +599,7 @@ void ScenarioRunWidget::showResults() {
 }
 
 void ScenarioRunWidget::togglePaused() {
-    if (runner_.complete()) {
+    if (runner_.complete() || fastForwardingToResult_) {
         return;
     }
     paused_ = !paused_;
