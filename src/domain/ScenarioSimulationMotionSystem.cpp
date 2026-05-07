@@ -178,10 +178,13 @@ public:
             const bool verticalTransition = currentWaypointIsVertical(route);
             const auto target = routeWaypointTarget(route, position.value);
             const auto distance = distanceBetween(position.value, target);
-            const auto arrivalThreshold = verticalTransition ? kVerticalPortalContactTolerance : kArrivalEpsilon;
-            if (distance <= arrivalThreshold) {
+            if (!verticalTransition && distance <= kArrivalEpsilon) {
                 const auto advance = advanceRouteWaypoint(layoutCache, route, agent, target);
                 position.value = advance.position;
+                velocity.value = {};
+                continue;
+            }
+            if (verticalTransition && distance <= kGeometryEpsilon) {
                 velocity.value = {};
                 continue;
             }
@@ -343,16 +346,28 @@ private:
         if (lengthOf(normal) <= 1e-9) {
             return false;
         }
-        const auto towardToZone = polygonCenter(toZone->area) - midpoint(passage);
-        if (lengthOf(towardToZone) <= kArrivalEpsilon) {
+        const auto passageMidpoint = midpoint(passage);
+        auto towardCrossing = polygonCenter(toZone->area) - passageMidpoint;
+        if (lengthOf(towardCrossing) <= kArrivalEpsilon) {
+            towardCrossing = passageMidpoint - route.currentSegmentStart;
+        }
+        if (lengthOf(towardCrossing) <= kArrivalEpsilon) {
             return false;
         }
-        if (dot(normal, towardToZone) < 0.0) {
+        if (dot(normal, towardCrossing) < 0.0) {
             normal = normal * -1.0;
         }
 
-        (void)agentRadius;
-        return dot(position - midpoint(passage), normal) >= -kVerticalPortalContactTolerance;
+        const auto passageVector = passage.end - passage.start;
+        const auto passageLengthSquared = dot(passageVector, passageVector);
+        const auto passageLength = std::sqrt(passageLengthSquared);
+        const auto spanTolerance = static_cast<double>(agentRadius) * passageLength;
+        const auto projection = dot(position - passage.start, passageVector);
+        if (projection < -spanTolerance || projection > passageLengthSquared + spanTolerance) {
+            return false;
+        }
+
+        return dot(position - passageMidpoint, normal) >= -kVerticalPortalContactTolerance;
     }
 
     Point2D velocityWithBarrierEscape(
@@ -399,11 +414,7 @@ private:
             return constrainedMove(layout, from, to, clearance);
         }
 
-        const auto candidate = constrainedMoveWithBarrierClearance(layout, from, to, clearance);
-        if (!zoneAt(layoutCache, candidate, route.currentFloorId).empty()) {
-            return candidate;
-        }
-        return constrainedMove(layout, from, to, clearance);
+        return constrainedMoveWithBarrierClearance(layout, from, to, clearance);
     }
 
     std::optional<Point2D> verticalTransitionLandingPoint(
@@ -814,8 +825,7 @@ private:
                 const auto segmentLengthSquared = dot(segment, segment);
                 const auto distance = distanceToRouteWaypoint(route, position.value);
 
-                const auto arrivalThreshold = verticalTransition ? kVerticalPortalContactTolerance : kArrivalEpsilon;
-                if (distance <= arrivalThreshold) {
+                if (!verticalTransition && distance <= kArrivalEpsilon) {
                     const auto advance = advanceRouteWaypoint(layoutCache, route, agent, target);
                     position.value = advance.position;
                     if (advance.advanced) {
@@ -871,7 +881,8 @@ private:
                     route.stalledSeconds += deltaSeconds;
                 }
 
-                if (route.stalledSeconds >= kWaypointStallSeconds
+                if (!verticalTransition
+                    && route.stalledSeconds >= kWaypointStallSeconds
                     && route.nextWaypointIndex + 1 < route.waypoints.size()
                     && segmentLengthSquared > 1e-9) {
                     const auto projection = dot(position.value - route.currentSegmentStart, segment);
@@ -917,6 +928,9 @@ private:
                     break;
                 }
 
+                if (currentWaypointIsVertical(route)) {
+                    break;
+                }
                 while (route.nextWaypointIndex <= matchedIndex && route.nextWaypointIndex < route.waypoints.size()) {
                     const auto advance = advanceRouteWaypoint(layoutCache, route, agent, position.value);
                     position.value = advance.position;
