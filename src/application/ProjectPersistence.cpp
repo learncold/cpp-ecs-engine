@@ -1176,6 +1176,7 @@ bool isLiveValidationIssue(safecrowd::domain::ImportIssueCode code) {
     case ImportIssueCode::MissingRoom:
     case ImportIssueCode::DisconnectedWalkableArea:
     case ImportIssueCode::WidthBelowMinimum:
+    case ImportIssueCode::ConnectionSpanMisaligned:
     case ImportIssueCode::InvalidFloorReference:
         return true;
     default:

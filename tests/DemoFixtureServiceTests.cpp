@@ -43,10 +43,33 @@ bool containsBarrierId(
     });
 }
 
+bool containsBlockingIssue(
+    const std::vector<safecrowd::domain::ImportIssue>& issues,
+    safecrowd::domain::ImportIssueCode code,
+    const std::string& sourceId) {
+    return std::any_of(issues.begin(), issues.end(), [&](const auto& issue) {
+        return issue.code == code && issue.sourceId == sourceId && issue.blocksSimulation();
+    });
+}
+
 double spanLength(const safecrowd::domain::LineSegment2D& span) {
     const auto dx = span.end.x - span.start.x;
     const auto dy = span.end.y - span.start.y;
     return std::sqrt(dx * dx + dy * dy);
+}
+
+void translatePolygon(safecrowd::domain::Polygon2D& polygon, double dx, double dy) {
+    auto translateRing = [&](std::vector<safecrowd::domain::Point2D>& ring) {
+        for (auto& point : ring) {
+            point.x += dx;
+            point.y += dy;
+        }
+    };
+
+    translateRing(polygon.outline);
+    for (auto& hole : polygon.holes) {
+        translateRing(hole);
+    }
 }
 
 }  // namespace
@@ -91,6 +114,41 @@ SC_TEST(DemoFixtureServiceBuildsSprint1Fixture) {
     safecrowd::domain::ImportValidationService validator;
     const auto issues = validator.validate(layout);
     SC_EXPECT_TRUE(!safecrowd::domain::hasBlockingImportIssue(issues));
+}
+
+SC_TEST(DemoLayoutRejectsMovedConnectionSpan) {
+    auto layout = safecrowd::domain::DemoLayouts::demoFacility();
+    auto it = std::find_if(layout.connections.begin(), layout.connections.end(), [](const auto& connection) {
+        return connection.id == safecrowd::domain::DemoLayouts::Sprint1FacilityIds::OpeningConnectionId;
+    });
+    SC_EXPECT_TRUE(it != layout.connections.end());
+
+    it->centerSpan.start.x += 1.0;
+    it->centerSpan.end.x += 1.0;
+
+    safecrowd::domain::ImportValidationService validator;
+    const auto issues = validator.validate(layout);
+    SC_EXPECT_TRUE(containsBlockingIssue(
+        issues,
+        safecrowd::domain::ImportIssueCode::ConnectionSpanMisaligned,
+        safecrowd::domain::DemoLayouts::Sprint1FacilityIds::OpeningConnectionId));
+}
+
+SC_TEST(DemoLayoutRejectsMovedExitZone) {
+    auto layout = safecrowd::domain::DemoLayouts::demoFacility();
+    auto it = std::find_if(layout.zones.begin(), layout.zones.end(), [](const auto& zone) {
+        return zone.id == safecrowd::domain::DemoLayouts::Sprint1FacilityIds::ExitZoneId;
+    });
+    SC_EXPECT_TRUE(it != layout.zones.end());
+
+    translatePolygon(it->area, 2.0, 0.0);
+
+    safecrowd::domain::ImportValidationService validator;
+    const auto issues = validator.validate(layout);
+    SC_EXPECT_TRUE(containsBlockingIssue(
+        issues,
+        safecrowd::domain::ImportIssueCode::ConnectionSpanMisaligned,
+        safecrowd::domain::DemoLayouts::Sprint1FacilityIds::ExitConnectionId));
 }
 
 SC_TEST(DemoLayoutsProvidesRuntimeFacilityLayout) {
