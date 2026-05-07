@@ -1505,6 +1505,46 @@ SC_TEST(ScenarioSimulationRunnerMovesOntoOccupiedUShapedLandingWithSharedPhysics
     SC_EXPECT_TRUE(upperReachedLowerFloor);
 }
 
+SC_TEST(ScenarioSimulationRunnerDoesNotSnapDuringUShapedStairFloorTransition) {
+    safecrowd::domain::InitialPlacement2D placement;
+    placement.id = "descending-agent";
+    placement.floorId = "L2";
+    placement.zoneId = "stair-l2";
+    placement.targetAgentCount = 1;
+    placement.initialVelocity = {.x = 0.0, .y = -1.0};
+    placement.area.outline = {{.x = 3.35, .y = 2.35}};
+
+    safecrowd::domain::ScenarioDraft scenario;
+    scenario.population.initialPlacements.push_back(placement);
+    scenario.execution.timeLimitSeconds = 4.0;
+
+    const auto layout = descendingWestEntryUShapedStairTransitionLayout();
+    safecrowd::domain::ScenarioSimulationRunner runner(layout, scenario);
+
+    SC_EXPECT_EQ(runner.frame().agents.size(), std::size_t{1});
+    auto previous = runner.frame().agents.front();
+    bool observedTransition = false;
+    for (int i = 0; i < 40 && !runner.complete(); ++i) {
+        runner.step(0.1);
+        if (runner.frame().agents.empty()) {
+            break;
+        }
+
+        const auto current = runner.frame().agents.front();
+        if (previous.floorId == "L2" && current.floorId == "L1") {
+            const auto displacement = testDistanceBetween(previous.position, current.position);
+            SC_EXPECT_TRUE(displacement <= 0.18);
+            SC_EXPECT_TRUE(current.position.y > 1.90);
+            SC_EXPECT_TRUE(current.position.y < 2.05);
+            observedTransition = true;
+            break;
+        }
+        previous = current;
+    }
+
+    SC_EXPECT_TRUE(observedTransition);
+}
+
 SC_TEST(ScenarioSimulationRunnerQueuesCrowdedUShapedStairFloorTransitions) {
     safecrowd::domain::InitialPlacement2D placement;
     placement.id = "descending-crowd";
