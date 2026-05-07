@@ -1505,6 +1505,27 @@ SC_TEST(ScenarioSimulationRunnerMovesOntoOccupiedUShapedLandingWithSharedPhysics
     SC_EXPECT_TRUE(upperReachedLowerFloor);
 }
 
+SC_TEST(ScenarioSimulationRunnerDoesNotEnterTargetFloorBeforeVerticalPortalContact) {
+    safecrowd::domain::InitialPlacement2D placement;
+    placement.id = "near-portal-agent";
+    placement.floorId = "L2";
+    placement.zoneId = "stair-l2";
+    placement.targetAgentCount = 1;
+    placement.initialVelocity = {.x = 0.0, .y = -1.0};
+    placement.area.outline = {{.x = 3.35, .y = 2.01}};
+
+    safecrowd::domain::ScenarioDraft scenario;
+    scenario.population.initialPlacements.push_back(placement);
+    scenario.execution.timeLimitSeconds = 4.0;
+
+    safecrowd::domain::ScenarioSimulationRunner runner(descendingWestEntryUShapedStairTransitionLayout(), scenario);
+    runner.step(0.001);
+
+    SC_EXPECT_EQ(runner.frame().agents.size(), std::size_t{1});
+    SC_EXPECT_EQ(runner.frame().agents.front().floorId, std::string{"L2"});
+    SC_EXPECT_TRUE(runner.frame().agents.front().position.y > 2.0);
+}
+
 SC_TEST(ScenarioSimulationRunnerDoesNotSnapDuringUShapedStairFloorTransition) {
     safecrowd::domain::InitialPlacement2D placement;
     placement.id = "descending-agent";

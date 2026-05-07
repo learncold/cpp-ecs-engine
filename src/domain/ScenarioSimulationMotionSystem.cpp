@@ -175,9 +175,11 @@ public:
                 continue;
             }
 
+            const bool verticalTransition = currentWaypointIsVertical(route);
             const auto target = routeWaypointTarget(route, position.value);
             const auto distance = distanceBetween(position.value, target);
-            if (distance <= kArrivalEpsilon) {
+            const auto arrivalThreshold = verticalTransition ? kVerticalPortalContactTolerance : kArrivalEpsilon;
+            if (distance <= arrivalThreshold) {
                 const auto advance = advanceRouteWaypoint(layoutCache, route, agent, target);
                 position.value = advance.position;
                 velocity.value = {};
@@ -266,6 +268,7 @@ private:
     static constexpr double kNoExitReplanCooldownSeconds = 7.0;
     static constexpr double kSegmentReplanCooldownSeconds = 0.25;
     static constexpr double kFailedSegmentReplanCooldownSeconds = 1.25;
+    static constexpr double kVerticalPortalContactTolerance = kPortalCrossingEpsilon * 0.25;
 
     struct RoutePlan {
         std::vector<Point2D> waypoints{};
@@ -349,7 +352,7 @@ private:
         }
 
         (void)agentRadius;
-        return dot(position - midpoint(passage), normal) >= -kPortalCrossingEpsilon;
+        return dot(position - midpoint(passage), normal) >= -kVerticalPortalContactTolerance;
     }
 
     Point2D velocityWithBarrierEscape(
@@ -811,7 +814,8 @@ private:
                 const auto segmentLengthSquared = dot(segment, segment);
                 const auto distance = distanceToRouteWaypoint(route, position.value);
 
-                if (distance <= kArrivalEpsilon) {
+                const auto arrivalThreshold = verticalTransition ? kVerticalPortalContactTolerance : kArrivalEpsilon;
+                if (distance <= arrivalThreshold) {
                     const auto advance = advanceRouteWaypoint(layoutCache, route, agent, target);
                     position.value = advance.position;
                     if (advance.advanced) {
