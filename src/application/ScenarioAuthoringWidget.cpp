@@ -154,6 +154,11 @@ QString buildChangeSummaryLine(
             .arg(countChangeSummary("blocks", static_cast<int>(baseline.control.connectionBlocks.size()),
                                     static_cast<int>(variant.control.connectionBlocks.size())));
     }
+    if (key == "control.routeGuidances") {
+        return QString("control.routeGuidances (%1)")
+            .arg(countChangeSummary("guidance", static_cast<int>(baseline.control.routeGuidances.size()),
+                                    static_cast<int>(variant.control.routeGuidances.size())));
+    }
     if (key == "execution.timeLimit") {
         return QString("execution.timeLimit (%1s -> %2s)")
             .arg(baseline.execution.timeLimitSeconds, 0, 'f', 1)
@@ -206,6 +211,7 @@ QString compactChangeSummary(const QString& summary) {
     compact.replace("environment.guidanceProfile", "layout guidance");
     compact.replace("control.events", "events");
     compact.replace("control.connectionBlocks", "blocked events");
+    compact.replace("control.routeGuidances", "route guidance");
     compact.replace("execution.timeLimit", "run time limit");
     compact.replace("execution.sampleInterval", "run sample interval");
     compact.replace("execution.repeatCount", "run repeat count");
@@ -499,6 +505,69 @@ std::vector<NavigationTreeNode> buildEventsTree(
         sections.push_back({
             .label = QString("Operational Events (%1)").arg(static_cast<int>(scenario->events.size())),
             .children = std::move(events),
+            .expanded = true,
+            .selectable = false,
+        });
+    }
+
+    const auto& routeGuidances = scenario->draft.control.routeGuidances;
+    if (!routeGuidances.empty()) {
+        std::vector<NavigationTreeNode> nodes;
+        nodes.reserve(routeGuidances.size());
+        for (const auto& guidance : routeGuidances) {
+            const auto guidanceId = QString::fromStdString(guidance.id);
+            const auto doorLabel = guidance.installConnectionId.empty()
+                ? QString{}
+                : connectionLabelForId(layout, guidance.installConnectionId);
+            const auto exitLabel = guidance.guidedExitZoneId.empty()
+                ? QStringLiteral("Nearest exit")
+                : zoneName(layout, guidance.guidedExitZoneId);
+            QString periodSummary = QStringLiteral("Always");
+            if (!guidance.periods.empty()) {
+                periodSummary = blockScheduleSummary(safecrowd::domain::ConnectionBlockDraft{
+                    .intervals = [&]() {
+                        std::vector<safecrowd::domain::ConnectionBlockIntervalDraft> intervals;
+                        intervals.reserve(guidance.periods.size());
+                        for (const auto& period : guidance.periods) {
+                            intervals.push_back({
+                                .startSeconds = std::max(0.0, period.startSeconds),
+                                .endSeconds = std::max(0.0, period.endSeconds),
+                            });
+                        }
+                        return intervals;
+                    }(),
+                });
+            }
+
+            std::vector<NavigationTreeNode> children;
+            children.reserve(doorLabel.isEmpty() ? 2u : 3u);
+            children.push_back({
+                .label = QString("Exit  -  %1").arg(exitLabel),
+                .id = QString("%1/exit").arg(guidanceId),
+            });
+            if (!doorLabel.isEmpty()) {
+                children.push_back({
+                    .label = QString("Door  -  %1").arg(doorLabel),
+                    .id = QString("%1/door").arg(guidanceId),
+                });
+            }
+            children.push_back({
+                .label = QString("Period  -  %1").arg(periodSummary),
+                .id = QString("%1/period").arg(guidanceId),
+            });
+
+            nodes.push_back({
+                .label = QString("Guidance  -  %1").arg(doorLabel.isEmpty() ? exitLabel : doorLabel),
+                .id = guidanceId,
+                .detail = QString("Period: %1").arg(periodSummary),
+                .children = std::move(children),
+                .expanded = true,
+            });
+        }
+
+        sections.push_back({
+            .label = QString("Route Guidance (%1)").arg(static_cast<int>(routeGuidances.size())),
+            .children = std::move(nodes),
             .expanded = true,
             .selectable = false,
         });
@@ -804,6 +873,17 @@ void ScenarioAuthoringWidget::refreshCanvas() {
         refreshNavigationPanel();
         refreshInspector();
     });
+    canvas_->setRouteGuidances(scenario->draft.control.routeGuidances);
+    canvas_->setRouteGuidancesChangedHandler([this](const std::vector<safecrowd::domain::RouteGuidanceDraft>& guidances) {
+        auto* current = currentScenario();
+        if (current == nullptr) {
+            return;
+        }
+        current->draft.control.routeGuidances = guidances;
+        recomputeDiffKeysAfterScenarioChanged(*current);
+        refreshNavigationPanel();
+        refreshInspector();
+    });
     if (!selectedLayoutElementId_.isEmpty()) {
         canvas_->focusLayoutElement(selectedLayoutElementId_);
     } else if (!selectedCrowdElementId_.isEmpty()) {
@@ -838,6 +918,7 @@ void ScenarioAuthoringWidget::refreshInspector() {
 
                 addMetaRow(cardLayout, "Population", QString::number(totalOccupantCount(*scenario)), card);
                 addMetaRow(cardLayout, "Events", QString::number(static_cast<int>(scenario->events.size())), card);
+                addMetaRow(cardLayout, "Guidance", QString::number(static_cast<int>(scenario->draft.control.routeGuidances.size())), card);
                 addMetaRow(cardLayout, "Blocked", QString::number(static_cast<int>(scenario->draft.control.connectionBlocks.size())), card);
                 addMetaRow(cardLayout, "Start", scenario->startText, card);
                 addMetaRow(cardLayout, "Destination", scenario->destinationText, card);

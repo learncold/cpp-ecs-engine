@@ -57,6 +57,8 @@ public:
     void setPlacementsChangedHandler(std::function<void(const std::vector<ScenarioCrowdPlacement>&)> handler);
     void setConnectionBlocks(std::vector<safecrowd::domain::ConnectionBlockDraft> blocks);
     void setConnectionBlocksChangedHandler(std::function<void(const std::vector<safecrowd::domain::ConnectionBlockDraft>&)> handler);
+    void setRouteGuidances(std::vector<safecrowd::domain::RouteGuidanceDraft> guidances);
+    void setRouteGuidancesChangedHandler(std::function<void(const std::vector<safecrowd::domain::RouteGuidanceDraft>&)> handler);
     void setLayoutElementActivatedHandler(std::function<void(const QString&)> handler);
     void setCrowdSelectionChangedHandler(std::function<void(const QString&)> handler);
     void focusLayoutElement(const QString& elementId);
@@ -82,6 +84,7 @@ private:
         IndividualPlacement,
         GroupPlacement,
         BlockDoor,
+        RouteGuidance,
     };
 
     std::optional<LayoutCanvasBounds> collectBounds() const;
@@ -101,10 +104,15 @@ private:
     safecrowd::domain::Point2D defaultVelocityFrom(const safecrowd::domain::Point2D& point) const;
     QString nextPlacementId(ScenarioCrowdPlacementKind kind) const;
     QString nextConnectionBlockId() const;
+    QString nextRouteGuidanceId() const;
     void addGroupPlacement(const QPointF& start, const QPointF& end);
     void addIndividualPlacement(const QPointF& position);
     void addConnectionBlock(const QPointF& position);
     void addConnectionBlockForConnection(const safecrowd::domain::Connection2D& connection);
+    void addRouteGuidance(const QPointF& position);
+    void addRouteGuidanceForExitZone(const safecrowd::domain::Zone2D& zone);
+    void addRouteGuidanceForConnection(const safecrowd::domain::Connection2D& connection);
+    void openRouteGuidanceEditor(const QString& guidanceId, const QPoint& screenPosition);
     void selectSingleAt(const QPointF& position, const LayoutCanvasTransform& transform);
     void selectPlacementsInRect(const QRectF& screenRect, const LayoutCanvasTransform& transform);
     void selectLayoutElementAt(const QPointF& position);
@@ -114,8 +122,10 @@ private:
     void drawFocusedLayoutElement(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawFocusedPlacement(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawConnectionBlocks(QPainter& painter, const LayoutCanvasTransform& transform) const;
+    void drawRouteGuidances(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void emitPlacementsChanged();
     void emitConnectionBlocksChanged();
+    void emitRouteGuidancesChanged();
     void repositionToolbars();
     void setToolMode(ToolMode mode);
     void setupToolbars();
@@ -123,6 +133,7 @@ private:
     safecrowd::domain::FacilityLayout2D layout_{};
     std::vector<ScenarioCrowdPlacement> placements_{};
     std::vector<safecrowd::domain::ConnectionBlockDraft> connectionBlocks_{};
+    std::vector<safecrowd::domain::RouteGuidanceDraft> routeGuidances_{};
     QString currentFloorId_{};
     QString focusedLayoutElementId_{};
     QString focusedCrowdElementId_{};
@@ -142,15 +153,18 @@ private:
     QToolButton* individualToolButton_{nullptr};
     QToolButton* groupToolButton_{nullptr};
     QToolButton* blockDoorToolButton_{nullptr};
+    QToolButton* routeGuidanceToolButton_{nullptr};
     QLabel* groupCountLabel_{nullptr};
     QSpinBox* groupCountSpinBox_{nullptr};
     QLabel* groupDistributionLabel_{nullptr};
     QComboBox* groupDistributionComboBox_{nullptr};
     QString hoveredConnectionBlockId_{};
+    QString hoveredRouteGuidanceId_{};
     std::function<void(const QString&)> layoutElementActivatedHandler_{};
     std::function<void(const QString&)> crowdSelectionChangedHandler_{};
     std::function<void(const std::vector<ScenarioCrowdPlacement>&)> placementsChangedHandler_{};
     std::function<void(const std::vector<safecrowd::domain::ConnectionBlockDraft>&)> connectionBlocksChangedHandler_{};
+    std::function<void(const std::vector<safecrowd::domain::RouteGuidanceDraft>&)> routeGuidancesChangedHandler_{};
 };
 
 }  // namespace safecrowd::application

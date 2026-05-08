@@ -81,6 +81,40 @@ bool ScenarioSimulationRunner::complete() const noexcept {
 
 std::vector<ScenarioAgentSeed> ScenarioSimulationRunner::createAgentSeeds() const {
     std::vector<ScenarioAgentSeed> seeds;
+    const std::uint64_t baseSeed = scenario_.execution.baseSeed != 0 ? scenario_.execution.baseSeed : 1;
+    auto fnv1a64 = [](const std::string& value) {
+        std::uint64_t hash = 1469598103934665603ULL;
+        for (const unsigned char ch : value) {
+            hash ^= static_cast<std::uint64_t>(ch);
+            hash *= 1099511628211ULL;
+        }
+        return hash;
+    };
+    auto mix64 = [](std::uint64_t v) {
+        v += 0x9e3779b97f4a7c15ULL;
+        v = (v ^ (v >> 30U)) * 0xbf58476d1ce4e5b9ULL;
+        v = (v ^ (v >> 27U)) * 0x94d049bb133111ebULL;
+        return v ^ (v >> 31U);
+    };
+    auto uniform01 = [&](std::uint64_t v) {
+        const auto mixed = mix64(v);
+        const auto mantissa = mixed >> 11U;
+        return static_cast<double>(mantissa) * (1.0 / 9007199254740992.0);
+    };
+    auto beta22 = [&](std::uint64_t salt) {
+        const auto u1 = std::max(1e-12, uniform01(baseSeed ^ salt ^ 0xA341316CULL));
+        const auto u2 = std::max(1e-12, uniform01(baseSeed ^ salt ^ 0xC8013EA4ULL));
+        const auto u3 = std::max(1e-12, uniform01(baseSeed ^ salt ^ 0xAD90777DULL));
+        const auto u4 = std::max(1e-12, uniform01(baseSeed ^ salt ^ 0x7E95761EULL));
+        const auto x = -std::log(u1 * u2);
+        const auto y = -std::log(u3 * u4);
+        if (!(x > 0.0) && !(y > 0.0)) {
+            return 0.5;
+        }
+        return x / (x + y);
+    };
+
+    std::uint64_t agentSerial = 0;
     for (const auto& placement : scenario_.population.initialPlacements) {
         const auto count = placement.explicitPositions.empty()
             ? placement.targetAgentCount
@@ -122,10 +156,17 @@ std::vector<ScenarioAgentSeed> ScenarioSimulationRunner::createAgentSeeds() cons
                 .destinationZoneId = route.destinationZoneId,
                 .currentFloorId = placementFloorId,
             };
+            evacuationRoute.originalDestinationZoneId = evacuationRoute.destinationZoneId;
             evacuationRoute.displayFloorId = evacuationRoute.currentFloorId;
             evacuationRoute.previousDistanceToWaypoint = route.waypoints.empty()
                 ? 0.0
                 : distanceToRouteWaypoint(evacuationRoute, position);
+            const auto propensitySalt =
+                mix64(static_cast<std::uint64_t>(++agentSerial))
+                ^ mix64(fnv1a64(placement.id))
+                ^ mix64(fnv1a64(startZoneId))
+                ^ mix64(static_cast<std::uint64_t>(evacuationRoute.destinationZoneId.size()));
+            const auto guidancePropensity = beta22(propensitySalt);
             seeds.push_back({
                 .position = {.value = position},
                 .agent = {
@@ -133,6 +174,7 @@ std::vector<ScenarioAgentSeed> ScenarioSimulationRunner::createAgentSeeds() cons
                     .maxSpeed = static_cast<float>(speed),
                     .sourcePlacementId = placement.id,
                     .sourceZoneId = startZoneId,
+                    .guidancePropensity = guidancePropensity,
                 },
                 .velocity = {.value = {}},
                 .route = std::move(evacuationRoute),
@@ -147,7 +189,7 @@ void ScenarioSimulationRunner::initializeRuntime() {
     runtime_ = std::make_unique<engine::EngineRuntime>(engine::EngineConfig{
         .fixedDeltaTime = 1.0 / 30.0,
         .maxCatchUpSteps = 1,
-        .baseSeed = 1,
+        .baseSeed = scenario_.execution.baseSeed != 0 ? scenario_.execution.baseSeed : 1,
     });
     runtime_->addSystem(std::make_unique<ScenarioAgentSpawnSystem>(createAgentSeeds(), timeLimitSeconds_));
     runtime_->addSystem(
@@ -159,7 +201,7 @@ void ScenarioSimulationRunner::initializeRuntime() {
         {.phase = engine::UpdatePhase::PreSimulation,
          .triggerPolicy = engine::TriggerPolicy::EveryFrame});
     runtime_->addSystem(
-        makeScenarioSimulationMotionSystem(layout_),
+        makeScenarioSimulationMotionSystem(layout_, scenario_.control.routeGuidances),
         {.phase = engine::UpdatePhase::PostSimulation,
          .triggerPolicy = engine::TriggerPolicy::EveryFrame});
     runtime_->addSystem(
