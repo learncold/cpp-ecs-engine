@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <optional>
 #include <utility>
 
@@ -330,6 +331,21 @@ const std::optional<ScenarioAuthoringWidget::InitialState>& ScenarioRunWidget::r
     return returnAuthoringState_;
 }
 
+bool ScenarioRunWidget::hasResultsForSave() const noexcept {
+    return hasCachedResults() || (batchRunner_.complete() && !batchRunner_.empty());
+}
+
+int ScenarioRunWidget::selectedRunIndex() const noexcept {
+    return selectedRunIndex_;
+}
+
+std::vector<SavedScenarioResultState> ScenarioRunWidget::resultsForSave() {
+    if (batchRunner_.complete() && !batchRunner_.empty()) {
+        return completedResults();
+    }
+    return cachedResults_;
+}
+
 bool ScenarioRunWidget::hasCachedResults() const noexcept {
     return !cachedResults_.empty();
 }
@@ -509,8 +525,18 @@ void ScenarioRunWidget::returnToAuthoring() {
         for (const auto& scenario : scenarios_) {
             initial.scenarios.push_back(scenarioStateFromDraft(scenario, layout_));
         }
-        initial.currentScenarioIndex = selectedRunIndex_;
         initial.navigationView = ScenarioAuthoringWidget::NavigationView::Layout;
+    }
+    if (selectedRunIndex_ >= 0 && selectedRunIndex_ < static_cast<int>(scenarios_.size())) {
+        const auto& selectedScenarioId = scenarios_[static_cast<std::size_t>(selectedRunIndex_)].scenarioId;
+        const auto selectedIt = std::find_if(initial.scenarios.begin(), initial.scenarios.end(), [&](const auto& scenario) {
+            return scenario.draft.scenarioId == selectedScenarioId;
+        });
+        if (selectedIt != initial.scenarios.end()) {
+            initial.currentScenarioIndex = static_cast<int>(std::distance(initial.scenarios.begin(), selectedIt));
+        } else if (selectedRunIndex_ < static_cast<int>(initial.scenarios.size())) {
+            initial.currentScenarioIndex = selectedRunIndex_;
+        }
     }
     initial.rightPanelMode = ScenarioAuthoringWidget::RightPanelMode::Scenario;
 

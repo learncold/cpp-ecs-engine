@@ -72,6 +72,9 @@ public:
     const safecrowd::domain::ScenarioDraft& scenario() const noexcept;
     const std::vector<safecrowd::domain::ScenarioDraft>& scenarios() const noexcept;
     const std::optional<ScenarioAuthoringWidget::InitialState>& returnAuthoringState() const noexcept;
+    bool hasResultsForSave() const noexcept;
+    int selectedRunIndex() const noexcept;
+    std::vector<SavedScenarioResultState> resultsForSave();
 
 private:
     QWidget* createRunCanvas();

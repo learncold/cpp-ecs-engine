@@ -1,6 +1,7 @@
 #include "application/MainWindow.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <filesystem>
 #include <string>
 #include <utility>
@@ -530,12 +531,30 @@ void MainWindow::saveCurrentProject() {
             .artifacts = resultWidget->artifacts(),
         };
     } else if (auto* runWidget = visibleChild<ScenarioRunWidget>(centralWidget())) {
-        workspace.activeView = ProjectWorkspaceView::ScenarioRun;
         if (runWidget->returnAuthoringState().has_value()) {
             workspace.authoring = savedStateFromInitial(*runWidget->returnAuthoringState());
         }
-        workspace.runningScenario = runWidget->scenario();
-        workspace.runningScenarios = runWidget->scenarios();
+        if (runWidget->hasResultsForSave()) {
+            auto results = runWidget->resultsForSave();
+            if (!results.empty()) {
+                workspace.activeView = ProjectWorkspaceView::ScenarioResult;
+                const auto index = std::clamp(
+                    runWidget->selectedRunIndex(),
+                    0,
+                    static_cast<int>(results.size()) - 1);
+                workspace.result = results[static_cast<std::size_t>(index)];
+                if (results.size() > 1) {
+                    workspace.batchResult = SavedScenarioBatchResultState{
+                        .results = std::move(results),
+                        .currentResultIndex = index,
+                    };
+                }
+            }
+        } else {
+            workspace.activeView = ProjectWorkspaceView::ScenarioRun;
+            workspace.runningScenario = runWidget->scenario();
+            workspace.runningScenarios = runWidget->scenarios();
+        }
     }
 
     if (!ProjectPersistence::saveProjectWorkspace(currentProject_, workspace, &errorMessage)) {

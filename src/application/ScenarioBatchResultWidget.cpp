@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <iterator>
 #include <utility>
 
 #include <QCheckBox>
@@ -712,7 +713,17 @@ void ScenarioBatchResultWidget::navigateToAuthoring() {
         for (const auto& result : results_) {
             initial.scenarios.push_back(scenarioStateFromDraft(result.scenario, layout_));
         }
-        initial.currentScenarioIndex = currentResultIndex_;
+    }
+    if (currentResultIndex_ >= 0 && currentResultIndex_ < static_cast<int>(results_.size())) {
+        const auto& selectedScenarioId = results_[static_cast<std::size_t>(currentResultIndex_)].scenario.scenarioId;
+        const auto selectedIt = std::find_if(initial.scenarios.begin(), initial.scenarios.end(), [&](const auto& scenario) {
+            return scenario.draft.scenarioId == selectedScenarioId;
+        });
+        if (selectedIt != initial.scenarios.end()) {
+            initial.currentScenarioIndex = static_cast<int>(std::distance(initial.scenarios.begin(), selectedIt));
+        } else if (currentResultIndex_ < static_cast<int>(initial.scenarios.size())) {
+            initial.currentScenarioIndex = currentResultIndex_;
+        }
     }
     initial.rightPanelMode = ScenarioAuthoringWidget::RightPanelMode::Scenario;
 
