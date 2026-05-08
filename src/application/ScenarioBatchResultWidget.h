@@ -12,6 +12,7 @@
 #include "domain/FacilityLayout2D.h"
 
 class QLabel;
+class QButtonGroup;
 class QTableWidget;
 
 namespace safecrowd::application {
@@ -37,10 +38,17 @@ public:
     std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState() const;
 
 private:
+    enum class OverlayMode {
+        Density = 0,
+        Hotspots = 1,
+        Bottlenecks = 2,
+    };
+
     QWidget* createSummaryPanel();
     void navigateToAuthoring();
     void refreshSelectedResult();
     void rerunBatch();
+    int baselineResultIndex() const noexcept;
 
     QString projectName_{};
     safecrowd::domain::FacilityLayout2D layout_{};
@@ -52,8 +60,11 @@ private:
     int currentResultIndex_{0};
     WorkspaceShell* shell_{nullptr};
     SimulationCanvasWidget* canvas_{nullptr};
+    QButtonGroup* overlayButtonGroup_{nullptr};
     QTableWidget* table_{nullptr};
     QLabel* detailLabel_{nullptr};
+    QWidget* progressChart_{nullptr};
+    OverlayMode overlayMode_{OverlayMode::Density};
 };
 
 }  // namespace safecrowd::application
