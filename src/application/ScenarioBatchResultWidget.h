@@ -12,8 +12,11 @@
 #include "domain/FacilityLayout2D.h"
 
 class QLabel;
-class QButtonGroup;
-class QTableWidget;
+class QCheckBox;
+class QComboBox;
+class QPushButton;
+class QSlider;
+class QTimer;
 
 namespace safecrowd::application {
 
@@ -42,10 +45,17 @@ private:
         Density = 0,
         Hotspots = 1,
         Bottlenecks = 2,
+        None = 3,
     };
 
+    QWidget* createCanvasPanel();
     QWidget* createSummaryPanel();
+    void advanceReplay();
+    void applyReplayFrame(int frameIndex);
+    void loadReplayForSelectedResult();
     void navigateToAuthoring();
+    void pauseReplay();
+    void refreshComparisonSelection();
     void refreshSelectedResult();
     void rerunBatch();
     int baselineResultIndex() const noexcept;
@@ -58,12 +68,21 @@ private:
     std::function<void()> openProjectHandler_{};
     std::function<void()> backToLayoutReviewHandler_{};
     int currentResultIndex_{0};
+    std::vector<int> selectedCompareIndices_{};
+    std::vector<safecrowd::domain::SimulationFrame> replayFrames_{};
+    int replayFrameIndex_{0};
     WorkspaceShell* shell_{nullptr};
     SimulationCanvasWidget* canvas_{nullptr};
-    QButtonGroup* overlayButtonGroup_{nullptr};
-    QTableWidget* table_{nullptr};
+    QComboBox* displayScenarioCombo_{nullptr};
+    QComboBox* overlayCombo_{nullptr};
+    QPushButton* playButton_{nullptr};
+    QSlider* replaySlider_{nullptr};
+    QLabel* replayTimeLabel_{nullptr};
     QLabel* detailLabel_{nullptr};
-    QWidget* progressChart_{nullptr};
+    std::vector<QCheckBox*> compareCheckBoxes_{};
+    QWidget* remainingChart_{nullptr};
+    QWidget* exitsChart_{nullptr};
+    QTimer* replayTimer_{nullptr};
     OverlayMode overlayMode_{OverlayMode::Density};
 };
 

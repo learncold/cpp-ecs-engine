@@ -5,12 +5,9 @@
 #include <cstddef>
 #include <utility>
 
-#include <QAbstractButton>
-#include <QAbstractItemView>
-#include <QButtonGroup>
+#include <QCheckBox>
+#include <QComboBox>
 #include <QFrame>
-#include <QGridLayout>
-#include <QHeaderView>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPainter>
@@ -18,9 +15,11 @@
 #include <QPen>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSignalBlocker>
 #include <QSizePolicy>
-#include <QTableWidget>
-#include <QTableWidgetItem>
+#include <QSlider>
+#include <QTabWidget>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include "application/ScenarioRunWidget.h"
@@ -78,55 +77,6 @@ QString scenarioRoleLabel(safecrowd::domain::ScenarioRole role) {
     }
 }
 
-int riskRank(safecrowd::domain::ScenarioRiskLevel level) noexcept {
-    switch (level) {
-    case safecrowd::domain::ScenarioRiskLevel::High:
-        return 2;
-    case safecrowd::domain::ScenarioRiskLevel::Medium:
-        return 1;
-    case safecrowd::domain::ScenarioRiskLevel::Low:
-    default:
-        return 0;
-    }
-}
-
-QColor deltaColor(double deltaSeconds) {
-    if (deltaSeconds < -0.05) {
-        return QColor("#166534");
-    }
-    if (deltaSeconds > 0.05) {
-        return QColor("#b42318");
-    }
-    return QColor("#4f5d6b");
-}
-
-QTableWidgetItem* readonlyItem(const QString& text, Qt::Alignment alignment = Qt::AlignLeft | Qt::AlignVCenter) {
-    auto* item = new QTableWidgetItem(text);
-    item->setFlags(item->flags() & ~Qt::ItemIsEditable);
-    item->setTextAlignment(alignment);
-    return item;
-}
-
-QFrame* createMetricCard(const QString& title, const QString& value, const QString& caption, QWidget* parent) {
-    auto* card = new QFrame(parent);
-    card->setStyleSheet(ui::panelStyleSheet());
-    auto* layout = new QVBoxLayout(card);
-    layout->setContentsMargins(12, 10, 12, 10);
-    layout->setSpacing(4);
-
-    auto* titleLabel = createLabel(title, card, ui::FontRole::Caption);
-    titleLabel->setStyleSheet(ui::mutedTextStyleSheet());
-    layout->addWidget(titleLabel);
-
-    auto* valueLabel = createLabel(value, card, ui::FontRole::SectionTitle);
-    layout->addWidget(valueLabel);
-
-    auto* captionLabel = createLabel(caption, card, ui::FontRole::Caption);
-    captionLabel->setStyleSheet(ui::subtleTextStyleSheet());
-    layout->addWidget(captionLabel);
-    return card;
-}
-
 std::vector<std::pair<double, double>> progressSeries(const SavedScenarioResultState& result) {
     std::vector<std::pair<double, double>> series;
     if (!result.artifacts.evacuationProgress.empty()) {
@@ -148,26 +98,32 @@ std::vector<std::pair<double, double>> progressSeries(const SavedScenarioResultS
     return series;
 }
 
-class EvacuationProgressChartWidget final : public QWidget {
+enum class ComparisonGraphMode {
+    Remaining,
+    Exits,
+};
+
+class ComparisonGraphWidget final : public QWidget {
 public:
-    explicit EvacuationProgressChartWidget(QWidget* parent = nullptr)
-        : QWidget(parent) {
-        setMinimumHeight(150);
-        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    explicit ComparisonGraphWidget(ComparisonGraphMode mode, QWidget* parent = nullptr)
+        : QWidget(parent),
+          mode_(mode) {
+        setMinimumHeight(190);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     }
 
     void setResults(
         const std::vector<SavedScenarioResultState>& results,
-        int baselineIndex,
-        int selectedIndex) {
+        std::vector<int> selectedIndices,
+        int displayIndex) {
         results_ = &results;
-        baselineIndex_ = baselineIndex;
-        selectedIndex_ = selectedIndex;
+        selectedIndices_ = std::move(selectedIndices);
+        displayIndex_ = displayIndex;
         update();
     }
 
-    void setSelectedIndex(int selectedIndex) {
-        selectedIndex_ = selectedIndex;
+    void setCurrentTimeSeconds(double seconds) {
+        currentTimeSeconds_ = seconds;
         update();
     }
 
@@ -178,47 +134,79 @@ protected:
         QPainter painter(this);
         painter.setRenderHint(QPainter::Antialiasing, true);
         painter.fillRect(rect(), QColor("#ffffff"));
-
-        const QRectF bounds = rect().adjusted(12, 12, -12, -22);
         painter.setPen(QPen(QColor("#d7e0ea"), 1));
         painter.drawRoundedRect(rect().adjusted(0, 0, -1, -1), 8, 8);
 
-        if (results_ == nullptr || results_->empty() || bounds.width() <= 1.0 || bounds.height() <= 1.0) {
+        const QRectF plot = rect().adjusted(40, 16, -18, -44);
+        if (results_ == nullptr || selectedIndices_.empty() || plot.width() <= 1.0 || plot.height() <= 1.0) {
             painter.setPen(QColor("#6b7785"));
             painter.setFont(ui::font(ui::FontRole::Caption));
-            painter.drawText(rect(), Qt::AlignCenter, "No evacuation progress data");
+            painter.drawText(rect(), Qt::AlignCenter, "Select scenarios to compare");
             return;
         }
 
+        painter.setPen(QPen(QColor("#e2e8f0"), 1));
+        painter.drawLine(plot.bottomLeft(), plot.bottomRight());
+        painter.drawLine(plot.bottomLeft(), plot.topLeft());
+
+        if (mode_ == ComparisonGraphMode::Remaining) {
+            drawRemaining(painter, plot);
+        } else {
+            drawExits(painter, plot);
+        }
+        drawLegend(painter, QRectF(rect().left() + 12, rect().bottom() - 34, rect().width() - 24, 24));
+    }
+
+private:
+    QColor colorForSeries(int index) const {
+        static const std::vector<QColor> colors{
+            QColor("#2563eb"),
+            QColor("#16a34a"),
+            QColor("#dc2626"),
+            QColor("#7c3aed"),
+            QColor("#ea580c"),
+        };
+        if (index == displayIndex_) {
+            return QColor("#1d4ed8");
+        }
+        return colors[static_cast<std::size_t>(std::abs(index)) % colors.size()];
+    }
+
+    void drawRemaining(QPainter& painter, const QRectF& plot) {
         double maxTime = 1.0;
-        for (const auto& result : *results_) {
+        for (const auto index : selectedIndices_) {
+            if (!validIndex(index)) {
+                continue;
+            }
+            const auto& result = (*results_)[static_cast<std::size_t>(index)];
             maxTime = std::max(maxTime, finalSeconds(result));
             for (const auto& sample : result.artifacts.evacuationProgress) {
                 maxTime = std::max(maxTime, sample.timeSeconds);
             }
         }
 
-        painter.setPen(QPen(QColor("#e2e8f0"), 1));
-        painter.drawLine(bounds.bottomLeft(), bounds.bottomRight());
-        painter.drawLine(bounds.bottomLeft(), bounds.topLeft());
-
         painter.setFont(ui::font(ui::FontRole::Caption));
         painter.setPen(QColor("#6b7785"));
-        painter.drawText(QRectF(bounds.left(), bounds.bottom() + 2, bounds.width(), 18), Qt::AlignLeft, "0%");
-        painter.drawText(QRectF(bounds.left(), bounds.top() - 3, bounds.width(), 18), Qt::AlignLeft, "100%");
-        painter.drawText(QRectF(bounds.left(), bounds.bottom() + 2, bounds.width(), 18), Qt::AlignRight, formatSeconds(maxTime));
+        painter.drawText(QRectF(4, plot.top() - 5, 32, 18), Qt::AlignRight | Qt::AlignVCenter, "100%");
+        painter.drawText(QRectF(4, plot.bottom() - 10, 32, 18), Qt::AlignRight | Qt::AlignVCenter, "0%");
+        painter.drawText(QRectF(plot.left(), plot.bottom() + 4, plot.width(), 18), Qt::AlignRight, formatSeconds(maxTime));
 
-        for (int index = 0; index < static_cast<int>(results_->size()); ++index) {
-            const auto series = progressSeries((*results_)[static_cast<std::size_t>(index)]);
+        for (const auto index : selectedIndices_) {
+            if (!validIndex(index)) {
+                continue;
+            }
+            const auto& result = (*results_)[static_cast<std::size_t>(index)];
+            const auto series = progressSeries(result);
             if (series.empty()) {
                 continue;
             }
 
             QPainterPath path;
             bool started = false;
-            for (const auto& [time, ratio] : series) {
-                const auto x = bounds.left() + std::clamp(time / maxTime, 0.0, 1.0) * bounds.width();
-                const auto y = bounds.bottom() - std::clamp(ratio, 0.0, 1.0) * bounds.height();
+            for (const auto& [time, evacuatedRatio] : series) {
+                const auto remainingRatio = 1.0 - std::clamp(evacuatedRatio, 0.0, 1.0);
+                const auto x = plot.left() + std::clamp(time / maxTime, 0.0, 1.0) * plot.width();
+                const auto y = plot.bottom() - remainingRatio * plot.height();
                 if (!started) {
                     path.moveTo(x, y);
                     started = true;
@@ -226,28 +214,140 @@ protected:
                     path.lineTo(x, y);
                 }
             }
-
-            QColor color("#94a3b8");
-            double width = 1.4;
-            if (index == baselineIndex_) {
-                color = QColor("#16202b");
-                width = 2.0;
-            }
-            if (index == selectedIndex_) {
-                color = QColor("#2563eb");
-                width = 2.8;
-            }
-
-            painter.setPen(QPen(color, width, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            painter.setPen(QPen(colorForSeries(index), index == displayIndex_ ? 2.8 : 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
             painter.drawPath(path);
+        }
+
+        if (currentTimeSeconds_ >= 0.0) {
+            const auto x = plot.left() + std::clamp(currentTimeSeconds_ / maxTime, 0.0, 1.0) * plot.width();
+            painter.setPen(QPen(QColor("#0f172a"), 1, Qt::DashLine));
+            painter.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()));
         }
     }
 
-private:
+    void drawExits(QPainter& painter, const QRectF& plot) {
+        std::vector<QString> exits;
+        for (const auto index : selectedIndices_) {
+            if (!validIndex(index)) {
+                continue;
+            }
+            for (const auto& exit : (*results_)[static_cast<std::size_t>(index)].artifacts.exitUsage) {
+                const auto label = QString::fromStdString(exit.exitLabel.empty() ? exit.exitZoneId : exit.exitLabel);
+                if (std::find(exits.begin(), exits.end(), label) == exits.end()) {
+                    exits.push_back(label);
+                }
+            }
+        }
+        if (exits.empty()) {
+            painter.setPen(QColor("#6b7785"));
+            painter.setFont(ui::font(ui::FontRole::Caption));
+            painter.drawText(plot, Qt::AlignCenter, "No exit usage data");
+            return;
+        }
+
+        painter.setFont(ui::font(ui::FontRole::Caption));
+        painter.setPen(QColor("#6b7785"));
+        painter.drawText(QRectF(4, plot.top() - 5, 32, 18), Qt::AlignRight | Qt::AlignVCenter, "100%");
+        painter.drawText(QRectF(4, plot.bottom() - 10, 32, 18), Qt::AlignRight | Qt::AlignVCenter, "0%");
+
+        for (int exitIndex = 0; exitIndex < static_cast<int>(exits.size()); ++exitIndex) {
+            const auto x = exits.size() == 1
+                ? plot.center().x()
+                : plot.left() + (static_cast<double>(exitIndex) / static_cast<double>(exits.size() - 1)) * plot.width();
+            painter.setPen(QPen(QColor("#edf2f7"), 1));
+            painter.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()));
+            painter.setPen(QColor("#6b7785"));
+            painter.drawText(QRectF(x - 38, plot.bottom() + 4, 76, 18), Qt::AlignCenter, exits[static_cast<std::size_t>(exitIndex)]);
+        }
+
+        for (const auto index : selectedIndices_) {
+            if (!validIndex(index)) {
+                continue;
+            }
+            const auto& result = (*results_)[static_cast<std::size_t>(index)];
+            QPainterPath path;
+            bool started = false;
+            for (int exitIndex = 0; exitIndex < static_cast<int>(exits.size()); ++exitIndex) {
+                double usageRatio = 0.0;
+                const auto& exitLabel = exits[static_cast<std::size_t>(exitIndex)];
+                for (const auto& exit : result.artifacts.exitUsage) {
+                    const auto label = QString::fromStdString(exit.exitLabel.empty() ? exit.exitZoneId : exit.exitLabel);
+                    if (label == exitLabel) {
+                        usageRatio = std::clamp(exit.usageRatio, 0.0, 1.0);
+                        break;
+                    }
+                }
+                const auto x = exits.size() == 1
+                    ? plot.center().x()
+                    : plot.left() + (static_cast<double>(exitIndex) / static_cast<double>(exits.size() - 1)) * plot.width();
+                const auto y = plot.bottom() - usageRatio * plot.height();
+                if (!started) {
+                    path.moveTo(x, y);
+                    started = true;
+                } else {
+                    path.lineTo(x, y);
+                }
+            }
+            painter.setPen(QPen(colorForSeries(index), index == displayIndex_ ? 2.8 : 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            painter.drawPath(path);
+            for (int exitIndex = 0; exitIndex < static_cast<int>(exits.size()); ++exitIndex) {
+                double usageRatio = 0.0;
+                const auto& exitLabel = exits[static_cast<std::size_t>(exitIndex)];
+                for (const auto& exit : result.artifacts.exitUsage) {
+                    const auto label = QString::fromStdString(exit.exitLabel.empty() ? exit.exitZoneId : exit.exitLabel);
+                    if (label == exitLabel) {
+                        usageRatio = std::clamp(exit.usageRatio, 0.0, 1.0);
+                        break;
+                    }
+                }
+                const auto x = exits.size() == 1
+                    ? plot.center().x()
+                    : plot.left() + (static_cast<double>(exitIndex) / static_cast<double>(exits.size() - 1)) * plot.width();
+                const auto y = plot.bottom() - usageRatio * plot.height();
+                painter.setBrush(colorForSeries(index));
+                painter.setPen(Qt::NoPen);
+                painter.drawEllipse(QPointF(x, y), 3.5, 3.5);
+            }
+        }
+    }
+
+    void drawLegend(QPainter& painter, const QRectF& legendRect) {
+        painter.setFont(ui::font(ui::FontRole::Caption));
+        double x = legendRect.left();
+        const auto y = legendRect.center().y();
+        for (const auto index : selectedIndices_) {
+            if (!validIndex(index)) {
+                continue;
+            }
+            const auto name = QString::fromStdString((*results_)[static_cast<std::size_t>(index)].scenario.name);
+            painter.setPen(QPen(colorForSeries(index), index == displayIndex_ ? 2.8 : 2.0));
+            painter.drawLine(QPointF(x, y), QPointF(x + 18, y));
+            painter.setPen(QColor("#344256"));
+            painter.drawText(QRectF(x + 24, legendRect.top(), 120, legendRect.height()), Qt::AlignLeft | Qt::AlignVCenter, name);
+            x += 148;
+            if (x > legendRect.right() - 120) {
+                break;
+            }
+        }
+    }
+
+    bool validIndex(int index) const noexcept {
+        return results_ != nullptr && index >= 0 && index < static_cast<int>(results_->size());
+    }
+
+    ComparisonGraphMode mode_{ComparisonGraphMode::Remaining};
     const std::vector<SavedScenarioResultState>* results_{nullptr};
-    int baselineIndex_{0};
-    int selectedIndex_{0};
+    std::vector<int> selectedIndices_{};
+    int displayIndex_{0};
+    double currentTimeSeconds_{-1.0};
 };
+
+std::vector<safecrowd::domain::SimulationFrame> replayFramesForResult(const SavedScenarioResultState& result) {
+    if (!result.artifacts.replayFrames.empty()) {
+        return result.artifacts.replayFrames;
+    }
+    return {result.frame};
+}
 
 std::vector<safecrowd::domain::ScenarioDraft> scenariosFromResults(
     const std::vector<SavedScenarioResultState>& results) {
@@ -341,6 +441,25 @@ ScenarioBatchResultWidget::ScenarioBatchResultWidget(
     if (currentResultIndex_ < 0 || currentResultIndex_ >= static_cast<int>(results_.size())) {
         currentResultIndex_ = 0;
     }
+    const auto baselineIndex = baselineResultIndex();
+    if (results_.size() <= 2) {
+        for (int index = 0; index < static_cast<int>(results_.size()); ++index) {
+            selectedCompareIndices_.push_back(index);
+        }
+    } else {
+        if (baselineIndex >= 0) {
+            selectedCompareIndices_.push_back(baselineIndex);
+        }
+        if (currentResultIndex_ >= 0
+            && std::find(selectedCompareIndices_.begin(), selectedCompareIndices_.end(), currentResultIndex_) == selectedCompareIndices_.end()) {
+            selectedCompareIndices_.push_back(currentResultIndex_);
+        }
+        for (int index = 0; selectedCompareIndices_.size() < 2 && index < static_cast<int>(results_.size()); ++index) {
+            if (std::find(selectedCompareIndices_.begin(), selectedCompareIndices_.end(), index) == selectedCompareIndices_.end()) {
+                selectedCompareIndices_.push_back(index);
+            }
+        }
+    }
 
     auto* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
@@ -359,8 +478,7 @@ ScenarioBatchResultWidget::ScenarioBatchResultWidget(
         navigateToAuthoring();
     });
 
-    canvas_ = new SimulationCanvasWidget(layout_, shell_);
-    shell_->setCanvas(canvas_);
+    shell_->setCanvas(createCanvasPanel());
     shell_->setReviewPanel(createSummaryPanel());
     shell_->setReviewPanelVisible(true);
     rootLayout->addWidget(shell_);
@@ -379,12 +497,138 @@ std::optional<ScenarioAuthoringWidget::InitialState> ScenarioBatchResultWidget::
     return returnAuthoringState_;
 }
 
+QWidget* ScenarioBatchResultWidget::createCanvasPanel() {
+    auto* panel = new QWidget(shell_);
+    auto* layout = new QVBoxLayout(panel);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
+
+    auto* selectorBar = new QFrame(panel);
+    selectorBar->setStyleSheet(
+        "QFrame { background: #ffffff; border-bottom: 1px solid #d7e0ea; }"
+        "QLabel { background: transparent; border: 0; }"
+        "QComboBox { background: #ffffff; border: 1px solid #c9d5e2; border-radius: 7px; padding: 5px 24px 5px 8px; }");
+    auto* selectorLayout = new QHBoxLayout(selectorBar);
+    selectorLayout->setContentsMargins(16, 8, 16, 8);
+    selectorLayout->setSpacing(8);
+
+    auto* scenarioLabel = createLabel("Scenario playback", selectorBar, ui::FontRole::Caption);
+    scenarioLabel->setStyleSheet(ui::mutedTextStyleSheet());
+    selectorLayout->addWidget(scenarioLabel);
+
+    displayScenarioCombo_ = new QComboBox(selectorBar);
+    for (const auto& result : results_) {
+        displayScenarioCombo_->addItem(QString::fromStdString(result.scenario.name));
+    }
+    displayScenarioCombo_->setCurrentIndex(currentResultIndex_);
+    selectorLayout->addWidget(displayScenarioCombo_, 1);
+
+    auto* overlayLabel = createLabel("Map overlay", selectorBar, ui::FontRole::Caption);
+    overlayLabel->setStyleSheet(ui::mutedTextStyleSheet());
+    selectorLayout->addWidget(overlayLabel);
+
+    overlayCombo_ = new QComboBox(selectorBar);
+    overlayCombo_->addItem("Density", static_cast<int>(OverlayMode::Density));
+    overlayCombo_->addItem("Hotspots", static_cast<int>(OverlayMode::Hotspots));
+    overlayCombo_->addItem("Bottlenecks", static_cast<int>(OverlayMode::Bottlenecks));
+    overlayCombo_->addItem("None", static_cast<int>(OverlayMode::None));
+    overlayCombo_->setCurrentIndex(0);
+    selectorLayout->addWidget(overlayCombo_);
+    layout->addWidget(selectorBar);
+
+    canvas_ = new SimulationCanvasWidget(layout_, panel);
+    layout->addWidget(canvas_, 1);
+
+    auto* replayBar = new QFrame(panel);
+    replayBar->setStyleSheet(
+        "QFrame { background: #ffffff; border-top: 1px solid #d7e0ea; border-bottom: 1px solid #d7e0ea; }"
+        "QPushButton { border: 1px solid #c9d5e2; border-radius: 6px; padding: 5px 12px; background: #ffffff; color: #344256; }"
+        "QPushButton:hover { background: #eef3f8; }"
+        "QSlider::groove:horizontal { height: 6px; background: #d7e0ea; border-radius: 3px; }"
+        "QSlider::handle:horizontal { width: 16px; margin: -5px 0; border-radius: 8px; background: #1f5fae; }"
+        "QLabel { background: transparent; border: 0; }");
+    auto* replayLayout = new QHBoxLayout(replayBar);
+    replayLayout->setContentsMargins(16, 8, 16, 8);
+    replayLayout->setSpacing(10);
+    playButton_ = new QPushButton("Play", replayBar);
+    replaySlider_ = new QSlider(Qt::Horizontal, replayBar);
+    replaySlider_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    replayTimeLabel_ = createLabel("", replayBar, ui::FontRole::Caption);
+    replayTimeLabel_->setStyleSheet(ui::mutedTextStyleSheet());
+    replayLayout->addWidget(playButton_);
+    replayLayout->addWidget(replaySlider_, 1);
+    replayLayout->addWidget(replayTimeLabel_);
+    layout->addWidget(replayBar);
+
+    auto* graphPanel = new QFrame(panel);
+    graphPanel->setStyleSheet(
+        "QFrame { background: #ffffff; border-top: 1px solid #d7e0ea; }"
+        "QLabel { border: 0; }"
+        "QTabWidget::pane { border: 0; }"
+        "QTabBar::tab { background: #ffffff; border: 1px solid #c9d5e2; padding: 6px 12px; margin-right: 4px; }"
+        "QTabBar::tab:selected { background: #e6eef8; color: #1f5fae; }");
+    graphPanel->setMinimumHeight(260);
+    auto* graphLayout = new QVBoxLayout(graphPanel);
+    graphLayout->setContentsMargins(16, 10, 16, 16);
+    graphLayout->setSpacing(8);
+    graphLayout->addWidget(createLabel("Comparison Graphs", graphPanel, ui::FontRole::SectionTitle));
+    auto* tabs = new QTabWidget(graphPanel);
+    remainingChart_ = new ComparisonGraphWidget(ComparisonGraphMode::Remaining, tabs);
+    exitsChart_ = new ComparisonGraphWidget(ComparisonGraphMode::Exits, tabs);
+    static_cast<ComparisonGraphWidget*>(remainingChart_)->setResults(results_, selectedCompareIndices_, currentResultIndex_);
+    static_cast<ComparisonGraphWidget*>(exitsChart_)->setResults(results_, selectedCompareIndices_, currentResultIndex_);
+    tabs->addTab(remainingChart_, "Remaining");
+    tabs->addTab(exitsChart_, "Exits");
+    graphLayout->addWidget(tabs, 1);
+    layout->addWidget(graphPanel, 1);
+
+    replayTimer_ = new QTimer(this);
+    replayTimer_->setInterval(500);
+
+    connect(displayScenarioCombo_, &QComboBox::currentIndexChanged, this, [this](int index) {
+        if (index >= 0 && index < static_cast<int>(results_.size())) {
+            currentResultIndex_ = index;
+            refreshSelectedResult();
+        }
+    });
+    connect(overlayCombo_, &QComboBox::currentIndexChanged, this, [this](int index) {
+        overlayMode_ = static_cast<OverlayMode>(overlayCombo_->itemData(index).toInt());
+        if (!replayFrames_.empty()) {
+            applyReplayFrame(replayFrameIndex_);
+        }
+    });
+    connect(playButton_, &QPushButton::clicked, this, [this]() {
+        if (replayTimer_ == nullptr || replayFrames_.size() <= 1) {
+            return;
+        }
+        if (replayTimer_->isActive()) {
+            pauseReplay();
+            return;
+        }
+        if (replayFrameIndex_ >= static_cast<int>(replayFrames_.size()) - 1) {
+            replayFrameIndex_ = 0;
+            applyReplayFrame(replayFrameIndex_);
+        }
+        playButton_->setText("Pause");
+        replayTimer_->start();
+    });
+    connect(replaySlider_, &QSlider::valueChanged, this, [this](int value) {
+        pauseReplay();
+        applyReplayFrame(value);
+    });
+    connect(replayTimer_, &QTimer::timeout, this, [this]() {
+        advanceReplay();
+    });
+
+    return panel;
+}
+
 QWidget* ScenarioBatchResultWidget::createSummaryPanel() {
     auto* panel = new QWidget(shell_);
     auto* panelLayout = new QVBoxLayout(panel);
     panelLayout->setContentsMargins(0, 0, 0, 0);
     panelLayout->setSpacing(12);
-    panelLayout->addWidget(shell_ != nullptr ? shell_->createPanelHeader("Comparison", panel, false) : createLabel("Comparison", panel, ui::FontRole::Title));
+    panelLayout->addWidget(shell_ != nullptr ? shell_->createPanelHeader("Compare", panel, false) : createLabel("Compare", panel, ui::FontRole::Title));
 
     auto* scrollArea = new QScrollArea(panel);
     scrollArea->setWidgetResizable(true);
@@ -396,123 +640,32 @@ QWidget* ScenarioBatchResultWidget::createSummaryPanel() {
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(12);
 
-    const auto baselineIndex = baselineResultIndex();
-    int bestIndex = results_.empty() ? -1 : 0;
-    int highestRiskIndex = results_.empty() ? -1 : 0;
-    for (int index = 0; index < static_cast<int>(results_.size()); ++index) {
-        const auto& result = results_[static_cast<std::size_t>(index)];
-        if (bestIndex < 0 || finalSeconds(result) < finalSeconds(results_[static_cast<std::size_t>(bestIndex)])) {
-            bestIndex = index;
-        }
-        const auto& currentRisk = results_[static_cast<std::size_t>(highestRiskIndex)].risk;
-        if (riskRank(result.risk.completionRisk) > riskRank(currentRisk.completionRisk)
-            || (riskRank(result.risk.completionRisk) == riskRank(currentRisk.completionRisk)
-                && result.risk.bottlenecks.size() > currentRisk.bottlenecks.size())) {
-            highestRiskIndex = index;
-        }
-    }
+    auto* intro = createLabel("Choose which completed scenarios appear together in the Remaining and Exits graphs.", content, ui::FontRole::Caption);
+    intro->setStyleSheet(ui::mutedTextStyleSheet());
+    layout->addWidget(intro);
 
-    auto* cardsHost = new QWidget(content);
-    auto* cards = new QGridLayout(cardsHost);
-    cards->setContentsMargins(0, 0, 0, 0);
-    cards->setHorizontalSpacing(8);
-    cards->setVerticalSpacing(8);
-    const auto baselineName = baselineIndex >= 0
-        ? QString::fromStdString(results_[static_cast<std::size_t>(baselineIndex)].scenario.name)
-        : QString("None");
-    cards->addWidget(createMetricCard("Runs", QString::number(static_cast<int>(results_.size())), "Staged scenarios completed", cardsHost), 0, 0);
-    cards->addWidget(createMetricCard("Baseline", baselineName, "Comparison reference", cardsHost), 0, 1);
-    if (bestIndex >= 0) {
-        const auto& best = results_[static_cast<std::size_t>(bestIndex)];
-        const auto bestDelta = baselineIndex >= 0
-            ? finalSeconds(best) - finalSeconds(results_[static_cast<std::size_t>(baselineIndex)])
-            : 0.0;
-        cards->addWidget(createMetricCard(
-            "Fastest",
-            formatSeconds(finalSeconds(best)),
-            QString("%1  -  %2").arg(formatDeltaSeconds(bestDelta), QString::fromStdString(best.scenario.name)),
-            cardsHost), 1, 0);
-    }
-    if (highestRiskIndex >= 0) {
-        const auto& riskiest = results_[static_cast<std::size_t>(highestRiskIndex)];
-        cards->addWidget(createMetricCard(
-            "Highest Risk",
-            safecrowd::domain::scenarioRiskLevelLabel(riskiest.risk.completionRisk),
-            QString("%1 hotspots / %2 bottlenecks")
-                .arg(static_cast<int>(riskiest.risk.hotspots.size()))
-                .arg(static_cast<int>(riskiest.risk.bottlenecks.size())),
-            cardsHost), 1, 1);
-    }
-    layout->addWidget(cardsHost);
-
-    table_ = new QTableWidget(static_cast<int>(results_.size()), 8, content);
-    table_->setHorizontalHeaderLabels({"Scenario", "Role", "Final", "Delta", "Evac.", "Risk", "Hotspots", "Bottlenecks"});
-    table_->verticalHeader()->setVisible(false);
-    table_->setSelectionBehavior(QAbstractItemView::SelectRows);
-    table_->setSelectionMode(QAbstractItemView::SingleSelection);
-    table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    table_->setAlternatingRowColors(true);
-    table_->setMinimumHeight(190);
-    table_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
-    table_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
-    table_->setStyleSheet(
-        "QTableWidget { background: #ffffff; border: 1px solid #d7e0ea; border-radius: 8px; gridline-color: #e4ebf3; }"
-        "QHeaderView::section { background: #eef3f8; border: 0; padding: 6px; color: #4f5d6b; }"
-        "QTableWidget::item { padding: 6px; }");
+    compareCheckBoxes_.clear();
     for (int row = 0; row < static_cast<int>(results_.size()); ++row) {
         const auto& result = results_[row];
-        table_->setItem(row, 0, readonlyItem(QString::fromStdString(result.scenario.name)));
-        table_->setItem(row, 1, readonlyItem(scenarioRoleLabel(result.scenario.role)));
-        table_->setItem(row, 2, readonlyItem(formatSeconds(finalSeconds(result)), Qt::AlignRight | Qt::AlignVCenter));
-        const auto deltaSeconds = baselineIndex >= 0
-            ? finalSeconds(result) - finalSeconds(results_[static_cast<std::size_t>(baselineIndex)])
-            : 0.0;
-        auto* deltaItem = readonlyItem(row == baselineIndex ? "Baseline" : formatDeltaSeconds(deltaSeconds), Qt::AlignRight | Qt::AlignVCenter);
-        deltaItem->setForeground(deltaColor(deltaSeconds));
-        table_->setItem(row, 3, deltaItem);
-        table_->setItem(row, 4, readonlyItem(formatPercent(result.frame.evacuatedAgentCount, result.frame.totalAgentCount), Qt::AlignRight | Qt::AlignVCenter));
-        table_->setItem(row, 5, readonlyItem(safecrowd::domain::scenarioRiskLevelLabel(result.risk.completionRisk)));
-        table_->setItem(row, 6, readonlyItem(QString::number(static_cast<int>(result.risk.hotspots.size())), Qt::AlignRight | Qt::AlignVCenter));
-        table_->setItem(row, 7, readonlyItem(QString::number(static_cast<int>(result.risk.bottlenecks.size())), Qt::AlignRight | Qt::AlignVCenter));
+        auto* checkbox = new QCheckBox(
+            QString("%1\n%2  -  %3  -  %4")
+                .arg(QString::fromStdString(result.scenario.name))
+                .arg(scenarioRoleLabel(result.scenario.role))
+                .arg(formatSeconds(finalSeconds(result)))
+                .arg(safecrowd::domain::scenarioRiskLevelLabel(result.risk.completionRisk)),
+            content);
+        checkbox->setFont(ui::font(ui::FontRole::Body));
+        checkbox->setChecked(std::find(selectedCompareIndices_.begin(), selectedCompareIndices_.end(), row) != selectedCompareIndices_.end());
+        checkbox->setStyleSheet(
+            "QCheckBox { background: #ffffff; border: 1px solid #d7e0ea; border-radius: 8px; padding: 8px; color: #16202b; }"
+            "QCheckBox:hover { background: #f8fafc; }"
+            "QCheckBox::indicator { width: 16px; height: 16px; }");
+        compareCheckBoxes_.push_back(checkbox);
+        layout->addWidget(checkbox);
+        connect(checkbox, &QCheckBox::toggled, this, [this]() {
+            refreshComparisonSelection();
+        });
     }
-    table_->resizeColumnsToContents();
-    layout->addWidget(table_);
-
-    auto* overlayLabel = createLabel("Overlay", content, ui::FontRole::SectionTitle);
-    layout->addWidget(overlayLabel);
-
-    auto* overlayRow = new QWidget(content);
-    auto* overlayLayout = new QHBoxLayout(overlayRow);
-    overlayLayout->setContentsMargins(0, 0, 0, 0);
-    overlayLayout->setSpacing(8);
-    overlayButtonGroup_ = new QButtonGroup(overlayRow);
-    overlayButtonGroup_->setExclusive(true);
-    const auto addOverlayButton = [this, overlayLayout, overlayRow](OverlayMode mode, const QString& text) {
-        auto* button = new QPushButton(text, overlayRow);
-        button->setCheckable(true);
-        button->setFont(ui::font(ui::FontRole::Caption));
-        button->setStyleSheet(ui::secondaryButtonStyleSheet()
-            + "QPushButton:checked { background: #e8f1ff; border-color: #2563eb; color: #1d4ed8; }");
-        overlayButtonGroup_->addButton(button, static_cast<int>(mode));
-        overlayLayout->addWidget(button);
-    };
-    addOverlayButton(OverlayMode::Density, "Density");
-    addOverlayButton(OverlayMode::Hotspots, "Hotspots");
-    addOverlayButton(OverlayMode::Bottlenecks, "Bottlenecks");
-    if (auto* button = overlayButtonGroup_->button(static_cast<int>(overlayMode_)); button != nullptr) {
-        button->setChecked(true);
-    }
-    connect(overlayButtonGroup_, &QButtonGroup::idClicked, this, [this](int id) {
-        overlayMode_ = static_cast<OverlayMode>(id);
-        refreshSelectedResult();
-    });
-    layout->addWidget(overlayRow);
-
-    layout->addWidget(createLabel("Evacuation Progress", content, ui::FontRole::SectionTitle));
-    auto* chart = new EvacuationProgressChartWidget(content);
-    chart->setResults(results_, baselineIndex, currentResultIndex_);
-    progressChart_ = chart;
-    layout->addWidget(chart);
 
     auto* detailCard = new QFrame(content);
     detailCard->setStyleSheet(ui::panelStyleSheet());
@@ -538,21 +691,12 @@ QWidget* ScenarioBatchResultWidget::createSummaryPanel() {
     editButton->setStyleSheet(ui::secondaryButtonStyleSheet());
     panelLayout->addWidget(editButton);
 
-    connect(table_, &QTableWidget::currentCellChanged, this, [this](int currentRow, int, int, int) {
-        if (currentRow >= 0 && currentRow < static_cast<int>(results_.size())) {
-            currentResultIndex_ = currentRow;
-            refreshSelectedResult();
-        }
-    });
     connect(rerunButton, &QPushButton::clicked, this, [this]() {
         rerunBatch();
     });
     connect(editButton, &QPushButton::clicked, this, [this]() {
         navigateToAuthoring();
     });
-    if (!results_.empty()) {
-        table_->selectRow(currentResultIndex_);
-    }
     return panel;
 }
 
@@ -561,6 +705,7 @@ void ScenarioBatchResultWidget::navigateToAuthoring() {
     if (rootLayout == nullptr || shell_ == nullptr) {
         return;
     }
+    pauseReplay();
 
     auto initial = returnAuthoringState_.value_or(ScenarioAuthoringWidget::InitialState{});
     if (initial.scenarios.empty()) {
@@ -586,15 +731,42 @@ void ScenarioBatchResultWidget::navigateToAuthoring() {
     canvas_ = nullptr;
 }
 
-void ScenarioBatchResultWidget::refreshSelectedResult() {
-    if (results_.empty() || currentResultIndex_ < 0 || currentResultIndex_ >= static_cast<int>(results_.size())) {
+void ScenarioBatchResultWidget::pauseReplay() {
+    if (replayTimer_ != nullptr) {
+        replayTimer_->stop();
+    }
+    if (playButton_ != nullptr) {
+        playButton_->setText("Play");
+    }
+}
+
+void ScenarioBatchResultWidget::advanceReplay() {
+    if (replayFrames_.empty()) {
+        pauseReplay();
         return;
     }
-    const auto& result = results_[currentResultIndex_];
-    const auto baselineIndex = baselineResultIndex();
+    if (replayFrameIndex_ >= static_cast<int>(replayFrames_.size()) - 1) {
+        pauseReplay();
+        return;
+    }
+    applyReplayFrame(replayFrameIndex_ + 1);
+}
+
+void ScenarioBatchResultWidget::applyReplayFrame(int frameIndex) {
+    if (replayFrames_.empty()) {
+        if (replayTimeLabel_ != nullptr) {
+            replayTimeLabel_->setText("No replay");
+        }
+        return;
+    }
+
+    replayFrameIndex_ = std::clamp(frameIndex, 0, static_cast<int>(replayFrames_.size()) - 1);
+    const auto& frame = replayFrames_[static_cast<std::size_t>(replayFrameIndex_)];
+    const auto& result = results_[static_cast<std::size_t>(currentResultIndex_)];
+
     if (canvas_ != nullptr) {
         canvas_->setConnectionBlocks(result.scenario.control.connectionBlocks);
-        canvas_->setFrame(result.frame);
+        canvas_->setFrame(frame);
         canvas_->setHotspotOverlay(result.risk.hotspots);
         canvas_->setBottleneckOverlay(result.risk.bottlenecks);
         canvas_->setDensityOverlay(result.artifacts.densitySummary.peakField.cells.empty()
@@ -607,14 +779,97 @@ void ScenarioBatchResultWidget::refreshSelectedResult() {
         case OverlayMode::Bottlenecks:
             canvas_->setResultOverlayMode(ResultOverlayMode::Bottlenecks);
             break;
+        case OverlayMode::None:
+            canvas_->setResultOverlayMode(ResultOverlayMode::None);
+            break;
         case OverlayMode::Density:
         default:
             canvas_->setResultOverlayMode(ResultOverlayMode::Density);
             break;
         }
     }
-    if (progressChart_ != nullptr) {
-        static_cast<EvacuationProgressChartWidget*>(progressChart_)->setSelectedIndex(currentResultIndex_);
+    if (replaySlider_ != nullptr && replaySlider_->value() != replayFrameIndex_) {
+        const QSignalBlocker blocker(replaySlider_);
+        replaySlider_->setValue(replayFrameIndex_);
+    }
+    if (remainingChart_ != nullptr) {
+        static_cast<ComparisonGraphWidget*>(remainingChart_)->setCurrentTimeSeconds(frame.elapsedSeconds);
+    }
+    if (exitsChart_ != nullptr) {
+        static_cast<ComparisonGraphWidget*>(exitsChart_)->setCurrentTimeSeconds(frame.elapsedSeconds);
+    }
+    if (replayTimeLabel_ != nullptr) {
+        const auto totalSeconds = replayFrames_.empty() ? frame.elapsedSeconds : replayFrames_.back().elapsedSeconds;
+        replayTimeLabel_->setText(QString("%1 / %2 sec")
+            .arg(frame.elapsedSeconds, 0, 'f', 1)
+            .arg(totalSeconds, 0, 'f', 1));
+    }
+}
+
+void ScenarioBatchResultWidget::loadReplayForSelectedResult() {
+    pauseReplay();
+    if (results_.empty() || currentResultIndex_ < 0 || currentResultIndex_ >= static_cast<int>(results_.size())) {
+        replayFrames_.clear();
+        return;
+    }
+    replayFrames_ = replayFramesForResult(results_[static_cast<std::size_t>(currentResultIndex_)]);
+    replayFrameIndex_ = replayFrames_.empty() ? 0 : static_cast<int>(replayFrames_.size()) - 1;
+    if (replaySlider_ != nullptr) {
+        replaySlider_->setEnabled(replayFrames_.size() > 1);
+        replaySlider_->setRange(0, replayFrames_.empty() ? 0 : static_cast<int>(replayFrames_.size()) - 1);
+        const QSignalBlocker blocker(replaySlider_);
+        replaySlider_->setValue(replayFrameIndex_);
+    }
+    if (playButton_ != nullptr) {
+        playButton_->setEnabled(replayFrames_.size() > 1);
+        playButton_->setText("Play");
+    }
+    applyReplayFrame(replayFrameIndex_);
+}
+
+void ScenarioBatchResultWidget::refreshComparisonSelection() {
+    selectedCompareIndices_.clear();
+    for (int index = 0; index < static_cast<int>(compareCheckBoxes_.size()); ++index) {
+        if (compareCheckBoxes_[static_cast<std::size_t>(index)] != nullptr
+            && compareCheckBoxes_[static_cast<std::size_t>(index)]->isChecked()) {
+            selectedCompareIndices_.push_back(index);
+        }
+    }
+    if (selectedCompareIndices_.empty() && !compareCheckBoxes_.empty()) {
+        const auto fallbackIndex = std::clamp(currentResultIndex_, 0, static_cast<int>(compareCheckBoxes_.size()) - 1);
+        if (auto* checkbox = compareCheckBoxes_[static_cast<std::size_t>(fallbackIndex)]; checkbox != nullptr) {
+            const QSignalBlocker blocker(checkbox);
+            checkbox->setChecked(true);
+        }
+        selectedCompareIndices_.push_back(fallbackIndex);
+    }
+    if (remainingChart_ != nullptr) {
+        static_cast<ComparisonGraphWidget*>(remainingChart_)->setResults(results_, selectedCompareIndices_, currentResultIndex_);
+    }
+    if (exitsChart_ != nullptr) {
+        static_cast<ComparisonGraphWidget*>(exitsChart_)->setResults(results_, selectedCompareIndices_, currentResultIndex_);
+    }
+}
+
+void ScenarioBatchResultWidget::refreshSelectedResult() {
+    if (results_.empty() || currentResultIndex_ < 0 || currentResultIndex_ >= static_cast<int>(results_.size())) {
+        return;
+    }
+    const auto& result = results_[currentResultIndex_];
+    const auto baselineIndex = baselineResultIndex();
+
+    if (displayScenarioCombo_ != nullptr && displayScenarioCombo_->currentIndex() != currentResultIndex_) {
+        const QSignalBlocker blocker(displayScenarioCombo_);
+        displayScenarioCombo_->setCurrentIndex(currentResultIndex_);
+    }
+
+    loadReplayForSelectedResult();
+
+    if (remainingChart_ != nullptr) {
+        static_cast<ComparisonGraphWidget*>(remainingChart_)->setResults(results_, selectedCompareIndices_, currentResultIndex_);
+    }
+    if (exitsChart_ != nullptr) {
+        static_cast<ComparisonGraphWidget*>(exitsChart_)->setResults(results_, selectedCompareIndices_, currentResultIndex_);
     }
     if (detailLabel_ != nullptr) {
         const auto selectedFinalSeconds = finalSeconds(result);
@@ -653,6 +908,7 @@ void ScenarioBatchResultWidget::rerunBatch() {
     if (rootLayout == nullptr || shell_ == nullptr) {
         return;
     }
+    pauseReplay();
     auto* runWidget = new ScenarioRunWidget(
         projectName_,
         layout_,
