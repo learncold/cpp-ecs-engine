@@ -778,6 +778,7 @@ safecrowd::domain::RouteGuidanceDraft routeGuidanceFromJson(const QJsonObject& o
     guidance.id = object.value("id").toString().toStdString();
     guidance.startSeconds = object.value("startSeconds").toDouble(0.0);
     guidance.endSeconds = object.value("endSeconds").toDouble(10.0);
+    const bool hasPeriodsField = object.contains("periods");
     for (const auto& value : object.value("periods").toArray()) {
         const auto periodObject = value.toObject();
         guidance.periods.push_back({
@@ -785,7 +786,7 @@ safecrowd::domain::RouteGuidanceDraft routeGuidanceFromJson(const QJsonObject& o
             .endSeconds = periodObject.value("endSeconds").toDouble(0.0),
         });
     }
-    if (guidance.periods.empty() && (object.contains("startSeconds") || object.contains("endSeconds"))) {
+    if (!hasPeriodsField && guidance.periods.empty() && (object.contains("startSeconds") || object.contains("endSeconds"))) {
         // Backward compatibility: older projects stored a single scalar period.
         guidance.periods.push_back({
             .startSeconds = guidance.startSeconds,

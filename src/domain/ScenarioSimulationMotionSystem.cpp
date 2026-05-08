@@ -636,9 +636,7 @@ private:
 
         const auto base = logit(clamp01(guidance.baseComplianceRate));
         const auto strength = clamp01(guidance.guidanceStrength);
-        const auto detourRatio = guidance.maxDetourMeters > 1e-6
-            ? std::max(0.0, detourMeters) / std::max(1e-6, guidance.maxDetourMeters)
-            : 0.0;
+        const auto detourRatio = std::max(0.0, detourMeters) / std::max(1e-6, guidance.maxDetourMeters);
         const auto propensity = clamp01(agent.guidancePropensity);
         const auto score =
             base
