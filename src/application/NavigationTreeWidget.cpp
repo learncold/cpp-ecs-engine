@@ -4,6 +4,7 @@
 #include <QColor>
 #include <QFrame>
 #include <QLabel>
+#include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QSet>
@@ -274,7 +275,10 @@ NavigationTreeWidget::NavigationTreeWidget(
     QWidget* parent,
     QWidget* headerWidget,
     NavigationTreeState state,
-    std::function<void(const QSet<QString>&)> expandedStateChangedHandler)
+    std::function<void(const QSet<QString>&)> expandedStateChangedHandler,
+    std::function<void(const QString&)> deleteItemHandler,
+    std::function<void(const QString&)> settingsItemHandler,
+    const QString& settingsLabel)
     : QWidget(parent) {
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -356,6 +360,57 @@ NavigationTreeWidget::NavigationTreeWidget(
         QObject::connect(tree, &QTreeWidget::itemCollapsed, tree, [notifyExpandedStateChanged](QTreeWidgetItem*) {
             notifyExpandedStateChanged();
         });
+    }
+
+    if (deleteItemHandler || settingsItemHandler) {
+        auto* viewport = tree->viewport();
+        if (viewport != nullptr) {
+            tree->setContextMenuPolicy(Qt::CustomContextMenu);
+            viewport->setContextMenuPolicy(Qt::CustomContextMenu);
+
+            const auto showMenu = [tree, viewport, deleteItemHandler, settingsItemHandler, settingsLabel](const QPoint& pos, QWidget* source) {
+                auto* item = tree->itemAt(pos);
+                if (item == nullptr) {
+                    return;
+                }
+
+                const auto selectable = item->data(0, kSelectableRole).toBool();
+                const auto id = item->data(0, kIdRole).toString();
+                if (!selectable || id.isEmpty()) {
+                    return;
+                }
+
+                QMenu menu;
+                QAction* settingsAction = nullptr;
+                if (settingsItemHandler) {
+                    settingsAction = menu.addAction(settingsLabel);
+                }
+                QAction* deleteAction = nullptr;
+                if (deleteItemHandler) {
+                    deleteAction = menu.addAction("Delete");
+                    if (id.startsWith("floor:")) {
+                        deleteAction->setEnabled(false);
+                    }
+                }
+
+                const auto* selectedAction = menu.exec(source->mapToGlobal(pos));
+                if (selectedAction == nullptr) {
+                    return;
+                }
+                if (selectedAction == settingsAction && settingsItemHandler) {
+                    settingsItemHandler(id);
+                } else if (selectedAction == deleteAction && deleteItemHandler) {
+                    deleteItemHandler(id);
+                }
+            };
+
+            QObject::connect(viewport, &QWidget::customContextMenuRequested, tree, [showMenu, viewport](const QPoint& pos) {
+                showMenu(pos, viewport);
+            });
+            QObject::connect(tree, &QWidget::customContextMenuRequested, tree, [showMenu, tree](const QPoint& pos) {
+                showMenu(pos, tree);
+            });
+        }
     }
 
     layout->addWidget(tree, 1);

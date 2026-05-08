@@ -374,7 +374,8 @@ LayoutNavigationPanelWidget::LayoutNavigationPanelWidget(
     QWidget* parent,
     QWidget* headerWidget,
     NavigationTreeState navigationState,
-    std::function<void(const QSet<QString>&)> expandedStateChangedHandler)
+    std::function<void(const QSet<QString>&)> expandedStateChangedHandler,
+    std::function<void(const QString&)> deleteElementHandler)
     : QWidget(parent) {
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -387,7 +388,10 @@ LayoutNavigationPanelWidget::LayoutNavigationPanelWidget(
         this,
         headerWidget,
         std::move(navigationState),
-        std::move(expandedStateChangedHandler)));
+        std::move(expandedStateChangedHandler),
+        std::move(deleteElementHandler),
+        {},
+        QString("Settings...")));
 }
 
 }  // namespace safecrowd::application

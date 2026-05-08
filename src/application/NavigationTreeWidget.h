@@ -36,7 +36,10 @@ public:
         QWidget* parent = nullptr,
         QWidget* headerWidget = nullptr,
         NavigationTreeState state = {},
-        std::function<void(const QSet<QString>&)> expandedStateChangedHandler = {});
+        std::function<void(const QSet<QString>&)> expandedStateChangedHandler = {},
+        std::function<void(const QString&)> deleteItemHandler = {},
+        std::function<void(const QString&)> settingsItemHandler = {},
+        const QString& settingsLabel = QString("Settings..."));
 };
 
 }  // namespace safecrowd::application

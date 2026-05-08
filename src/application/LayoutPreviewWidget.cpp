@@ -2992,6 +2992,33 @@ void LayoutPreviewWidget::focusElement(const QString& elementId) {
     focusIssueTarget(elementId);
 }
 
+bool LayoutPreviewWidget::deleteElement(const QString& elementId) {
+    if (!importResult_.layout.has_value() || elementId.isEmpty() || elementId.startsWith("floor:")) {
+        return false;
+    }
+
+    if (containsConnection(*importResult_.layout, elementId)) {
+        deleteConnection(elementId);
+        return true;
+    }
+    if (containsBarrier(*importResult_.layout, elementId)) {
+        deleteBarrier(elementId);
+        return true;
+    }
+    if (containsZone(*importResult_.layout, elementId)) {
+        selectedBarrierId_.clear();
+        selectedBarrierIds_.clear();
+        selectedConnectionId_.clear();
+        selectedConnectionIds_.clear();
+        selectedZoneId_ = elementId;
+        selectedZoneIds_ = QStringList{elementId};
+        deleteSelectedElements();
+        return true;
+    }
+
+    return false;
+}
+
 void LayoutPreviewWidget::focusIssueTarget(const QString& targetId) {
     selectedZoneId_.clear();
     selectedZoneIds_.clear();
