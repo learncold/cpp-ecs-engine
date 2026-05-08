@@ -324,8 +324,8 @@ public:
         : QWidget(parent),
           threshold_(summary.highDensityThresholdPeoplePerSquareMeter),
           peakDensity_(summary.peakDensityPeoplePerSquareMeter) {
-        setFixedSize(230, 34);
-        setToolTip("Peak density heatmap scale in people per square meter.");
+        setFixedSize(300, 34);
+        setToolTip("Density heatmap scale uses the high-density threshold in people per square meter.");
     }
 
 protected:
@@ -349,20 +349,20 @@ protected:
 
         painter.setFont(ui::font(ui::FontRole::Caption));
         painter.setPen(QColor("#687789"));
-        if (peakDensity_ > 0.0) {
-            const auto thresholdX = ramp.left()
-                + (std::clamp(threshold_ / peakDensity_, 0.0, 1.0) * ramp.width());
+        if (peakDensity_ > 0.0 && threshold_ > 0.0) {
+            const auto peakX = ramp.left()
+                + (std::clamp(peakDensity_ / threshold_, 0.0, 1.0) * ramp.width());
             painter.setPen(QPen(QColor("#405063"), 1));
-            painter.drawLine(QPointF(thresholdX, ramp.top() - 2), QPointF(thresholdX, ramp.bottom() + 2));
+            painter.drawLine(QPointF(peakX, ramp.top() - 2), QPointF(peakX, ramp.bottom() + 2));
             painter.setPen(QColor("#687789"));
         }
         painter.drawText(QRectF(0, 16, 40, 16), Qt::AlignLeft | Qt::AlignVCenter, "0");
         painter.drawText(
-            QRectF(48, 16, 96, 16),
+            QRectF(54, 16, 140, 16),
             Qt::AlignCenter,
-            QString("%1 /m2").arg(threshold_, 0, 'f', 1));
+            QString("High %1+ /m2").arg(threshold_, 0, 'f', 1));
         painter.drawText(
-            QRectF(width() - 86, 16, 86, 16),
+            QRectF(width() - 98, 16, 98, 16),
             Qt::AlignRight | Qt::AlignVCenter,
             QString("Peak %1").arg(peakDensity_, 0, 'f', 1));
     }
@@ -756,7 +756,8 @@ QWidget* createResultCanvasPanel(
     layout->addWidget(overlayBar);
     canvas->setDensityOverlay(artifacts.densitySummary.peakField.cells.empty()
             ? artifacts.densitySummary.peakCells
-            : artifacts.densitySummary.peakField.cells);
+            : artifacts.densitySummary.peakField.cells,
+        artifacts.densitySummary.highDensityThresholdPeoplePerSquareMeter);
     canvas->setResultOverlayMode(ResultOverlayMode::Density);
     QObject::connect(overlayCombo, &QComboBox::currentIndexChanged, panel, [canvas, overlayCombo](int index) {
         const auto mode = static_cast<ResultOverlayMode>(overlayCombo->itemData(index).toInt());

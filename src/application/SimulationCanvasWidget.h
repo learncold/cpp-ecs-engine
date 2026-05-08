@@ -40,7 +40,9 @@ public:
 
     void setFrame(safecrowd::domain::SimulationFrame frame);
     void setConnectionBlocks(std::vector<safecrowd::domain::ConnectionBlockDraft> blocks);
-    void setDensityOverlay(std::vector<safecrowd::domain::DensityCellMetric> densityCells);
+    void setDensityOverlay(
+        std::vector<safecrowd::domain::DensityCellMetric> densityCells,
+        double scaleMaxPeoplePerSquareMeter = 4.0);
     void setHotspotOverlay(std::vector<safecrowd::domain::ScenarioCongestionHotspot> hotspots);
     void setBottleneckOverlay(std::vector<safecrowd::domain::ScenarioBottleneckMetric> bottlenecks);
     void setResultOverlayMode(ResultOverlayMode mode);
@@ -79,6 +81,7 @@ private:
     safecrowd::domain::SimulationFrame frame_{};
     std::vector<safecrowd::domain::ConnectionBlockDraft> connectionBlocks_{};
     std::vector<safecrowd::domain::DensityCellMetric> densityOverlay_{};
+    double densityScaleMaxPeoplePerSquareMeter_{4.0};
     std::vector<safecrowd::domain::ScenarioCongestionHotspot> hotspotOverlay_{};
     std::vector<safecrowd::domain::ScenarioBottleneckMetric> bottleneckOverlay_{};
     ResultOverlayMode overlayMode_{ResultOverlayMode::None};

@@ -29,6 +29,7 @@ constexpr double kHotspotFocusZoom = 2.8;
 constexpr double kBottleneckFocusZoom = 2.4;
 constexpr double kDensityInfluenceRadiusMultiplier = 1.75;
 constexpr double kDensityMinimumScreenRadius = 14.0;
+constexpr double kDefaultDensityScaleMaxPeoplePerSquareMeter = 4.0;
 constexpr int kHotspotMinCoreAlpha = 72;
 constexpr int kHotspotMaxCoreAlpha = 190;
 constexpr int kFloorSelectorMargin = 14;
@@ -88,7 +89,7 @@ QColor densityHeatmapColor(double ratio, int alpha) {
     if (t < 0.82) {
         return QColor(250, 204, 21, alpha);
     }
-    if (t < 0.94) {
+    if (t < 1.0) {
         return QColor(249, 115, 22, alpha);
     }
     return QColor(220, 38, 38, alpha);
@@ -196,8 +197,14 @@ void SimulationCanvasWidget::setConnectionBlocks(std::vector<safecrowd::domain::
     update();
 }
 
-void SimulationCanvasWidget::setDensityOverlay(std::vector<safecrowd::domain::DensityCellMetric> densityCells) {
+void SimulationCanvasWidget::setDensityOverlay(
+    std::vector<safecrowd::domain::DensityCellMetric> densityCells,
+    double scaleMaxPeoplePerSquareMeter) {
     densityOverlay_ = std::move(densityCells);
+    densityScaleMaxPeoplePerSquareMeter_ =
+        std::isfinite(scaleMaxPeoplePerSquareMeter) && scaleMaxPeoplePerSquareMeter > 0.0
+        ? scaleMaxPeoplePerSquareMeter
+        : kDefaultDensityScaleMaxPeoplePerSquareMeter;
     update();
 }
 
@@ -529,19 +536,21 @@ void SimulationCanvasWidget::drawDensityOverlay(QPainter& painter, const LayoutC
         return;
     }
 
-    double maxDensity = 0.0;
     std::vector<const safecrowd::domain::DensityCellMetric*> visibleCells;
     visibleCells.reserve(densityOverlay_.size());
     for (const auto& cell : densityOverlay_) {
         if (!matchesFloor(cell.floorId, currentFloorId_)) {
             continue;
         }
-        maxDensity = std::max(maxDensity, cell.densityPeoplePerSquareMeter);
         visibleCells.push_back(&cell);
     }
-    if (maxDensity <= 0.0 || visibleCells.empty()) {
+    if (visibleCells.empty()) {
         return;
     }
+    const auto scaleMax =
+        std::isfinite(densityScaleMaxPeoplePerSquareMeter_) && densityScaleMaxPeoplePerSquareMeter_ > 0.0
+        ? densityScaleMaxPeoplePerSquareMeter_
+        : kDefaultDensityScaleMaxPeoplePerSquareMeter;
     std::sort(visibleCells.begin(), visibleCells.end(), [](const auto* lhs, const auto* rhs) {
         if (lhs->densityPeoplePerSquareMeter != rhs->densityPeoplePerSquareMeter) {
             return lhs->densityPeoplePerSquareMeter < rhs->densityPeoplePerSquareMeter;
@@ -580,7 +589,7 @@ void SimulationCanvasWidget::drawDensityOverlay(QPainter& painter, const LayoutC
         const auto radius = std::max(
             kDensityMinimumScreenRadius,
             std::hypot(radiusAnchor.x() - center.x(), radiusAnchor.y() - center.y()));
-        const auto intensity = std::clamp(cell->densityPeoplePerSquareMeter / maxDensity, 0.0, 1.0);
+        const auto intensity = std::clamp(cell->densityPeoplePerSquareMeter / scaleMax, 0.0, 1.0);
         const auto coreAlpha = 58 + static_cast<int>(118.0 * intensity);
         const auto coreColor = densityHeatmapColor(intensity, std::clamp(coreAlpha, 58, 176));
         const auto middleColor = densityHeatmapColor(intensity, static_cast<int>(coreAlpha * 0.42));

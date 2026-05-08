@@ -919,7 +919,8 @@ void ScenarioBatchResultWidget::applyReplayFrameData(const safecrowd::domain::Si
         canvas_->setBottleneckOverlay(result.risk.bottlenecks);
         canvas_->setDensityOverlay(result.artifacts.densitySummary.peakField.cells.empty()
             ? result.artifacts.densitySummary.peakCells
-            : result.artifacts.densitySummary.peakField.cells);
+            : result.artifacts.densitySummary.peakField.cells,
+            result.artifacts.densitySummary.highDensityThresholdPeoplePerSquareMeter);
         applyOverlayModeToCanvas();
     }
     if (replaySlider_ != nullptr && replaySlider_->value() != replayFrameIndex_) {
