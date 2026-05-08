@@ -9,7 +9,9 @@
 
 #include "application/ScenarioAuthoringWidget.h"
 #include "application/ProjectWorkspaceState.h"
+#include "application/ScenarioResultNavigation.h"
 #include "domain/FacilityLayout2D.h"
+#include "domain/ScenarioSimulationFrame.h"
 
 class QLabel;
 class QCheckBox;
@@ -52,12 +54,20 @@ private:
     QWidget* createSummaryPanel();
     void advanceReplay();
     void applyReplayFrame(int frameIndex);
+    void applyReplayFrameData(const safecrowd::domain::SimulationFrame& frame, int sliderIndex);
+    void applyOverlayModeToCanvas();
     void loadReplayForSelectedResult();
+    int nearestReplayFrameIndex(double seconds) const;
     void navigateToAuthoring();
     void pauseReplay();
     void refreshComparisonSelection();
+    void refreshResultNavigationPanel();
     void refreshSelectedResult();
     void rerunBatch();
+    void seekToTimingMarkerSeconds(double seconds);
+    void setOverlayMode(OverlayMode mode);
+    void showClosestReplayFrameAtSeconds(double seconds);
+    void showReplayFrame(const safecrowd::domain::SimulationFrame& frame);
     int baselineResultIndex() const noexcept;
 
     QString projectName_{};
@@ -84,6 +94,7 @@ private:
     QWidget* exitsChart_{nullptr};
     QTimer* replayTimer_{nullptr};
     OverlayMode overlayMode_{OverlayMode::Density};
+    ScenarioResultNavigationView resultNavigationView_{ScenarioResultNavigationView::Bottleneck};
 };
 
 }  // namespace safecrowd::application

@@ -196,6 +196,7 @@ if (SAFECROWD_BUILD_APP)
         src/application/ScenarioAuthoringWidget.h
         src/application/ScenarioBatchResultWidget.h
         src/application/ScenarioCanvasWidget.h
+        src/application/ScenarioResultNavigation.h
         src/application/ScenarioResultWidget.h
         src/application/ScenarioRunWidget.h
         src/application/SimulationCanvasWidget.h
@@ -219,6 +220,7 @@ if (SAFECROWD_BUILD_APP)
         src/application/ScenarioAuthoringWidget.cpp
         src/application/ScenarioBatchResultWidget.cpp
         src/application/ScenarioCanvasWidget.cpp
+        src/application/ScenarioResultNavigation.cpp
         src/application/ScenarioResultWidget.cpp
         src/application/ScenarioRunWidget.cpp
         src/application/SimulationCanvasWidget.cpp

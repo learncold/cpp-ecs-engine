@@ -3,14 +3,18 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <functional>
 #include <iterator>
+#include <optional>
 #include <utility>
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QEvent>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPen>
@@ -23,6 +27,7 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
+#include "application/ScenarioResultNavigation.h"
 #include "application/ScenarioRunWidget.h"
 #include "application/SimulationCanvasWidget.h"
 #include "application/UiStyle.h"
@@ -111,6 +116,7 @@ public:
           mode_(mode) {
         setMinimumHeight(190);
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        setMouseTracking(true);
     }
 
     void setResults(
@@ -126,6 +132,10 @@ public:
     void setCurrentTimeSeconds(double seconds) {
         currentTimeSeconds_ = seconds;
         update();
+    }
+
+    void setTimingMarkerActivatedHandler(std::function<void(double)> handler) {
+        timingMarkerActivatedHandler_ = std::move(handler);
     }
 
 protected:
@@ -158,6 +168,36 @@ protected:
         drawLegend(painter, QRectF(rect().left() + 12, rect().bottom() - 34, rect().width() - 24, 24));
     }
 
+    void mouseMoveEvent(QMouseEvent* event) override {
+        if (event == nullptr) {
+            return;
+        }
+        const bool hover = timingMarkerHitSeconds(event->position()).has_value();
+        setCursor(hover ? Qt::PointingHandCursor : Qt::ArrowCursor);
+        QWidget::mouseMoveEvent(event);
+    }
+
+    void leaveEvent(QEvent* event) override {
+        unsetCursor();
+        QWidget::leaveEvent(event);
+    }
+
+    void mousePressEvent(QMouseEvent* event) override {
+        if (event == nullptr || event->button() != Qt::LeftButton) {
+            QWidget::mousePressEvent(event);
+            return;
+        }
+        const auto seconds = timingMarkerHitSeconds(event->position());
+        if (!seconds.has_value()) {
+            QWidget::mousePressEvent(event);
+            return;
+        }
+        event->accept();
+        if (timingMarkerActivatedHandler_) {
+            timingMarkerActivatedHandler_(*seconds);
+        }
+    }
+
 private:
     QColor colorForSeries(int index) const {
         static const std::vector<QColor> colors{
@@ -173,18 +213,99 @@ private:
         return colors[static_cast<std::size_t>(std::abs(index)) % colors.size()];
     }
 
-    void drawRemaining(QPainter& painter, const QRectF& plot) {
+    double remainingMaxTimeSeconds() const {
         double maxTime = 1.0;
-        for (const auto index : selectedIndices_) {
+        auto considerResult = [&](int index) {
             if (!validIndex(index)) {
-                continue;
+                return;
             }
             const auto& result = (*results_)[static_cast<std::size_t>(index)];
             maxTime = std::max(maxTime, finalSeconds(result));
             for (const auto& sample : result.artifacts.evacuationProgress) {
                 maxTime = std::max(maxTime, sample.timeSeconds);
             }
+        };
+
+        for (const auto index : selectedIndices_) {
+            considerResult(index);
         }
+        considerResult(displayIndex_);
+        if (validIndex(displayIndex_)) {
+            const auto& timing = (*results_)[static_cast<std::size_t>(displayIndex_)].artifacts.timingSummary;
+            if (timing.t90Seconds.has_value()) {
+                maxTime = std::max(maxTime, *timing.t90Seconds);
+            }
+            if (timing.t95Seconds.has_value()) {
+                maxTime = std::max(maxTime, *timing.t95Seconds);
+            }
+        }
+        return maxTime;
+    }
+
+    void drawTimingMarker(
+        QPainter& painter,
+        const QRectF& plot,
+        double maxTime,
+        const std::optional<double>& seconds,
+        const QString& label) const {
+        if (!seconds.has_value()) {
+            return;
+        }
+        const auto x = plot.left() + std::clamp(*seconds / maxTime, 0.0, 1.0) * plot.width();
+        painter.setPen(QPen(QColor("#d97706"), 1, Qt::DashLine));
+        painter.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()));
+        painter.setPen(QColor("#92400e"));
+        painter.drawText(QRectF(x + 4, plot.top(), 46, 18), Qt::AlignLeft | Qt::AlignVCenter, label);
+    }
+
+    QRectF markerHitRegion(const QRectF& plot, double maxTime, double seconds) const {
+        const auto x = plot.left() + std::clamp(seconds / maxTime, 0.0, 1.0) * plot.width();
+        const QRectF lineHit(x - 6.0, plot.top(), 12.0, plot.height());
+        const QRectF labelHit(x - 4.0, plot.top() - 2.0, 70.0, 22.0);
+        return lineHit.united(labelHit);
+    }
+
+    std::optional<double> timingMarkerHitSeconds(const QPointF& position) const {
+        if (mode_ != ComparisonGraphMode::Remaining || !validIndex(displayIndex_)) {
+            return std::nullopt;
+        }
+        const QRectF plot = QRectF(rect()).adjusted(40, 16, -18, -44);
+        if (!plot.contains(position)) {
+            return std::nullopt;
+        }
+
+        const auto maxTime = remainingMaxTimeSeconds();
+        const auto& timing = (*results_)[static_cast<std::size_t>(displayIndex_)].artifacts.timingSummary;
+        struct Candidate {
+            double seconds;
+            double distance;
+        };
+        std::optional<Candidate> best;
+        auto consider = [&](const std::optional<double>& markerSeconds) {
+            if (!markerSeconds.has_value()) {
+                return;
+            }
+            const auto region = markerHitRegion(plot, maxTime, *markerSeconds);
+            if (!region.contains(position)) {
+                return;
+            }
+            const auto x = plot.left() + std::clamp(*markerSeconds / maxTime, 0.0, 1.0) * plot.width();
+            const auto distance = std::abs(position.x() - x);
+            if (!best.has_value() || distance < best->distance) {
+                best = Candidate{.seconds = *markerSeconds, .distance = distance};
+            }
+        };
+
+        consider(timing.t90Seconds);
+        consider(timing.t95Seconds);
+        if (!best.has_value()) {
+            return std::nullopt;
+        }
+        return best->seconds;
+    }
+
+    void drawRemaining(QPainter& painter, const QRectF& plot) {
+        const auto maxTime = remainingMaxTimeSeconds();
 
         painter.setFont(ui::font(ui::FontRole::Caption));
         painter.setPen(QColor("#6b7785"));
@@ -217,6 +338,12 @@ private:
             }
             painter.setPen(QPen(colorForSeries(index), index == displayIndex_ ? 2.8 : 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
             painter.drawPath(path);
+        }
+
+        if (validIndex(displayIndex_)) {
+            const auto& timing = (*results_)[static_cast<std::size_t>(displayIndex_)].artifacts.timingSummary;
+            drawTimingMarker(painter, plot, maxTime, timing.t90Seconds, "T90");
+            drawTimingMarker(painter, plot, maxTime, timing.t95Seconds, "T95");
         }
 
         if (currentTimeSeconds_ >= 0.0) {
@@ -341,6 +468,7 @@ private:
     std::vector<int> selectedIndices_{};
     int displayIndex_{0};
     double currentTimeSeconds_{-1.0};
+    std::function<void(double)> timingMarkerActivatedHandler_{};
 };
 
 std::vector<safecrowd::domain::SimulationFrame> replayFramesForResult(const SavedScenarioResultState& result) {
@@ -578,6 +706,9 @@ QWidget* ScenarioBatchResultWidget::createCanvasPanel() {
     exitsChart_ = new ComparisonGraphWidget(ComparisonGraphMode::Exits, tabs);
     static_cast<ComparisonGraphWidget*>(remainingChart_)->setResults(results_, selectedCompareIndices_, currentResultIndex_);
     static_cast<ComparisonGraphWidget*>(exitsChart_)->setResults(results_, selectedCompareIndices_, currentResultIndex_);
+    static_cast<ComparisonGraphWidget*>(remainingChart_)->setTimingMarkerActivatedHandler([this](double seconds) {
+        seekToTimingMarkerSeconds(seconds);
+    });
     tabs->addTab(remainingChart_, "Remaining");
     tabs->addTab(exitsChart_, "Exits");
     graphLayout->addWidget(tabs, 1);
@@ -593,10 +724,7 @@ QWidget* ScenarioBatchResultWidget::createCanvasPanel() {
         }
     });
     connect(overlayCombo_, &QComboBox::currentIndexChanged, this, [this](int index) {
-        overlayMode_ = static_cast<OverlayMode>(overlayCombo_->itemData(index).toInt());
-        if (!replayFrames_.empty()) {
-            applyReplayFrame(replayFrameIndex_);
-        }
+        setOverlayMode(static_cast<OverlayMode>(overlayCombo_->itemData(index).toInt()));
     });
     connect(playButton_, &QPushButton::clicked, this, [this]() {
         if (replayTimer_ == nullptr || replayFrames_.size() <= 1) {
@@ -772,8 +900,17 @@ void ScenarioBatchResultWidget::applyReplayFrame(int frameIndex) {
     }
 
     replayFrameIndex_ = std::clamp(frameIndex, 0, static_cast<int>(replayFrames_.size()) - 1);
-    const auto& frame = replayFrames_[static_cast<std::size_t>(replayFrameIndex_)];
+    applyReplayFrameData(replayFrames_[static_cast<std::size_t>(replayFrameIndex_)], replayFrameIndex_);
+}
+
+void ScenarioBatchResultWidget::applyReplayFrameData(const safecrowd::domain::SimulationFrame& frame, int sliderIndex) {
+    if (results_.empty() || currentResultIndex_ < 0 || currentResultIndex_ >= static_cast<int>(results_.size())) {
+        return;
+    }
     const auto& result = results_[static_cast<std::size_t>(currentResultIndex_)];
+    replayFrameIndex_ = replayFrames_.empty()
+        ? 0
+        : std::clamp(sliderIndex, 0, static_cast<int>(replayFrames_.size()) - 1);
 
     if (canvas_ != nullptr) {
         canvas_->setConnectionBlocks(result.scenario.control.connectionBlocks);
@@ -783,21 +920,7 @@ void ScenarioBatchResultWidget::applyReplayFrame(int frameIndex) {
         canvas_->setDensityOverlay(result.artifacts.densitySummary.peakField.cells.empty()
             ? result.artifacts.densitySummary.peakCells
             : result.artifacts.densitySummary.peakField.cells);
-        switch (overlayMode_) {
-        case OverlayMode::Hotspots:
-            canvas_->setResultOverlayMode(ResultOverlayMode::Hotspots);
-            break;
-        case OverlayMode::Bottlenecks:
-            canvas_->setResultOverlayMode(ResultOverlayMode::Bottlenecks);
-            break;
-        case OverlayMode::None:
-            canvas_->setResultOverlayMode(ResultOverlayMode::None);
-            break;
-        case OverlayMode::Density:
-        default:
-            canvas_->setResultOverlayMode(ResultOverlayMode::Density);
-            break;
-        }
+        applyOverlayModeToCanvas();
     }
     if (replaySlider_ != nullptr && replaySlider_->value() != replayFrameIndex_) {
         const QSignalBlocker blocker(replaySlider_);
@@ -815,6 +938,91 @@ void ScenarioBatchResultWidget::applyReplayFrame(int frameIndex) {
             .arg(frame.elapsedSeconds, 0, 'f', 1)
             .arg(totalSeconds, 0, 'f', 1));
     }
+}
+
+void ScenarioBatchResultWidget::applyOverlayModeToCanvas() {
+    if (canvas_ == nullptr) {
+        return;
+    }
+    switch (overlayMode_) {
+    case OverlayMode::Hotspots:
+        canvas_->setResultOverlayMode(ResultOverlayMode::Hotspots);
+        break;
+    case OverlayMode::Bottlenecks:
+        canvas_->setResultOverlayMode(ResultOverlayMode::Bottlenecks);
+        break;
+    case OverlayMode::None:
+        canvas_->setResultOverlayMode(ResultOverlayMode::None);
+        break;
+    case OverlayMode::Density:
+    default:
+        canvas_->setResultOverlayMode(ResultOverlayMode::Density);
+        break;
+    }
+}
+
+int ScenarioBatchResultWidget::nearestReplayFrameIndex(double seconds) const {
+    if (replayFrames_.empty()) {
+        return 0;
+    }
+    const auto closest = std::min_element(replayFrames_.begin(), replayFrames_.end(), [seconds](const auto& lhs, const auto& rhs) {
+        return std::abs(lhs.elapsedSeconds - seconds) < std::abs(rhs.elapsedSeconds - seconds);
+    });
+    return static_cast<int>(std::distance(replayFrames_.begin(), closest));
+}
+
+void ScenarioBatchResultWidget::showReplayFrame(const safecrowd::domain::SimulationFrame& frame) {
+    pauseReplay();
+    const auto index = nearestReplayFrameIndex(frame.elapsedSeconds);
+    applyReplayFrameData(frame, index);
+}
+
+void ScenarioBatchResultWidget::showClosestReplayFrameAtSeconds(double seconds) {
+    if (replayFrames_.empty()) {
+        return;
+    }
+    pauseReplay();
+    applyReplayFrame(nearestReplayFrameIndex(seconds));
+}
+
+void ScenarioBatchResultWidget::seekToTimingMarkerSeconds(double seconds) {
+    if (results_.empty() || currentResultIndex_ < 0 || currentResultIndex_ >= static_cast<int>(results_.size())) {
+        return;
+    }
+
+    const auto& timing = results_[static_cast<std::size_t>(currentResultIndex_)].artifacts.timingSummary;
+    if (timing.t90Seconds.has_value()
+        && std::abs(seconds - *timing.t90Seconds) <= 1e-6) {
+        if (timing.t90Frame.has_value()) {
+            showReplayFrame(*timing.t90Frame);
+        } else {
+            showClosestReplayFrameAtSeconds(*timing.t90Seconds);
+        }
+        return;
+    }
+    if (timing.t95Seconds.has_value()
+        && std::abs(seconds - *timing.t95Seconds) <= 1e-6) {
+        if (timing.t95Frame.has_value()) {
+            showReplayFrame(*timing.t95Frame);
+        } else {
+            showClosestReplayFrameAtSeconds(*timing.t95Seconds);
+        }
+        return;
+    }
+
+    showClosestReplayFrameAtSeconds(seconds);
+}
+
+void ScenarioBatchResultWidget::setOverlayMode(OverlayMode mode) {
+    overlayMode_ = mode;
+    if (overlayCombo_ != nullptr) {
+        const auto comboIndex = overlayCombo_->findData(static_cast<int>(mode));
+        if (comboIndex >= 0 && overlayCombo_->currentIndex() != comboIndex) {
+            const QSignalBlocker blocker(overlayCombo_);
+            overlayCombo_->setCurrentIndex(comboIndex);
+        }
+    }
+    applyOverlayModeToCanvas();
 }
 
 void ScenarioBatchResultWidget::loadReplayForSelectedResult() {
@@ -862,6 +1070,66 @@ void ScenarioBatchResultWidget::refreshComparisonSelection() {
     }
 }
 
+void ScenarioBatchResultWidget::refreshResultNavigationPanel() {
+    if (shell_ == nullptr || results_.empty() || currentResultIndex_ < 0 || currentResultIndex_ >= static_cast<int>(results_.size())) {
+        return;
+    }
+
+    shell_->setNavigationTabs(
+        scenarioResultNavigationTabs(),
+        scenarioResultNavigationTabId(resultNavigationView_),
+        [this](const QString& tabId) {
+            resultNavigationView_ = scenarioResultNavigationViewFromTabId(tabId);
+            refreshResultNavigationPanel();
+        });
+
+    const auto& result = results_[static_cast<std::size_t>(currentResultIndex_)];
+    auto bottleneckFocusHandler = [this](std::size_t index) {
+        if (results_.empty() || currentResultIndex_ < 0 || currentResultIndex_ >= static_cast<int>(results_.size())) {
+            return;
+        }
+        const auto& selected = results_[static_cast<std::size_t>(currentResultIndex_)];
+        if (index < selected.risk.bottlenecks.size()) {
+            setOverlayMode(OverlayMode::Bottlenecks);
+            const auto& bottleneck = selected.risk.bottlenecks[index];
+            if (bottleneck.detectionFrame.has_value()) {
+                showReplayFrame(*bottleneck.detectionFrame);
+            } else if (bottleneck.detectedAtSeconds.has_value()) {
+                showClosestReplayFrameAtSeconds(*bottleneck.detectedAtSeconds);
+            }
+        }
+        if (canvas_ != nullptr) {
+            canvas_->focusBottleneck(index);
+        }
+    };
+    auto hotspotFocusHandler = [this](std::size_t index) {
+        if (results_.empty() || currentResultIndex_ < 0 || currentResultIndex_ >= static_cast<int>(results_.size())) {
+            return;
+        }
+        const auto& selected = results_[static_cast<std::size_t>(currentResultIndex_)];
+        if (index < selected.risk.hotspots.size()) {
+            setOverlayMode(OverlayMode::Hotspots);
+            const auto& hotspot = selected.risk.hotspots[index];
+            if (hotspot.detectionFrame.has_value()) {
+                showReplayFrame(*hotspot.detectionFrame);
+            } else if (hotspot.detectedAtSeconds.has_value()) {
+                showClosestReplayFrameAtSeconds(*hotspot.detectedAtSeconds);
+            }
+        }
+        if (canvas_ != nullptr) {
+            canvas_->focusHotspot(index);
+        }
+    };
+
+    shell_->setNavigationPanel(createScenarioResultNavigationPanel(
+        resultNavigationView_,
+        result.risk,
+        result.artifacts,
+        std::move(bottleneckFocusHandler),
+        std::move(hotspotFocusHandler),
+        shell_));
+}
+
 void ScenarioBatchResultWidget::refreshSelectedResult() {
     if (results_.empty() || currentResultIndex_ < 0 || currentResultIndex_ >= static_cast<int>(results_.size())) {
         return;
@@ -882,6 +1150,7 @@ void ScenarioBatchResultWidget::refreshSelectedResult() {
     if (exitsChart_ != nullptr) {
         static_cast<ComparisonGraphWidget*>(exitsChart_)->setResults(results_, selectedCompareIndices_, currentResultIndex_);
     }
+    refreshResultNavigationPanel();
     if (detailLabel_ != nullptr) {
         const auto selectedFinalSeconds = finalSeconds(result);
         const auto deltaText = baselineIndex >= 0
