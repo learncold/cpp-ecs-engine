@@ -1076,6 +1076,157 @@ safecrowd::domain::ScenarioRiskSnapshot riskSnapshotFromJson(const QJsonObject& 
     return risk;
 }
 
+QJsonObject densityCellMetricToJson(const safecrowd::domain::DensityCellMetric& cell) {
+    QJsonObject object;
+    object["center"] = pointArray(cell.center);
+    object["cellMin"] = pointArray(cell.cellMin);
+    object["cellMax"] = pointArray(cell.cellMax);
+    object["floorId"] = QString::fromStdString(cell.floorId);
+    object["agentCount"] = static_cast<qint64>(cell.agentCount);
+    object["densityPeoplePerSquareMeter"] = cell.densityPeoplePerSquareMeter;
+    return object;
+}
+
+safecrowd::domain::DensityCellMetric densityCellMetricFromJson(const QJsonObject& object) {
+    return {
+        .center = pointFromJson(object.value("center")),
+        .cellMin = pointFromJson(object.value("cellMin")),
+        .cellMax = pointFromJson(object.value("cellMax")),
+        .floorId = object.value("floorId").toString().toStdString(),
+        .agentCount = static_cast<std::size_t>(object.value("agentCount").toInteger()),
+        .densityPeoplePerSquareMeter = object.value("densityPeoplePerSquareMeter").toDouble(),
+    };
+}
+
+QJsonObject densityFieldSnapshotToJson(const safecrowd::domain::DensityFieldSnapshot& snapshot) {
+    QJsonObject object;
+    object["timeSeconds"] = snapshot.timeSeconds;
+    object["cellSizeMeters"] = snapshot.cellSizeMeters;
+    QJsonArray cells;
+    for (const auto& cell : snapshot.cells) {
+        cells.append(densityCellMetricToJson(cell));
+    }
+    object["cells"] = cells;
+    return object;
+}
+
+safecrowd::domain::DensityFieldSnapshot densityFieldSnapshotFromJson(const QJsonObject& object) {
+    safecrowd::domain::DensityFieldSnapshot snapshot;
+    snapshot.timeSeconds = object.value("timeSeconds").toDouble();
+    snapshot.cellSizeMeters = object.value("cellSizeMeters").toDouble();
+    for (const auto& value : object.value("cells").toArray()) {
+        snapshot.cells.push_back(densityCellMetricFromJson(value.toObject()));
+    }
+    return snapshot;
+}
+
+QJsonObject densitySummaryToJson(const safecrowd::domain::DensitySummary& summary) {
+    QJsonObject object;
+    object["cellSizeMeters"] = summary.cellSizeMeters;
+    object["highDensityThresholdPeoplePerSquareMeter"] = summary.highDensityThresholdPeoplePerSquareMeter;
+    object["peakDensityPeoplePerSquareMeter"] = summary.peakDensityPeoplePerSquareMeter;
+    object["peakAgentCount"] = static_cast<qint64>(summary.peakAgentCount);
+    object["peakAtSeconds"] = optionalDoubleToJson(summary.peakAtSeconds);
+    if (summary.peakCell.has_value()) {
+        object["peakCell"] = densityCellMetricToJson(*summary.peakCell);
+    }
+    object["highDensityDurationSeconds"] = summary.highDensityDurationSeconds;
+    QJsonArray peakCells;
+    for (const auto& cell : summary.peakCells) {
+        peakCells.append(densityCellMetricToJson(cell));
+    }
+    object["peakCells"] = peakCells;
+    object["peakField"] = densityFieldSnapshotToJson(summary.peakField);
+    return object;
+}
+
+safecrowd::domain::DensitySummary densitySummaryFromJson(const QJsonObject& object) {
+    safecrowd::domain::DensitySummary summary;
+    summary.cellSizeMeters = object.value("cellSizeMeters").toDouble();
+    summary.highDensityThresholdPeoplePerSquareMeter =
+        object.value("highDensityThresholdPeoplePerSquareMeter").toDouble(4.0);
+    summary.peakDensityPeoplePerSquareMeter = object.value("peakDensityPeoplePerSquareMeter").toDouble();
+    summary.peakAgentCount = static_cast<std::size_t>(object.value("peakAgentCount").toInteger());
+    summary.peakAtSeconds = optionalDoubleFromJson(object.value("peakAtSeconds"));
+    if (object.value("peakCell").isObject()) {
+        summary.peakCell = densityCellMetricFromJson(object.value("peakCell").toObject());
+    }
+    summary.highDensityDurationSeconds = object.value("highDensityDurationSeconds").toDouble();
+    for (const auto& value : object.value("peakCells").toArray()) {
+        summary.peakCells.push_back(densityCellMetricFromJson(value.toObject()));
+    }
+    if (object.value("peakField").isObject()) {
+        summary.peakField = densityFieldSnapshotFromJson(object.value("peakField").toObject());
+    }
+    return summary;
+}
+
+QJsonObject exitUsageMetricToJson(const safecrowd::domain::ExitUsageMetric& exit) {
+    QJsonObject object;
+    object["exitZoneId"] = QString::fromStdString(exit.exitZoneId);
+    object["exitLabel"] = QString::fromStdString(exit.exitLabel);
+    object["floorId"] = QString::fromStdString(exit.floorId);
+    object["evacuatedCount"] = static_cast<qint64>(exit.evacuatedCount);
+    object["usageRatio"] = exit.usageRatio;
+    object["lastExitTimeSeconds"] = optionalDoubleToJson(exit.lastExitTimeSeconds);
+    return object;
+}
+
+safecrowd::domain::ExitUsageMetric exitUsageMetricFromJson(const QJsonObject& object) {
+    safecrowd::domain::ExitUsageMetric exit;
+    exit.exitZoneId = object.value("exitZoneId").toString().toStdString();
+    exit.exitLabel = object.value("exitLabel").toString().toStdString();
+    exit.floorId = object.value("floorId").toString().toStdString();
+    exit.evacuatedCount = static_cast<std::size_t>(object.value("evacuatedCount").toInteger());
+    exit.usageRatio = object.value("usageRatio").toDouble();
+    exit.lastExitTimeSeconds = optionalDoubleFromJson(object.value("lastExitTimeSeconds"));
+    return exit;
+}
+
+QJsonObject zoneCompletionMetricToJson(const safecrowd::domain::ZoneCompletionMetric& zone) {
+    QJsonObject object;
+    object["zoneId"] = QString::fromStdString(zone.zoneId);
+    object["zoneLabel"] = QString::fromStdString(zone.zoneLabel);
+    object["floorId"] = QString::fromStdString(zone.floorId);
+    object["initialCount"] = static_cast<qint64>(zone.initialCount);
+    object["evacuatedCount"] = static_cast<qint64>(zone.evacuatedCount);
+    object["lastCompletionTimeSeconds"] = optionalDoubleToJson(zone.lastCompletionTimeSeconds);
+    return object;
+}
+
+safecrowd::domain::ZoneCompletionMetric zoneCompletionMetricFromJson(const QJsonObject& object) {
+    safecrowd::domain::ZoneCompletionMetric zone;
+    zone.zoneId = object.value("zoneId").toString().toStdString();
+    zone.zoneLabel = object.value("zoneLabel").toString().toStdString();
+    zone.floorId = object.value("floorId").toString().toStdString();
+    zone.initialCount = static_cast<std::size_t>(object.value("initialCount").toInteger());
+    zone.evacuatedCount = static_cast<std::size_t>(object.value("evacuatedCount").toInteger());
+    zone.lastCompletionTimeSeconds = optionalDoubleFromJson(object.value("lastCompletionTimeSeconds"));
+    return zone;
+}
+
+QJsonObject placementCompletionMetricToJson(const safecrowd::domain::PlacementCompletionMetric& placement) {
+    QJsonObject object;
+    object["placementId"] = QString::fromStdString(placement.placementId);
+    object["zoneId"] = QString::fromStdString(placement.zoneId);
+    object["floorId"] = QString::fromStdString(placement.floorId);
+    object["initialCount"] = static_cast<qint64>(placement.initialCount);
+    object["evacuatedCount"] = static_cast<qint64>(placement.evacuatedCount);
+    object["lastCompletionTimeSeconds"] = optionalDoubleToJson(placement.lastCompletionTimeSeconds);
+    return object;
+}
+
+safecrowd::domain::PlacementCompletionMetric placementCompletionMetricFromJson(const QJsonObject& object) {
+    safecrowd::domain::PlacementCompletionMetric placement;
+    placement.placementId = object.value("placementId").toString().toStdString();
+    placement.zoneId = object.value("zoneId").toString().toStdString();
+    placement.floorId = object.value("floorId").toString().toStdString();
+    placement.initialCount = static_cast<std::size_t>(object.value("initialCount").toInteger());
+    placement.evacuatedCount = static_cast<std::size_t>(object.value("evacuatedCount").toInteger());
+    placement.lastCompletionTimeSeconds = optionalDoubleFromJson(object.value("lastCompletionTimeSeconds"));
+    return placement;
+}
+
 QJsonObject resultArtifactsToJson(const safecrowd::domain::ScenarioResultArtifacts& artifacts) {
     QJsonObject object;
     QJsonArray progress;
@@ -1100,6 +1251,8 @@ QJsonObject resultArtifactsToJson(const safecrowd::domain::ScenarioResultArtifac
     timing["t90Seconds"] = optionalDoubleToJson(artifacts.timingSummary.t90Seconds);
     timing["t95Seconds"] = optionalDoubleToJson(artifacts.timingSummary.t95Seconds);
     timing["finalEvacuationTimeSeconds"] = optionalDoubleToJson(artifacts.timingSummary.finalEvacuationTimeSeconds);
+    timing["targetTimeSeconds"] = artifacts.timingSummary.targetTimeSeconds;
+    timing["marginSeconds"] = optionalDoubleToJson(artifacts.timingSummary.marginSeconds);
     if (artifacts.timingSummary.t90Frame.has_value()) {
         timing["t90Frame"] = simulationFrameToJson(*artifacts.timingSummary.t90Frame);
     }
@@ -1107,6 +1260,27 @@ QJsonObject resultArtifactsToJson(const safecrowd::domain::ScenarioResultArtifac
         timing["t95Frame"] = simulationFrameToJson(*artifacts.timingSummary.t95Frame);
     }
     object["timingSummary"] = timing;
+
+    object["densitySummary"] = densitySummaryToJson(artifacts.densitySummary);
+
+    QJsonArray exitUsage;
+    for (const auto& exit : artifacts.exitUsage) {
+        exitUsage.append(exitUsageMetricToJson(exit));
+    }
+    object["exitUsage"] = exitUsage;
+
+    QJsonArray zoneCompletion;
+    for (const auto& zone : artifacts.zoneCompletion) {
+        zoneCompletion.append(zoneCompletionMetricToJson(zone));
+    }
+    object["zoneCompletion"] = zoneCompletion;
+
+    QJsonArray placementCompletion;
+    for (const auto& placement : artifacts.placementCompletion) {
+        placementCompletion.append(placementCompletionMetricToJson(placement));
+    }
+    object["placementCompletion"] = placementCompletion;
+
     return object;
 }
 
@@ -1130,12 +1304,28 @@ safecrowd::domain::ScenarioResultArtifacts resultArtifactsFromJson(const QJsonOb
     artifacts.timingSummary.t90Seconds = optionalDoubleFromJson(timing.value("t90Seconds"));
     artifacts.timingSummary.t95Seconds = optionalDoubleFromJson(timing.value("t95Seconds"));
     artifacts.timingSummary.finalEvacuationTimeSeconds = optionalDoubleFromJson(timing.value("finalEvacuationTimeSeconds"));
+    artifacts.timingSummary.targetTimeSeconds = timing.value("targetTimeSeconds").toDouble();
+    artifacts.timingSummary.marginSeconds = optionalDoubleFromJson(timing.value("marginSeconds"));
     if (timing.value("t90Frame").isObject()) {
         artifacts.timingSummary.t90Frame = simulationFrameFromJson(timing.value("t90Frame").toObject());
     }
     if (timing.value("t95Frame").isObject()) {
         artifacts.timingSummary.t95Frame = simulationFrameFromJson(timing.value("t95Frame").toObject());
     }
+
+    if (object.value("densitySummary").isObject()) {
+        artifacts.densitySummary = densitySummaryFromJson(object.value("densitySummary").toObject());
+    }
+    for (const auto& value : object.value("exitUsage").toArray()) {
+        artifacts.exitUsage.push_back(exitUsageMetricFromJson(value.toObject()));
+    }
+    for (const auto& value : object.value("zoneCompletion").toArray()) {
+        artifacts.zoneCompletion.push_back(zoneCompletionMetricFromJson(value.toObject()));
+    }
+    for (const auto& value : object.value("placementCompletion").toArray()) {
+        artifacts.placementCompletion.push_back(placementCompletionMetricFromJson(value.toObject()));
+    }
+
     return artifacts;
 }
 
@@ -1185,6 +1375,7 @@ QJsonObject resultStateToJson(const SavedScenarioResultState& result) {
     object["frame"] = simulationFrameToJson(result.frame);
     object["risk"] = riskSnapshotToJson(result.risk);
     object["artifacts"] = resultArtifactsToJson(result.artifacts);
+    object["navigationView"] = static_cast<int>(result.navigationView);
     return object;
 }
 
@@ -1194,6 +1385,7 @@ SavedScenarioResultState resultStateFromJson(const QJsonObject& object) {
         .frame = simulationFrameFromJson(object.value("frame").toObject()),
         .risk = riskSnapshotFromJson(object.value("risk").toObject()),
         .artifacts = resultArtifactsFromJson(object.value("artifacts").toObject()),
+        .navigationView = static_cast<SavedResultNavigationView>(object.value("navigationView").toInt()),
     };
 }
 

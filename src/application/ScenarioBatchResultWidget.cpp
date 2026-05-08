@@ -546,6 +546,34 @@ ScenarioAuthoringWidget::ScenarioState scenarioStateFromDraft(
     return state;
 }
 
+ScenarioResultNavigationView resultNavigationViewFromSaved(SavedResultNavigationView view) {
+    switch (view) {
+    case SavedResultNavigationView::Hotspot:
+        return ScenarioResultNavigationView::Hotspot;
+    case SavedResultNavigationView::Zone:
+        return ScenarioResultNavigationView::Zone;
+    case SavedResultNavigationView::Groups:
+        return ScenarioResultNavigationView::Groups;
+    case SavedResultNavigationView::Bottleneck:
+    default:
+        return ScenarioResultNavigationView::Bottleneck;
+    }
+}
+
+SavedResultNavigationView savedResultNavigationView(ScenarioResultNavigationView view) {
+    switch (view) {
+    case ScenarioResultNavigationView::Hotspot:
+        return SavedResultNavigationView::Hotspot;
+    case ScenarioResultNavigationView::Zone:
+        return SavedResultNavigationView::Zone;
+    case ScenarioResultNavigationView::Groups:
+        return SavedResultNavigationView::Groups;
+    case ScenarioResultNavigationView::Bottleneck:
+    default:
+        return SavedResultNavigationView::Bottleneck;
+    }
+}
+
 }  // namespace
 
 ScenarioBatchResultWidget::ScenarioBatchResultWidget(
@@ -569,6 +597,9 @@ ScenarioBatchResultWidget::ScenarioBatchResultWidget(
       currentResultIndex_(currentResultIndex) {
     if (currentResultIndex_ < 0 || currentResultIndex_ >= static_cast<int>(results_.size())) {
         currentResultIndex_ = 0;
+    }
+    if (!results_.empty()) {
+        resultNavigationView_ = resultNavigationViewFromSaved(results_[static_cast<std::size_t>(currentResultIndex_)].navigationView);
     }
     const auto baselineIndex = baselineResultIndex();
     if (results_.size() <= 2) {
@@ -620,6 +651,10 @@ const std::vector<SavedScenarioResultState>& ScenarioBatchResultWidget::results(
 
 int ScenarioBatchResultWidget::currentResultIndex() const noexcept {
     return currentResultIndex_;
+}
+
+SavedResultNavigationView ScenarioBatchResultWidget::currentSavedNavigationView() const noexcept {
+    return savedResultNavigationView(resultNavigationView_);
 }
 
 std::optional<ScenarioAuthoringWidget::InitialState> ScenarioBatchResultWidget::returnAuthoringState() const {

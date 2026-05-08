@@ -796,6 +796,7 @@ void ScenarioRunWidget::showResults() {
                 }
             },
             backToLayoutReviewHandler_,
+            SavedResultNavigationView::Bottleneck,
             returnAuthoringState_,
             this);
     } else {

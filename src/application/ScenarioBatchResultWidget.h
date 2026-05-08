@@ -40,6 +40,7 @@ public:
 
     const std::vector<SavedScenarioResultState>& results() const noexcept;
     int currentResultIndex() const noexcept;
+    SavedResultNavigationView currentSavedNavigationView() const noexcept;
     std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState() const;
 
 private:

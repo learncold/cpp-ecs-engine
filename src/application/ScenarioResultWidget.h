@@ -31,6 +31,7 @@ public:
         std::function<void()> saveProjectHandler,
         std::function<void()> openProjectHandler,
         std::function<void()> backToLayoutReviewHandler,
+        SavedResultNavigationView savedNavigationView = SavedResultNavigationView::Bottleneck,
         std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState = std::nullopt,
         QWidget* parent = nullptr);
 
@@ -38,6 +39,7 @@ public:
     const safecrowd::domain::SimulationFrame& frame() const noexcept;
     const safecrowd::domain::ScenarioRiskSnapshot& risk() const noexcept;
     const safecrowd::domain::ScenarioResultArtifacts& artifacts() const noexcept;
+    SavedResultNavigationView currentSavedNavigationView() const noexcept;
     const std::optional<ScenarioAuthoringWidget::InitialState>& returnAuthoringState() const noexcept;
 
 private:

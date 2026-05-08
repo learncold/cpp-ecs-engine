@@ -90,6 +90,7 @@ private:
     void updateCurrentScenarioPlacements(const std::vector<ScenarioCrowdPlacement>& placements);
     void showEmptyCanvas();
     void showScenarioNameDialog(int sourceIndex);
+    QWidget* createRunPanel();
     QWidget* createScenarioPanel();
     ScenarioState* currentScenario();
     const ScenarioState* currentScenario() const;
