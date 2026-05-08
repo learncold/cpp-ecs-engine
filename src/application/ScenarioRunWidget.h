@@ -2,14 +2,16 @@
 
 #include <functional>
 #include <optional>
+#include <vector>
 
 #include <QString>
 #include <QWidget>
 
+#include "application/ProjectWorkspaceState.h"
 #include "application/ScenarioAuthoringWidget.h"
 #include "domain/FacilityLayout2D.h"
 #include "domain/ScenarioAuthoring.h"
-#include "domain/ScenarioSimulationRunner.h"
+#include "domain/ScenarioBatchRunner.h"
 
 class QLabel;
 class QProgressBar;
@@ -32,6 +34,7 @@ public:
         std::function<void()> backToLayoutReviewHandler,
         QWidget* parent = nullptr,
         std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState = std::nullopt);
+
     explicit ScenarioRunWidget(
         const QString& projectName,
         const safecrowd::domain::FacilityLayout2D& layout,
@@ -45,35 +48,60 @@ public:
         QWidget* parent = nullptr,
         std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState = std::nullopt);
 
+    explicit ScenarioRunWidget(
+        const QString& projectName,
+        const safecrowd::domain::FacilityLayout2D& layout,
+        std::vector<safecrowd::domain::ScenarioDraft> scenarios,
+        std::function<void()> saveProjectHandler,
+        std::function<void()> openProjectHandler,
+        std::function<void()> backToLayoutReviewHandler,
+        std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState = std::nullopt,
+        QWidget* parent = nullptr);
+
+    explicit ScenarioRunWidget(
+        const QString& projectName,
+        const safecrowd::domain::FacilityLayout2D& layout,
+        std::vector<safecrowd::domain::ScenarioDraft> scenarios,
+        std::vector<SavedScenarioResultState> cachedResults,
+        std::function<void()> saveProjectHandler,
+        std::function<void()> openProjectHandler,
+        std::function<void()> backToLayoutReviewHandler,
+        std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState = std::nullopt,
+        QWidget* parent = nullptr);
+
     const safecrowd::domain::ScenarioDraft& scenario() const noexcept;
+    const std::vector<safecrowd::domain::ScenarioDraft>& scenarios() const noexcept;
     const std::optional<ScenarioAuthoringWidget::InitialState>& returnAuthoringState() const noexcept;
 
 private:
+    QWidget* createRunCanvas();
     QWidget* createRunPanel();
-    void returnToAuthoring();
-    bool hasCachedResult() const noexcept;
-    void refreshStatus();
+    bool hasCachedResults() const noexcept;
+    std::vector<SavedScenarioResultState> completedResults();
     void advanceFastForwardToResult();
-    void startFastForwardToResult();
-    void storeResultCache(const safecrowd::domain::ScenarioSimulationRunner& runner);
-    void setupUi();
+    void returnToAuthoring();
+    void refreshStatus();
+    void selectRun(int index);
     void showResults();
+    void startFastForwardToResult();
     void stopRun();
     void togglePaused();
 
     QString projectName_{};
     safecrowd::domain::FacilityLayout2D layout_{};
     safecrowd::domain::ScenarioDraft scenario_{};
-    safecrowd::domain::ScenarioSimulationRunner runner_{};
-    std::optional<safecrowd::domain::SimulationFrame> cachedResultFrame_{};
-    std::optional<safecrowd::domain::ScenarioRiskSnapshot> cachedResultRisk_{};
-    std::optional<safecrowd::domain::ScenarioResultArtifacts> cachedResultArtifacts_{};
+    std::vector<safecrowd::domain::ScenarioDraft> scenarios_{};
+    std::vector<SavedScenarioResultState> cachedResults_{};
+    safecrowd::domain::ScenarioBatchRunner batchRunner_{};
+    std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState_{};
     std::function<void()> saveProjectHandler_{};
     std::function<void()> openProjectHandler_{};
     std::function<void()> backToLayoutReviewHandler_{};
-    std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState_{};
     WorkspaceShell* shell_{nullptr};
     SimulationCanvasWidget* canvas_{nullptr};
+    std::vector<QPushButton*> previewButtons_{};
+    std::vector<QLabel*> previewStatusLabels_{};
+    std::vector<QProgressBar*> previewProgressBars_{};
     QTimer* timer_{nullptr};
     QLabel* scenarioLabel_{nullptr};
     QLabel* statusLabel_{nullptr};
@@ -88,6 +116,7 @@ private:
     QPushButton* stopButton_{nullptr};
     QPushButton* fastForwardButton_{nullptr};
     QPushButton* resultButton_{nullptr};
+    int selectedRunIndex_{0};
     bool fastForwardingToResult_{false};
     bool paused_{false};
 };

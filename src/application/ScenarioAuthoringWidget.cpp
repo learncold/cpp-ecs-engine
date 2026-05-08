@@ -1060,12 +1060,12 @@ void ScenarioAuthoringWidget::refreshScenarioSwitcher() {
     scenarioSwitcher_->blockSignals(false);
 }
 
-void ScenarioAuthoringWidget::runFirstStagedBaselineScenario() {
-    const auto* scenario = firstStagedBaselineScenario();
-    if (scenario == nullptr) {
+void ScenarioAuthoringWidget::runStagedScenarios() {
+    auto scenarios = stagedRunnableScenarios();
+    if (scenarios.empty()) {
         if (stagedScenariosLabel_ != nullptr) {
             stagedScenariosLabel_->setText(stagedScenariosLabel_->text()
-                + "\n\nNo staged baseline scenario is ready to run.");
+                + "\n\nNo staged scenario is ready to run.");
         }
         return;
     }
@@ -1078,12 +1078,12 @@ void ScenarioAuthoringWidget::runFirstStagedBaselineScenario() {
     auto* runWidget = new ScenarioRunWidget(
         projectName_,
         layout_,
-        scenario->draft,
+        std::move(scenarios),
         saveProjectHandler_,
         openProjectHandler_,
         backToLayoutReviewHandler_,
-        this,
-        currentInitialState());
+        currentInitialState(),
+        this);
     rootLayout->replaceWidget(shell_, runWidget);
     shell_->hide();
     shell_->deleteLater();
@@ -1307,7 +1307,7 @@ QWidget* ScenarioAuthoringWidget::createScenarioPanel() {
         stageCurrentScenario();
     });
     connect(executeRunButton_, &QPushButton::clicked, this, [this]() {
-        runFirstStagedBaselineScenario();
+        runStagedScenarios();
     });
 
     return inspector;
@@ -1327,13 +1327,16 @@ const ScenarioAuthoringWidget::ScenarioState* ScenarioAuthoringWidget::currentSc
     return &scenarios_[currentScenarioIndex_];
 }
 
-const ScenarioAuthoringWidget::ScenarioState* ScenarioAuthoringWidget::firstStagedBaselineScenario() const {
-    const auto it = std::find_if(scenarios_.begin(), scenarios_.end(), [](const auto& scenario) {
-        return scenario.stagedForRun
-            && scenarioHasOccupants(scenario)
-            && scenario.draft.role == safecrowd::domain::ScenarioRole::Baseline;
-    });
-    return it == scenarios_.end() ? nullptr : &(*it);
+std::vector<safecrowd::domain::ScenarioDraft> ScenarioAuthoringWidget::stagedRunnableScenarios() const {
+    std::vector<safecrowd::domain::ScenarioDraft> staged;
+    for (const auto& scenario : scenarios_) {
+        if (scenario.stagedForRun && scenarioHasOccupants(scenario)) {
+            auto draft = scenario.draft;
+            draft.control.events = scenario.events;
+            staged.push_back(std::move(draft));
+        }
+    }
+    return staged;
 }
 
 }  // namespace safecrowd::application

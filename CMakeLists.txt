@@ -82,6 +82,8 @@ add_library(safecrowd_domain STATIC
     src/domain/PopulationSpec.h
     src/domain/ScenarioAuthoring.h
     src/domain/ScenarioAuthoring.cpp
+    src/domain/ScenarioBatchRunner.h
+    src/domain/ScenarioBatchRunner.cpp
     src/domain/ScenarioRiskMetrics.h
     src/domain/ScenarioRiskMetrics.cpp
     src/domain/ScenarioRiskMetricsSystem.cpp
@@ -156,6 +158,7 @@ if (BUILD_TESTING)
         tests/DeterministicRngTests.cpp
         tests/ScenarioSimulationRunnerTests.cpp
         tests/ScenarioAuthoringTests.cpp
+        tests/ScenarioBatchRunnerTests.cpp
     )
 
     target_include_directories(safecrowd_tests
@@ -191,6 +194,7 @@ if (SAFECROWD_BUILD_APP)
         src/application/ProjectNavigatorWidget.h
         src/application/ProjectPersistence.h
         src/application/ScenarioAuthoringWidget.h
+        src/application/ScenarioBatchResultWidget.h
         src/application/ScenarioCanvasWidget.h
         src/application/ScenarioResultWidget.h
         src/application/ScenarioRunWidget.h
@@ -213,6 +217,7 @@ if (SAFECROWD_BUILD_APP)
         src/application/ProjectNavigatorWidget.cpp
         src/application/ProjectPersistence.cpp
         src/application/ScenarioAuthoringWidget.cpp
+        src/application/ScenarioBatchResultWidget.cpp
         src/application/ScenarioCanvasWidget.cpp
         src/application/ScenarioResultWidget.cpp
         src/application/ScenarioRunWidget.cpp

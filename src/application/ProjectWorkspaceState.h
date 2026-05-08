@@ -50,11 +50,18 @@ struct SavedScenarioResultState {
     safecrowd::domain::ScenarioResultArtifacts artifacts{};
 };
 
+struct SavedScenarioBatchResultState {
+    std::vector<SavedScenarioResultState> results{};
+    int currentResultIndex{0};
+};
+
 struct ProjectWorkspaceState {
     ProjectWorkspaceView activeView{ProjectWorkspaceView::LayoutReview};
     std::optional<SavedScenarioAuthoringState> authoring{};
     std::optional<safecrowd::domain::ScenarioDraft> runningScenario{};
+    std::vector<safecrowd::domain::ScenarioDraft> runningScenarios{};
     std::optional<SavedScenarioResultState> result{};
+    std::optional<SavedScenarioBatchResultState> batchResult{};
 };
 
 }  // namespace safecrowd::application

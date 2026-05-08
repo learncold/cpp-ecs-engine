@@ -1,6 +1,8 @@
 #include "application/ProjectPersistence.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <vector>
 
 #include <QDateTime>
 #include <QDebug>
@@ -1137,6 +1139,46 @@ SavedScenarioResultState resultStateFromJson(const QJsonObject& object) {
     };
 }
 
+QJsonArray scenarioDraftsToJson(const std::vector<safecrowd::domain::ScenarioDraft>& scenarios) {
+    QJsonArray array;
+    for (const auto& scenario : scenarios) {
+        array.append(scenarioDraftToJson(scenario));
+    }
+    return array;
+}
+
+std::vector<safecrowd::domain::ScenarioDraft> scenarioDraftsFromJson(const QJsonArray& array) {
+    std::vector<safecrowd::domain::ScenarioDraft> scenarios;
+    scenarios.reserve(static_cast<std::size_t>(array.size()));
+    for (const auto& value : array) {
+        scenarios.push_back(scenarioDraftFromJson(value.toObject()));
+    }
+    return scenarios;
+}
+
+QJsonObject batchResultStateToJson(const SavedScenarioBatchResultState& batch) {
+    QJsonObject object;
+    QJsonArray results;
+    for (const auto& result : batch.results) {
+        results.append(resultStateToJson(result));
+    }
+    object["results"] = results;
+    object["currentResultIndex"] = batch.currentResultIndex;
+    return object;
+}
+
+SavedScenarioBatchResultState batchResultStateFromJson(const QJsonObject& object) {
+    SavedScenarioBatchResultState batch;
+    for (const auto& value : object.value("results").toArray()) {
+        batch.results.push_back(resultStateFromJson(value.toObject()));
+    }
+    batch.currentResultIndex = object.value("currentResultIndex").toInt(0);
+    if (batch.currentResultIndex < 0 || batch.currentResultIndex >= static_cast<int>(batch.results.size())) {
+        batch.currentResultIndex = 0;
+    }
+    return batch;
+}
+
 QJsonObject workspaceStateToJson(const ProjectWorkspaceState& state) {
     QJsonObject object;
     object["version"] = 1;
@@ -1147,8 +1189,14 @@ QJsonObject workspaceStateToJson(const ProjectWorkspaceState& state) {
     if (state.runningScenario.has_value()) {
         object["runningScenario"] = scenarioDraftToJson(*state.runningScenario);
     }
+    if (!state.runningScenarios.empty()) {
+        object["runningScenarios"] = scenarioDraftsToJson(state.runningScenarios);
+    }
     if (state.result.has_value()) {
         object["result"] = resultStateToJson(*state.result);
+    }
+    if (state.batchResult.has_value()) {
+        object["batchResult"] = batchResultStateToJson(*state.batchResult);
     }
     return object;
 }
@@ -1162,8 +1210,21 @@ ProjectWorkspaceState workspaceStateFromJson(const QJsonObject& object) {
     if (object.value("runningScenario").isObject()) {
         state.runningScenario = scenarioDraftFromJson(object.value("runningScenario").toObject());
     }
+    if (object.value("runningScenarios").isArray()) {
+        state.runningScenarios = scenarioDraftsFromJson(object.value("runningScenarios").toArray());
+    } else if (state.runningScenario.has_value()) {
+        state.runningScenarios.push_back(*state.runningScenario);
+    }
     if (object.value("result").isObject()) {
         state.result = resultStateFromJson(object.value("result").toObject());
+    }
+    if (object.value("batchResult").isObject()) {
+        state.batchResult = batchResultStateFromJson(object.value("batchResult").toObject());
+    } else if (state.result.has_value()) {
+        state.batchResult = SavedScenarioBatchResultState{
+            .results = {*state.result},
+            .currentResultIndex = 0,
+        };
     }
     return state;
 }

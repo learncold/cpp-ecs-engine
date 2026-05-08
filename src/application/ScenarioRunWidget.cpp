@@ -7,17 +7,22 @@
 
 #include <QColor>
 #include <QElapsedTimer>
-#include <QIcon>
-#include <QLabel>
+#include <QGridLayout>
 #include <QHBoxLayout>
+#include <QIcon>
+#include <QImage>
+#include <QLabel>
 #include <QPainter>
 #include <QPixmap>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QSizePolicy>
 #include <QTimer>
+#include <QVariant>
 #include <QVBoxLayout>
 
 #include "application/ScenarioAuthoringWidget.h"
+#include "application/ScenarioBatchResultWidget.h"
 #include "application/ScenarioResultWidget.h"
 #include "application/SimulationCanvasWidget.h"
 #include "application/UiStyle.h"
@@ -70,10 +75,10 @@ QProgressBar* createProgressBar(const QString& tooltip, QWidget* parent) {
 }
 
 QIcon makeTransportIcon(TransportIconKind kind, const QColor& color) {
-    QPixmap pixmap(40, 40);
-    pixmap.fill(Qt::transparent);
+    QImage image(QSize(40, 40), QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
 
-    QPainter painter(&pixmap);
+    QPainter painter(&image);
     painter.setRenderHint(QPainter::Antialiasing, true);
     painter.setPen(Qt::NoPen);
     painter.setBrush(color);
@@ -89,17 +94,31 @@ QIcon makeTransportIcon(TransportIconKind kind, const QColor& color) {
         painter.drawRoundedRect(QRectF(13, 13, 14, 14), 2, 2);
     }
 
-    return QIcon(pixmap);
+    painter.end();
+    return QIcon(QPixmap::fromImage(image));
+}
+
+void setTransportIcon(QPushButton* button, TransportIconKind kind, const QColor& color) {
+    if (button == nullptr) {
+        return;
+    }
+    const auto iconKind = static_cast<int>(kind);
+    const auto previousKind = button->property("transportIconKind");
+    if (previousKind.isValid() && previousKind.toInt() == iconKind) {
+        return;
+    }
+    button->setIcon(makeTransportIcon(kind, color));
+    button->setProperty("transportIconKind", iconKind);
 }
 
 QPushButton* createIconButton(TransportIconKind icon, const QString& tooltip, QWidget* parent) {
     auto* button = new QPushButton(parent);
-    button->setIcon(makeTransportIcon(icon, QColor("#16202b")));
     button->setIconSize(QSize(22, 22));
     button->setToolTip(tooltip);
     button->setAccessibleName(tooltip);
     button->setFixedSize(40, 36);
     button->setStyleSheet(ui::secondaryButtonStyleSheet());
+    setTransportIcon(button, icon, QColor("#16202b"));
     return button;
 }
 
@@ -180,17 +199,15 @@ ScenarioRunWidget::ScenarioRunWidget(
     std::function<void()> backToLayoutReviewHandler,
     QWidget* parent,
     std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState)
-    : QWidget(parent),
-      projectName_(projectName),
-      layout_(layout),
-      scenario_(scenario),
-      runner_(layout_, scenario_),
-      saveProjectHandler_(std::move(saveProjectHandler)),
-      openProjectHandler_(std::move(openProjectHandler)),
-      backToLayoutReviewHandler_(std::move(backToLayoutReviewHandler)),
-      returnAuthoringState_(std::move(returnAuthoringState)) {
-    setupUi();
-}
+    : ScenarioRunWidget(
+          projectName,
+          layout,
+          std::vector<safecrowd::domain::ScenarioDraft>{scenario},
+          std::move(saveProjectHandler),
+          std::move(openProjectHandler),
+          std::move(backToLayoutReviewHandler),
+          std::move(returnAuthoringState),
+          parent) {}
 
 ScenarioRunWidget::ScenarioRunWidget(
     const QString& projectName,
@@ -204,22 +221,63 @@ ScenarioRunWidget::ScenarioRunWidget(
     safecrowd::domain::ScenarioResultArtifacts cachedResultArtifacts,
     QWidget* parent,
     std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState)
+    : ScenarioRunWidget(
+          projectName,
+          layout,
+          std::vector<safecrowd::domain::ScenarioDraft>{scenario},
+          std::vector<SavedScenarioResultState>{{
+              .scenario = scenario,
+              .frame = std::move(cachedResultFrame),
+              .risk = std::move(cachedResultRisk),
+              .artifacts = std::move(cachedResultArtifacts),
+          }},
+          std::move(saveProjectHandler),
+          std::move(openProjectHandler),
+          std::move(backToLayoutReviewHandler),
+          std::move(returnAuthoringState),
+          parent) {}
+
+ScenarioRunWidget::ScenarioRunWidget(
+    const QString& projectName,
+    const safecrowd::domain::FacilityLayout2D& layout,
+    std::vector<safecrowd::domain::ScenarioDraft> scenarios,
+    std::function<void()> saveProjectHandler,
+    std::function<void()> openProjectHandler,
+    std::function<void()> backToLayoutReviewHandler,
+    std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState,
+    QWidget* parent)
+    : ScenarioRunWidget(
+          projectName,
+          layout,
+          std::move(scenarios),
+          {},
+          std::move(saveProjectHandler),
+          std::move(openProjectHandler),
+          std::move(backToLayoutReviewHandler),
+          std::move(returnAuthoringState),
+          parent) {}
+
+ScenarioRunWidget::ScenarioRunWidget(
+    const QString& projectName,
+    const safecrowd::domain::FacilityLayout2D& layout,
+    std::vector<safecrowd::domain::ScenarioDraft> scenarios,
+    std::vector<SavedScenarioResultState> cachedResults,
+    std::function<void()> saveProjectHandler,
+    std::function<void()> openProjectHandler,
+    std::function<void()> backToLayoutReviewHandler,
+    std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState,
+    QWidget* parent)
     : QWidget(parent),
       projectName_(projectName),
       layout_(layout),
-      scenario_(scenario),
-      runner_(layout_, scenario_),
-      cachedResultFrame_(std::move(cachedResultFrame)),
-      cachedResultRisk_(std::move(cachedResultRisk)),
-      cachedResultArtifacts_(std::move(cachedResultArtifacts)),
+      scenario_(scenarios.empty() ? safecrowd::domain::ScenarioDraft{} : scenarios.front()),
+      scenarios_(std::move(scenarios)),
+      cachedResults_(std::move(cachedResults)),
+      batchRunner_(layout_, scenarios_),
+      returnAuthoringState_(std::move(returnAuthoringState)),
       saveProjectHandler_(std::move(saveProjectHandler)),
       openProjectHandler_(std::move(openProjectHandler)),
-      backToLayoutReviewHandler_(std::move(backToLayoutReviewHandler)),
-      returnAuthoringState_(std::move(returnAuthoringState)) {
-    setupUi();
-}
-
-void ScenarioRunWidget::setupUi() {
+      backToLayoutReviewHandler_(std::move(backToLayoutReviewHandler)) {
     auto* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
@@ -236,10 +294,7 @@ void ScenarioRunWidget::setupUi() {
     shell_->setBackHandler([this]() {
         returnToAuthoring();
     });
-    canvas_ = new SimulationCanvasWidget(layout_, shell_);
-    canvas_->setConnectionBlocks(scenario_.control.connectionBlocks);
-    canvas_->setFrame(runner_.frame());
-    shell_->setCanvas(canvas_);
+    shell_->setCanvas(createRunCanvas());
     shell_->setReviewPanel(createRunPanel());
     shell_->setReviewPanelVisible(true);
     rootLayout->addWidget(shell_);
@@ -252,10 +307,9 @@ void ScenarioRunWidget::setupUi() {
             return;
         }
         if (!paused_) {
-            runner_.step(kSimulationDeltaSeconds);
-            canvas_->setFrame(runner_.frame());
+            batchRunner_.step(kSimulationDeltaSeconds);
             refreshStatus();
-            if (runner_.complete()) {
+            if (batchRunner_.complete()) {
                 timer_->stop();
             }
         }
@@ -268,8 +322,96 @@ const safecrowd::domain::ScenarioDraft& ScenarioRunWidget::scenario() const noex
     return scenario_;
 }
 
+const std::vector<safecrowd::domain::ScenarioDraft>& ScenarioRunWidget::scenarios() const noexcept {
+    return scenarios_;
+}
+
 const std::optional<ScenarioAuthoringWidget::InitialState>& ScenarioRunWidget::returnAuthoringState() const noexcept {
     return returnAuthoringState_;
+}
+
+bool ScenarioRunWidget::hasCachedResults() const noexcept {
+    return !cachedResults_.empty();
+}
+
+std::vector<SavedScenarioResultState> ScenarioRunWidget::completedResults() {
+    batchRunner_.syncResultArtifacts();
+
+    std::vector<SavedScenarioResultState> results;
+    results.reserve(batchRunner_.size());
+    for (const auto& run : batchRunner_.runs()) {
+        results.push_back({
+            .scenario = run.scenario,
+            .frame = run.frame,
+            .risk = run.resultRisk,
+            .artifacts = run.artifacts,
+        });
+    }
+    return results;
+}
+
+QWidget* ScenarioRunWidget::createRunCanvas() {
+    auto* container = new QWidget(shell_);
+    auto* layout = new QVBoxLayout(container);
+    layout->setContentsMargins(16, 16, 16, 16);
+    layout->setSpacing(12);
+
+    canvas_ = new SimulationCanvasWidget(layout_, container);
+    canvas_->setMinimumHeight(360);
+    if (!batchRunner_.empty()) {
+        const auto& run = batchRunner_.run(0);
+        canvas_->setConnectionBlocks(run.scenario.control.connectionBlocks);
+        canvas_->setFrame(run.frame);
+    }
+    layout->addWidget(canvas_, 1);
+
+    auto* cardGrid = new QGridLayout();
+    cardGrid->setContentsMargins(0, 0, 0, 0);
+    cardGrid->setSpacing(8);
+    const auto count = static_cast<int>(batchRunner_.size());
+    const auto columns = count <= 1 ? 1 : 2;
+    previewButtons_.clear();
+    previewStatusLabels_.clear();
+    previewProgressBars_.clear();
+    previewButtons_.reserve(static_cast<std::size_t>(count));
+    previewStatusLabels_.reserve(static_cast<std::size_t>(count));
+    previewProgressBars_.reserve(static_cast<std::size_t>(count));
+
+    for (int index = 0; index < count; ++index) {
+        const auto& run = batchRunner_.run(static_cast<std::size_t>(index));
+        auto* card = new QWidget(container);
+        card->setStyleSheet(ui::panelStyleSheet());
+        auto* cardLayout = new QVBoxLayout(card);
+        cardLayout->setContentsMargins(10, 10, 10, 10);
+        cardLayout->setSpacing(8);
+
+        auto* button = new QPushButton(QString::fromStdString(run.scenario.name), card);
+        button->setFont(ui::font(ui::FontRole::Body));
+        button->setStyleSheet(ui::secondaryButtonStyleSheet());
+        button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        cardLayout->addWidget(button);
+
+        auto* status = createLabel("Pending", card, ui::FontRole::Caption);
+        status->setStyleSheet(ui::mutedTextStyleSheet());
+        cardLayout->addWidget(status);
+
+        auto* progress = createProgressBar("Scenario progress against its time limit.", card);
+        cardLayout->addWidget(progress);
+
+        const int row = index / columns;
+        const int column = index % columns;
+        cardGrid->addWidget(card, row, column);
+        previewButtons_.push_back(button);
+        previewStatusLabels_.push_back(status);
+        previewProgressBars_.push_back(progress);
+
+        connect(button, &QPushButton::clicked, this, [this, index]() {
+            selectRun(index);
+        });
+    }
+
+    layout->addLayout(cardGrid);
+    return container;
 }
 
 QWidget* ScenarioRunWidget::createRunPanel() {
@@ -354,6 +496,7 @@ void ScenarioRunWidget::returnToAuthoring() {
     fastForwardingToResult_ = false;
     if (timer_ != nullptr) {
         timer_->stop();
+        timer_->setInterval(kPlaybackTimerIntervalMs);
     }
 
     auto* rootLayout = qobject_cast<QVBoxLayout*>(layout());
@@ -363,8 +506,10 @@ void ScenarioRunWidget::returnToAuthoring() {
 
     auto initial = returnAuthoringState_.value_or(ScenarioAuthoringWidget::InitialState{});
     if (initial.scenarios.empty()) {
-        initial.scenarios.push_back(scenarioStateFromDraft(scenario_, layout_));
-        initial.currentScenarioIndex = 0;
+        for (const auto& scenario : scenarios_) {
+            initial.scenarios.push_back(scenarioStateFromDraft(scenario, layout_));
+        }
+        initial.currentScenarioIndex = selectedRunIndex_;
         initial.navigationView = ScenarioAuthoringWidget::NavigationView::Layout;
     }
     initial.rightPanelMode = ScenarioAuthoringWidget::RightPanelMode::Scenario;
@@ -385,16 +530,46 @@ void ScenarioRunWidget::returnToAuthoring() {
     canvas_ = nullptr;
 }
 
-bool ScenarioRunWidget::hasCachedResult() const noexcept {
-    return cachedResultFrame_.has_value()
-        && cachedResultRisk_.has_value()
-        && cachedResultArtifacts_.has_value();
-}
-
 void ScenarioRunWidget::refreshStatus() {
-    const auto& frame = runner_.frame();
+    if (batchRunner_.empty()) {
+        return;
+    }
+    if (selectedRunIndex_ < 0 || selectedRunIndex_ >= static_cast<int>(batchRunner_.size())) {
+        selectedRunIndex_ = 0;
+    }
+    const auto& selectedRun = batchRunner_.run(static_cast<std::size_t>(selectedRunIndex_));
+    const auto& frame = selectedRun.frame;
+    if (canvas_ != nullptr) {
+        canvas_->setConnectionBlocks(selectedRun.scenario.control.connectionBlocks);
+        canvas_->setFrame(selectedRun.frame);
+    }
+    for (std::size_t index = 0; index < batchRunner_.size(); ++index) {
+        const auto& run = batchRunner_.run(index);
+        if (index < previewButtons_.size() && previewButtons_[index] != nullptr) {
+            previewButtons_[index]->setText(QString("%1%2")
+                .arg(QString::fromStdString(run.scenario.name))
+                .arg(run.complete ? "  -  Complete" : "  -  Running"));
+            previewButtons_[index]->setStyleSheet(index == static_cast<std::size_t>(selectedRunIndex_)
+                ? ui::primaryButtonStyleSheet()
+                : ui::secondaryButtonStyleSheet());
+        }
+        if (index < previewStatusLabels_.size() && previewStatusLabels_[index] != nullptr) {
+            previewStatusLabels_[index]->setText(QString("%1  -  %2 / %3 evacuated")
+                .arg(run.complete ? "Complete" : fastForwardingToResult_ ? "Fast forwarding" : paused_ ? "Paused" : "Running")
+                .arg(static_cast<int>(run.frame.evacuatedAgentCount))
+                .arg(static_cast<int>(run.frame.totalAgentCount)));
+        }
+        if (index < previewProgressBars_.size() && previewProgressBars_[index] != nullptr) {
+            previewProgressBars_[index]->setValue(percentValue(run.frame.elapsedSeconds, run.timeLimitSeconds));
+        }
+    }
     if (scenarioLabel_ != nullptr) {
-        scenarioLabel_->setText(QString("Scenario: %1").arg(QString::fromStdString(scenario_.name)));
+        scenarioLabel_->setText(QString("Scenario: %1\nBatch: %2 / %3 complete")
+            .arg(QString::fromStdString(selectedRun.scenario.name))
+            .arg(static_cast<int>(std::count_if(batchRunner_.runs().begin(), batchRunner_.runs().end(), [](const auto& run) {
+                return run.complete;
+            })))
+            .arg(static_cast<int>(batchRunner_.size())));
     }
     if (statusLabel_ != nullptr) {
         statusLabel_->setText(QString("Status: %1").arg(
@@ -405,10 +580,10 @@ void ScenarioRunWidget::refreshStatus() {
     if (elapsedLabel_ != nullptr) {
         elapsedLabel_->setText(QString("Elapsed: %1 / %2 sec")
             .arg(frame.elapsedSeconds, 0, 'f', 1)
-            .arg(runner_.timeLimitSeconds(), 0, 'f', 0));
+            .arg(selectedRun.timeLimitSeconds, 0, 'f', 0));
     }
     if (timeProgressBar_ != nullptr) {
-        timeProgressBar_->setValue(percentValue(frame.elapsedSeconds, runner_.timeLimitSeconds()));
+        timeProgressBar_->setValue(percentValue(frame.elapsedSeconds, selectedRun.timeLimitSeconds));
     }
     if (agentCountLabel_ != nullptr) {
         agentCountLabel_->setText(QString("Evacuated: %1 / %2\nActive Agents: %3")
@@ -421,7 +596,7 @@ void ScenarioRunWidget::refreshStatus() {
             static_cast<double>(frame.evacuatedAgentCount),
             static_cast<double>(frame.totalAgentCount)));
     }
-    const auto& risk = runner_.riskSnapshot();
+    const auto& risk = selectedRun.risk;
     if (riskLabel_ != nullptr) {
         riskLabel_->setText(QString("Completion Risk: %1\nStalled Agents: %2")
             .arg(safecrowd::domain::scenarioRiskLevelLabel(risk.completionRisk))
@@ -448,39 +623,52 @@ void ScenarioRunWidget::refreshStatus() {
         }
     }
     if (pauseButton_ != nullptr) {
-        pauseButton_->setIcon(makeTransportIcon(
+        setTransportIcon(
+            pauseButton_,
             paused_ ? TransportIconKind::Play : TransportIconKind::Pause,
-            QColor("#16202b")));
+            QColor("#16202b"));
         pauseButton_->setToolTip(paused_ ? "Resume simulation" : "Pause simulation");
         pauseButton_->setAccessibleName(paused_ ? "Resume simulation" : "Pause simulation");
-        pauseButton_->setEnabled(!frame.complete && !fastForwardingToResult_);
+        pauseButton_->setEnabled(!batchRunner_.complete() && !fastForwardingToResult_);
     }
     if (stopButton_ != nullptr) {
-        stopButton_->setEnabled(frame.totalAgentCount > 0);
+        stopButton_->setEnabled(frame.totalAgentCount > 0 || fastForwardingToResult_ || hasCachedResults());
     }
     if (fastForwardButton_ != nullptr) {
         fastForwardButton_->setEnabled(
-            frame.totalAgentCount > 0
-            && !frame.complete
-            && !hasCachedResult()
+            !batchRunner_.complete()
+            && !batchRunner_.empty()
+            && !hasCachedResults()
             && !fastForwardingToResult_);
     }
     if (resultButton_ != nullptr) {
-        const auto cachedAgentCount = hasCachedResult() ? cachedResultFrame_->totalAgentCount : 0;
         resultButton_->setEnabled(
             !fastForwardingToResult_
-            && ((frame.complete && frame.totalAgentCount > 0)
-                || cachedAgentCount > 0));
+            && ((batchRunner_.complete() && !batchRunner_.empty())
+                || hasCachedResults()));
     }
 }
 
+void ScenarioRunWidget::selectRun(int index) {
+    if (index < 0 || index >= static_cast<int>(batchRunner_.size())) {
+        return;
+    }
+    selectedRunIndex_ = index;
+    scenario_ = batchRunner_.run(static_cast<std::size_t>(selectedRunIndex_)).scenario;
+    refreshStatus();
+}
+
 void ScenarioRunWidget::startFastForwardToResult() {
-    if (runner_.complete()) {
-        storeResultCache(runner_);
+    if (batchRunner_.empty()) {
         refreshStatus();
         return;
     }
-    if (runner_.frame().totalAgentCount == 0 || hasCachedResult()) {
+    if (batchRunner_.complete()) {
+        batchRunner_.syncResultArtifacts();
+        refreshStatus();
+        return;
+    }
+    if (hasCachedResults()) {
         refreshStatus();
         return;
     }
@@ -503,48 +691,33 @@ void ScenarioRunWidget::advanceFastForwardToResult() {
     QElapsedTimer elapsed;
     elapsed.start();
     int steps = 0;
-    while (!runner_.complete()
+    while (!batchRunner_.complete()
            && steps < kFastForwardMaxStepsPerTick
            && elapsed.elapsed() < kFastForwardStepBudgetMs) {
-        runner_.step(kSimulationDeltaSeconds);
+        batchRunner_.step(kSimulationDeltaSeconds);
         ++steps;
     }
 
-    if (canvas_ != nullptr) {
-        canvas_->setFrame(runner_.frame());
-    }
-
-    if (runner_.complete()) {
+    if (batchRunner_.complete()) {
         fastForwardingToResult_ = false;
+        batchRunner_.syncResultArtifacts();
         if (timer_ != nullptr) {
             timer_->stop();
             timer_->setInterval(kPlaybackTimerIntervalMs);
         }
-        storeResultCache(runner_);
     }
     refreshStatus();
-}
-
-void ScenarioRunWidget::storeResultCache(const safecrowd::domain::ScenarioSimulationRunner& runner) {
-    cachedResultFrame_ = runner.frame();
-    cachedResultRisk_ = runner.resultRiskSnapshot();
-    cachedResultArtifacts_ = runner.resultArtifacts();
 }
 
 void ScenarioRunWidget::stopRun() {
     fastForwardingToResult_ = false;
     paused_ = true;
+    cachedResults_.clear();
     if (timer_ != nullptr) {
         timer_->stop();
         timer_->setInterval(kPlaybackTimerIntervalMs);
     }
-    runner_.reset(layout_, scenario_);
-    cachedResultFrame_.reset();
-    cachedResultRisk_.reset();
-    cachedResultArtifacts_.reset();
-    if (canvas_ != nullptr) {
-        canvas_->setFrame(runner_.frame());
-    }
+    batchRunner_.reset(layout_, scenarios_);
     refreshStatus();
     if (timer_ != nullptr) {
         timer_->start();
@@ -555,23 +728,14 @@ void ScenarioRunWidget::showResults() {
     if (fastForwardingToResult_) {
         return;
     }
-    if (runner_.frame().totalAgentCount == 0 && !hasCachedResult()) {
-        return;
-    }
 
-    const auto* resultFrame = &runner_.frame();
-    const auto* resultRisk = &runner_.resultRiskSnapshot();
-    const auto* resultArtifacts = &runner_.resultArtifacts();
-    if (!runner_.complete() && hasCachedResult()) {
-        resultFrame = &*cachedResultFrame_;
-        resultRisk = &*cachedResultRisk_;
-        resultArtifacts = &*cachedResultArtifacts_;
-    } else if (!runner_.complete()) {
-        return;
+    std::vector<SavedScenarioResultState> results;
+    if (batchRunner_.complete() && !batchRunner_.empty()) {
+        results = completedResults();
+    } else if (hasCachedResults()) {
+        results = cachedResults_;
     } else {
-        resultFrame = &runner_.frame();
-        resultRisk = &runner_.resultRiskSnapshot();
-        resultArtifacts = &runner_.resultArtifacts();
+        return;
     }
 
     if (timer_ != nullptr) {
@@ -583,26 +747,49 @@ void ScenarioRunWidget::showResults() {
         return;
     }
 
-    auto* resultWidget = new ScenarioResultWidget(
-        projectName_,
-        layout_,
-        scenario_,
-        *resultFrame,
-        *resultRisk,
-        *resultArtifacts,
-        [this]() {
-            if (saveProjectHandler_) {
-                saveProjectHandler_();
-            }
-        },
-        [this]() {
-            if (openProjectHandler_) {
-                openProjectHandler_();
-            }
-        },
-        backToLayoutReviewHandler_,
-        returnAuthoringState_,
-        this);
+    QWidget* resultWidget = nullptr;
+    if (results.size() == 1) {
+        const auto& result = results.front();
+        resultWidget = new ScenarioResultWidget(
+            projectName_,
+            layout_,
+            result.scenario,
+            result.frame,
+            result.risk,
+            result.artifacts,
+            [this]() {
+                if (saveProjectHandler_) {
+                    saveProjectHandler_();
+                }
+            },
+            [this]() {
+                if (openProjectHandler_) {
+                    openProjectHandler_();
+                }
+            },
+            backToLayoutReviewHandler_,
+            returnAuthoringState_,
+            this);
+    } else {
+        resultWidget = new ScenarioBatchResultWidget(
+            projectName_,
+            layout_,
+            std::move(results),
+            [this]() {
+                if (saveProjectHandler_) {
+                    saveProjectHandler_();
+                }
+            },
+            [this]() {
+                if (openProjectHandler_) {
+                    openProjectHandler_();
+                }
+            },
+            backToLayoutReviewHandler_,
+            returnAuthoringState_,
+            selectedRunIndex_,
+            this);
+    }
     rootLayout->replaceWidget(shell_, resultWidget);
     shell_->hide();
     shell_->deleteLater();
@@ -611,7 +798,7 @@ void ScenarioRunWidget::showResults() {
 }
 
 void ScenarioRunWidget::togglePaused() {
-    if (runner_.complete() || fastForwardingToResult_) {
+    if (batchRunner_.complete() || fastForwardingToResult_) {
         return;
     }
     paused_ = !paused_;

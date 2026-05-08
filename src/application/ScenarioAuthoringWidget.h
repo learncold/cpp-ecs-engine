@@ -85,7 +85,7 @@ private:
     void recomputeDiffKeysAfterScenarioChanged(ScenarioState& scenario);
     void recomputeDependentVariationDiffKeys(const QString& baselineId);
     void recomputeVariationDiffKeysIfAlternative(ScenarioState& scenario) const;
-    void runFirstStagedBaselineScenario();
+    void runStagedScenarios();
     void stageCurrentScenario();
     void updateCurrentScenarioPlacements(const std::vector<ScenarioCrowdPlacement>& placements);
     void showEmptyCanvas();
@@ -93,7 +93,7 @@ private:
     QWidget* createScenarioPanel();
     ScenarioState* currentScenario();
     const ScenarioState* currentScenario() const;
-    const ScenarioState* firstStagedBaselineScenario() const;
+    std::vector<safecrowd::domain::ScenarioDraft> stagedRunnableScenarios() const;
 
     QString projectName_{};
     safecrowd::domain::FacilityLayout2D layout_{};
