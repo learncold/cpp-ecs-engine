@@ -157,6 +157,7 @@ QWidget* createNavigationPanel(
     bool showIssues,
     std::function<void(const safecrowd::domain::ImportIssue&)> selectIssueHandler,
     std::function<void(const QString&)> selectLayoutElementHandler,
+    std::function<void(const QString&)> deleteLayoutElementHandler,
     NavigationTreeState layoutNavigationState,
     std::function<void(const QSet<QString>&)> layoutExpandedStateChangedHandler,
     const WorkspaceShell* shell,
@@ -173,7 +174,8 @@ QWidget* createNavigationPanel(
             content,
             shell != nullptr ? shell->createPanelHeader("Layout", content, false) : nullptr,
             std::move(layoutNavigationState),
-            std::move(layoutExpandedStateChangedHandler)));
+            std::move(layoutExpandedStateChangedHandler),
+            std::move(deleteLayoutElementHandler)));
         return content;
     }
 
@@ -502,6 +504,11 @@ void LayoutReviewWidget::refreshNavigationPanel() {
         },
         [this](const QString& elementId) {
             handleLayoutElementSelected(elementId);
+        },
+        [this](const QString& elementId) {
+            if (preview_ != nullptr) {
+                preview_->deleteElement(elementId);
+            }
         },
         NavigationTreeState{
             .expandedNodeIds = layoutExpandedNodeIds_,

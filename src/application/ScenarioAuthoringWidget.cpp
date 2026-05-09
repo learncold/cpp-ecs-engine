@@ -4,6 +4,9 @@
 #include <utility>
 
 #include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QFormLayout>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QInputDialog>
@@ -12,6 +15,7 @@
 #include <QLayoutItem>
 #include <QMessageBox>
 #include <QPainter>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSizePolicy>
@@ -34,6 +38,58 @@ QLabel* createLabel(const QString& text, QWidget* parent, ui::FontRole role = ui
     label->setFont(ui::font(role));
     label->setWordWrap(true);
     return label;
+}
+
+bool editOperationalEvent(
+    safecrowd::domain::OperationalEventDraft* event,
+    QWidget* parent) {
+    if (event == nullptr) {
+        return false;
+    }
+
+    QDialog dialog(parent);
+    dialog.setWindowTitle("Edit event");
+
+    auto* root = new QVBoxLayout(&dialog);
+    root->setContentsMargins(16, 16, 16, 16);
+    root->setSpacing(12);
+
+    auto* form = new QFormLayout();
+    form->setContentsMargins(0, 0, 0, 0);
+    form->setSpacing(8);
+
+    auto* nameEdit = new QLineEdit(&dialog);
+    nameEdit->setText(QString::fromStdString(event->name));
+    auto* triggerEdit = new QPlainTextEdit(&dialog);
+    triggerEdit->setPlainText(QString::fromStdString(event->triggerSummary));
+    triggerEdit->setMinimumHeight(72);
+    auto* targetEdit = new QPlainTextEdit(&dialog);
+    targetEdit->setPlainText(QString::fromStdString(event->targetSummary));
+    targetEdit->setMinimumHeight(72);
+
+    form->addRow("Name", nameEdit);
+    form->addRow("Trigger", triggerEdit);
+    form->addRow("Target", targetEdit);
+    root->addLayout(form);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    root->addWidget(buttons);
+
+    if (dialog.exec() != QDialog::Accepted) {
+        return false;
+    }
+
+    const auto name = nameEdit->text().trimmed();
+    if (name.isEmpty()) {
+        return false;
+    }
+
+    event->name = name.toStdString();
+    event->triggerSummary = triggerEdit->toPlainText().trimmed().toStdString();
+    event->targetSummary = targetEdit->toPlainText().trimmed().toStdString();
+    return true;
 }
 
 QString zoneLabel(const safecrowd::domain::Zone2D& zone) {
@@ -459,6 +515,7 @@ QWidget* createCrowdPanel(
     std::function<void(const QString&)> selectPlacementHandler,
     NavigationTreeState navigationState,
     std::function<void(const QSet<QString>&)> expandedStateChangedHandler,
+    std::function<void(const QString&)> deletePlacementHandler,
     const WorkspaceShell* shell,
     QWidget* parent) {
     return new NavigationTreeWidget(
@@ -469,7 +526,8 @@ QWidget* createCrowdPanel(
         parent,
         shell != nullptr ? shell->createPanelHeader("Crowd", parent, false) : nullptr,
         std::move(navigationState),
-        std::move(expandedStateChangedHandler));
+        std::move(expandedStateChangedHandler),
+        std::move(deletePlacementHandler));
 }
 
 std::vector<NavigationTreeNode> buildEventsTree(
@@ -613,14 +671,21 @@ QWidget* createEventsPanel(
     const safecrowd::domain::FacilityLayout2D& layout,
     const ScenarioAuthoringWidget::ScenarioState* scenario,
     const WorkspaceShell* shell,
-    QWidget* parent) {
+    QWidget* parent,
+    std::function<void(const QString&)> deleteItemHandler,
+    std::function<void(const QString&)> settingsItemHandler) {
     return new NavigationTreeWidget(
         "Events",
         buildEventsTree(layout, scenario),
         "No operational events or blocked exits yet",
         {},
         parent,
-        shell != nullptr ? shell->createPanelHeader("Events", parent, false) : nullptr);
+        shell != nullptr ? shell->createPanelHeader("Events", parent, false) : nullptr,
+        {},
+        {},
+        std::move(deleteItemHandler),
+        std::move(settingsItemHandler),
+        QString("Settings..."));
 }
 
 SavedNavigationView savedNavigationView(ScenarioAuthoringWidget::NavigationView view) {
@@ -1095,11 +1160,82 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
             [this](const QSet<QString>& expandedNodeIds) {
                 crowdExpandedNodeIds_ = expandedNodeIds;
             },
+            [this](const QString& crowdElementId) {
+                if (canvas_ != nullptr) {
+                    canvas_->deleteCrowdElementById(crowdElementId);
+                }
+            },
             shell_,
             shell_));
         return;
     }
-    shell_->setNavigationPanel(createEventsPanel(layout_, currentScenario(), shell_, shell_));
+    shell_->setNavigationPanel(createEventsPanel(
+        layout_,
+        currentScenario(),
+        shell_,
+        shell_,
+        [this](const QString& rawId) {
+            auto* scenario = currentScenario();
+            if (scenario == nullptr || rawId.isEmpty()) {
+                return;
+            }
+
+            const auto id = rawId.section('/', 0, 0);
+            if (canvas_ != nullptr && canvas_->deleteConnectionBlockById(id)) {
+                return;
+            }
+            if (canvas_ != nullptr && canvas_->deleteRouteGuidanceById(id)) {
+                return;
+            }
+
+            const auto eventId = id.toStdString();
+            auto& events = scenario->events;
+            const auto it = std::remove_if(events.begin(), events.end(), [&](const auto& event) {
+                return event.id == eventId;
+            });
+            if (it == events.end()) {
+                return;
+            }
+            events.erase(it, events.end());
+            scenario->draft.control.events = scenario->events;
+            recomputeDiffKeysAfterScenarioChanged(*scenario);
+            refreshNavigationPanel();
+            refreshInspector();
+        },
+        [this](const QString& rawId) {
+            if (canvas_ == nullptr || rawId.isEmpty()) {
+                return;
+            }
+
+            const auto id = rawId.section('/', 0, 0);
+            if (canvas_->editConnectionBlockScheduleById(id)) {
+                return;
+            }
+            if (canvas_->editRouteGuidanceById(id)) {
+                return;
+            }
+
+            auto* scenario = currentScenario();
+            if (scenario == nullptr) {
+                return;
+            }
+
+            const auto eventId = id.toStdString();
+            auto& events = scenario->events;
+            const auto it = std::find_if(events.begin(), events.end(), [&](auto& event) {
+                return event.id == eventId;
+            });
+            if (it == events.end()) {
+                return;
+            }
+            if (!editOperationalEvent(&(*it), this)) {
+                return;
+            }
+            scenario->draft.control.events = scenario->events;
+            recomputeDiffKeysAfterScenarioChanged(*scenario);
+            refreshNavigationPanel();
+            refreshInspector();
+        }));
 }
 
 void ScenarioAuthoringWidget::refreshRightPanel() {

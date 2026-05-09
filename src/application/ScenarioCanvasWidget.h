@@ -64,6 +64,11 @@ public:
     void focusLayoutElement(const QString& elementId);
     void activateLayoutElement(const QString& elementId);
     void focusPlacement(const QString& placementId);
+    bool deleteCrowdElementById(const QString& crowdElementId);
+    bool deleteConnectionBlockById(const QString& blockId);
+    bool editConnectionBlockScheduleById(const QString& blockId);
+    bool deleteRouteGuidanceById(const QString& guidanceId);
+    bool editRouteGuidanceById(const QString& guidanceId);
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;

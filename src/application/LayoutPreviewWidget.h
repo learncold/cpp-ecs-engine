@@ -52,6 +52,7 @@ public:
 
     void focusElement(const QString& elementId);
     void focusIssueTarget(const QString& targetId);
+    bool deleteElement(const QString& elementId);
     void resetView();
     void setImportResult(safecrowd::domain::ImportResult importResult);
     void setSelectionChangedHandler(std::function<void(const PreviewSelection&)> handler);
