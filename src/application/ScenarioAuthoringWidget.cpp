@@ -900,33 +900,34 @@ void ScenarioAuthoringWidget::refreshInspector() {
         auto* panelLayout = qobject_cast<QVBoxLayout*>(scenarioOverviewPanel_->layout());
         clearLayout(panelLayout);
         if (panelLayout != nullptr) {
-            auto* card = createInspectorCard(scenarioOverviewPanel_);
-            auto* cardLayout = new QVBoxLayout(card);
-            cardLayout->setContentsMargins(12, 11, 12, 11);
-            cardLayout->setSpacing(8);
-
             if (!hasScenario) {
-                addStatusMessage(cardLayout, "No scenario selected", card);
+                addStatusMessage(panelLayout, "No scenario selected", scenarioOverviewPanel_);
             } else {
                 const bool alternative = scenario->draft.role == safecrowd::domain::ScenarioRole::Alternative;
-                cardLayout->addWidget(createRoleBadge(alternative ? "Alternative" : "Baseline", alternative, card));
+                panelLayout->addWidget(createRoleBadge(
+                    alternative ? "Alternative" : "Baseline",
+                    alternative,
+                    scenarioOverviewPanel_));
 
-                auto* nameLabel = createLabel(QString::fromStdString(scenario->draft.name), card, ui::FontRole::SectionTitle);
+                auto* nameLabel = createLabel(
+                    QString::fromStdString(scenario->draft.name),
+                    scenarioOverviewPanel_,
+                    ui::FontRole::SectionTitle);
                 nameLabel->setMinimumWidth(0);
                 nameLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-                cardLayout->addWidget(nameLabel);
+                panelLayout->addWidget(nameLabel);
 
-                addMetaRow(cardLayout, "Population", QString::number(totalOccupantCount(*scenario)), card);
-                addMetaRow(cardLayout, "Events", QString::number(static_cast<int>(scenario->events.size())), card);
-                addMetaRow(cardLayout, "Guidance", QString::number(static_cast<int>(scenario->draft.control.routeGuidances.size())), card);
-                addMetaRow(cardLayout, "Blocked", QString::number(static_cast<int>(scenario->draft.control.connectionBlocks.size())), card);
-                addMetaRow(cardLayout, "Start", scenario->startText, card);
-                addMetaRow(cardLayout, "Destination", scenario->destinationText, card);
+                addMetaRow(panelLayout, "Population", QString::number(totalOccupantCount(*scenario)), scenarioOverviewPanel_);
+                addMetaRow(panelLayout, "Events", QString::number(static_cast<int>(scenario->events.size())), scenarioOverviewPanel_);
+                addMetaRow(panelLayout, "Guidance", QString::number(static_cast<int>(scenario->draft.control.routeGuidances.size())), scenarioOverviewPanel_);
+                addMetaRow(panelLayout, "Blocked", QString::number(static_cast<int>(scenario->draft.control.connectionBlocks.size())), scenarioOverviewPanel_);
+                addMetaRow(panelLayout, "Start", scenario->startText, scenarioOverviewPanel_);
+                addMetaRow(panelLayout, "Destination", scenario->destinationText, scenarioOverviewPanel_);
                 if (alternative && !scenario->baseScenarioId.isEmpty()) {
-                    addMetaRow(cardLayout, "Based on", scenario->baseScenarioId, card);
+                    addMetaRow(panelLayout, "Based on", scenario->baseScenarioId, scenarioOverviewPanel_);
                 }
             }
-            panelLayout->addWidget(card);
+            panelLayout->addStretch(1);
         }
     }
 
@@ -934,37 +935,32 @@ void ScenarioAuthoringWidget::refreshInspector() {
         auto* panelLayout = qobject_cast<QVBoxLayout*>(scenarioDiffPanel_->layout());
         clearLayout(panelLayout);
         if (panelLayout != nullptr) {
-            auto* card = createInspectorCard(scenarioDiffPanel_);
-            auto* cardLayout = new QVBoxLayout(card);
-            cardLayout->setContentsMargins(10, 10, 10, 10);
-            cardLayout->setSpacing(7);
-
-            auto* title = createLabel("Changes", card, ui::FontRole::SectionTitle);
-            cardLayout->addWidget(title);
+            auto* title = createLabel("Changes", scenarioDiffPanel_, ui::FontRole::SectionTitle);
+            panelLayout->addWidget(title);
 
             if (!hasScenario) {
-                addStatusMessage(cardLayout, "No scenario selected", card);
+                addStatusMessage(panelLayout, "No scenario selected", scenarioDiffPanel_);
             } else if (scenario->draft.role == safecrowd::domain::ScenarioRole::Baseline) {
-                addStatusMessage(cardLayout, "Baseline scenario", card);
+                addStatusMessage(panelLayout, "Baseline scenario", scenarioDiffPanel_);
             } else if (scenario->baseScenarioId.isEmpty()) {
-                addStatusMessage(cardLayout, "Alternative scenario / no baseline link", card);
+                addStatusMessage(panelLayout, "Alternative scenario / no baseline link", scenarioDiffPanel_);
             } else {
                 const auto baseId = scenario->baseScenarioId.toStdString();
                 const auto baselineIt = std::find_if(scenarios_.begin(), scenarios_.end(), [&](const auto& candidate) {
                     return candidate.draft.scenarioId == baseId;
                 });
                 if (scenario->draft.variationDiffKeys.empty()) {
-                    addStatusMessage(cardLayout, "No changed fields yet", card);
+                    addStatusMessage(panelLayout, "No changed fields yet", scenarioDiffPanel_);
                 } else {
                     for (const auto& key : scenario->draft.variationDiffKeys) {
                         const auto summary = baselineIt != scenarios_.end()
                             ? buildChangeSummaryLine(baselineIt->draft, scenario->draft, key)
                             : QString::fromStdString(key);
-                        addDiffRow(cardLayout, changeCategoryLabel(key), compactChangeSummary(summary), card);
+                        addDiffRow(panelLayout, changeCategoryLabel(key), compactChangeSummary(summary), scenarioDiffPanel_);
                     }
                 }
             }
-            panelLayout->addWidget(card);
+            panelLayout->addStretch(1);
         }
     }
 
@@ -1322,17 +1318,49 @@ QWidget* ScenarioAuthoringWidget::createScenarioPanel() {
     newScenarioButton_->setStyleSheet(ui::secondaryButtonStyleSheet());
     inspectorLayout->addWidget(newScenarioButton_);
 
-    scenarioOverviewPanel_ = new QWidget(inspector);
-    auto* overviewLayout = new QVBoxLayout(scenarioOverviewPanel_);
-    overviewLayout->setContentsMargins(0, 0, 0, 0);
-    overviewLayout->setSpacing(0);
-    inspectorLayout->addWidget(scenarioOverviewPanel_);
+    auto* overviewCard = createInspectorCard(inspector);
+    auto* overviewCardLayout = new QVBoxLayout(overviewCard);
+    overviewCardLayout->setContentsMargins(0, 0, 0, 0);
+    overviewCardLayout->setSpacing(0);
 
-    scenarioDiffPanel_ = new QWidget(inspector);
+    auto* overviewScrollArea = new QScrollArea(overviewCard);
+    overviewScrollArea->setWidgetResizable(true);
+    overviewScrollArea->setFrameShape(QFrame::NoFrame);
+    overviewScrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    overviewScrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    overviewScrollArea->setStyleSheet("QScrollArea { background: transparent; border: 0; }");
+    overviewScrollArea->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    overviewScrollArea->setMinimumHeight(150);
+    scenarioOverviewPanel_ = new QWidget(overviewScrollArea);
+    scenarioOverviewPanel_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    auto* overviewLayout = new QVBoxLayout(scenarioOverviewPanel_);
+    overviewLayout->setContentsMargins(12, 11, 12, 11);
+    overviewLayout->setSpacing(8);
+    overviewScrollArea->setWidget(scenarioOverviewPanel_);
+    overviewCardLayout->addWidget(overviewScrollArea);
+    inspectorLayout->addWidget(overviewCard, 3);
+
+    auto* diffCard = createInspectorCard(inspector);
+    auto* diffCardLayout = new QVBoxLayout(diffCard);
+    diffCardLayout->setContentsMargins(0, 0, 0, 0);
+    diffCardLayout->setSpacing(0);
+
+    auto* diffScrollArea = new QScrollArea(diffCard);
+    diffScrollArea->setWidgetResizable(true);
+    diffScrollArea->setFrameShape(QFrame::NoFrame);
+    diffScrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    diffScrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    diffScrollArea->setStyleSheet("QScrollArea { background: transparent; border: 0; }");
+    diffScrollArea->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    diffScrollArea->setMinimumHeight(110);
+    scenarioDiffPanel_ = new QWidget(diffScrollArea);
+    scenarioDiffPanel_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     auto* diffLayout = new QVBoxLayout(scenarioDiffPanel_);
-    diffLayout->setContentsMargins(0, 0, 0, 0);
-    diffLayout->setSpacing(0);
-    inspectorLayout->addWidget(scenarioDiffPanel_);
+    diffLayout->setContentsMargins(10, 10, 10, 10);
+    diffLayout->setSpacing(7);
+    diffScrollArea->setWidget(scenarioDiffPanel_);
+    diffCardLayout->addWidget(diffScrollArea);
+    inspectorLayout->addWidget(diffCard, 2);
 
     stageScenarioButton_ = new QPushButton("Stage Scenario", inspector);
     stageScenarioButton_->setFont(ui::font(ui::FontRole::Body));
@@ -1365,7 +1393,6 @@ QWidget* ScenarioAuthoringWidget::createScenarioPanel() {
     }
     stagedScenariosLabel_->setText(lines.join('\n'));
     inspectorLayout->addWidget(stagedScenariosLabel_);
-    inspectorLayout->addStretch(1);
 
     executeRunButton_ = new QPushButton("Run Staged Scenarios", inspector);
     executeRunButton_->setFont(ui::font(ui::FontRole::Body));
