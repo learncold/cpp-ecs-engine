@@ -1,10 +1,12 @@
 #pragma once
 
 #include <optional>
+#include <vector>
 
 #include <QMainWindow>
 
 #include "application/ProjectMetadata.h"
+#include "application/ProjectWorkspaceState.h"
 #include "application/ScenarioAuthoringWidget.h"
 #include "domain/ImportResult.h"
 #include "domain/ScenarioResultArtifacts.h"
@@ -40,6 +42,15 @@ private:
     void showScenarioRun(
         const safecrowd::domain::FacilityLayout2D& layout,
         const safecrowd::domain::ScenarioDraft& scenario,
+        std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState = std::nullopt);
+    void showScenarioRun(
+        const safecrowd::domain::FacilityLayout2D& layout,
+        std::vector<safecrowd::domain::ScenarioDraft> scenarios,
+        std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState = std::nullopt);
+    void showScenarioBatchResult(
+        const safecrowd::domain::FacilityLayout2D& layout,
+        std::vector<SavedScenarioResultState> results,
+        int currentResultIndex,
         std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState = std::nullopt);
     void showScenarioResult(
         const safecrowd::domain::FacilityLayout2D& layout,

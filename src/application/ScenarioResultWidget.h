@@ -7,6 +7,7 @@
 #include <QString>
 #include <QWidget>
 
+#include "application/ScenarioResultNavigation.h"
 #include "application/ScenarioAuthoringWidget.h"
 #include "domain/FacilityLayout2D.h"
 #include "domain/ScenarioAuthoring.h"
@@ -40,13 +41,6 @@ public:
     const std::optional<ScenarioAuthoringWidget::InitialState>& returnAuthoringState() const noexcept;
 
 private:
-    enum class ResultNavigationView {
-        Bottleneck,
-        Hotspot,
-        Zone,
-        Groups,
-    };
-
     void rerunScenario();
     void navigateToAuthoring(bool showRunPanel);
     void refreshResultNavigationPanel();
@@ -63,7 +57,7 @@ private:
     std::function<void()> backToLayoutReviewHandler_{};
     std::function<void(std::size_t)> bottleneckFocusHandler_{};
     std::function<void(std::size_t)> hotspotFocusHandler_{};
-    ResultNavigationView resultNavigationView_{ResultNavigationView::Bottleneck};
+    ScenarioResultNavigationView resultNavigationView_{ScenarioResultNavigationView::Bottleneck};
     WorkspaceShell* shell_{nullptr};
 };
 

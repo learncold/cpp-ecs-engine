@@ -99,6 +99,11 @@ struct ZoneRouteToExit {
     }
 };
 
+struct ZoneRouteResult {
+    ZoneRouteToExit route{};
+    double distance{0.0};
+};
+
 long long spatialKey(const SpatialCell& cell);
 SpatialCell spatialCellFor(const Point2D& point, double cellSize);
 Bounds boundsOf(const Polygon2D& polygon);
@@ -127,6 +132,11 @@ std::optional<ZoneRouteToExit> zoneRouteToNearestExit(
     const ScenarioLayoutCacheResource& cache,
     const Point2D& startPosition,
     const std::string& startZoneId);
+std::optional<ZoneRouteResult> zoneRouteToExit(
+    const ScenarioLayoutCacheResource& cache,
+    const Point2D& startPosition,
+    const std::string& startZoneId,
+    const std::string& exitZoneId);
 std::string floorIdForZone(const FacilityLayout2D& layout, const std::string& zoneId);
 bool isVerticalConnection(const Connection2D& connection);
 bool canTraverseConnection(const FacilityLayout2D& layout, const Connection2D& connection);

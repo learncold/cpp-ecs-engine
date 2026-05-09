@@ -1,6 +1,8 @@
 #include "application/ProjectPersistence.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <vector>
 
 #include <QDateTime>
 #include <QDebug>
@@ -752,6 +754,55 @@ safecrowd::domain::OperationalEventDraft eventFromJson(const QJsonObject& object
     };
 }
 
+QJsonObject routeGuidanceToJson(const safecrowd::domain::RouteGuidanceDraft& guidance) {
+    QJsonObject object;
+    object["id"] = QString::fromStdString(guidance.id);
+    object["startSeconds"] = guidance.startSeconds;
+    object["endSeconds"] = guidance.endSeconds;
+    QJsonArray periods;
+    for (const auto& period : guidance.periods) {
+        QJsonObject periodObject;
+        periodObject["startSeconds"] = period.startSeconds;
+        periodObject["endSeconds"] = period.endSeconds;
+        periods.append(periodObject);
+    }
+    object["periods"] = periods;
+    object["guidedExitZoneId"] = QString::fromStdString(guidance.guidedExitZoneId);
+    object["installConnectionId"] = QString::fromStdString(guidance.installConnectionId);
+    object["baseComplianceRate"] = guidance.baseComplianceRate;
+    object["guidanceStrength"] = guidance.guidanceStrength;
+    object["maxDetourMeters"] = guidance.maxDetourMeters;
+    return object;
+}
+
+safecrowd::domain::RouteGuidanceDraft routeGuidanceFromJson(const QJsonObject& object) {
+    safecrowd::domain::RouteGuidanceDraft guidance;
+    guidance.id = object.value("id").toString().toStdString();
+    guidance.startSeconds = object.value("startSeconds").toDouble(0.0);
+    guidance.endSeconds = object.value("endSeconds").toDouble(10.0);
+    const bool hasPeriodsField = object.contains("periods");
+    for (const auto& value : object.value("periods").toArray()) {
+        const auto periodObject = value.toObject();
+        guidance.periods.push_back({
+            .startSeconds = periodObject.value("startSeconds").toDouble(0.0),
+            .endSeconds = periodObject.value("endSeconds").toDouble(0.0),
+        });
+    }
+    if (!hasPeriodsField && guidance.periods.empty() && (object.contains("startSeconds") || object.contains("endSeconds"))) {
+        // Backward compatibility: older projects stored a single scalar period.
+        guidance.periods.push_back({
+            .startSeconds = guidance.startSeconds,
+            .endSeconds = guidance.endSeconds,
+        });
+    }
+    guidance.guidedExitZoneId = object.value("guidedExitZoneId").toString().toStdString();
+    guidance.installConnectionId = object.value("installConnectionId").toString().toStdString();
+    guidance.baseComplianceRate = object.value("baseComplianceRate").toDouble(0.5);
+    guidance.guidanceStrength = object.value("guidanceStrength").toDouble(0.55);
+    guidance.maxDetourMeters = object.value("maxDetourMeters").toDouble(20.0);
+    return guidance;
+}
+
 QJsonObject connectionBlockIntervalToJson(const safecrowd::domain::ConnectionBlockIntervalDraft& interval) {
     QJsonObject object;
     object["startSeconds"] = interval.startSeconds;
@@ -796,6 +847,12 @@ QJsonObject controlPlanToJson(const safecrowd::domain::ControlPlan& control) {
     }
     object["events"] = events;
 
+    QJsonArray routeGuidances;
+    for (const auto& guidance : control.routeGuidances) {
+        routeGuidances.append(routeGuidanceToJson(guidance));
+    }
+    object["routeGuidances"] = routeGuidances;
+
     QJsonArray connectionBlocks;
     for (const auto& block : control.connectionBlocks) {
         connectionBlocks.append(connectionBlockToJson(block));
@@ -808,6 +865,9 @@ safecrowd::domain::ControlPlan controlPlanFromJson(const QJsonObject& object) {
     safecrowd::domain::ControlPlan control;
     for (const auto& value : object.value("events").toArray()) {
         control.events.push_back(eventFromJson(value.toObject()));
+    }
+    for (const auto& value : object.value("routeGuidances").toArray()) {
+        control.routeGuidances.push_back(routeGuidanceFromJson(value.toObject()));
     }
     for (const auto& value : object.value("connectionBlocks").toArray()) {
         control.connectionBlocks.push_back(connectionBlockFromJson(value.toObject()));
@@ -1137,6 +1197,46 @@ SavedScenarioResultState resultStateFromJson(const QJsonObject& object) {
     };
 }
 
+QJsonArray scenarioDraftsToJson(const std::vector<safecrowd::domain::ScenarioDraft>& scenarios) {
+    QJsonArray array;
+    for (const auto& scenario : scenarios) {
+        array.append(scenarioDraftToJson(scenario));
+    }
+    return array;
+}
+
+std::vector<safecrowd::domain::ScenarioDraft> scenarioDraftsFromJson(const QJsonArray& array) {
+    std::vector<safecrowd::domain::ScenarioDraft> scenarios;
+    scenarios.reserve(static_cast<std::size_t>(array.size()));
+    for (const auto& value : array) {
+        scenarios.push_back(scenarioDraftFromJson(value.toObject()));
+    }
+    return scenarios;
+}
+
+QJsonObject batchResultStateToJson(const SavedScenarioBatchResultState& batch) {
+    QJsonObject object;
+    QJsonArray results;
+    for (const auto& result : batch.results) {
+        results.append(resultStateToJson(result));
+    }
+    object["results"] = results;
+    object["currentResultIndex"] = batch.currentResultIndex;
+    return object;
+}
+
+SavedScenarioBatchResultState batchResultStateFromJson(const QJsonObject& object) {
+    SavedScenarioBatchResultState batch;
+    for (const auto& value : object.value("results").toArray()) {
+        batch.results.push_back(resultStateFromJson(value.toObject()));
+    }
+    batch.currentResultIndex = object.value("currentResultIndex").toInt(0);
+    if (batch.currentResultIndex < 0 || batch.currentResultIndex >= static_cast<int>(batch.results.size())) {
+        batch.currentResultIndex = 0;
+    }
+    return batch;
+}
+
 QJsonObject workspaceStateToJson(const ProjectWorkspaceState& state) {
     QJsonObject object;
     object["version"] = 1;
@@ -1147,8 +1247,14 @@ QJsonObject workspaceStateToJson(const ProjectWorkspaceState& state) {
     if (state.runningScenario.has_value()) {
         object["runningScenario"] = scenarioDraftToJson(*state.runningScenario);
     }
+    if (!state.runningScenarios.empty()) {
+        object["runningScenarios"] = scenarioDraftsToJson(state.runningScenarios);
+    }
     if (state.result.has_value()) {
         object["result"] = resultStateToJson(*state.result);
+    }
+    if (state.batchResult.has_value()) {
+        object["batchResult"] = batchResultStateToJson(*state.batchResult);
     }
     return object;
 }
@@ -1162,8 +1268,21 @@ ProjectWorkspaceState workspaceStateFromJson(const QJsonObject& object) {
     if (object.value("runningScenario").isObject()) {
         state.runningScenario = scenarioDraftFromJson(object.value("runningScenario").toObject());
     }
+    if (object.value("runningScenarios").isArray()) {
+        state.runningScenarios = scenarioDraftsFromJson(object.value("runningScenarios").toArray());
+    } else if (state.runningScenario.has_value()) {
+        state.runningScenarios.push_back(*state.runningScenario);
+    }
     if (object.value("result").isObject()) {
         state.result = resultStateFromJson(object.value("result").toObject());
+    }
+    if (object.value("batchResult").isObject()) {
+        state.batchResult = batchResultStateFromJson(object.value("batchResult").toObject());
+    } else if (state.result.has_value()) {
+        state.batchResult = SavedScenarioBatchResultState{
+            .results = {*state.result},
+            .currentResultIndex = 0,
+        };
     }
     return state;
 }

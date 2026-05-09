@@ -211,3 +211,17 @@ SC_TEST(computeScenarioDiffKeys_detectsConnectionBlockChange) {
     SC_EXPECT_EQ(keys.size(), std::size_t{1});
     SC_EXPECT_TRUE(containsKey(keys, "control.connectionBlocks"));
 }
+
+SC_TEST(computeScenarioDiffKeys_detectsRouteGuidanceChange) {
+    const auto baseline = makeBaselineDraft();
+    auto variant = duplicateScenarioDraft(baseline, "scenario-2", "Variant");
+    RouteGuidanceDraft guidance;
+    guidance.id = "guidance-1";
+    guidance.guidedExitZoneId = "exit-east";
+    variant.control.routeGuidances.push_back(guidance);
+
+    const auto keys = computeScenarioDiffKeys(baseline, variant);
+
+    SC_EXPECT_EQ(keys.size(), std::size_t{1});
+    SC_EXPECT_TRUE(containsKey(keys, "control.routeGuidances"));
+}

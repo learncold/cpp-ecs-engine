@@ -1,0 +1,411 @@
+#include "application/ScenarioResultNavigation.h"
+
+#include <algorithm>
+#include <optional>
+#include <utility>
+
+#include <QColor>
+#include <QFrame>
+#include <QHBoxLayout>
+#include <QIcon>
+#include <QLabel>
+#include <QPainter>
+#include <QPen>
+#include <QPixmap>
+#include <QPushButton>
+#include <QScrollArea>
+#include <QSizePolicy>
+#include <QStringList>
+#include <QVBoxLayout>
+
+#include "application/UiStyle.h"
+
+namespace safecrowd::application {
+namespace {
+
+QLabel* createLabel(const QString& text, QWidget* parent, ui::FontRole role = ui::FontRole::Body) {
+    auto* label = new QLabel(text, parent);
+    label->setFont(ui::font(role));
+    label->setWordWrap(true);
+    return label;
+}
+
+QString formatOptionalSeconds(const std::optional<double>& seconds) {
+    return seconds.has_value() ? QString("%1 sec").arg(*seconds, 0, 'f', 1) : QString("Pending");
+}
+
+QLabel* createReportSectionHeader(const QString& text, QWidget* parent) {
+    auto* label = createLabel(text, parent, ui::FontRole::SectionTitle);
+    label->setStyleSheet(ui::mutedTextStyleSheet());
+    return label;
+}
+
+QFrame* createReportInfoRow(const QStringList& lines, QWidget* parent) {
+    auto* row = new QFrame(parent);
+    row->setStyleSheet(ui::panelStyleSheet());
+    row->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+
+    auto* layout = new QVBoxLayout(row);
+    layout->setContentsMargins(14, 12, 14, 12);
+    layout->setSpacing(4);
+    for (const auto& line : lines) {
+        auto* label = createLabel(line, row, ui::FontRole::Body);
+        label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        label->setStyleSheet("QLabel { background: transparent; border: 0; padding: 0; }");
+        layout->addWidget(label);
+    }
+    return row;
+}
+
+QPushButton* createReportRowButton(const QStringList& lines, QWidget* parent) {
+    auto* button = new QPushButton(parent);
+    button->setFont(ui::font(ui::FontRole::Body));
+    button->setCursor(Qt::PointingHandCursor);
+    button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+    button->setMinimumWidth(0);
+    button->setStyleSheet(ui::ghostRowStyleSheet());
+
+    auto* layout = new QVBoxLayout(button);
+    layout->setContentsMargins(14, 12, 14, 12);
+    layout->setSpacing(4);
+    for (const auto& line : lines) {
+        auto* label = createLabel(line, button, ui::FontRole::Body);
+        label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        label->setStyleSheet("QLabel { background: transparent; border: 0; padding: 0; }");
+        layout->addWidget(label);
+    }
+    return button;
+}
+
+QPushButton* createBottleneckRowButton(
+    const safecrowd::domain::ScenarioBottleneckMetric& bottleneck,
+    std::size_t index,
+    QWidget* parent) {
+    const auto label = QString::fromStdString(bottleneck.label);
+    const auto id = QString::fromStdString(bottleneck.connectionId);
+    QStringList lines{
+        QString("%1. %2").arg(static_cast<int>(index + 1)).arg(label),
+    };
+    if (!id.isEmpty() && id != label) {
+        lines.push_back(QString("ID: %1").arg(id));
+    }
+    lines.push_back(QString("%1 nearby, %2 stalled")
+        .arg(static_cast<int>(bottleneck.nearbyAgentCount))
+        .arg(static_cast<int>(bottleneck.stalledAgentCount)));
+    if (bottleneck.detectedAtSeconds.has_value()) {
+        lines.push_back(QString("Detected: %1 sec").arg(*bottleneck.detectedAtSeconds, 0, 'f', 1));
+    }
+    if (!bottleneck.floorId.empty()) {
+        lines.push_back(QString("Floor: %1").arg(QString::fromStdString(bottleneck.floorId)));
+    }
+    auto* button = createReportRowButton(lines, parent);
+    button->setToolTip(QString("%1\nClick to focus this bottleneck on the canvas.")
+        .arg(safecrowd::domain::scenarioBottleneckDefinition()));
+    return button;
+}
+
+QPushButton* createHotspotRowButton(
+    const safecrowd::domain::ScenarioCongestionHotspot& hotspot,
+    std::size_t index,
+    QWidget* parent) {
+    QStringList lines{
+        QString("%1. (%2, %3) - %4 agents")
+            .arg(static_cast<int>(index + 1))
+            .arg(hotspot.center.x, 0, 'f', 1)
+            .arg(hotspot.center.y, 0, 'f', 1)
+            .arg(static_cast<int>(hotspot.agentCount)),
+    };
+    if (hotspot.detectedAtSeconds.has_value()) {
+        lines.push_back(QString("Detected: %1 sec").arg(*hotspot.detectedAtSeconds, 0, 'f', 1));
+    }
+    if (!hotspot.floorId.empty()) {
+        lines.push_back(QString("Floor: %1").arg(QString::fromStdString(hotspot.floorId)));
+    }
+    auto* button = createReportRowButton(lines, parent);
+    button->setToolTip(QString("%1\nClick to focus this hotspot on the canvas.")
+        .arg(safecrowd::domain::scenarioHotspotDefinition()));
+    return button;
+}
+
+QFrame* createLegendSwatch(const QColor& color, QWidget* parent) {
+    auto* swatch = new QFrame(parent);
+    swatch->setFixedSize(22, 12);
+    swatch->setStyleSheet(QString(
+        "QFrame {"
+        " background: %1;"
+        " border: 1px solid rgba(127, 29, 29, 80);"
+        " border-radius: 3px;"
+        "}").arg(color.name()));
+    return swatch;
+}
+
+QWidget* createHotspotLegend(QWidget* parent) {
+    auto* legend = new QWidget(parent);
+    auto* layout = new QHBoxLayout(legend);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(6);
+
+    auto* label = createLabel("Intensity", legend, ui::FontRole::Caption);
+    label->setStyleSheet(ui::subtleTextStyleSheet());
+    layout->addWidget(label);
+    layout->addWidget(createLegendSwatch(QColor("#f97316"), legend));
+    layout->addWidget(createLegendSwatch(QColor("#dc2626"), legend));
+    layout->addWidget(createLegendSwatch(QColor("#b91c1c"), legend));
+    layout->addStretch(1);
+    legend->setToolTip("Hotspot color intensity is relative to the largest hotspot in this result.");
+    return legend;
+}
+
+QIcon makeResultNavigationIcon(const QString& tabId, const QColor& color) {
+    QPixmap pixmap(44, 44);
+    pixmap.fill(Qt::transparent);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(QPen(color, 2.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(Qt::NoBrush);
+
+    if (tabId == "bottleneck") {
+        painter.drawLine(QPointF(12, 12), QPointF(20, 21));
+        painter.drawLine(QPointF(12, 32), QPointF(20, 23));
+        painter.drawLine(QPointF(32, 12), QPointF(24, 21));
+        painter.drawLine(QPointF(32, 32), QPointF(24, 23));
+        painter.setBrush(color);
+        painter.drawEllipse(QPointF(22, 22), 2.8, 2.8);
+    } else if (tabId == "hotspot") {
+        painter.drawEllipse(QPointF(22, 22), 12, 12);
+        painter.drawEllipse(QPointF(22, 22), 7, 7);
+        painter.setBrush(color);
+        painter.drawEllipse(QPointF(22, 22), 3, 3);
+    } else if (tabId == "zone") {
+        painter.drawRoundedRect(QRectF(11, 11, 22, 22), 4, 4);
+        painter.drawLine(QPointF(22, 11), QPointF(22, 33));
+        painter.drawLine(QPointF(11, 22), QPointF(33, 22));
+    } else {
+        painter.drawEllipse(QPointF(22, 14), 5, 5);
+        painter.drawEllipse(QPointF(14, 20), 4, 4);
+        painter.drawEllipse(QPointF(30, 20), 4, 4);
+        painter.drawArc(QRectF(12, 22, 20, 14), 20 * 16, 140 * 16);
+        painter.drawArc(QRectF(5, 26, 18, 10), 30 * 16, 120 * 16);
+        painter.drawArc(QRectF(21, 26, 18, 10), 30 * 16, 120 * 16);
+    }
+
+    return QIcon(pixmap);
+}
+
+struct ResultReportPanelParts {
+    QWidget* panel{nullptr};
+    QWidget* content{nullptr};
+    QVBoxLayout* contentLayout{nullptr};
+};
+
+ResultReportPanelParts createResultReportPanel(
+    const QString& title,
+    const QString& caption,
+    QWidget* parent) {
+    auto* panel = new QWidget(parent);
+    auto* layout = new QVBoxLayout(panel);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(12);
+
+    auto* header = createReportSectionHeader(title, panel);
+    layout->addWidget(header);
+    if (!caption.isEmpty()) {
+        auto* captionLabel = createLabel(caption, panel, ui::FontRole::Caption);
+        captionLabel->setStyleSheet(ui::subtleTextStyleSheet());
+        layout->addWidget(captionLabel);
+    }
+
+    auto* area = new QScrollArea(panel);
+    area->setWidgetResizable(true);
+    area->setFrameShape(QFrame::NoFrame);
+    area->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    ui::polishScrollArea(area);
+
+    auto* content = new QWidget(area);
+    content->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    auto* contentLayout = new QVBoxLayout(content);
+    contentLayout->setContentsMargins(0, 0, 10, 0);
+    contentLayout->setSpacing(12);
+    area->setWidget(content);
+    layout->addWidget(area, 1);
+
+    return {
+        .panel = panel,
+        .content = content,
+        .contentLayout = contentLayout,
+    };
+}
+
+QWidget* createBottleneckReportPanel(
+    const safecrowd::domain::ScenarioRiskSnapshot& risk,
+    std::function<void(std::size_t)> bottleneckFocusHandler,
+    QWidget* parent) {
+    auto parts = createResultReportPanel("Bottleneck", "Detected passage constraints", parent);
+    auto* bottleneckHeader = createReportSectionHeader("Bottlenecks", parts.content);
+    bottleneckHeader->setToolTip(safecrowd::domain::scenarioBottleneckDefinition());
+    parts.contentLayout->addWidget(bottleneckHeader);
+    if (risk.bottlenecks.empty()) {
+        auto* empty = createLabel("None detected", parts.content);
+        empty->setStyleSheet(ui::mutedTextStyleSheet());
+        parts.contentLayout->addWidget(empty);
+    } else {
+        for (std::size_t index = 0; index < risk.bottlenecks.size(); ++index) {
+            auto* row = createBottleneckRowButton(risk.bottlenecks[index], index, parts.content);
+            QObject::connect(row, &QPushButton::clicked, parts.content, [bottleneckFocusHandler, index]() {
+                if (bottleneckFocusHandler) {
+                    bottleneckFocusHandler(index);
+                }
+            });
+            parts.contentLayout->addWidget(row);
+        }
+    }
+    parts.contentLayout->addStretch(1);
+    return parts.panel;
+}
+
+QWidget* createHotspotReportPanel(
+    const safecrowd::domain::ScenarioRiskSnapshot& risk,
+    std::function<void(std::size_t)> hotspotFocusHandler,
+    QWidget* parent) {
+    auto parts = createResultReportPanel("Hotspot", "Peak congestion locations", parent);
+    auto* hotspotHeader = createReportSectionHeader("Hotspots", parts.content);
+    hotspotHeader->setToolTip(safecrowd::domain::scenarioHotspotDefinition());
+    parts.contentLayout->addWidget(hotspotHeader);
+    parts.contentLayout->addWidget(createHotspotLegend(parts.content));
+    if (risk.hotspots.empty()) {
+        auto* empty = createLabel("None detected", parts.content);
+        empty->setStyleSheet(ui::mutedTextStyleSheet());
+        parts.contentLayout->addWidget(empty);
+    } else {
+        for (std::size_t index = 0; index < risk.hotspots.size(); ++index) {
+            auto* row = createHotspotRowButton(risk.hotspots[index], index, parts.content);
+            QObject::connect(row, &QPushButton::clicked, parts.content, [hotspotFocusHandler, index]() {
+                if (hotspotFocusHandler) {
+                    hotspotFocusHandler(index);
+                }
+            });
+            parts.contentLayout->addWidget(row);
+        }
+    }
+    parts.contentLayout->addStretch(1);
+    return parts.panel;
+}
+
+QWidget* createZoneReportPanel(const safecrowd::domain::ScenarioResultArtifacts& artifacts, QWidget* parent) {
+    auto parts = createResultReportPanel("Zone", "Completion by source zone", parent);
+    if (artifacts.zoneCompletion.empty()) {
+        auto* empty = createLabel("No zone completion data", parts.content);
+        empty->setStyleSheet(ui::mutedTextStyleSheet());
+        parts.contentLayout->addWidget(empty);
+    } else {
+        for (const auto& zone : artifacts.zoneCompletion) {
+            parts.contentLayout->addWidget(createReportInfoRow({
+                QString::fromStdString(zone.zoneLabel),
+                QString("People: %1    Out: %2")
+                    .arg(static_cast<int>(zone.initialCount))
+                    .arg(static_cast<int>(zone.evacuatedCount)),
+                QString("Last: %1").arg(formatOptionalSeconds(zone.lastCompletionTimeSeconds)),
+            }, parts.content));
+        }
+    }
+    parts.contentLayout->addStretch(1);
+    return parts.panel;
+}
+
+QWidget* createGroupsReportPanel(const safecrowd::domain::ScenarioResultArtifacts& artifacts, QWidget* parent) {
+    auto parts = createResultReportPanel("Groups", "Completion by crowd placement", parent);
+    if (artifacts.placementCompletion.empty()) {
+        auto* empty = createLabel("No group completion data", parts.content);
+        empty->setStyleSheet(ui::mutedTextStyleSheet());
+        parts.contentLayout->addWidget(empty);
+    } else {
+        for (const auto& group : artifacts.placementCompletion) {
+            parts.contentLayout->addWidget(createReportInfoRow({
+                QString::fromStdString(group.placementId),
+                QString("People: %1    Out: %2")
+                    .arg(static_cast<int>(group.initialCount))
+                    .arg(static_cast<int>(group.evacuatedCount)),
+                QString("Last: %1").arg(formatOptionalSeconds(group.lastCompletionTimeSeconds)),
+            }, parts.content));
+        }
+    }
+    parts.contentLayout->addStretch(1);
+    return parts.panel;
+}
+
+}  // namespace
+
+std::vector<WorkspaceNavigationTab> scenarioResultNavigationTabs() {
+    return {
+        {
+            .id = "bottleneck",
+            .label = "Bottleneck",
+            .icon = makeResultNavigationIcon("bottleneck", QColor("#1f5fae")),
+        },
+        {
+            .id = "hotspot",
+            .label = "Hotspot",
+            .icon = makeResultNavigationIcon("hotspot", QColor("#1f5fae")),
+        },
+        {
+            .id = "zone",
+            .label = "Zone",
+            .icon = makeResultNavigationIcon("zone", QColor("#1f5fae")),
+        },
+        {
+            .id = "groups",
+            .label = "Groups",
+            .icon = makeResultNavigationIcon("groups", QColor("#1f5fae")),
+        },
+    };
+}
+
+QString scenarioResultNavigationTabId(ScenarioResultNavigationView view) {
+    switch (view) {
+    case ScenarioResultNavigationView::Hotspot:
+        return "hotspot";
+    case ScenarioResultNavigationView::Zone:
+        return "zone";
+    case ScenarioResultNavigationView::Groups:
+        return "groups";
+    case ScenarioResultNavigationView::Bottleneck:
+    default:
+        return "bottleneck";
+    }
+}
+
+ScenarioResultNavigationView scenarioResultNavigationViewFromTabId(const QString& tabId) {
+    if (tabId == "hotspot") {
+        return ScenarioResultNavigationView::Hotspot;
+    }
+    if (tabId == "zone") {
+        return ScenarioResultNavigationView::Zone;
+    }
+    if (tabId == "groups") {
+        return ScenarioResultNavigationView::Groups;
+    }
+    return ScenarioResultNavigationView::Bottleneck;
+}
+
+QWidget* createScenarioResultNavigationPanel(
+    ScenarioResultNavigationView view,
+    const safecrowd::domain::ScenarioRiskSnapshot& risk,
+    const safecrowd::domain::ScenarioResultArtifacts& artifacts,
+    std::function<void(std::size_t)> bottleneckFocusHandler,
+    std::function<void(std::size_t)> hotspotFocusHandler,
+    QWidget* parent) {
+    switch (view) {
+    case ScenarioResultNavigationView::Hotspot:
+        return createHotspotReportPanel(risk, std::move(hotspotFocusHandler), parent);
+    case ScenarioResultNavigationView::Zone:
+        return createZoneReportPanel(artifacts, parent);
+    case ScenarioResultNavigationView::Groups:
+        return createGroupsReportPanel(artifacts, parent);
+    case ScenarioResultNavigationView::Bottleneck:
+    default:
+        return createBottleneckReportPanel(risk, std::move(bottleneckFocusHandler), parent);
+    }
+}
+
+}  // namespace safecrowd::application

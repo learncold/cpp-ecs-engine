@@ -25,6 +25,11 @@ public:
         : layoutCache_(buildScenarioLayoutCache(std::move(layout))) {
     }
 
+    ScenarioSimulationMotionSystem(FacilityLayout2D layout, std::vector<RouteGuidanceDraft> routeGuidances)
+        : layoutCache_(buildScenarioLayoutCache(std::move(layout))),
+          routeGuidances_(std::move(routeGuidances)) {
+    }
+
     void configure(engine::EngineWorld& world) override {
         if (layoutCache_.has_value() && !world.resources().contains<ScenarioLayoutCacheResource>()) {
             world.resources().set(*layoutCache_);
@@ -32,8 +37,6 @@ public:
     }
 
     void update(engine::EngineWorld& world, const engine::EngineStepContext& step) override {
-        (void)step;
-
         auto& resources = world.resources();
         if (!resources.contains<ScenarioSimulationStepResource>()) {
             return;
@@ -61,6 +64,7 @@ public:
         std::vector<MovementPlan> plans;
         plans.reserve(entities.size());
 
+        applyRouteGuidance(query, entities, layoutCache, clock.elapsedSeconds, step.derivedSeed);
         advanceRoutesForCurrentZones(query, entities, layoutCache);
         advanceRoutesForWaypointProgress(query, 0.0, entities, layoutCache);
         replanBlockedExitRoutes(query, entities, layoutCache, clock.elapsedSeconds, layoutRevision);
@@ -641,6 +645,277 @@ private:
         return targetFloorId;
     }
 
+    static std::uint64_t fnv1a64(const std::string& value) {
+        std::uint64_t hash = 1469598103934665603ULL;
+        for (const unsigned char ch : value) {
+            hash ^= static_cast<std::uint64_t>(ch);
+            hash *= 1099511628211ULL;
+        }
+        return hash;
+    }
+
+    static std::uint64_t mix64(std::uint64_t value) {
+        value += 0x9e3779b97f4a7c15ULL;
+        value = (value ^ (value >> 30U)) * 0xbf58476d1ce4e5b9ULL;
+        value = (value ^ (value >> 27U)) * 0x94d049bb133111ebULL;
+        return value ^ (value >> 31U);
+    }
+
+    static double uniform01(std::uint64_t value) {
+        const auto mixed = mix64(value);
+        const auto mantissa = mixed >> 11U;
+        return static_cast<double>(mantissa) * (1.0 / 9007199254740992.0);
+    }
+
+    static double clamp01(double value) {
+        return std::clamp(value, 0.0, 1.0);
+    }
+
+    static double logit(double p) {
+        const auto clamped = std::clamp(p, 1e-6, 1.0 - 1e-6);
+        return std::log(clamped / (1.0 - clamped));
+    }
+
+    static double sigmoid(double x) {
+        if (x >= 0.0) {
+            const auto z = std::exp(-x);
+            return 1.0 / (1.0 + z);
+        }
+        const auto z = std::exp(x);
+        return z / (1.0 + z);
+    }
+
+    struct ActiveRouteGuidance {
+        const RouteGuidanceDraft* guidance{nullptr};
+        std::size_t periodIndex{0};
+        double startSeconds{0.0};
+        double endSeconds{0.0};
+    };
+
+    std::optional<ActiveRouteGuidance> activeRouteGuidance(double elapsedSeconds) const {
+        std::optional<ActiveRouteGuidance> best;
+        double bestStart = -1.0;
+
+        for (const auto& guidance : routeGuidances_) {
+            if (guidance.periods.empty()) {
+                // No periods configured => always active (like connection blocks with no intervals).
+                const double start = 0.0;
+                const double end = 1e18;
+                if (elapsedSeconds + 1e-9 < start || elapsedSeconds > end + 1e-9) {
+                    continue;
+                }
+                if (!best.has_value() || start >= bestStart) {
+                    bestStart = start;
+                    best = ActiveRouteGuidance{.guidance = &guidance, .periodIndex = 0, .startSeconds = start, .endSeconds = end};
+                }
+                continue;
+            }
+
+            for (std::size_t index = 0; index < guidance.periods.size(); ++index) {
+                const auto& period = guidance.periods[index];
+                const auto start = std::max(0.0, period.startSeconds);
+                const auto end = std::max(start, std::max(0.0, period.endSeconds));
+                if (elapsedSeconds + 1e-9 < start) {
+                    continue;
+                }
+                if (elapsedSeconds > end + 1e-9) {
+                    continue;
+                }
+                if (!best.has_value() || start >= bestStart) {
+                    bestStart = start;
+                    best = ActiveRouteGuidance{.guidance = &guidance, .periodIndex = index, .startSeconds = start, .endSeconds = end};
+                }
+            }
+        }
+
+        return best;
+    }
+
+    std::optional<double> zoneDistanceToExit(
+        const ScenarioLayoutCacheResource& layoutCache,
+        const Point2D& start,
+        const std::string& startZoneId,
+        const std::string& exitZoneId) const {
+        const auto result = zoneRouteToExit(layoutCache, start, startZoneId, exitZoneId);
+        if (!result.has_value()) {
+            return std::nullopt;
+        }
+        return result->distance;
+    }
+
+    double complianceProbability(
+        const RouteGuidanceDraft& guidance,
+        const Agent& agent,
+        double detourMeters) const {
+        constexpr double kStrengthBaseline = 0.55;
+        constexpr double kStrengthWeight = 4.0;
+        constexpr double kDetourWeight = 2.0;
+        constexpr double kPropensityWeight = 1.0;
+
+        const auto base = logit(clamp01(guidance.baseComplianceRate));
+        const auto strength = clamp01(guidance.guidanceStrength);
+        const auto detourRatio = std::max(0.0, detourMeters) / std::max(1e-6, guidance.maxDetourMeters);
+        const auto propensity = clamp01(agent.guidancePropensity);
+        const auto score =
+            base
+            + (kStrengthWeight * (strength - kStrengthBaseline))
+            - (kDetourWeight * detourRatio)
+            + (kPropensityWeight * logit(propensity));
+        return clamp01(sigmoid(score));
+    }
+
+    void applyRouteGuidance(
+        engine::WorldQuery& query,
+        const std::vector<engine::Entity>& entities,
+        const ScenarioLayoutCacheResource& layoutCache,
+        double elapsedSeconds,
+        std::uint64_t derivedSeed) {
+        // Keep this small to avoid frame spikes when guidance toggles.
+        // Higher values converge faster but may cause noticeable hitching with many agents.
+        constexpr std::size_t kGuidanceReplanBudgetPerFrame = 50;
+
+        const auto active = activeRouteGuidance(elapsedSeconds);
+        std::string activeId;
+        if (active.has_value() && active->guidance != nullptr) {
+            activeId = active->guidance->id;
+            if (!active->guidance->periods.empty()) {
+                activeId.append(":p");
+                activeId.append(std::to_string(active->periodIndex));
+            }
+        }
+
+        if (activeId != activeRouteGuidanceId_) {
+            activeRouteGuidanceId_ = activeId;
+            guidanceReplanCursor_ = 0;
+            guidanceReplanSeed_ = derivedSeed;
+            if (active.has_value() && active->guidance != nullptr) {
+                guidanceReplanGuidance_ = *active->guidance;
+            } else {
+                guidanceReplanGuidance_.reset();
+            }
+            guidanceReplanIdHash_ = fnv1a64(activeId);
+            guidanceReplanPending_ = true;
+        }
+
+        if (!guidanceReplanPending_ || guidanceReplanCursor_ >= entities.size()) {
+            return;
+        }
+
+        const auto endIndex = std::min<std::size_t>(entities.size(), guidanceReplanCursor_ + kGuidanceReplanBudgetPerFrame);
+
+        const RouteGuidanceDraft* activeGuidance = guidanceReplanGuidance_.has_value() ? &*guidanceReplanGuidance_ : nullptr;
+        const auto activeIdHash = guidanceReplanIdHash_;
+        const auto stableSeed = guidanceReplanSeed_;
+
+        for (std::size_t i = guidanceReplanCursor_; i < endIndex; ++i) {
+            const auto entity = entities[i];
+            const auto& status = query.get<EvacuationStatus>(entity);
+            if (status.evacuated) {
+                continue;
+            }
+
+            const auto& position = query.get<Position>(entity);
+            const auto& agent = query.get<Agent>(entity);
+            auto& route = query.get<EvacuationRoute>(entity);
+            if (route.originalDestinationZoneId.empty()) {
+                route.originalDestinationZoneId = route.destinationZoneId;
+            }
+
+            const auto startZoneId = zoneAt(layoutCache, position.value, route.currentFloorId);
+            if (startZoneId.empty()) {
+                continue;
+            }
+
+            if (activeGuidance == nullptr) {
+                route.guidanceEventId.clear();
+                route.followsGuidance = false;
+
+                std::string desiredExit = route.originalDestinationZoneId;
+                if (desiredExit.empty()) {
+                    continue;
+                }
+
+                if (route.destinationZoneId == desiredExit && !route.waypoints.empty()) {
+                    continue;
+                }
+
+                RoutePlan plan = routePlanToExit(layoutCache, position.value, startZoneId, desiredExit);
+                if (plan.destinationZoneId.empty()) {
+                    plan = routePlanToNearestExit(layoutCache, position.value, startZoneId);
+                }
+                if (plan.destinationZoneId.empty()) {
+                    continue;
+                }
+                replaceRouteWithPlan(route, plan, position.value);
+                route.nextExitReplanSeconds = elapsedSeconds + 0.25;
+                continue;
+            }
+
+            bool guidedExitValid = false;
+            if (!activeGuidance->guidedExitZoneId.empty()) {
+                if (const auto* exitZone = findCachedZone(layoutCache, activeGuidance->guidedExitZoneId);
+                    exitZone != nullptr && exitZone->kind == ZoneKind::Exit) {
+                    guidedExitValid = true;
+                }
+            }
+
+            // Detour estimation can be expensive; skip it unless guidance has a detour limit.
+            double detourMeters = 0.0;
+            if (guidedExitValid && !route.originalDestinationZoneId.empty()) {
+                // Use a cheap approximation for detour to avoid expensive graph searches when guidance toggles.
+                // This detour is only used for compliance probability; the actual route still uses full planning.
+                const auto* originalExit = findCachedZone(layoutCache, route.originalDestinationZoneId);
+                const auto* guidedExit = findCachedZone(layoutCache, activeGuidance->guidedExitZoneId);
+                if (originalExit != nullptr && guidedExit != nullptr && originalExit->kind == ZoneKind::Exit
+                    && guidedExit->kind == ZoneKind::Exit) {
+                    const auto originalDistance = distanceBetween(position.value, polygonCenter(originalExit->area));
+                    const auto guidedDistance = distanceBetween(position.value, polygonCenter(guidedExit->area));
+                    detourMeters = std::max(0.0, guidedDistance - originalDistance);
+                }
+            }
+
+            const auto pFollow = complianceProbability(*activeGuidance, agent, detourMeters);
+            const auto u = uniform01(
+                stableSeed
+                ^ activeIdHash
+                ^ (static_cast<std::uint64_t>(entity.index) << 1U)
+                ^ static_cast<std::uint64_t>(entity.generation));
+            const bool follows = u < pFollow;
+
+            route.guidanceEventId = activeId;
+            route.followsGuidance = follows;
+
+            std::string desiredExit;
+            if (follows && guidedExitValid) {
+                desiredExit = activeGuidance->guidedExitZoneId;
+            } else if (!follows) {
+                desiredExit = route.originalDestinationZoneId;
+            }
+
+            if (!desiredExit.empty() && route.destinationZoneId == desiredExit && !route.waypoints.empty()) {
+                continue;
+            }
+
+            RoutePlan plan;
+            if (!desiredExit.empty()) {
+                plan = routePlanToExit(layoutCache, position.value, startZoneId, desiredExit);
+            }
+            if (plan.destinationZoneId.empty()) {
+                plan = routePlanToNearestExit(layoutCache, position.value, startZoneId);
+            }
+            if (plan.destinationZoneId.empty()) {
+                continue;
+            }
+            replaceRouteWithPlan(route, plan, position.value);
+            route.nextExitReplanSeconds = elapsedSeconds + 0.25;
+        }
+
+        guidanceReplanCursor_ = endIndex;
+        if (guidanceReplanCursor_ >= entities.size()) {
+            guidanceReplanPending_ = false;
+        }
+    }
+
     RoutePlan routePlanToNearestExit(
         const ScenarioLayoutCacheResource& layoutCache,
         const Point2D& start,
@@ -719,6 +994,86 @@ private:
         return plan;
     }
 
+    RoutePlan routePlanToExit(
+        const ScenarioLayoutCacheResource& layoutCache,
+        const Point2D& start,
+        const std::string& startZoneId,
+        const std::string& exitZoneId) const {
+        RoutePlan plan;
+        const auto zoneRouteResult = zoneRouteToExit(layoutCache, start, startZoneId, exitZoneId);
+        if (!zoneRouteResult.has_value() || zoneRouteResult->route.empty()) {
+            return plan;
+        }
+
+        const auto& zoneRoute = zoneRouteResult->route;
+        plan.destinationZoneId = zoneRoute.zoneIds.back();
+
+        Point2D segmentStart = start;
+        auto appendSegment = [&](const std::vector<Point2D>& segment,
+                                 const LineSegment2D& finalPassage,
+                                 const std::string& finalFromZoneId,
+                                 const std::string& finalZoneId,
+                                 const std::string& finalFloorId,
+                                 const std::string& finalConnectionId,
+                                 bool finalVerticalTransition) {
+            for (std::size_t waypointIndex = 0; waypointIndex < segment.size(); ++waypointIndex) {
+                const bool isFinalWaypoint = waypointIndex + 1 == segment.size();
+                plan.waypoints.push_back(segment[waypointIndex]);
+                plan.waypointPassages.push_back(isFinalWaypoint ? finalPassage : pointPassage(segment[waypointIndex]));
+                plan.waypointFromZoneIds.push_back(isFinalWaypoint ? finalFromZoneId : std::string{});
+                plan.waypointZoneIds.push_back(isFinalWaypoint ? finalZoneId : std::string{});
+                plan.waypointFloorIds.push_back(isFinalWaypoint ? finalFloorId : std::string{});
+                plan.waypointConnectionIds.push_back(isFinalWaypoint ? finalConnectionId : std::string{});
+                plan.waypointVerticalTransitions.push_back(isFinalWaypoint && finalVerticalTransition);
+            }
+        };
+
+        for (std::size_t index = 1; index < zoneRoute.zoneIds.size(); ++index) {
+            const auto& fromZoneId = zoneRoute.zoneIds[index - 1];
+            const auto& toZoneId = zoneRoute.zoneIds[index];
+            const auto connectionIndex = zoneRoute.connectionIndices[index - 1];
+            if (connectionIndex < layoutCache.layout.connections.size()) {
+                const auto* connection = &layoutCache.layout.connections[connectionIndex];
+                const auto passage = passageWithClearance(*connection, kCandidateClearance);
+                const auto fromFloorId = cachedFloorIdForZone(layoutCache, fromZoneId);
+                const auto toFloorId = cachedFloorIdForZone(layoutCache, toZoneId);
+                const auto& segmentLayout = cachedLayoutForFloor(layoutCache, fromFloorId);
+                const auto target = closestPointOnSegment(segmentStart, passage.start, passage.end);
+                const auto segment = buildPath(segmentLayout, segmentStart, target, kCandidateClearance);
+                appendSegment(
+                    segment,
+                    passage,
+                    fromZoneId,
+                    toZoneId,
+                    toFloorId.empty() ? fromFloorId : toFloorId,
+                    connection->id,
+                    isVerticalConnection(*connection));
+                segmentStart = target;
+            }
+        }
+
+        if (const auto* exitZone = findCachedZone(layoutCache, zoneRoute.zoneIds.back())) {
+            const auto exitCenter = polygonCenter(exitZone->area);
+            if (distanceBetween(segmentStart, exitCenter) > kArrivalEpsilon) {
+                const auto exitFloorId = exitZone->floorId;
+                const auto& segmentLayout = cachedLayoutForFloor(layoutCache, exitFloorId);
+                const auto segment = buildPath(segmentLayout, segmentStart, exitCenter, kCandidateClearance);
+                appendSegment(segment, pointPassage(exitCenter), std::string{}, exitZone->id, exitFloorId, std::string{}, false);
+            }
+        }
+
+        if (!plan.waypoints.empty() && distanceBetween(start, plan.waypoints.front()) <= kArrivalEpsilon) {
+            plan.waypoints.erase(plan.waypoints.begin());
+            plan.waypointPassages.erase(plan.waypointPassages.begin());
+            plan.waypointFromZoneIds.erase(plan.waypointFromZoneIds.begin());
+            plan.waypointZoneIds.erase(plan.waypointZoneIds.begin());
+            plan.waypointFloorIds.erase(plan.waypointFloorIds.begin());
+            plan.waypointConnectionIds.erase(plan.waypointConnectionIds.begin());
+            plan.waypointVerticalTransitions.erase(plan.waypointVerticalTransitions.begin());
+        }
+        return plan;
+    }
+
     void replaceRouteWithPlan(EvacuationRoute& route, const RoutePlan& plan, const Point2D& start) const {
         route.destinationZoneId = plan.destinationZoneId;
         route.waypoints = plan.waypoints;
@@ -754,7 +1109,13 @@ private:
             return false;
         }
 
-        const auto plan = routePlanToNearestExit(layoutCache, startPoint, startZoneId);
+        RoutePlan plan;
+        if (route.followsGuidance && !route.destinationZoneId.empty()) {
+            plan = routePlanToExit(layoutCache, startPoint, startZoneId, route.destinationZoneId);
+        }
+        if (plan.destinationZoneId.empty()) {
+            plan = routePlanToNearestExit(layoutCache, startPoint, startZoneId);
+        }
         if (plan.destinationZoneId.empty()) {
             return false;
         }
@@ -1078,7 +1439,13 @@ private:
                 continue;
             }
 
-            const auto plan = routePlanToNearestExit(layoutCache, position.value, startZoneId);
+            RoutePlan plan;
+            if (route.followsGuidance && !route.destinationZoneId.empty()) {
+                plan = routePlanToExit(layoutCache, position.value, startZoneId, route.destinationZoneId);
+            }
+            if (plan.destinationZoneId.empty()) {
+                plan = routePlanToNearestExit(layoutCache, position.value, startZoneId);
+            }
             if (plan.destinationZoneId.empty()) {
                 route.noExitAvailable = true;
                 route.destinationZoneId.clear();
@@ -1383,8 +1750,16 @@ private:
     }
 
     std::optional<ScenarioLayoutCacheResource> layoutCache_{};
+    std::vector<RouteGuidanceDraft> routeGuidances_{};
+    std::string activeRouteGuidanceId_{};
+    bool guidanceReplanPending_{false};
+    std::size_t guidanceReplanCursor_{0};
+    std::optional<RouteGuidanceDraft> guidanceReplanGuidance_{};
+    std::uint64_t guidanceReplanSeed_{0U};
+    std::uint64_t guidanceReplanIdHash_{0U};
 };
-
+
+
 
 
 }  // namespace
@@ -1395,6 +1770,12 @@ std::unique_ptr<engine::EngineSystem> makeScenarioSimulationMotionSystem() {
 
 std::unique_ptr<engine::EngineSystem> makeScenarioSimulationMotionSystem(FacilityLayout2D layout) {
     return std::make_unique<ScenarioSimulationMotionSystem>(std::move(layout));
+}
+
+std::unique_ptr<engine::EngineSystem> makeScenarioSimulationMotionSystem(
+    FacilityLayout2D layout,
+    std::vector<RouteGuidanceDraft> routeGuidances) {
+    return std::make_unique<ScenarioSimulationMotionSystem>(std::move(layout), std::move(routeGuidances));
 }
 
 }  // namespace safecrowd::domain

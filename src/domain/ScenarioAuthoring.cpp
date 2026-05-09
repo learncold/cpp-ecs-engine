@@ -74,7 +74,7 @@ bool eventsEqual(const std::vector<OperationalEventDraft>& lhs,
 }
 
 bool connectionBlocksEqual(const std::vector<ConnectionBlockDraft>& lhs,
-                           const std::vector<ConnectionBlockDraft>& rhs) {
+                            const std::vector<ConnectionBlockDraft>& rhs) {
     if (lhs.size() != rhs.size()) {
         return false;
     }
@@ -90,6 +90,41 @@ bool connectionBlocksEqual(const std::vector<ConnectionBlockDraft>& lhs,
                 || lhs[i].intervals[j].endSeconds != rhs[i].intervals[j].endSeconds) {
                 return false;
             }
+        }
+    }
+    return true;
+}
+
+bool routeGuidancePeriodsEqual(const std::vector<RouteGuidancePeriodDraft>& lhs,
+                               const std::vector<RouteGuidancePeriodDraft>& rhs) {
+    if (lhs.size() != rhs.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < lhs.size(); ++i) {
+        if (lhs[i].startSeconds != rhs[i].startSeconds
+            || lhs[i].endSeconds != rhs[i].endSeconds) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool routeGuidancesEqual(const std::vector<RouteGuidanceDraft>& lhs,
+                         const std::vector<RouteGuidanceDraft>& rhs) {
+    if (lhs.size() != rhs.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < lhs.size(); ++i) {
+        if (lhs[i].id != rhs[i].id
+            || lhs[i].startSeconds != rhs[i].startSeconds
+            || lhs[i].endSeconds != rhs[i].endSeconds
+            || lhs[i].guidedExitZoneId != rhs[i].guidedExitZoneId
+            || lhs[i].installConnectionId != rhs[i].installConnectionId
+            || lhs[i].baseComplianceRate != rhs[i].baseComplianceRate
+            || lhs[i].guidanceStrength != rhs[i].guidanceStrength
+            || lhs[i].maxDetourMeters != rhs[i].maxDetourMeters
+            || !routeGuidancePeriodsEqual(lhs[i].periods, rhs[i].periods)) {
+            return false;
         }
     }
     return true;
@@ -130,6 +165,9 @@ std::vector<std::string> computeScenarioDiffKeys(const ScenarioDraft& baseline,
     }
     if (!connectionBlocksEqual(baseline.control.connectionBlocks, variant.control.connectionBlocks)) {
         keys.emplace_back("control.connectionBlocks");
+    }
+    if (!routeGuidancesEqual(baseline.control.routeGuidances, variant.control.routeGuidances)) {
+        keys.emplace_back("control.routeGuidances");
     }
     if (baseline.execution.timeLimitSeconds != variant.execution.timeLimitSeconds) {
         keys.emplace_back("execution.timeLimit");
