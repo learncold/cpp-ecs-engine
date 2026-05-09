@@ -76,6 +76,95 @@ QString formatPressureScore(double score) {
     return QString::number(score, 'f', 1);
 }
 
+QString simplifyLocationLabel(QString text) {
+    text = text.simplified();
+    if (text.isEmpty()) {
+        return text;
+    }
+
+    QStringList words = text.split(' ', Qt::SkipEmptyParts);
+    static const QStringList genericSuffixes{
+        "Room",
+        "Area",
+        "Zone",
+        "Passage",
+        "Corridor",
+        "Hallway",
+        "Hall",
+        "Lobby",
+        "Section",
+    };
+
+    while (words.size() > 1 && genericSuffixes.contains(words.back(), Qt::CaseInsensitive)) {
+        words.removeLast();
+    }
+    return words.join(' ');
+}
+
+QString compactWords(QString text, int maxCharactersPerSide) {
+    text = text.simplified();
+    if (text.size() <= maxCharactersPerSide) {
+        return text;
+    }
+
+    const auto words = text.split(' ', Qt::SkipEmptyParts);
+    if (words.size() >= 2) {
+        QString compact = words.front();
+        for (int index = 1; index < words.size(); ++index) {
+            const auto candidate = compact + ' ' + words[index];
+            if (candidate.size() > maxCharactersPerSide) {
+                break;
+            }
+            compact = candidate;
+        }
+        if (compact.size() <= maxCharactersPerSide) {
+            return compact;
+        }
+    }
+
+    if (maxCharactersPerSide <= 3) {
+        return text.left(std::max(1, maxCharactersPerSide));
+    }
+    return text.left(maxCharactersPerSide - 3).trimmed() + QStringLiteral("...");
+}
+
+QString compactBottleneckLabel(QString label) {
+    label = label.simplified();
+    if (label.isEmpty()) {
+        return label;
+    }
+
+    constexpr int kCompactLabelLimit = 18;
+    if (label.size() <= kCompactLabelLimit) {
+        return label.replace(QStringLiteral("->"), QStringLiteral(">"));
+    }
+
+    const auto segments = label.split(QStringLiteral("->"), Qt::SkipEmptyParts);
+    if (segments.size() != 2) {
+        const auto simplified = simplifyLocationLabel(label);
+        return compactWords(simplified, kCompactLabelLimit);
+    }
+
+    auto from = simplifyLocationLabel(segments[0]);
+    auto to = simplifyLocationLabel(segments[1]);
+    QString compact = QStringLiteral("%1 > %2").arg(from, to);
+    if (compact.size() <= kCompactLabelLimit) {
+        return compact;
+    }
+
+    const int sideBudget = std::max(5, (kCompactLabelLimit - 3) / 2);
+    from = compactWords(from, sideBudget);
+    to = compactWords(to, sideBudget);
+    compact = QStringLiteral("%1 > %2").arg(from, to);
+    if (compact.size() <= kCompactLabelLimit) {
+        return compact;
+    }
+
+    return QStringLiteral("%1 > %2")
+        .arg(compactWords(from, sideBudget - 1))
+        .arg(compactWords(to, sideBudget - 1));
+}
+
 QString formatPercent(double ratio) {
     return QString("%1%").arg(std::clamp(ratio, 0.0, 1.0) * 100.0, 0, 'f', 0);
 }
@@ -445,7 +534,20 @@ QFrame* createMetricCard(const QString& title, const QString& value, QWidget* pa
     auto* titleLabel = createLabel(title, card, ui::FontRole::Caption);
     titleLabel->setStyleSheet(ui::mutedTextStyleSheet());
     auto* valueLabel = createLabel(value, card, ui::FontRole::SectionTitle);
-    valueLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    const bool longValue = value.size() >= 12 || value.contains('>') || value.contains(' ');
+    auto valueFont = longValue
+        ? ui::font(ui::FontRole::Caption)
+        : valueLabel->font();
+    if (longValue) {
+        valueFont.setWeight(QFont::DemiBold);
+    } else {
+        valueFont.setPointSize(std::max(11, valueFont.pointSize() - 1));
+    }
+    valueLabel->setFont(valueFont);
+    valueLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::MinimumExpanding);
+    valueLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    const auto minimumLines = longValue ? 2 : 1;
+    valueLabel->setMinimumHeight((QFontMetrics(valueFont).lineSpacing() * minimumLines) + 4);
     if (!tooltip.isEmpty()) {
         titleLabel->setToolTip(tooltip);
         valueLabel->setToolTip(tooltip);
@@ -961,9 +1063,10 @@ QWidget* createResultPanel(
     metricsGrid->setColumnStretch(0, 1);
     metricsGrid->setColumnStretch(1, 1);
     const auto completionTime = resultCompletionTime(frame, artifacts);
-    const auto worstBottleneck = risk.bottlenecks.empty()
+    const auto worstBottleneckFull = risk.bottlenecks.empty()
         ? QString("None")
         : QString::fromStdString(risk.bottlenecks.front().label);
+    const auto worstBottleneck = compactBottleneckLabel(worstBottleneckFull);
     const auto slowestGroup = artifacts.placementCompletion.empty()
         ? QString("Pending")
         : QString::fromStdString(artifacts.placementCompletion.front().placementId);
@@ -994,7 +1097,8 @@ QWidget* createResultPanel(
         "Bottleneck",
         worstBottleneck,
         panel,
-        QString("Worst bottleneck observed during the run.\n\n%1")
+        QString("Worst bottleneck observed during the run.\n\nFull label: %1\n\n%2")
+            .arg(worstBottleneckFull)
             .arg(safecrowd::domain::scenarioBottleneckDefinition())), 1, 1);
     metricsGrid->addWidget(createMetricCard(
         "Slowest",
