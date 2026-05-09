@@ -1370,6 +1370,39 @@ bool ScenarioCanvasWidget::editConnectionBlockScheduleById(const QString& blockI
     return true;
 }
 
+bool ScenarioCanvasWidget::deleteRouteGuidanceById(const QString& guidanceId) {
+    auto it = std::find_if(routeGuidances_.begin(), routeGuidances_.end(), [&](const auto& guidance) {
+        return QString::fromStdString(guidance.id) == guidanceId;
+    });
+    if (it == routeGuidances_.end()) {
+        return false;
+    }
+
+    routeGuidances_.erase(it);
+    emitRouteGuidancesChanged();
+    update();
+    return true;
+}
+
+bool ScenarioCanvasWidget::editRouteGuidanceById(const QString& guidanceId) {
+    auto it = std::find_if(routeGuidances_.begin(), routeGuidances_.end(), [&](const auto& guidance) {
+        return QString::fromStdString(guidance.id) == guidanceId;
+    });
+    if (it == routeGuidances_.end()) {
+        return false;
+    }
+
+    RouteGuidanceSettingsDialog dialog(*it, this);
+    if (dialog.exec() != QDialog::Accepted) {
+        return false;
+    }
+
+    *it = dialog.guidance();
+    emitRouteGuidancesChanged();
+    update();
+    return true;
+}
+
 bool ScenarioCanvasWidget::eventFilter(QObject* watched, QEvent* event) {
     (void)watched;
     camera_.handleGlobalKeyEvent(event);
@@ -2667,9 +2700,7 @@ void ScenarioCanvasWidget::openRouteGuidanceEditor(const QString& guidanceId, co
     }
 
     if (selected == deleteAction) {
-        routeGuidances_.erase(it);
-        emitRouteGuidancesChanged();
-        update();
+        deleteRouteGuidanceById(guidanceId);
         return;
     }
 

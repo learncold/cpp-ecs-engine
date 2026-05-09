@@ -1184,6 +1184,9 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
             if (canvas_ != nullptr && canvas_->deleteConnectionBlockById(id)) {
                 return;
             }
+            if (canvas_ != nullptr && canvas_->deleteRouteGuidanceById(id)) {
+                return;
+            }
 
             const auto eventId = id.toStdString();
             auto& events = scenario->events;
@@ -1195,6 +1198,7 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
             }
             events.erase(it, events.end());
             scenario->draft.control.events = scenario->events;
+            recomputeDiffKeysAfterScenarioChanged(*scenario);
             refreshNavigationPanel();
             refreshInspector();
         },
@@ -1205,6 +1209,9 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
 
             const auto id = rawId.section('/', 0, 0);
             if (canvas_->editConnectionBlockScheduleById(id)) {
+                return;
+            }
+            if (canvas_->editRouteGuidanceById(id)) {
                 return;
             }
 
@@ -1225,6 +1232,7 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
                 return;
             }
             scenario->draft.control.events = scenario->events;
+            recomputeDiffKeysAfterScenarioChanged(*scenario);
             refreshNavigationPanel();
             refreshInspector();
         }));
