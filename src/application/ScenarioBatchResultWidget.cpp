@@ -12,6 +12,7 @@
 #include <QComboBox>
 #include <QEvent>
 #include <QFrame>
+#include <QHeaderView>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMouseEvent>
@@ -24,6 +25,8 @@
 #include <QSizePolicy>
 #include <QSlider>
 #include <QTabWidget>
+#include <QTableWidget>
+#include <QTableWidgetItem>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -71,6 +74,41 @@ QString formatPercent(std::size_t numerator, std::size_t denominator) {
     }
     const auto ratio = std::clamp(static_cast<double>(numerator) / static_cast<double>(denominator), 0.0, 1.0);
     return QString("%1%").arg(ratio * 100.0, 0, 'f', 0);
+}
+
+QString formatPressureScore(double score) {
+    return QString::number(score, 'f', 1);
+}
+
+QTableWidget* createComparisonTable(const QStringList& headers, QWidget* parent) {
+    auto* table = new QTableWidget(0, headers.size(), parent);
+    table->setHorizontalHeaderLabels(headers);
+    table->verticalHeader()->setVisible(false);
+    table->horizontalHeader()->setStretchLastSection(true);
+    table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    table->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    table->setWordWrap(false);
+    table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    table->setSelectionMode(QAbstractItemView::NoSelection);
+    table->setFocusPolicy(Qt::NoFocus);
+    table->setAlternatingRowColors(true);
+    table->setStyleSheet(
+        "QTableWidget { background: #ffffff; border: 1px solid #d7e0ea; gridline-color: #e4ebf3; }"
+        "QHeaderView::section { background: #eef3f8; border: 0; border-bottom: 1px solid #d7e0ea; padding: 6px; color: #4f5d6b; }"
+        "QTableWidget::item { padding: 6px; }");
+    return table;
+}
+
+QTableWidgetItem* tableItem(const QString& text, bool emphasized = false) {
+    auto* item = new QTableWidgetItem(text);
+    item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+    if (emphasized) {
+        auto font = item->font();
+        font.setBold(true);
+        item->setFont(font);
+        item->setBackground(QColor("#eef5ff"));
+    }
+    return item;
 }
 
 QString scenarioRoleLabel(safecrowd::domain::ScenarioRole role) {
@@ -658,6 +696,7 @@ QWidget* ScenarioBatchResultWidget::createCanvasPanel() {
 
     overlayCombo_ = new QComboBox(selectorBar);
     overlayCombo_->addItem("Density", static_cast<int>(OverlayMode::Density));
+    overlayCombo_->addItem("Pressure", static_cast<int>(OverlayMode::Pressure));
     overlayCombo_->addItem("Hotspots", static_cast<int>(OverlayMode::Hotspots));
     overlayCombo_->addItem("Bottlenecks", static_cast<int>(OverlayMode::Bottlenecks));
     overlayCombo_->addItem("None", static_cast<int>(OverlayMode::None));
@@ -704,6 +743,7 @@ QWidget* ScenarioBatchResultWidget::createCanvasPanel() {
     auto* tabs = new QTabWidget(graphPanel);
     remainingChart_ = new ComparisonGraphWidget(ComparisonGraphMode::Remaining, tabs);
     exitsChart_ = new ComparisonGraphWidget(ComparisonGraphMode::Exits, tabs);
+    pressureTable_ = createComparisonTable({"Scenario", "Peak score", "Exposed / Critical", "Hotspots", "Events", "Peak at"}, tabs);
     static_cast<ComparisonGraphWidget*>(remainingChart_)->setResults(results_, selectedCompareIndices_, currentResultIndex_);
     static_cast<ComparisonGraphWidget*>(exitsChart_)->setResults(results_, selectedCompareIndices_, currentResultIndex_);
     static_cast<ComparisonGraphWidget*>(remainingChart_)->setTimingMarkerActivatedHandler([this](double seconds) {
@@ -711,6 +751,7 @@ QWidget* ScenarioBatchResultWidget::createCanvasPanel() {
     });
     tabs->addTab(remainingChart_, "Remaining");
     tabs->addTab(exitsChart_, "Exits");
+    tabs->addTab(pressureTable_, "Pressure");
     graphLayout->addWidget(tabs, 1);
     layout->addWidget(graphPanel, 1);
 
@@ -769,7 +810,7 @@ QWidget* ScenarioBatchResultWidget::createSummaryPanel() {
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(12);
 
-    auto* intro = createLabel("Choose which completed scenarios appear together in the Remaining and Exits graphs.", content, ui::FontRole::Caption);
+    auto* intro = createLabel("Choose which completed scenarios appear together in the comparison graphs and pressure summary table.", content, ui::FontRole::Caption);
     intro->setStyleSheet(ui::mutedTextStyleSheet());
     layout->addWidget(intro);
 
@@ -921,6 +962,12 @@ void ScenarioBatchResultWidget::applyReplayFrameData(const safecrowd::domain::Si
             ? result.artifacts.densitySummary.peakCells
             : result.artifacts.densitySummary.peakField.cells,
             result.artifacts.densitySummary.highDensityThresholdPeoplePerSquareMeter);
+        canvas_->setPressureOverlay(result.artifacts.pressureSummary.peakField.cells.empty()
+            ? result.artifacts.pressureSummary.peakCells
+            : result.artifacts.pressureSummary.peakField.cells,
+            std::max(
+                result.artifacts.pressureSummary.hotspotScoreThreshold,
+                result.artifacts.pressureSummary.peakPressureScore));
         applyOverlayModeToCanvas();
     }
     if (replaySlider_ != nullptr && replaySlider_->value() != replayFrameIndex_) {
@@ -946,6 +993,9 @@ void ScenarioBatchResultWidget::applyOverlayModeToCanvas() {
         return;
     }
     switch (overlayMode_) {
+    case OverlayMode::Pressure:
+        canvas_->setResultOverlayMode(ResultOverlayMode::Pressure);
+        break;
     case OverlayMode::Hotspots:
         canvas_->setResultOverlayMode(ResultOverlayMode::Hotspots);
         break;
@@ -1069,6 +1119,44 @@ void ScenarioBatchResultWidget::refreshComparisonSelection() {
     if (exitsChart_ != nullptr) {
         static_cast<ComparisonGraphWidget*>(exitsChart_)->setResults(results_, selectedCompareIndices_, currentResultIndex_);
     }
+    refreshPressureComparisonTable();
+}
+
+void ScenarioBatchResultWidget::refreshPressureComparisonTable() {
+    if (pressureTable_ == nullptr) {
+        return;
+    }
+
+    std::vector<int> visibleIndices = selectedCompareIndices_;
+    if (visibleIndices.empty() && currentResultIndex_ >= 0 && currentResultIndex_ < static_cast<int>(results_.size())) {
+        visibleIndices.push_back(currentResultIndex_);
+    }
+
+    pressureTable_->setRowCount(static_cast<int>(visibleIndices.size()));
+    for (int row = 0; row < static_cast<int>(visibleIndices.size()); ++row) {
+        const auto index = visibleIndices[static_cast<std::size_t>(row)];
+        if (index < 0 || index >= static_cast<int>(results_.size())) {
+            continue;
+        }
+
+        const auto& result = results_[static_cast<std::size_t>(index)];
+        const auto& summary = result.artifacts.pressureSummary;
+        const bool emphasized = index == currentResultIndex_;
+        pressureTable_->setItem(row, 0, tableItem(QString::fromStdString(result.scenario.name), emphasized));
+        pressureTable_->setItem(row, 1, tableItem(formatPressureScore(summary.peakPressureScore), emphasized));
+        pressureTable_->setItem(
+            row,
+            2,
+            tableItem(
+                QString("%1 / %2")
+                    .arg(static_cast<int>(summary.peakExposedAgentCount))
+                    .arg(static_cast<int>(summary.peakCriticalAgentCount)),
+                emphasized));
+        pressureTable_->setItem(row, 3, tableItem(QString::number(static_cast<int>(summary.peakHotspots.size())), emphasized));
+        pressureTable_->setItem(row, 4, tableItem(QString::number(static_cast<int>(summary.criticalEvents.size())), emphasized));
+        pressureTable_->setItem(row, 5, tableItem(formatSeconds(summary.peakAtSeconds), emphasized));
+    }
+    pressureTable_->resizeRowsToContents();
 }
 
 void ScenarioBatchResultWidget::refreshResultNavigationPanel() {
@@ -1151,6 +1239,7 @@ void ScenarioBatchResultWidget::refreshSelectedResult() {
     if (exitsChart_ != nullptr) {
         static_cast<ComparisonGraphWidget*>(exitsChart_)->setResults(results_, selectedCompareIndices_, currentResultIndex_);
     }
+    refreshPressureComparisonTable();
     refreshResultNavigationPanel();
     if (detailLabel_ != nullptr) {
         const auto selectedFinalSeconds = finalSeconds(result);
@@ -1159,7 +1248,7 @@ void ScenarioBatchResultWidget::refreshSelectedResult() {
                 ? QString("Baseline")
                 : formatDeltaSeconds(selectedFinalSeconds - finalSeconds(results_[static_cast<std::size_t>(baselineIndex)])))
             : QString("No baseline");
-        detailLabel_->setText(QString("%1 (%2)\nFinal: %3\nDelta vs baseline: %4\nEvacuated: %5 / %6 (%7)\nRisk: %8\nHotspots: %9\nBottlenecks: %10\nT90 / T95: %11 / %12")
+        detailLabel_->setText(QString("%1 (%2)\nFinal: %3\nDelta vs baseline: %4\nEvacuated: %5 / %6 (%7)\nRisk: %8\nHotspots: %9\nBottlenecks: %10\nPressure hotspots: %11\nCritical pressure: %12 agents / %13 events\nPeak pressure: %14 at %15\nT90 / T95: %16 / %17")
             .arg(QString::fromStdString(result.scenario.name))
             .arg(scenarioRoleLabel(result.scenario.role))
             .arg(formatSeconds(selectedFinalSeconds))
@@ -1170,6 +1259,11 @@ void ScenarioBatchResultWidget::refreshSelectedResult() {
             .arg(safecrowd::domain::scenarioRiskLevelLabel(result.risk.completionRisk))
             .arg(static_cast<int>(result.risk.hotspots.size()))
             .arg(static_cast<int>(result.risk.bottlenecks.size()))
+            .arg(static_cast<int>(result.artifacts.pressureSummary.peakHotspots.size()))
+            .arg(static_cast<int>(result.artifacts.pressureSummary.peakCriticalAgentCount))
+            .arg(static_cast<int>(result.artifacts.pressureSummary.criticalEvents.size()))
+            .arg(formatPressureScore(result.artifacts.pressureSummary.peakPressureScore))
+            .arg(formatSeconds(result.artifacts.pressureSummary.peakAtSeconds))
             .arg(formatSeconds(result.artifacts.timingSummary.t90Seconds))
             .arg(formatSeconds(result.artifacts.timingSummary.t95Seconds)));
     }

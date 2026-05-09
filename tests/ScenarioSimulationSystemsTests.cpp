@@ -1442,8 +1442,126 @@ SC_TEST(ScenarioRiskMetricsSystem_PublishesStalledHotspotAndBottleneckMetrics) {
     SC_EXPECT_NEAR(snapshot.hotspots.front().cellMin.y, 0.0, 1e-9);
     SC_EXPECT_NEAR(snapshot.hotspots.front().cellMax.x, 1.5, 1e-9);
     SC_EXPECT_NEAR(snapshot.hotspots.front().cellMax.y, 1.5, 1e-9);
+    SC_EXPECT_TRUE(!snapshot.pressureHotspots.empty());
+    SC_EXPECT_EQ(snapshot.pressureHotspots.front().agentCount, std::size_t{5});
+    SC_EXPECT_TRUE(snapshot.pressureHotspots.front().intrudingPairCount > 0);
+    SC_EXPECT_TRUE(snapshot.pressureHotspots.front().pressureScore >= 1.0);
     SC_EXPECT_TRUE(!snapshot.bottlenecks.empty());
     SC_EXPECT_EQ(snapshot.bottlenecks.front().label, std::string{"Room -> Exit"});
+    SC_EXPECT_EQ(snapshot.completionRisk, safecrowd::domain::ScenarioRiskLevel::High);
+}
+
+SC_TEST(ScenarioRiskMetricsSystem_DoesNotPublishPressureHotspotsForLooseClusterInSameCell) {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    for (const auto& point : std::vector<safecrowd::domain::Point2D>{
+             {0.10, 0.10},
+             {1.30, 0.10},
+             {0.10, 1.30},
+             {1.30, 1.30},
+             {0.75, 0.75},
+         }) {
+        seeds.push_back({
+            .position = {.value = point},
+            .agent = {.radius = 0.25f, .maxSpeed = 1.0f},
+            .velocity = {.value = {}},
+            .route = {
+                .waypoints = {{.x = 1.0, .y = 0.0}},
+                .waypointPassages = {{{.x = 1.0, .y = -0.4}, {.x = 1.0, .y = 0.4}}},
+                .waypointFromZoneIds = {"room"},
+                .waypointZoneIds = {"exit"},
+                .nextWaypointIndex = 0,
+                .currentSegmentStart = point,
+                .previousDistanceToWaypoint = 0.25,
+                .stalledSeconds = 1.0,
+                .destinationZoneId = "exit",
+            },
+            .status = {},
+        });
+    }
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 37,
+    });
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioRiskMetricsSystem(straightExitLayout()),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(0.0);
+
+    const auto& snapshot =
+        runtime.world().resources().get<safecrowd::domain::ScenarioRiskMetricsResource>().snapshot;
+    SC_EXPECT_TRUE(!snapshot.hotspots.empty());
+    SC_EXPECT_TRUE(snapshot.pressureHotspots.empty());
+}
+
+SC_TEST(ScenarioRiskMetricsSystem_AccumulatesCompressionExposureAndCriticalPressureAgents) {
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 38,
+    });
+    runtime.addSystem(std::make_unique<ConfigureDenseActiveAgentsSystem>());
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioRiskMetricsSystem(straightExitLayout()),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(0.0);
+    auto& clock = runtime.world().resources().get<safecrowd::domain::ScenarioSimulationClockResource>();
+    clock.elapsedSeconds = 2.0;
+    runtime.stepFrame(0.0);
+    clock.elapsedSeconds = 3.0;
+    runtime.stepFrame(0.0);
+
+    const auto& snapshot =
+        runtime.world().resources().get<safecrowd::domain::ScenarioRiskMetricsResource>().snapshot;
+    SC_EXPECT_TRUE(snapshot.pressureExposedAgentCount > 0);
+    SC_EXPECT_TRUE(snapshot.criticalPressureAgentCount > 0);
+    SC_EXPECT_TRUE(!snapshot.pressureAgents.empty());
+    SC_EXPECT_TRUE(snapshot.pressureAgents.front().critical);
+    SC_EXPECT_TRUE(snapshot.pressureAgents.front().compressionForce > 0.5);
+    SC_EXPECT_TRUE(snapshot.pressureAgents.front().exposureSeconds >= 2.0);
+}
+
+SC_TEST(ScenarioRiskMetricsSystem_PublishesCriticalPressureEventAfterSustainedExposure) {
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 39,
+    });
+    runtime.addSystem(std::make_unique<ConfigureDenseActiveAgentsSystem>());
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioRiskMetricsSystem(straightExitLayout()),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(0.0);
+    auto& clock = runtime.world().resources().get<safecrowd::domain::ScenarioSimulationClockResource>();
+    clock.elapsedSeconds = 2.0;
+    runtime.stepFrame(0.0);
+    {
+        const auto& snapshot =
+            runtime.world().resources().get<safecrowd::domain::ScenarioRiskMetricsResource>().snapshot;
+        SC_EXPECT_TRUE(snapshot.criticalPressureEvents.empty());
+    }
+
+    clock.elapsedSeconds = 3.0;
+    runtime.stepFrame(0.0);
+
+    const auto& snapshot =
+        runtime.world().resources().get<safecrowd::domain::ScenarioRiskMetricsResource>().snapshot;
+    SC_EXPECT_TRUE(snapshot.criticalPressureAgentCount >= 2);
+    SC_EXPECT_TRUE(!snapshot.criticalPressureEvents.empty());
+    SC_EXPECT_TRUE(snapshot.criticalPressureEvents.front().criticalAgentCount >= 2);
+    SC_EXPECT_TRUE(snapshot.criticalPressureEvents.front().durationSeconds >= 1.0);
+    SC_EXPECT_TRUE(snapshot.criticalPressureEvents.front().pressureScore > 0.0);
     SC_EXPECT_EQ(snapshot.completionRisk, safecrowd::domain::ScenarioRiskLevel::High);
 }
 
@@ -1465,6 +1583,7 @@ SC_TEST(ScenarioRiskMetricsSystem_DoesNotMergeHotspotsAcrossFloors) {
     const auto& snapshot =
         runtime.world().resources().get<safecrowd::domain::ScenarioRiskMetricsResource>().snapshot;
     SC_EXPECT_TRUE(snapshot.hotspots.empty());
+    SC_EXPECT_TRUE(snapshot.pressureHotspots.empty());
 }
 
 SC_TEST(ScenarioRiskMetricsSystem_FiltersBottlenecksByConnectionFloor) {
@@ -1532,6 +1651,8 @@ SC_TEST(ScenarioRiskMetricsSystem_UsesDisplayFloorForVirtualPhysicsBuckets) {
         runtime.world().resources().get<safecrowd::domain::ScenarioRiskMetricsResource>().snapshot;
     SC_EXPECT_TRUE(!snapshot.hotspots.empty());
     SC_EXPECT_EQ(snapshot.hotspots.front().floorId, std::string{"L2"});
+    SC_EXPECT_TRUE(!snapshot.pressureHotspots.empty());
+    SC_EXPECT_EQ(snapshot.pressureHotspots.front().floorId, std::string{"L2"});
     SC_EXPECT_TRUE(!snapshot.bottlenecks.empty());
     SC_EXPECT_EQ(snapshot.bottlenecks.front().floorId, std::string{"L2"});
 }
@@ -1581,11 +1702,52 @@ SC_TEST(ScenarioRiskMetricsSystem_PreservesPeakMetricsAfterAllAgentsEvacuate) {
     const auto& metrics =
         runtime.world().resources().get<safecrowd::domain::ScenarioRiskMetricsResource>();
     SC_EXPECT_TRUE(metrics.snapshot.hotspots.empty());
+    SC_EXPECT_TRUE(metrics.snapshot.pressureHotspots.empty());
     SC_EXPECT_TRUE(metrics.snapshot.bottlenecks.empty());
     SC_EXPECT_TRUE(!metrics.peakSnapshot.hotspots.empty());
+    SC_EXPECT_TRUE(!metrics.peakSnapshot.pressureHotspots.empty());
     SC_EXPECT_TRUE(!metrics.peakSnapshot.bottlenecks.empty());
     SC_EXPECT_EQ(metrics.peakSnapshot.stalledAgentCount, std::size_t{5});
     SC_EXPECT_EQ(metrics.peakSnapshot.completionRisk, safecrowd::domain::ScenarioRiskLevel::High);
+}
+
+SC_TEST(ScenarioRiskMetricsSystem_PreservesPeakCriticalPressureMetricsAfterAgentsEvacuate) {
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 40,
+    });
+    runtime.addSystem(std::make_unique<ConfigureDenseActiveAgentsSystem>());
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioRiskMetricsSystem(straightExitLayout()),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(0.0);
+    auto& clock = runtime.world().resources().get<safecrowd::domain::ScenarioSimulationClockResource>();
+    clock.elapsedSeconds = 2.0;
+    runtime.stepFrame(0.0);
+    clock.elapsedSeconds = 3.0;
+    runtime.stepFrame(0.0);
+
+    auto& query = runtime.world().query();
+    for (const auto entity : query.view<safecrowd::domain::EvacuationStatus>()) {
+        query.get<safecrowd::domain::EvacuationStatus>(entity).evacuated = true;
+    }
+    clock.elapsedSeconds = 4.0;
+    runtime.stepFrame(0.0);
+
+    const auto& metrics =
+        runtime.world().resources().get<safecrowd::domain::ScenarioRiskMetricsResource>();
+    SC_EXPECT_EQ(metrics.snapshot.pressureExposedAgentCount, std::size_t{0});
+    SC_EXPECT_EQ(metrics.snapshot.criticalPressureAgentCount, std::size_t{0});
+    SC_EXPECT_TRUE(metrics.snapshot.pressureAgents.empty());
+    SC_EXPECT_TRUE(metrics.snapshot.criticalPressureEvents.empty());
+    SC_EXPECT_TRUE(metrics.peakSnapshot.pressureExposedAgentCount > 0);
+    SC_EXPECT_TRUE(metrics.peakSnapshot.criticalPressureAgentCount > 0);
+    SC_EXPECT_TRUE(!metrics.peakSnapshot.pressureAgents.empty());
+    SC_EXPECT_TRUE(!metrics.peakSnapshot.criticalPressureEvents.empty());
 }
 
 SC_TEST(ScenarioResultArtifactsSystem_PublishesEvacuationCurveAndPercentiles) {
@@ -1697,6 +1859,104 @@ SC_TEST(ScenarioResultArtifactsSystem_AccumulatesDensityPeakFieldByFloorAndCell)
 
     const auto& cells =
         runtime.world().resources().get<safecrowd::domain::ScenarioResultArtifactsResource>().artifacts.densitySummary.peakField.cells;
+    const auto hasL1Cell = std::any_of(cells.begin(), cells.end(), [](const auto& cell) {
+        return cell.floorId == "L1";
+    });
+    const auto hasL2Cell = std::any_of(cells.begin(), cells.end(), [](const auto& cell) {
+        return cell.floorId == "L2";
+    });
+    SC_EXPECT_TRUE(hasL1Cell);
+    SC_EXPECT_TRUE(hasL2Cell);
+}
+
+SC_TEST(ScenarioResultArtifactsSystem_PublishesPressureSummary) {
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 41,
+    });
+    runtime.addSystem(std::make_unique<ConfigureDenseActiveAgentsSystem>());
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioRiskMetricsSystem(straightExitLayout()),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .order = 10,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+    runtime.addSystem(
+        std::make_unique<safecrowd::domain::ScenarioResultArtifactsSystem>(1.0),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .order = 20,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(0.0);
+    auto& clock = runtime.world().resources().get<safecrowd::domain::ScenarioSimulationClockResource>();
+    clock.elapsedSeconds = 2.0;
+    runtime.stepFrame(0.0);
+    clock.elapsedSeconds = 3.0;
+    runtime.stepFrame(0.0);
+
+    const auto& summary =
+        runtime.world().resources().get<safecrowd::domain::ScenarioResultArtifactsResource>().artifacts.pressureSummary;
+    SC_EXPECT_NEAR(summary.cellSizeMeters, safecrowd::domain::kScenarioHotspotCellSize, 1e-9);
+    SC_EXPECT_NEAR(summary.hotspotScoreThreshold, safecrowd::domain::kScenarioPressureScoreThreshold, 1e-9);
+    SC_EXPECT_NEAR(summary.criticalCompressionForceThreshold, safecrowd::domain::kScenarioCriticalPressureForceThreshold, 1e-9);
+    SC_EXPECT_NEAR(summary.criticalExposureThresholdSeconds, safecrowd::domain::kScenarioCriticalPressureExposureThresholdSeconds, 1e-9);
+    SC_EXPECT_NEAR(summary.criticalEventDurationThresholdSeconds, safecrowd::domain::kScenarioCriticalPressureEventDurationThresholdSeconds, 1e-9);
+    SC_EXPECT_EQ(summary.criticalEventAgentThreshold, safecrowd::domain::kScenarioCriticalPressureEventAgentThreshold);
+    SC_EXPECT_TRUE(summary.peakPressureScore > 0.0);
+    SC_EXPECT_TRUE(summary.peakAtSeconds.has_value());
+    SC_EXPECT_TRUE(summary.peakCell.has_value());
+    SC_EXPECT_TRUE(!summary.peakCells.empty());
+    SC_EXPECT_TRUE(!summary.peakField.cells.empty());
+    SC_EXPECT_TRUE(!summary.peakHotspots.empty());
+    SC_EXPECT_TRUE(!summary.peakAgents.empty());
+    SC_EXPECT_TRUE(summary.peakAgents.front().critical);
+    SC_EXPECT_TRUE(summary.peakExposedAgentCount > 0);
+    SC_EXPECT_TRUE(summary.peakCriticalAgentCount > 0);
+    SC_EXPECT_TRUE(!summary.criticalEvents.empty());
+    SC_EXPECT_TRUE(summary.criticalEvents.front().durationSeconds >= 1.0);
+}
+
+SC_TEST(ScenarioResultArtifactsSystem_AccumulatesPressurePeakFieldByFloorAndCell) {
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 42,
+    });
+    runtime.addSystem(std::make_unique<ConfigureMovingFloorDensityAgentsSystem>());
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioRiskMetricsSystem(straightExitLayout()),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .order = 10,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+    runtime.addSystem(
+        std::make_unique<safecrowd::domain::ScenarioResultArtifactsSystem>(1.0),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .order = 20,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(0.0);
+
+    auto& query = runtime.world().query();
+    int movedIndex = 0;
+    for (const auto entity : query.view<
+             safecrowd::domain::Position,
+             safecrowd::domain::EvacuationRoute,
+             safecrowd::domain::EvacuationStatus>()) {
+        auto& position = query.get<safecrowd::domain::Position>(entity);
+        auto& route = query.get<safecrowd::domain::EvacuationRoute>(entity);
+        position.value = {.x = 3.1 + (0.04 * static_cast<double>(movedIndex)), .y = 0.1};
+        route.currentFloorId = "L1";
+        route.displayFloorId = "L1";
+        ++movedIndex;
+    }
+    auto& clock = runtime.world().resources().get<safecrowd::domain::ScenarioSimulationClockResource>();
+    clock.elapsedSeconds = 2.0;
+    runtime.stepFrame(0.0);
+
+    const auto& cells =
+        runtime.world().resources().get<safecrowd::domain::ScenarioResultArtifactsResource>().artifacts.pressureSummary.peakField.cells;
     const auto hasL1Cell = std::any_of(cells.begin(), cells.end(), [](const auto& cell) {
         return cell.floorId == "L1";
     });

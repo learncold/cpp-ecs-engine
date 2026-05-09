@@ -30,6 +30,7 @@ namespace safecrowd::application {
 enum class ResultOverlayMode {
     None,
     Density,
+    Pressure,
     Hotspots,
     Bottlenecks,
 };
@@ -45,6 +46,9 @@ public:
     void setDensityOverlay(
         std::vector<safecrowd::domain::DensityCellMetric> densityCells,
         double scaleMaxPeoplePerSquareMeter = 4.0);
+    void setPressureOverlay(
+        std::vector<safecrowd::domain::PressureCellMetric> pressureCells,
+        double scaleMaxPressureScore = 1.0);
     void setHotspotOverlay(std::vector<safecrowd::domain::ScenarioCongestionHotspot> hotspots);
     void setBottleneckOverlay(std::vector<safecrowd::domain::ScenarioBottleneckMetric> bottlenecks);
     void setResultOverlayMode(ResultOverlayMode mode);
@@ -73,6 +77,7 @@ private:
     void drawConnectionBlockOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawRouteGuidanceOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawDensityOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
+    void drawPressureOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawHotspotOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawBottleneckOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     bool switchFloorByWheel(QWheelEvent* event);
@@ -86,6 +91,8 @@ private:
     std::vector<safecrowd::domain::RouteGuidanceDraft> routeGuidances_{};
     std::vector<safecrowd::domain::DensityCellMetric> densityOverlay_{};
     double densityScaleMaxPeoplePerSquareMeter_{4.0};
+    std::vector<safecrowd::domain::PressureCellMetric> pressureOverlay_{};
+    double pressureScaleMaxScore_{1.0};
     std::vector<safecrowd::domain::ScenarioCongestionHotspot> hotspotOverlay_{};
     std::vector<safecrowd::domain::ScenarioBottleneckMetric> bottleneckOverlay_{};
     ResultOverlayMode overlayMode_{ResultOverlayMode::None};

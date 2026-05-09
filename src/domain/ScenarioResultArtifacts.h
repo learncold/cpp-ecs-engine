@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "domain/Geometry2D.h"
+#include "domain/ScenarioRiskMetrics.h"
 #include "domain/ScenarioSimulationFrame.h"
 
 namespace safecrowd::domain {
@@ -55,6 +56,42 @@ struct DensitySummary {
     DensityFieldSnapshot peakField{};
 };
 
+struct PressureCellMetric {
+    Point2D center{};
+    Point2D cellMin{};
+    Point2D cellMax{};
+    std::string floorId{};
+    std::size_t agentCount{0};
+    std::size_t intrudingPairCount{0};
+    double densityPeoplePerSquareMeter{0.0};
+    double pressureScore{0.0};
+};
+
+struct PressureFieldSnapshot {
+    double timeSeconds{0.0};
+    double cellSizeMeters{0.0};
+    std::vector<PressureCellMetric> cells{};
+};
+
+struct PressureSummary {
+    double cellSizeMeters{0.0};
+    double hotspotScoreThreshold{0.0};
+    double criticalCompressionForceThreshold{0.0};
+    double criticalExposureThresholdSeconds{0.0};
+    double criticalEventDurationThresholdSeconds{0.0};
+    std::size_t criticalEventAgentThreshold{0};
+    double peakPressureScore{0.0};
+    std::optional<double> peakAtSeconds{};
+    std::optional<PressureCellMetric> peakCell{};
+    std::size_t peakExposedAgentCount{0};
+    std::size_t peakCriticalAgentCount{0};
+    std::vector<PressureCellMetric> peakCells{};
+    PressureFieldSnapshot peakField{};
+    std::vector<ScenarioPressureHotspot> peakHotspots{};
+    std::vector<ScenarioPressureAgentMetric> peakAgents{};
+    std::vector<ScenarioCriticalPressureEvent> criticalEvents{};
+};
+
 struct ExitUsageMetric {
     std::string exitZoneId{};
     std::string exitLabel{};
@@ -87,6 +124,7 @@ struct ScenarioResultArtifacts {
     std::vector<SimulationFrame> replayFrames{};
     EvacuationTimingSummary timingSummary{};
     DensitySummary densitySummary{};
+    PressureSummary pressureSummary{};
     std::vector<ExitUsageMetric> exitUsage{};
     std::vector<ZoneCompletionMetric> zoneCompletion{};
     std::vector<PlacementCompletionMetric> placementCompletion{};

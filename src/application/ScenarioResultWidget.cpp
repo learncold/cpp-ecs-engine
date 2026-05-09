@@ -33,6 +33,7 @@
 #include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <QWidget>
 
 #include "application/ScenarioAuthoringWidget.h"
 #include "application/ScenarioCanvasWidget.h"
@@ -69,6 +70,10 @@ QString formatOptionalMargin(const std::optional<double>& seconds) {
 
 QString formatDensity(double density) {
     return QString("%1 / m2").arg(density, 0, 'f', 1);
+}
+
+QString formatPressureScore(double score) {
+    return QString::number(score, 'f', 1);
 }
 
 QString formatPercent(double ratio) {
@@ -372,6 +377,60 @@ private:
     double peakDensity_{0.0};
 };
 
+class PressureLegendWidget final : public QWidget {
+public:
+    explicit PressureLegendWidget(
+        const safecrowd::domain::PressureSummary& summary,
+        QWidget* parent = nullptr)
+        : QWidget(parent),
+          threshold_(summary.hotspotScoreThreshold),
+          peakScore_(summary.peakPressureScore) {
+        setFixedSize(300, 34);
+        setToolTip("Pressure heatmap scale uses the pressure hotspot score threshold and the observed peak score.");
+    }
+
+protected:
+    void paintEvent(QPaintEvent* event) override {
+        (void)event;
+
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+
+        const QRectF ramp(0, 4, width(), 9);
+        QLinearGradient gradient(ramp.left(), ramp.center().y(), ramp.right(), ramp.center().y());
+        gradient.setColorAt(0.0, QColor("#facc15"));
+        gradient.setColorAt(0.25, QColor("#f97316"));
+        gradient.setColorAt(0.55, QColor("#ef4444"));
+        gradient.setColorAt(1.0, QColor("#991b1b"));
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(gradient);
+        painter.drawRoundedRect(ramp, 4, 4);
+
+        painter.setFont(ui::font(ui::FontRole::Caption));
+        painter.setPen(QColor("#687789"));
+        if (peakScore_ > 0.0 && threshold_ > 0.0) {
+            const auto peakX = ramp.left()
+                + (std::clamp(peakScore_ / threshold_, 0.0, 1.0) * ramp.width());
+            painter.setPen(QPen(QColor("#405063"), 1));
+            painter.drawLine(QPointF(peakX, ramp.top() - 2), QPointF(peakX, ramp.bottom() + 2));
+            painter.setPen(QColor("#687789"));
+        }
+        painter.drawText(QRectF(0, 16, 40, 16), Qt::AlignLeft | Qt::AlignVCenter, "0");
+        painter.drawText(
+            QRectF(42, 16, 178, 16),
+            Qt::AlignCenter,
+            QString("Hotspot %1+").arg(threshold_, 0, 'f', 1));
+        painter.drawText(
+            QRectF(width() - 98, 16, 98, 16),
+            Qt::AlignRight | Qt::AlignVCenter,
+            QString("Peak %1").arg(peakScore_, 0, 'f', 1));
+    }
+
+private:
+    double threshold_{0.0};
+    double peakScore_{0.0};
+};
+
 QFrame* createMetricCard(const QString& title, const QString& value, QWidget* parent, const QString& tooltip = {}) {
     auto* card = new QFrame(parent);
     card->setStyleSheet(ui::panelStyleSheet());
@@ -400,6 +459,8 @@ QString resultCriteriaTooltip(const safecrowd::domain::ScenarioResultArtifacts& 
     return QStringList{
         QString("High density: %1 / m2 or higher for accumulated duration.")
             .arg(artifacts.densitySummary.highDensityThresholdPeoplePerSquareMeter, 0, 'f', 1),
+        QString("Pressure hotspot: score %1 or higher in a crowded cell.")
+            .arg(artifacts.pressureSummary.hotspotScoreThreshold, 0, 'f', 1),
         safecrowd::domain::scenarioStalledDefinition(),
         safecrowd::domain::scenarioBottleneckDefinition(),
     }.join("\n\n");
@@ -744,6 +805,7 @@ QWidget* createResultCanvasPanel(
     overlayLabel->setStyleSheet(ui::mutedTextStyleSheet());
     auto* overlayCombo = new QComboBox(overlayBar);
     overlayCombo->addItem("Peak Density", static_cast<int>(ResultOverlayMode::Density));
+    overlayCombo->addItem("Pressure", static_cast<int>(ResultOverlayMode::Pressure));
     overlayCombo->addItem("Bottlenecks", static_cast<int>(ResultOverlayMode::Bottlenecks));
     overlayCombo->addItem("Hotspots", static_cast<int>(ResultOverlayMode::Hotspots));
     overlayCombo->addItem("None", static_cast<int>(ResultOverlayMode::None));
@@ -751,16 +813,28 @@ QWidget* createResultCanvasPanel(
     overlayLayout->addWidget(overlayLabel);
     overlayLayout->addWidget(overlayCombo);
     overlayLayout->addSpacing(10);
-    overlayLayout->addWidget(new DensityLegendWidget(artifacts.densitySummary, overlayBar));
+    auto* densityLegend = new DensityLegendWidget(artifacts.densitySummary, overlayBar);
+    auto* pressureLegend = new PressureLegendWidget(artifacts.pressureSummary, overlayBar);
+    pressureLegend->setVisible(false);
+    overlayLayout->addWidget(densityLegend);
+    overlayLayout->addWidget(pressureLegend);
     overlayLayout->addStretch(1);
     layout->addWidget(overlayBar);
     canvas->setDensityOverlay(artifacts.densitySummary.peakField.cells.empty()
             ? artifacts.densitySummary.peakCells
             : artifacts.densitySummary.peakField.cells,
         artifacts.densitySummary.highDensityThresholdPeoplePerSquareMeter);
+    canvas->setPressureOverlay(artifacts.pressureSummary.peakField.cells.empty()
+            ? artifacts.pressureSummary.peakCells
+            : artifacts.pressureSummary.peakField.cells,
+        std::max(
+            artifacts.pressureSummary.hotspotScoreThreshold,
+            artifacts.pressureSummary.peakPressureScore));
     canvas->setResultOverlayMode(ResultOverlayMode::Density);
-    QObject::connect(overlayCombo, &QComboBox::currentIndexChanged, panel, [canvas, overlayCombo](int index) {
+    QObject::connect(overlayCombo, &QComboBox::currentIndexChanged, panel, [canvas, overlayCombo, densityLegend, pressureLegend](int index) {
         const auto mode = static_cast<ResultOverlayMode>(overlayCombo->itemData(index).toInt());
+        densityLegend->setVisible(mode == ResultOverlayMode::Density);
+        pressureLegend->setVisible(mode == ResultOverlayMode::Pressure);
         canvas->setResultOverlayMode(mode);
     });
     layout->addWidget(canvas, 1);
@@ -893,6 +967,14 @@ QWidget* createResultPanel(
     const auto slowestGroup = artifacts.placementCompletion.empty()
         ? QString("Pending")
         : QString::fromStdString(artifacts.placementCompletion.front().placementId);
+    const auto peakPressureTooltip = QString(
+        "Highest pressure hotspot score observed during the run.%1%2")
+        .arg(artifacts.pressureSummary.peakAtSeconds.has_value()
+            ? QString("\n\nPeak at %1 sec.").arg(*artifacts.pressureSummary.peakAtSeconds, 0, 'f', 1)
+            : QString())
+        .arg(artifacts.pressureSummary.peakCell.has_value()
+            ? QString("\nCell floor: %1").arg(QString::fromStdString(artifacts.pressureSummary.peakCell->floorId))
+            : QString());
     metricsGrid->addWidget(createMetricCard(
         "Completion",
         formatSecondsValue(completionTime),
@@ -939,6 +1021,27 @@ QWidget* createResultPanel(
         formatOptionalSeconds(artifacts.timingSummary.t95Seconds),
         panel,
         "Time at which 95% of occupants completed evacuation."), 4, 0);
+    metricsGrid->addWidget(createMetricCard(
+        "Peak Pressure",
+        formatPressureScore(artifacts.pressureSummary.peakPressureScore),
+        panel,
+        peakPressureTooltip), 4, 1);
+    metricsGrid->addWidget(createMetricCard(
+        "Pressure Hotspots",
+        QString::number(static_cast<int>(artifacts.pressureSummary.peakHotspots.size())),
+        panel,
+        "Peak number of stored pressure hotspot locations from the run."), 5, 0);
+    metricsGrid->addWidget(createMetricCard(
+        "Pressure Events",
+        QString::number(static_cast<int>(artifacts.pressureSummary.criticalEvents.size())),
+        panel,
+        "Stored sustained critical pressure events that met the duration and agent-count thresholds."), 5, 1);
+    metricsGrid->addWidget(createMetricCard(
+        "Critical Pressure",
+        QString("%1 agents").arg(static_cast<int>(artifacts.pressureSummary.peakCriticalAgentCount)),
+        panel,
+        QString("Peak simultaneously critical agents during the run.\nExposed peak: %1 agents.")
+            .arg(static_cast<int>(artifacts.pressureSummary.peakExposedAgentCount))), 6, 0);
     layout->addLayout(metricsGrid);
     layout->addStretch(1);
 

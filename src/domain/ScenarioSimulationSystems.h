@@ -70,6 +70,10 @@ struct ScenarioResultArtifactsResource {
     bool densityTrackingInitialized{false};
     double lastDensitySampleTimeSeconds{0.0};
     std::unordered_map<long long, DensityCellMetric> peakDensityCellsByAddress{};
+    std::unordered_map<long long, PressureCellMetric> peakPressureCellsByAddress{};
+    std::unordered_map<long long, ScenarioPressureHotspot> peakPressureHotspotsByAddress{};
+    std::unordered_map<std::uint64_t, ScenarioPressureAgentMetric> peakPressureAgentsById{};
+    std::unordered_map<long long, ScenarioCriticalPressureEvent> peakCriticalPressureEventsByAddress{};
 };
 
 struct ScenarioTimingKeyframesResource {
