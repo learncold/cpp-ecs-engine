@@ -58,6 +58,7 @@ private:
         const safecrowd::domain::SimulationFrame& frame,
         const safecrowd::domain::ScenarioRiskSnapshot& risk,
         const safecrowd::domain::ScenarioResultArtifacts& artifacts,
+        SavedResultNavigationView savedNavigationView = SavedResultNavigationView::Bottleneck,
         std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState = std::nullopt);
 
     safecrowd::domain::SafeCrowdDomain& domain_;

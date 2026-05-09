@@ -971,6 +971,34 @@ QWidget* createResultPanel(
     return panel;
 }
 
+ScenarioResultNavigationView resultNavigationViewFromSaved(SavedResultNavigationView view) {
+    switch (view) {
+    case SavedResultNavigationView::Hotspot:
+        return ScenarioResultNavigationView::Hotspot;
+    case SavedResultNavigationView::Zone:
+        return ScenarioResultNavigationView::Zone;
+    case SavedResultNavigationView::Groups:
+        return ScenarioResultNavigationView::Groups;
+    case SavedResultNavigationView::Bottleneck:
+    default:
+        return ScenarioResultNavigationView::Bottleneck;
+    }
+}
+
+SavedResultNavigationView savedResultNavigationView(ScenarioResultNavigationView view) {
+    switch (view) {
+    case ScenarioResultNavigationView::Hotspot:
+        return SavedResultNavigationView::Hotspot;
+    case ScenarioResultNavigationView::Zone:
+        return SavedResultNavigationView::Zone;
+    case ScenarioResultNavigationView::Groups:
+        return SavedResultNavigationView::Groups;
+    case ScenarioResultNavigationView::Bottleneck:
+    default:
+        return SavedResultNavigationView::Bottleneck;
+    }
+}
+
 }  // namespace
 
 ScenarioResultWidget::ScenarioResultWidget(
@@ -983,6 +1011,7 @@ ScenarioResultWidget::ScenarioResultWidget(
     std::function<void()> saveProjectHandler,
     std::function<void()> openProjectHandler,
     std::function<void()> backToLayoutReviewHandler,
+    SavedResultNavigationView savedNavigationView,
     std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState,
     QWidget* parent)
     : QWidget(parent),
@@ -996,6 +1025,8 @@ ScenarioResultWidget::ScenarioResultWidget(
       saveProjectHandler_(std::move(saveProjectHandler)),
       openProjectHandler_(std::move(openProjectHandler)),
       backToLayoutReviewHandler_(std::move(backToLayoutReviewHandler)) {
+    resultNavigationView_ = resultNavigationViewFromSaved(savedNavigationView);
+
     auto* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
@@ -1097,6 +1128,10 @@ const safecrowd::domain::ScenarioRiskSnapshot& ScenarioResultWidget::risk() cons
 
 const safecrowd::domain::ScenarioResultArtifacts& ScenarioResultWidget::artifacts() const noexcept {
     return artifacts_;
+}
+
+SavedResultNavigationView ScenarioResultWidget::currentSavedNavigationView() const noexcept {
+    return savedResultNavigationView(resultNavigationView_);
 }
 
 const std::optional<ScenarioAuthoringWidget::InitialState>& ScenarioResultWidget::returnAuthoringState() const noexcept {

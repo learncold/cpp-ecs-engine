@@ -30,6 +30,13 @@ enum class SavedRightPanelMode {
     Run,
 };
 
+enum class SavedResultNavigationView {
+    Bottleneck,
+    Hotspot,
+    Zone,
+    Groups,
+};
+
 struct SavedScenarioState {
     safecrowd::domain::ScenarioDraft draft{};
     std::string baseScenarioId{};
@@ -48,6 +55,7 @@ struct SavedScenarioResultState {
     safecrowd::domain::SimulationFrame frame{};
     safecrowd::domain::ScenarioRiskSnapshot risk{};
     safecrowd::domain::ScenarioResultArtifacts artifacts{};
+    SavedResultNavigationView navigationView{SavedResultNavigationView::Bottleneck};
 };
 
 struct SavedScenarioBatchResultState {

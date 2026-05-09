@@ -741,7 +741,6 @@ ScenarioAuthoringWidget::ScenarioAuthoringWidget(
             scenario.stagedForRun = false;
         }
     }
-    rightPanelMode_ = RightPanelMode::Scenario;
     initializeUi(false);
 }
 
@@ -772,7 +771,18 @@ SavedScenarioAuthoringState ScenarioAuthoringWidget::currentSavedState() const {
     SavedScenarioAuthoringState state;
     state.currentScenarioIndex = currentScenarioIndex_;
     state.navigationView = savedNavigationView(navigationView_);
-    state.rightPanelMode = SavedRightPanelMode::Scenario;
+    switch (rightPanelMode_) {
+    case RightPanelMode::None:
+        state.rightPanelMode = SavedRightPanelMode::None;
+        break;
+    case RightPanelMode::Run:
+        state.rightPanelMode = SavedRightPanelMode::Run;
+        break;
+    case RightPanelMode::Scenario:
+    default:
+        state.rightPanelMode = SavedRightPanelMode::Scenario;
+        break;
+    }
     state.scenarios.reserve(scenarios_.size());
     for (const auto& scenario : scenarios_) {
         auto draft = scenario.draft;
@@ -1251,9 +1261,18 @@ void ScenarioAuthoringWidget::refreshRightPanel() {
         return;
     }
 
-    rightPanelMode_ = RightPanelMode::Scenario;
+    if (rightPanelMode_ == RightPanelMode::None) {
+        shell_->setReviewPanelVisible(false);
+        return;
+    }
+
     shell_->setReviewPanelVisible(true);
-    shell_->setReviewPanel(createScenarioPanel());
+    if (rightPanelMode_ == RightPanelMode::Run) {
+        shell_->setReviewPanel(createRunPanel());
+    } else {
+        rightPanelMode_ = RightPanelMode::Scenario;
+        shell_->setReviewPanel(createScenarioPanel());
+    }
     refreshScenarioSwitcher();
     refreshInspector();
 }
@@ -1434,6 +1453,40 @@ void ScenarioAuthoringWidget::showScenarioNameDialog(int sourceIndex) {
     }
 
     createScenarioWithName(name, sourceIndex);
+}
+
+QWidget* ScenarioAuthoringWidget::createRunPanel() {
+    auto* panel = new QWidget(shell_);
+    auto* layout = new QVBoxLayout(panel);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(12);
+    layout->addWidget(createLabel("Run", panel, ui::FontRole::Title));
+
+    stagedScenariosLabel_ = createLabel("", panel);
+    stagedScenariosLabel_->setStyleSheet(ui::mutedTextStyleSheet());
+    layout->addWidget(stagedScenariosLabel_);
+
+    executeRunButton_ = new QPushButton("Run Staged Scenarios", panel);
+    executeRunButton_->setFont(ui::font(ui::FontRole::Body));
+    executeRunButton_->setStyleSheet(ui::primaryButtonStyleSheet());
+    executeRunButton_->setEnabled(false);
+    layout->addWidget(executeRunButton_);
+
+    auto* editButton = new QPushButton("Edit Scenario", panel);
+    editButton->setFont(ui::font(ui::FontRole::Body));
+    editButton->setStyleSheet(ui::secondaryButtonStyleSheet());
+    layout->addWidget(editButton);
+    layout->addStretch(1);
+
+    connect(executeRunButton_, &QPushButton::clicked, this, [this]() {
+        runStagedScenarios();
+    });
+    connect(editButton, &QPushButton::clicked, this, [this]() {
+        rightPanelMode_ = RightPanelMode::Scenario;
+        refreshRightPanel();
+    });
+
+    return panel;
 }
 
 QWidget* ScenarioAuthoringWidget::createScenarioPanel() {
