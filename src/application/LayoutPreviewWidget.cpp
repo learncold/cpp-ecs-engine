@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <optional>
 #include <utility>
@@ -451,6 +452,195 @@ bool hasConnectionPairAtSpan(
         const bool samePair = (from == fromZoneId && to == toZoneId) || (from == toZoneId && to == fromZoneId);
         return samePair && segmentsShareSpan(connection.centerSpan, spanStart, spanEnd);
     });
+}
+
+bool sameZonePair(
+    const safecrowd::domain::Connection2D& connection,
+    const QString& fromZoneId,
+    const QString& toZoneId) {
+    const auto from = QString::fromStdString(connection.fromZoneId);
+    const auto to = QString::fromStdString(connection.toZoneId);
+    return (from == fromZoneId && to == toZoneId) || (from == toZoneId && to == fromZoneId);
+}
+
+struct AxisAlignedSpan {
+    bool vertical{false};
+    double fixedCoordinate{0.0};
+    double start{0.0};
+    double end{0.0};
+};
+
+std::optional<AxisAlignedSpan> axisAlignedSpan(const safecrowd::domain::LineSegment2D& span) {
+    const bool vertical = nearlyEqual(span.start.x, span.end.x, kGeometryEpsilon);
+    const bool horizontal = nearlyEqual(span.start.y, span.end.y, kGeometryEpsilon);
+    if (!vertical && !horizontal) {
+        return std::nullopt;
+    }
+
+    if (vertical) {
+        return AxisAlignedSpan{
+            .vertical = true,
+            .fixedCoordinate = span.start.x,
+            .start = std::min(span.start.y, span.end.y),
+            .end = std::max(span.start.y, span.end.y),
+        };
+    }
+
+    return AxisAlignedSpan{
+        .vertical = false,
+        .fixedCoordinate = span.start.y,
+        .start = std::min(span.start.x, span.end.x),
+        .end = std::max(span.start.x, span.end.x),
+    };
+}
+
+bool intervalsTouchOrOverlap(double firstStart, double firstEnd, double secondStart, double secondEnd, double tolerance) {
+    return std::max(firstStart, secondStart) <= std::min(firstEnd, secondEnd) + tolerance;
+}
+
+safecrowd::domain::LineSegment2D spanFromAxisAlignedSpan(const AxisAlignedSpan& span) {
+    if (span.vertical) {
+        return {
+            .start = {.x = span.fixedCoordinate, .y = span.start},
+            .end = {.x = span.fixedCoordinate, .y = span.end},
+        };
+    }
+
+    return {
+        .start = {.x = span.start, .y = span.fixedCoordinate},
+        .end = {.x = span.end, .y = span.fixedCoordinate},
+    };
+}
+
+constexpr double kDoorMergeEndpointToleranceMeters = 0.05;
+
+bool connectionCanMergeDoorSpan(
+    const safecrowd::domain::Connection2D& connection,
+    const QString& floorId,
+    safecrowd::domain::ConnectionKind kind,
+    const QString& fromZoneId,
+    const QString& toZoneId,
+    const safecrowd::domain::LineSegment2D& span) {
+    if (!matchesFloor(connection.floorId, floorId)
+        || connection.kind != kind
+        || connection.isStair
+        || connection.isRamp
+        || !sameZonePair(connection, fromZoneId, toZoneId)) {
+        return false;
+    }
+
+    const auto existing = axisAlignedSpan(connection.centerSpan);
+    const auto candidate = axisAlignedSpan(span);
+    if (!existing.has_value()
+        || !candidate.has_value()
+        || existing->vertical != candidate->vertical
+        || !nearlyEqual(existing->fixedCoordinate, candidate->fixedCoordinate, kGeometryEpsilon)) {
+        return false;
+    }
+
+    return intervalsTouchOrOverlap(
+        existing->start,
+        existing->end,
+        candidate->start,
+        candidate->end,
+        kDoorMergeEndpointToleranceMeters);
+}
+
+std::vector<std::size_t> mergeableDoorConnectionIndices(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const QString& floorId,
+    safecrowd::domain::ConnectionKind kind,
+    const QString& fromZoneId,
+    const QString& toZoneId,
+    const safecrowd::domain::LineSegment2D& span) {
+    std::vector<std::size_t> indices;
+    for (std::size_t index = 0; index < layout.connections.size(); ++index) {
+        if (connectionCanMergeDoorSpan(layout.connections[index], floorId, kind, fromZoneId, toZoneId, span)) {
+            indices.push_back(index);
+        }
+    }
+    return indices;
+}
+
+void retargetControls(
+    safecrowd::domain::FacilityLayout2D& layout,
+    const QString& oldTargetId,
+    const QString& newTargetId) {
+    if (oldTargetId.isEmpty() || newTargetId.isEmpty() || oldTargetId == newTargetId) {
+        return;
+    }
+
+    for (auto& control : layout.controls) {
+        if (QString::fromStdString(control.targetId) == oldTargetId) {
+            control.targetId = newTargetId.toStdString();
+        }
+    }
+}
+
+void retargetConnectionsFromZone(
+    safecrowd::domain::FacilityLayout2D& layout,
+    const QString& oldZoneId,
+    const QString& newZoneId) {
+    if (oldZoneId.isEmpty() || newZoneId.isEmpty() || oldZoneId == newZoneId) {
+        return;
+    }
+
+    for (auto& connection : layout.connections) {
+        if (QString::fromStdString(connection.fromZoneId) == oldZoneId) {
+            connection.fromZoneId = newZoneId.toStdString();
+        }
+        if (QString::fromStdString(connection.toZoneId) == oldZoneId) {
+            connection.toZoneId = newZoneId.toStdString();
+        }
+    }
+    retargetControls(layout, oldZoneId, newZoneId);
+}
+
+std::optional<QString> mergeDoorConnectionSpan(
+    safecrowd::domain::FacilityLayout2D& layout,
+    const QString& floorId,
+    safecrowd::domain::ConnectionKind kind,
+    const QString& fromZoneId,
+    const QString& toZoneId,
+    const safecrowd::domain::LineSegment2D& span) {
+    auto indices = mergeableDoorConnectionIndices(layout, floorId, kind, fromZoneId, toZoneId, span);
+    if (indices.empty()) {
+        return std::nullopt;
+    }
+
+    const auto candidate = axisAlignedSpan(span);
+    if (!candidate.has_value()) {
+        return std::nullopt;
+    }
+
+    const auto targetIndex = indices.front();
+    const auto targetId = QString::fromStdString(layout.connections[targetIndex].id);
+    AxisAlignedSpan merged = *candidate;
+    for (const auto index : indices) {
+        const auto existing = axisAlignedSpan(layout.connections[index].centerSpan);
+        if (!existing.has_value()) {
+            continue;
+        }
+        merged.start = std::min(merged.start, existing->start);
+        merged.end = std::max(merged.end, existing->end);
+    }
+
+    layout.connections[targetIndex].centerSpan = spanFromAxisAlignedSpan(merged);
+    layout.connections[targetIndex].effectiveWidth = std::hypot(
+        layout.connections[targetIndex].centerSpan.end.x - layout.connections[targetIndex].centerSpan.start.x,
+        layout.connections[targetIndex].centerSpan.end.y - layout.connections[targetIndex].centerSpan.start.y);
+
+    std::sort(indices.begin(), indices.end(), std::greater<>());
+    for (const auto index : indices) {
+        if (index == targetIndex || index >= layout.connections.size()) {
+            continue;
+        }
+        const auto removedId = QString::fromStdString(layout.connections[index].id);
+        retargetControls(layout, removedId, targetId);
+        layout.connections.erase(layout.connections.begin() + static_cast<std::ptrdiff_t>(index));
+    }
+
+    return targetId;
 }
 
 safecrowd::domain::LineSegment2D entrySpanForRectangle(
@@ -1804,6 +1994,181 @@ std::optional<std::size_t> choosePrimaryZone(
     return std::nullopt;
 }
 
+bool ringsShareBoundarySpan(
+    const std::vector<safecrowd::domain::Point2D>& first,
+    const std::vector<safecrowd::domain::Point2D>& second) {
+    if (first.size() < 2 || second.size() < 2) {
+        return false;
+    }
+
+    for (std::size_t firstIndex = 0; firstIndex < first.size(); ++firstIndex) {
+        const safecrowd::domain::LineSegment2D firstEdge{
+            .start = first[firstIndex],
+            .end = first[(firstIndex + 1) % first.size()],
+        };
+        const auto firstSpan = axisAlignedSpan(firstEdge);
+        if (!firstSpan.has_value()) {
+            continue;
+        }
+
+        for (std::size_t secondIndex = 0; secondIndex < second.size(); ++secondIndex) {
+            const safecrowd::domain::LineSegment2D secondEdge{
+                .start = second[secondIndex],
+                .end = second[(secondIndex + 1) % second.size()],
+            };
+            const auto secondSpan = axisAlignedSpan(secondEdge);
+            if (!secondSpan.has_value()
+                || firstSpan->vertical != secondSpan->vertical
+                || !nearlyEqual(firstSpan->fixedCoordinate, secondSpan->fixedCoordinate)) {
+                continue;
+            }
+
+            const auto overlapStart = std::max(firstSpan->start, secondSpan->start);
+            const auto overlapEnd = std::min(firstSpan->end, secondSpan->end);
+            if (overlapEnd - overlapStart > kGeometryEpsilon) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool polygonsShareBoundarySpan(
+    const safecrowd::domain::Polygon2D& first,
+    const safecrowd::domain::Polygon2D& second) {
+    if (ringsShareBoundarySpan(first.outline, second.outline)) {
+        return true;
+    }
+
+    for (const auto& hole : first.holes) {
+        if (ringsShareBoundarySpan(hole, second.outline)) {
+            return true;
+        }
+    }
+    for (const auto& hole : second.holes) {
+        if (ringsShareBoundarySpan(first.outline, hole)) {
+            return true;
+        }
+    }
+    for (const auto& firstHole : first.holes) {
+        for (const auto& secondHole : second.holes) {
+            if (ringsShareBoundarySpan(firstHole, secondHole)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+std::optional<safecrowd::domain::Polygon2D> largestPolygonFromPath(const QPainterPath& path) {
+    auto polygons = polygonsFromFillPath(path.simplified());
+    if (polygons.empty()) {
+        return std::nullopt;
+    }
+
+    return *std::max_element(polygons.begin(), polygons.end(), [](const auto& lhs, const auto& rhs) {
+        return painterFillArea(worldPolygonPath(lhs)) < painterFillArea(worldPolygonPath(rhs));
+    });
+}
+
+bool ringIsAxisAligned(const std::vector<safecrowd::domain::Point2D>& ring) {
+    if (ring.size() < 2) {
+        return false;
+    }
+
+    for (std::size_t index = 0; index < ring.size(); ++index) {
+        const auto& a = ring[index];
+        const auto& b = ring[(index + 1) % ring.size()];
+        if (!nearlyEqual(a.x, b.x) && !nearlyEqual(a.y, b.y)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool polygonIsAxisAligned(const safecrowd::domain::Polygon2D& polygon) {
+    if (!ringIsAxisAligned(polygon.outline)) {
+        return false;
+    }
+
+    return std::all_of(polygon.holes.begin(), polygon.holes.end(), ringIsAxisAligned);
+}
+
+safecrowd::domain::Polygon2D rectanglePolygonForBounds(const Bounds2D& bounds) {
+    return {
+        .outline = {
+            {.x = bounds.minX, .y = bounds.minY},
+            {.x = bounds.maxX, .y = bounds.minY},
+            {.x = bounds.maxX, .y = bounds.maxY},
+            {.x = bounds.minX, .y = bounds.maxY},
+        },
+    };
+}
+
+std::optional<QString> mergeExitZonePolygon(
+    safecrowd::domain::FacilityLayout2D& layout,
+    const safecrowd::domain::Polygon2D& candidatePolygon,
+    const QPainterPath& candidatePath,
+    const std::string& floorId) {
+    const double candidateArea = painterFillArea(candidatePath);
+    constexpr double kExitZoneOverlapAreaThreshold = 0.02;
+    constexpr double kExitZoneOverlapRatioThreshold = 0.08;
+
+    std::vector<std::size_t> mergeZoneIndices;
+    QPainterPath mergedPath = candidatePath;
+    Bounds2D mergedBounds = polygonBounds(candidatePolygon);
+    bool canRectangularize = polygonIsAxisAligned(candidatePolygon);
+    for (std::size_t index = 0; index < layout.zones.size(); ++index) {
+        const auto& zone = layout.zones[index];
+        if (zone.kind != safecrowd::domain::ZoneKind::Exit || zone.floorId != floorId) {
+            continue;
+        }
+        const auto zonePath = worldPolygonPath(zone.area);
+        const QPainterPath overlap = candidatePath.intersected(zonePath);
+        const double overlapArea = painterFillArea(overlap);
+        const double ratio = candidateArea > kGeometryEpsilon ? overlapArea / candidateArea : 1.0;
+        const bool overlapsEnough = overlapArea > kExitZoneOverlapAreaThreshold && ratio >= kExitZoneOverlapRatioThreshold;
+        if (overlapsEnough || polygonsShareBoundarySpan(candidatePolygon, zone.area)) {
+            mergeZoneIndices.push_back(index);
+            mergedPath = mergedPath.united(zonePath);
+            includePolygon(mergedBounds, zone.area);
+            canRectangularize = canRectangularize && polygonIsAxisAligned(zone.area);
+        }
+    }
+
+    if (mergeZoneIndices.empty()) {
+        return std::nullopt;
+    }
+
+    const auto keepIndex = mergeZoneIndices.front();
+    const auto keepZoneId = QString::fromStdString(layout.zones[keepIndex].id);
+    std::size_t mergedCapacity = 0u;
+    for (const auto index : mergeZoneIndices) {
+        mergedCapacity += layout.zones[index].defaultCapacity;
+    }
+
+    if (canRectangularize && mergedBounds.valid()) {
+        layout.zones[keepIndex].area = rectanglePolygonForBounds(mergedBounds);
+    } else if (const auto mergedPolygon = largestPolygonFromPath(mergedPath)) {
+        layout.zones[keepIndex].area = *mergedPolygon;
+    }
+    layout.zones[keepIndex].defaultCapacity = std::max<std::size_t>(mergedCapacity, layout.zones[keepIndex].defaultCapacity);
+
+    std::sort(mergeZoneIndices.begin(), mergeZoneIndices.end(), std::greater<>());
+    for (const auto index : mergeZoneIndices) {
+        if (index == keepIndex || index >= layout.zones.size()) {
+            continue;
+        }
+        const auto removedZoneId = QString::fromStdString(layout.zones[index].id);
+        retargetConnectionsFromZone(layout, removedZoneId, keepZoneId);
+        layout.zones.erase(layout.zones.begin() + static_cast<std::ptrdiff_t>(index));
+    }
+
+    return keepZoneId;
+}
+
 QString createExitZoneAtDoor(
     safecrowd::domain::FacilityLayout2D& layout,
     const safecrowd::domain::Point2D& gapStart,
@@ -1827,29 +2192,8 @@ QString createExitZoneAtDoor(
     };
 
     const QPainterPath candidatePath = worldPolygonPath(candidatePolygon);
-    const double candidateArea = painterFillArea(candidatePath);
-    constexpr double kExitZoneOverlapAreaThreshold = 0.02;
-    constexpr double kExitZoneOverlapRatioThreshold = 0.08;
-
-    double bestOverlapArea = 0.0;
-    QString bestOverlapZoneId;
-    for (const auto& zone : layout.zones) {
-        if (zone.kind != safecrowd::domain::ZoneKind::Exit || zone.floorId != floorId) {
-            continue;
-        }
-        const QPainterPath overlap = candidatePath.intersected(worldPolygonPath(zone.area));
-        const double overlapArea = painterFillArea(overlap);
-        if (overlapArea > bestOverlapArea) {
-            bestOverlapArea = overlapArea;
-            bestOverlapZoneId = QString::fromStdString(zone.id);
-        }
-    }
-
-    if (!bestOverlapZoneId.isEmpty() && bestOverlapArea > kExitZoneOverlapAreaThreshold) {
-        const double ratio = candidateArea > kGeometryEpsilon ? bestOverlapArea / candidateArea : 1.0;
-        if (ratio >= kExitZoneOverlapRatioThreshold) {
-            return bestOverlapZoneId;
-        }
+    if (const auto mergedZoneId = mergeExitZonePolygon(layout, candidatePolygon, candidatePath, floorId)) {
+        return *mergedZoneId;
     }
 
     const auto zoneId = nextZoneId(layout);
@@ -3413,9 +3757,9 @@ void LayoutPreviewWidget::createRoomPolygon(const std::vector<QPointF>& points) 
 
     QString lastZoneId;
     for (const auto& polygon : polygonsToCreate) {
+        const auto floorId = currentFloorId().toStdString();
         const auto zoneId = nextZoneId(layout);
         const auto zoneNumber = static_cast<int>(layout.zones.size()) + 1;
-        const auto floorId = currentFloorId().toStdString();
         layout.zones.push_back({
             .id = zoneId.toStdString(),
             .floorId = floorId,
@@ -3495,9 +3839,16 @@ void LayoutPreviewWidget::createZone(const QPointF& startWorld, const QPointF& e
 
     QString lastZoneId;
     for (const auto& polygon : polygonsToCreate) {
+        const auto floorId = currentFloorId().toStdString();
+        if (kind == safecrowd::domain::ZoneKind::Exit) {
+            if (const auto mergedZoneId = mergeExitZonePolygon(layout, polygon, worldPolygonPath(polygon), floorId)) {
+                lastZoneId = *mergedZoneId;
+                continue;
+            }
+        }
+
         const auto zoneId = nextZoneId(layout);
         const auto zoneNumber = static_cast<int>(layout.zones.size()) + 1;
-        const auto floorId = currentFloorId().toStdString();
         layout.zones.push_back({
             .id = zoneId.toStdString(),
             .floorId = floorId,
@@ -4159,10 +4510,22 @@ bool LayoutPreviewWidget::createDoorSpan(
         connectionKind = safecrowd::domain::ConnectionKind::Exit;
     }
 
+    const safecrowd::domain::LineSegment2D gapSpan{
+        .start = gapStart,
+        .end = gapEnd,
+    };
+    const bool canMergeWithExistingDoor = !mergeableDoorConnectionIndices(
+        layout,
+        currentFloorId(),
+        connectionKind,
+        fromZoneId,
+        toZoneId,
+        gapSpan).empty();
+
     if (fromZoneId.isEmpty()
         || toZoneId.isEmpty()
         || fromZoneId == toZoneId
-        || hasConnectionPairAtSpan(layout, fromZoneId, toZoneId, gapStart, gapEnd)) {
+        || (!canMergeWithExistingDoor && hasConnectionPairAtSpan(layout, fromZoneId, toZoneId, gapStart, gapEnd))) {
         return false;
     }
 
@@ -4201,6 +4564,31 @@ bool LayoutPreviewWidget::createDoorSpan(
         }
 
         replaceBarrierWithSegments(layout, *barrierIndex, remainingSegments, currentFloorId().toStdString());
+    }
+
+    if (canMergeWithExistingDoor) {
+        const auto mergedConnectionId = mergeDoorConnectionSpan(
+            layout,
+            currentFloorId(),
+            connectionKind,
+            fromZoneId,
+            toZoneId,
+            gapSpan);
+        if (!mergedConnectionId.has_value()) {
+            return false;
+        }
+
+        selectedConnectionId_ = *mergedConnectionId;
+        selectedConnectionIds_ = QStringList{*mergedConnectionId};
+        selectedZoneId_.clear();
+        selectedZoneIds_.clear();
+        selectedBarrierId_.clear();
+        selectedBarrierIds_.clear();
+        focusedTargetId_ = *mergedConnectionId;
+        notifyLayoutEdited();
+        emitCurrentSelection();
+        update();
+        return true;
     }
 
     const auto connectionId = nextConnectionId(layout);
