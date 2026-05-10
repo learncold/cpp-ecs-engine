@@ -1365,7 +1365,7 @@ void ScenarioCanvasWidget::activateLayoutElement(const QString& elementId) {
         if (it == layout_.zones.end()) {
             return;
         }
-        addEnvironmentHazardForZone(*it, toolMode_ == ToolMode::FireHazard
+        addEnvironmentHazardForZone(*it, polygonCenter(it->area), toolMode_ == ToolMode::FireHazard
             ? safecrowd::domain::EnvironmentHazardKind::Fire
             : safecrowd::domain::EnvironmentHazardKind::Smoke);
     }
@@ -2013,11 +2013,15 @@ void ScenarioCanvasWidget::drawEnvironmentHazards(QPainter& painter, const Layou
         const auto zoneIt = std::find_if(layout_.zones.begin(), layout_.zones.end(), [&](const auto& zone) {
             return zone.id == hazard.affectedZoneId;
         });
-        if (zoneIt == layout_.zones.end() || !matchesFloor(zoneIt->floorId, currentFloorId_)) {
+        if (zoneIt == layout_.zones.end()) {
+            continue;
+        }
+        const auto floorId = hazard.floorId.empty() ? zoneIt->floorId : hazard.floorId;
+        if (!matchesFloor(floorId, currentFloorId_)) {
             continue;
         }
 
-        const auto center = transform.map(polygonCenter(zoneIt->area));
+        const auto center = transform.map(hazard.position);
         const QColor fill = hazard.kind == safecrowd::domain::EnvironmentHazardKind::Fire
             ? QColor("#c2410c")
             : QColor("#64748b");
@@ -2684,11 +2688,12 @@ void ScenarioCanvasWidget::addEnvironmentHazard(
     if (it == layout_.zones.end()) {
         return;
     }
-    addEnvironmentHazardForZone(*it, kind);
+    addEnvironmentHazardForZone(*it, point, kind);
 }
 
 void ScenarioCanvasWidget::addEnvironmentHazardForZone(
     const safecrowd::domain::Zone2D& zone,
+    safecrowd::domain::Point2D position,
     safecrowd::domain::EnvironmentHazardKind kind) {
     if (!matchesFloor(zone.floorId, currentFloorId_)) {
         return;
@@ -2702,6 +2707,8 @@ void ScenarioCanvasWidget::addEnvironmentHazardForZone(
         .arg(static_cast<int>(environmentHazards_.size()) + 1)
         .toStdString();
     draft.affectedZoneId = zone.id;
+    draft.floorId = zone.floorId.empty() ? currentFloorId_.toStdString() : zone.floorId;
+    draft.position = position;
     draft.startSeconds = 0.0;
     draft.endSeconds = 60.0;
     draft.severity = safecrowd::domain::ScenarioElementSeverity::Medium;

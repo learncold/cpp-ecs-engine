@@ -151,6 +151,16 @@ bool editEnvironmentHazard(
     }
     zoneCombo->setCurrentIndex(std::max(0, zoneCombo->findData(QString::fromStdString(hazard->affectedZoneId))));
 
+    auto* xSpin = new QDoubleSpinBox(&dialog);
+    xSpin->setRange(-100000.0, 100000.0);
+    xSpin->setDecimals(2);
+    xSpin->setValue(hazard->position.x);
+
+    auto* ySpin = new QDoubleSpinBox(&dialog);
+    ySpin->setRange(-100000.0, 100000.0);
+    ySpin->setDecimals(2);
+    ySpin->setValue(hazard->position.y);
+
     auto* startSpin = new QDoubleSpinBox(&dialog);
     startSpin->setRange(0.0, 86400.0);
     startSpin->setDecimals(1);
@@ -181,6 +191,8 @@ bool editEnvironmentHazard(
     form->addRow("Kind", kindCombo);
     form->addRow("Name", nameEdit);
     form->addRow("Affected zone", zoneCombo);
+    form->addRow("X", xSpin);
+    form->addRow("Y", ySpin);
     form->addRow("Start", startSpin);
     form->addRow("End", endSpin);
     form->addRow("Severity", severityCombo);
@@ -205,6 +217,10 @@ bool editEnvironmentHazard(
     hazard->kind = static_cast<safecrowd::domain::EnvironmentHazardKind>(kindCombo->currentData().toInt());
     hazard->name = name.toStdString();
     hazard->affectedZoneId = zoneCombo->currentData().toString().toStdString();
+    hazard->position = {
+        .x = xSpin->value(),
+        .y = ySpin->value(),
+    };
     hazard->startSeconds = startSpin->value();
     hazard->endSeconds = std::max(hazard->startSeconds, endSpin->value());
     hazard->severity = static_cast<safecrowd::domain::ScenarioElementSeverity>(severityCombo->currentData().toInt());
@@ -273,6 +289,10 @@ QString hazardZoneSummary(
         return "Unassigned zone";
     }
     return zoneName(layout, hazard.affectedZoneId);
+}
+
+QString hazardPositionSummary(const safecrowd::domain::EnvironmentHazardDraft& hazard) {
+    return QString("(%1, %2)").arg(hazard.position.x, 0, 'f', 1).arg(hazard.position.y, 0, 'f', 1);
 }
 
 bool hasSmokeHazard(const safecrowd::domain::EnvironmentState& environment) {
@@ -728,10 +748,12 @@ std::vector<NavigationTreeNode> buildEventsTree(
             const auto hazardId = QString::fromStdString(hazard.id);
             const auto kind = hazardKindLabel(hazard.kind);
             const auto zone = hazardZoneSummary(layout, hazard);
+            const auto position = hazardPositionSummary(hazard);
             const auto schedule = hazardScheduleSummary(hazard);
             const auto severity = severityLabel(hazard.severity);
             QStringList details;
             details << QString("Zone: %1").arg(zone)
+                    << QString("Location: %1").arg(position)
                     << QString("Period: %1").arg(schedule)
                     << QString("Severity: %1").arg(severity);
             if (hazard.kind == safecrowd::domain::EnvironmentHazardKind::Smoke) {
@@ -746,6 +768,10 @@ std::vector<NavigationTreeNode> buildEventsTree(
                 {
                     .label = QString("Zone  -  %1").arg(zone),
                     .id = QString("%1/zone").arg(hazardId),
+                },
+                {
+                    .label = QString("Location  -  %1").arg(position),
+                    .id = QString("%1/location").arg(hazardId),
                 },
                 {
                     .label = QString("Period  -  %1").arg(schedule),

@@ -31,6 +31,8 @@ struct EnvironmentHazardDraft {
     EnvironmentHazardKind kind{EnvironmentHazardKind::Fire};
     std::string name{};
     std::string affectedZoneId{};
+    std::string floorId{};
+    Point2D position{};
     double startSeconds{0.0};
     double endSeconds{0.0};
     ScenarioElementSeverity severity{ScenarioElementSeverity::Medium};

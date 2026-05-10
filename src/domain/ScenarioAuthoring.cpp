@@ -68,6 +68,8 @@ bool hazardsEqual(const std::vector<EnvironmentHazardDraft>& lhs,
             || lhs[i].kind != rhs[i].kind
             || lhs[i].name != rhs[i].name
             || lhs[i].affectedZoneId != rhs[i].affectedZoneId
+            || lhs[i].floorId != rhs[i].floorId
+            || !pointsEqual(lhs[i].position, rhs[i].position)
             || lhs[i].startSeconds != rhs[i].startSeconds
             || lhs[i].endSeconds != rhs[i].endSeconds
             || lhs[i].severity != rhs[i].severity

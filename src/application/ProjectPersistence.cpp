@@ -775,6 +775,8 @@ QJsonObject hazardToJson(const safecrowd::domain::EnvironmentHazardDraft& hazard
     object["kind"] = hazardKindToJson(hazard.kind);
     object["name"] = QString::fromStdString(hazard.name);
     object["affectedZoneId"] = QString::fromStdString(hazard.affectedZoneId);
+    object["floorId"] = QString::fromStdString(hazard.floorId);
+    object["position"] = pointArray(hazard.position);
     object["startSeconds"] = hazard.startSeconds;
     object["endSeconds"] = hazard.endSeconds;
     object["severity"] = severityToJson(hazard.severity);
@@ -788,6 +790,8 @@ safecrowd::domain::EnvironmentHazardDraft hazardFromJson(const QJsonObject& obje
         .kind = hazardKindFromJson(object.value("kind")),
         .name = object.value("name").toString().toStdString(),
         .affectedZoneId = object.value("affectedZoneId").toString().toStdString(),
+        .floorId = object.value("floorId").toString().toStdString(),
+        .position = pointFromJson(object.value("position")),
         .startSeconds = object.value("startSeconds").toDouble(0.0),
         .endSeconds = object.value("endSeconds").toDouble(0.0),
         .severity = severityFromJson(object.value("severity")),

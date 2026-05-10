@@ -123,7 +123,10 @@ private:
     void addRouteGuidanceForExitZone(const safecrowd::domain::Zone2D& zone);
     void addRouteGuidanceForConnection(const safecrowd::domain::Connection2D& connection);
     void addEnvironmentHazard(const QPointF& position, safecrowd::domain::EnvironmentHazardKind kind);
-    void addEnvironmentHazardForZone(const safecrowd::domain::Zone2D& zone, safecrowd::domain::EnvironmentHazardKind kind);
+    void addEnvironmentHazardForZone(
+        const safecrowd::domain::Zone2D& zone,
+        safecrowd::domain::Point2D position,
+        safecrowd::domain::EnvironmentHazardKind kind);
     void openRouteGuidanceEditor(const QString& guidanceId, const QPoint& screenPosition);
     void selectSingleAt(const QPointF& position, const LayoutCanvasTransform& transform);
     void selectPlacementsInRect(const QRectF& screenRect, const LayoutCanvasTransform& transform);
