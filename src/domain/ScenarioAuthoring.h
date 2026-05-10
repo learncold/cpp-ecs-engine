@@ -15,10 +15,33 @@ enum class ScenarioRole {
     Recommended,
 };
 
+enum class EnvironmentHazardKind {
+    Fire,
+    Smoke,
+};
+
+enum class ScenarioElementSeverity {
+    Low,
+    Medium,
+    High,
+};
+
+struct EnvironmentHazardDraft {
+    std::string id{};
+    EnvironmentHazardKind kind{EnvironmentHazardKind::Fire};
+    std::string name{};
+    std::string affectedZoneId{};
+    double startSeconds{0.0};
+    double endSeconds{0.0};
+    ScenarioElementSeverity severity{ScenarioElementSeverity::Medium};
+    std::string note{};
+};
+
 struct EnvironmentState {
     bool reducedVisibility{false};
     std::string familiarityProfile{};
     std::string guidanceProfile{};
+    std::vector<EnvironmentHazardDraft> hazards{};
 };
 
 struct OperationalEventDraft {

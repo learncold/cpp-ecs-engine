@@ -6,6 +6,7 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QFrame>
 #include <QHBoxLayout>
@@ -39,6 +40,8 @@ QLabel* createLabel(const QString& text, QWidget* parent, ui::FontRole role = ui
     label->setWordWrap(true);
     return label;
 }
+
+QString zoneLabel(const safecrowd::domain::Zone2D& zone);
 
 bool editOperationalEvent(
     safecrowd::domain::OperationalEventDraft* event,
@@ -92,6 +95,123 @@ bool editOperationalEvent(
     return true;
 }
 
+QString hazardKindLabel(safecrowd::domain::EnvironmentHazardKind kind) {
+    switch (kind) {
+    case safecrowd::domain::EnvironmentHazardKind::Smoke:
+        return "Smoke";
+    case safecrowd::domain::EnvironmentHazardKind::Fire:
+    default:
+        return "Fire";
+    }
+}
+
+QString severityLabel(safecrowd::domain::ScenarioElementSeverity severity) {
+    switch (severity) {
+    case safecrowd::domain::ScenarioElementSeverity::Low:
+        return "Low";
+    case safecrowd::domain::ScenarioElementSeverity::High:
+        return "High";
+    case safecrowd::domain::ScenarioElementSeverity::Medium:
+    default:
+        return "Medium";
+    }
+}
+
+bool editEnvironmentHazard(
+    safecrowd::domain::EnvironmentHazardDraft* hazard,
+    const safecrowd::domain::FacilityLayout2D& layout,
+    QWidget* parent) {
+    if (hazard == nullptr) {
+        return false;
+    }
+
+    QDialog dialog(parent);
+    dialog.setWindowTitle("Edit hazard");
+
+    auto* root = new QVBoxLayout(&dialog);
+    root->setContentsMargins(16, 16, 16, 16);
+    root->setSpacing(12);
+
+    auto* form = new QFormLayout();
+    form->setContentsMargins(0, 0, 0, 0);
+    form->setSpacing(8);
+
+    auto* kindCombo = new QComboBox(&dialog);
+    kindCombo->addItem("Fire", static_cast<int>(safecrowd::domain::EnvironmentHazardKind::Fire));
+    kindCombo->addItem("Smoke", static_cast<int>(safecrowd::domain::EnvironmentHazardKind::Smoke));
+    kindCombo->setCurrentIndex(std::max(0, kindCombo->findData(static_cast<int>(hazard->kind))));
+
+    auto* nameEdit = new QLineEdit(&dialog);
+    nameEdit->setText(QString::fromStdString(hazard->name));
+
+    auto* zoneCombo = new QComboBox(&dialog);
+    zoneCombo->addItem("Unassigned zone", QString{});
+    for (const auto& zone : layout.zones) {
+        zoneCombo->addItem(zoneLabel(zone), QString::fromStdString(zone.id));
+    }
+    zoneCombo->setCurrentIndex(std::max(0, zoneCombo->findData(QString::fromStdString(hazard->affectedZoneId))));
+
+    auto* startSpin = new QDoubleSpinBox(&dialog);
+    startSpin->setRange(0.0, 86400.0);
+    startSpin->setDecimals(1);
+    startSpin->setSuffix(" s");
+    startSpin->setValue(std::max(0.0, hazard->startSeconds));
+
+    auto* endSpin = new QDoubleSpinBox(&dialog);
+    endSpin->setRange(0.0, 86400.0);
+    endSpin->setDecimals(1);
+    endSpin->setSuffix(" s");
+    endSpin->setValue(std::max(0.0, hazard->endSeconds));
+
+    auto* severityCombo = new QComboBox(&dialog);
+    severityCombo->addItem("Low", static_cast<int>(safecrowd::domain::ScenarioElementSeverity::Low));
+    severityCombo->addItem("Medium", static_cast<int>(safecrowd::domain::ScenarioElementSeverity::Medium));
+    severityCombo->addItem("High", static_cast<int>(safecrowd::domain::ScenarioElementSeverity::High));
+    severityCombo->setCurrentIndex(std::max(0, severityCombo->findData(static_cast<int>(hazard->severity))));
+
+    auto* noteEdit = new QPlainTextEdit(&dialog);
+    noteEdit->setPlainText(QString::fromStdString(hazard->note));
+    noteEdit->setMinimumHeight(72);
+
+    auto* visibilityHint = createLabel(
+        "Smoke hazards are scenario inputs linked to reduced visibility concepts. No fire spread, smoke concentration, FED, or FDS runtime effect is calculated in v1.",
+        &dialog);
+    visibilityHint->setStyleSheet(ui::mutedTextStyleSheet());
+
+    form->addRow("Kind", kindCombo);
+    form->addRow("Name", nameEdit);
+    form->addRow("Affected zone", zoneCombo);
+    form->addRow("Start", startSpin);
+    form->addRow("End", endSpin);
+    form->addRow("Severity", severityCombo);
+    form->addRow("Note", noteEdit);
+    root->addLayout(form);
+    root->addWidget(visibilityHint);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    root->addWidget(buttons);
+
+    if (dialog.exec() != QDialog::Accepted) {
+        return false;
+    }
+
+    const auto name = nameEdit->text().trimmed();
+    if (name.isEmpty()) {
+        return false;
+    }
+
+    hazard->kind = static_cast<safecrowd::domain::EnvironmentHazardKind>(kindCombo->currentData().toInt());
+    hazard->name = name.toStdString();
+    hazard->affectedZoneId = zoneCombo->currentData().toString().toStdString();
+    hazard->startSeconds = startSpin->value();
+    hazard->endSeconds = std::max(hazard->startSeconds, endSpin->value());
+    hazard->severity = static_cast<safecrowd::domain::ScenarioElementSeverity>(severityCombo->currentData().toInt());
+    hazard->note = noteEdit->toPlainText().trimmed().toStdString();
+    return true;
+}
+
 QString zoneLabel(const safecrowd::domain::Zone2D& zone) {
     const auto id = QString::fromStdString(zone.id);
     const auto label = QString::fromStdString(zone.label);
@@ -140,6 +260,37 @@ QString blockScheduleSummary(const safecrowd::domain::ConnectionBlockDraft& bloc
         intervals << QString("%1s - %2s").arg(interval.startSeconds, 0, 'f', 1).arg(interval.endSeconds, 0, 'f', 1);
     }
     return intervals.join(", ");
+}
+
+QString hazardScheduleSummary(const safecrowd::domain::EnvironmentHazardDraft& hazard) {
+    return QString("%1s - %2s").arg(hazard.startSeconds, 0, 'f', 1).arg(hazard.endSeconds, 0, 'f', 1);
+}
+
+QString hazardZoneSummary(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const safecrowd::domain::EnvironmentHazardDraft& hazard) {
+    if (hazard.affectedZoneId.empty()) {
+        return "Unassigned zone";
+    }
+    return zoneName(layout, hazard.affectedZoneId);
+}
+
+bool hasSmokeHazard(const safecrowd::domain::EnvironmentState& environment) {
+    return std::any_of(environment.hazards.begin(), environment.hazards.end(), [](const auto& hazard) {
+        return hazard.kind == safecrowd::domain::EnvironmentHazardKind::Smoke;
+    });
+}
+
+QString nextHazardId(const std::vector<safecrowd::domain::EnvironmentHazardDraft>& hazards) {
+    for (int index = static_cast<int>(hazards.size()) + 1;; ++index) {
+        const auto candidate = QString("hazard-%1").arg(index);
+        const auto exists = std::any_of(hazards.begin(), hazards.end(), [&](const auto& hazard) {
+            return QString::fromStdString(hazard.id) == candidate;
+        });
+        if (!exists) {
+            return candidate;
+        }
+    }
 }
 
 int draftOccupantCount(const safecrowd::domain::ScenarioDraft& scenario) {
@@ -200,6 +351,15 @@ QString buildChangeSummaryLine(
             .arg(QString::fromStdString(baseline.environment.guidanceProfile),
                  QString::fromStdString(variant.environment.guidanceProfile));
     }
+    if (key == "environment.hazards") {
+        QString summary = countChangeSummary("hazards",
+                                             static_cast<int>(baseline.environment.hazards.size()),
+                                             static_cast<int>(variant.environment.hazards.size()));
+        if (hasSmokeHazard(variant.environment)) {
+            summary += ", smoke linked to reduced visibility concept";
+        }
+        return QString("environment.hazards (%1)").arg(summary);
+    }
     if (key == "control.events") {
         return QString("control.events (%1)")
             .arg(countChangeSummary("events", static_cast<int>(baseline.control.events.size()),
@@ -247,6 +407,9 @@ QString changeCategoryLabel(const std::string& key) {
     if (key.rfind("population.", 0) == 0) {
         return "Crowd";
     }
+    if (key == "environment.hazards") {
+        return "Hazards";
+    }
     if (key.rfind("environment.", 0) == 0) {
         return "Layout";
     }
@@ -265,6 +428,7 @@ QString compactChangeSummary(const QString& summary) {
     compact.replace("environment.reducedVisibility", "layout visibility");
     compact.replace("environment.familiarityProfile", "layout familiarity");
     compact.replace("environment.guidanceProfile", "layout guidance");
+    compact.replace("environment.hazards", "hazards");
     compact.replace("control.events", "events");
     compact.replace("control.connectionBlocks", "blocked events");
     compact.replace("control.routeGuidances", "route guidance");
@@ -568,6 +732,67 @@ std::vector<NavigationTreeNode> buildEventsTree(
         });
     }
 
+    const auto& hazards = scenario->draft.environment.hazards;
+    if (!hazards.empty()) {
+        std::vector<NavigationTreeNode> nodes;
+        nodes.reserve(hazards.size());
+        for (const auto& hazard : hazards) {
+            const auto hazardId = QString::fromStdString(hazard.id);
+            const auto kind = hazardKindLabel(hazard.kind);
+            const auto zone = hazardZoneSummary(layout, hazard);
+            const auto schedule = hazardScheduleSummary(hazard);
+            const auto severity = severityLabel(hazard.severity);
+            QStringList details;
+            details << QString("Zone: %1").arg(zone)
+                    << QString("Period: %1").arg(schedule)
+                    << QString("Severity: %1").arg(severity);
+            if (hazard.kind == safecrowd::domain::EnvironmentHazardKind::Smoke) {
+                details << "Visibility: reduced visibility concept";
+            }
+
+            std::vector<NavigationTreeNode> children{
+                {
+                    .label = QString("Kind  -  %1").arg(kind),
+                    .id = QString("%1/kind").arg(hazardId),
+                },
+                {
+                    .label = QString("Zone  -  %1").arg(zone),
+                    .id = QString("%1/zone").arg(hazardId),
+                },
+                {
+                    .label = QString("Period  -  %1").arg(schedule),
+                    .id = QString("%1/period").arg(hazardId),
+                },
+                {
+                    .label = QString("Severity  -  %1").arg(severity),
+                    .id = QString("%1/severity").arg(hazardId),
+                },
+            };
+            if (!hazard.note.empty()) {
+                children.push_back({
+                    .label = QString("Note  -  %1").arg(QString::fromStdString(hazard.note)),
+                    .id = QString("%1/note").arg(hazardId),
+                });
+            }
+
+            const auto hazardName = QString::fromStdString(hazard.name);
+            nodes.push_back({
+                .label = QString("Hazard  -  %1: %2").arg(kind, hazardName),
+                .id = hazardId,
+                .detail = details.join(" / "),
+                .children = std::move(children),
+                .expanded = true,
+            });
+        }
+
+        sections.push_back({
+            .label = QString("Hazards (%1)").arg(static_cast<int>(hazards.size())),
+            .children = std::move(nodes),
+            .expanded = true,
+            .selectable = false,
+        });
+    }
+
     const auto& routeGuidances = scenario->draft.control.routeGuidances;
     if (!routeGuidances.empty()) {
         std::vector<NavigationTreeNode> nodes;
@@ -670,17 +895,35 @@ std::vector<NavigationTreeNode> buildEventsTree(
 QWidget* createEventsPanel(
     const safecrowd::domain::FacilityLayout2D& layout,
     const ScenarioAuthoringWidget::ScenarioState* scenario,
-    const WorkspaceShell* shell,
     QWidget* parent,
+    std::function<void()> addHazardHandler,
     std::function<void(const QString&)> deleteItemHandler,
     std::function<void(const QString&)> settingsItemHandler) {
+    auto* header = new QWidget(parent);
+    auto* headerLayout = new QHBoxLayout(header);
+    headerLayout->setContentsMargins(0, 0, 0, 0);
+    headerLayout->setSpacing(8);
+    auto* title = createLabel("Events / Hazards", header, ui::FontRole::Title);
+    title->setWordWrap(false);
+    headerLayout->addWidget(title, 1, Qt::AlignVCenter);
+    auto* addButton = new QPushButton("Add Hazard", header);
+    addButton->setFont(ui::font(ui::FontRole::Body));
+    addButton->setStyleSheet(ui::secondaryButtonStyleSheet());
+    addButton->setEnabled(static_cast<bool>(addHazardHandler));
+    QObject::connect(addButton, &QPushButton::clicked, header, [addHazardHandler = std::move(addHazardHandler)]() {
+        if (addHazardHandler) {
+            addHazardHandler();
+        }
+    });
+    headerLayout->addWidget(addButton, 0, Qt::AlignVCenter);
+
     return new NavigationTreeWidget(
-        "Events",
+        "Events / Hazards",
         buildEventsTree(layout, scenario),
-        "No operational events or blocked exits yet",
+        "No operational events, hazards, or blocked exits yet",
         {},
         parent,
-        shell != nullptr ? shell->createPanelHeader("Events", parent, false) : nullptr,
+        header,
         {},
         {},
         std::move(deleteItemHandler),
@@ -984,6 +1227,7 @@ void ScenarioAuthoringWidget::refreshInspector() {
 
                 addMetaRow(panelLayout, "Population", QString::number(totalOccupantCount(*scenario)), scenarioOverviewPanel_);
                 addMetaRow(panelLayout, "Events", QString::number(static_cast<int>(scenario->events.size())), scenarioOverviewPanel_);
+                addMetaRow(panelLayout, "Hazards", QString::number(static_cast<int>(scenario->draft.environment.hazards.size())), scenarioOverviewPanel_);
                 addMetaRow(panelLayout, "Guidance", QString::number(static_cast<int>(scenario->draft.control.routeGuidances.size())), scenarioOverviewPanel_);
                 addMetaRow(panelLayout, "Blocked", QString::number(static_cast<int>(scenario->draft.control.connectionBlocks.size())), scenarioOverviewPanel_);
                 addMetaRow(panelLayout, "Start", scenario->startText, scenarioOverviewPanel_);
@@ -1104,7 +1348,7 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
             },
             {
                 .id = "events",
-                .label = "Events",
+                .label = "Events / Hazards",
                 .icon = makeEventsIcon(QColor("#1f5fae")),
             },
         },
@@ -1173,7 +1417,31 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
         layout_,
         currentScenario(),
         shell_,
-        shell_,
+        [this]() {
+            auto* scenario = currentScenario();
+            if (scenario == nullptr) {
+                return;
+            }
+
+            auto& hazards = scenario->draft.environment.hazards;
+            safecrowd::domain::EnvironmentHazardDraft hazard{
+                .id = nextHazardId(hazards).toStdString(),
+                .kind = safecrowd::domain::EnvironmentHazardKind::Fire,
+                .name = QString("Fire hazard %1").arg(static_cast<int>(hazards.size()) + 1).toStdString(),
+                .affectedZoneId = {},
+                .startSeconds = 0.0,
+                .endSeconds = 60.0,
+                .severity = safecrowd::domain::ScenarioElementSeverity::Medium,
+            };
+            if (!editEnvironmentHazard(&hazard, layout_, this)) {
+                return;
+            }
+
+            hazards.push_back(std::move(hazard));
+            recomputeDiffKeysAfterScenarioChanged(*scenario);
+            refreshNavigationPanel();
+            refreshInspector();
+        },
         [this](const QString& rawId) {
             auto* scenario = currentScenario();
             if (scenario == nullptr || rawId.isEmpty()) {
@@ -1193,25 +1461,38 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
             const auto it = std::remove_if(events.begin(), events.end(), [&](const auto& event) {
                 return event.id == eventId;
             });
-            if (it == events.end()) {
+            if (it != events.end()) {
+                events.erase(it, events.end());
+                scenario->draft.control.events = scenario->events;
+                recomputeDiffKeysAfterScenarioChanged(*scenario);
+                refreshNavigationPanel();
+                refreshInspector();
                 return;
             }
-            events.erase(it, events.end());
-            scenario->draft.control.events = scenario->events;
+
+            auto& hazards = scenario->draft.environment.hazards;
+            const auto hazardId = id.toStdString();
+            const auto hazardIt = std::remove_if(hazards.begin(), hazards.end(), [&](const auto& hazard) {
+                return hazard.id == hazardId;
+            });
+            if (hazardIt == hazards.end()) {
+                return;
+            }
+            hazards.erase(hazardIt, hazards.end());
             recomputeDiffKeysAfterScenarioChanged(*scenario);
             refreshNavigationPanel();
             refreshInspector();
         },
         [this](const QString& rawId) {
-            if (canvas_ == nullptr || rawId.isEmpty()) {
+            if (rawId.isEmpty()) {
                 return;
             }
 
             const auto id = rawId.section('/', 0, 0);
-            if (canvas_->editConnectionBlockScheduleById(id)) {
+            if (canvas_ != nullptr && canvas_->editConnectionBlockScheduleById(id)) {
                 return;
             }
-            if (canvas_->editRouteGuidanceById(id)) {
+            if (canvas_ != nullptr && canvas_->editRouteGuidanceById(id)) {
                 return;
             }
 
@@ -1225,13 +1506,25 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
             const auto it = std::find_if(events.begin(), events.end(), [&](auto& event) {
                 return event.id == eventId;
             });
-            if (it == events.end()) {
+            if (it != events.end()) {
+                if (!editOperationalEvent(&(*it), this)) {
+                    return;
+                }
+                scenario->draft.control.events = scenario->events;
+                recomputeDiffKeysAfterScenarioChanged(*scenario);
+                refreshNavigationPanel();
+                refreshInspector();
                 return;
             }
-            if (!editOperationalEvent(&(*it), this)) {
+
+            auto& hazards = scenario->draft.environment.hazards;
+            const auto hazardId = id.toStdString();
+            const auto hazardIt = std::find_if(hazards.begin(), hazards.end(), [&](auto& hazard) {
+                return hazard.id == hazardId;
+            });
+            if (hazardIt == hazards.end() || !editEnvironmentHazard(&(*hazardIt), layout_, this)) {
                 return;
             }
-            scenario->draft.control.events = scenario->events;
             recomputeDiffKeysAfterScenarioChanged(*scenario);
             refreshNavigationPanel();
             refreshInspector();
