@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -14,6 +15,22 @@ inline constexpr double kScenarioStalledSpeedThreshold = 0.12;
 inline constexpr double kScenarioStalledSecondsThreshold = 0.75;
 inline constexpr double kScenarioHotspotCellSize = 1.5;
 inline constexpr std::size_t kScenarioHotspotAgentThreshold = 5;
+inline constexpr std::size_t kScenarioPressureHotspotAgentThreshold = 5;
+inline constexpr double kScenarioPressureScoreThreshold = 1.0;
+inline constexpr double kScenarioPressureFeedbackForceThreshold = 0.18;
+inline constexpr double kScenarioPressureFeedbackExposureRecoveryPerSecond = 1.0;
+inline constexpr double kScenarioPressureFeedbackNeighborProbeRadius = 0.9;
+inline constexpr std::size_t kScenarioPressureFeedbackDenseNeighborThreshold = 2;
+inline constexpr std::uint64_t kScenarioPressureFeedbackCrowdedUpdateDivisor = 2;
+inline constexpr std::uint64_t kScenarioPressureFeedbackQuietUpdateDivisor = 3;
+inline constexpr double kScenarioPressureFeedbackMaxExposedSlowdown = 0.10;
+inline constexpr double kScenarioPressureFeedbackMaxCriticalSlowdown = 0.25;
+inline constexpr double kScenarioPressureFeedbackMaxAvoidanceScale = 1.35;
+inline constexpr double kScenarioPressureFeedbackMaxBarrierScale = 1.25;
+inline constexpr double kScenarioCriticalPressureForceThreshold = 0.5;
+inline constexpr double kScenarioCriticalPressureExposureThresholdSeconds = 2.0;
+inline constexpr double kScenarioCriticalPressureEventDurationThresholdSeconds = 1.0;
+inline constexpr std::size_t kScenarioCriticalPressureEventAgentThreshold = 2;
 inline constexpr double kScenarioBottleneckRadius = 1.25;
 inline constexpr std::size_t kScenarioBottleneckAgentThreshold = 3;
 
@@ -33,6 +50,42 @@ struct ScenarioCongestionHotspot {
     std::optional<SimulationFrame> detectionFrame{};
 };
 
+struct ScenarioPressureHotspot {
+    Point2D center{};
+    Point2D cellMin{};
+    Point2D cellMax{};
+    std::string floorId{};
+    std::size_t agentCount{0};
+    std::size_t intrudingPairCount{0};
+    double densityPeoplePerSquareMeter{0.0};
+    double pressureScore{0.0};
+    std::optional<double> detectedAtSeconds{};
+    std::optional<SimulationFrame> detectionFrame{};
+};
+
+struct ScenarioPressureAgentMetric {
+    std::uint64_t agentId{0};
+    Point2D position{};
+    std::string floorId{};
+    double compressionForce{0.0};
+    double exposureSeconds{0.0};
+    bool critical{false};
+};
+
+struct ScenarioCriticalPressureEvent {
+    Point2D center{};
+    Point2D cellMin{};
+    Point2D cellMax{};
+    std::string floorId{};
+    std::size_t exposedAgentCount{0};
+    std::size_t criticalAgentCount{0};
+    double pressureScore{0.0};
+    double startedAtSeconds{0.0};
+    double durationSeconds{0.0};
+    std::optional<double> detectedAtSeconds{};
+    std::optional<SimulationFrame> detectionFrame{};
+};
+
 struct ScenarioBottleneckMetric {
     std::string connectionId{};
     std::string label{};
@@ -48,7 +101,12 @@ struct ScenarioBottleneckMetric {
 struct ScenarioRiskSnapshot {
     ScenarioRiskLevel completionRisk{ScenarioRiskLevel::Low};
     std::size_t stalledAgentCount{0};
+    std::size_t pressureExposedAgentCount{0};
+    std::size_t criticalPressureAgentCount{0};
     std::vector<ScenarioCongestionHotspot> hotspots{};
+    std::vector<ScenarioPressureHotspot> pressureHotspots{};
+    std::vector<ScenarioPressureAgentMetric> pressureAgents{};
+    std::vector<ScenarioCriticalPressureEvent> criticalPressureEvents{};
     std::vector<ScenarioBottleneckMetric> bottlenecks{};
 };
 
@@ -56,6 +114,7 @@ const char* scenarioRiskLevelLabel(ScenarioRiskLevel level) noexcept;
 const char* scenarioRiskDefinition() noexcept;
 const char* scenarioStalledDefinition() noexcept;
 const char* scenarioHotspotDefinition() noexcept;
+const char* scenarioPressureHotspotDefinition() noexcept;
 const char* scenarioBottleneckDefinition() noexcept;
 bool scenarioAgentStalled(double speedMetersPerSecond, double routeStalledSeconds) noexcept;
 

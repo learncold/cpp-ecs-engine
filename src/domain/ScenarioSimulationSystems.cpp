@@ -20,6 +20,10 @@ namespace {
 constexpr double kReplaySampleIntervalSeconds = 0.5;
 constexpr std::size_t kMaxReplayFrames = 600;
 constexpr std::size_t kMaxResultDensityCells = 5;
+constexpr std::size_t kMaxResultPressureCells = 5;
+constexpr std::size_t kMaxResultPressureHotspots = 5;
+constexpr std::size_t kMaxResultPressureAgents = 5;
+constexpr std::size_t kMaxResultCriticalPressureEvents = 5;
 constexpr double kHighDensityThresholdPeoplePerSquareMeter = 4.0;
 
 struct SpatialCell {
@@ -37,6 +41,7 @@ struct DensityCellAccumulator {
     SpatialCell cell{};
     std::string floorId{};
     std::size_t agentCount{0};
+    std::vector<engine::Entity> entities{};
 };
 
 long long spatialKey(const SpatialCell& cell) {
@@ -143,6 +148,96 @@ DensityCellMetric densityMetricFromCell(
             ? 0.0
             : count / (cellSize * cellSize),
     };
+}
+
+PressureCellMetric pressureMetricFromCell(
+    engine::WorldQuery& query,
+    const DensityCellAccumulator& cell,
+    double cellSize) {
+    const auto count = static_cast<double>(cell.agentCount);
+    const auto min = cellMin(cell.cell, cellSize);
+    const auto max = cellMax(cell.cell, cellSize);
+    PressureCellMetric metric{
+        .center = cell.agentCount == 0
+            ? Point2D{.x = (min.x + max.x) * 0.5, .y = (min.y + max.y) * 0.5}
+            : Point2D{.x = cell.positionSum.x / count, .y = cell.positionSum.y / count},
+        .cellMin = min,
+        .cellMax = max,
+        .floorId = cell.floorId,
+        .agentCount = cell.agentCount,
+        .intrudingPairCount = 0,
+        .densityPeoplePerSquareMeter = cellSize <= 0.0
+            ? 0.0
+            : count / (cellSize * cellSize),
+        .pressureScore = 0.0,
+    };
+
+    for (std::size_t lhsIndex = 0; lhsIndex < cell.entities.size(); ++lhsIndex) {
+        const auto lhsEntity = cell.entities[lhsIndex];
+        const auto& lhsPosition = query.get<Position>(lhsEntity);
+        const auto& lhsAgent = query.get<Agent>(lhsEntity);
+        for (std::size_t rhsIndex = lhsIndex + 1; rhsIndex < cell.entities.size(); ++rhsIndex) {
+            const auto rhsEntity = cell.entities[rhsIndex];
+            const auto& rhsPosition = query.get<Position>(rhsEntity);
+            const auto& rhsAgent = query.get<Agent>(rhsEntity);
+            const auto comfortDistance =
+                static_cast<double>(lhsAgent.radius + rhsAgent.radius) + simulation_internal::kPersonalSpaceBuffer;
+            if (comfortDistance <= 1e-9) {
+                continue;
+            }
+            const auto distance = distanceBetween(lhsPosition.value, rhsPosition.value);
+            if (distance >= comfortDistance) {
+                continue;
+            }
+
+            metric.pressureScore += (comfortDistance - distance) / comfortDistance;
+            ++metric.intrudingPairCount;
+        }
+    }
+
+    return metric;
+}
+
+bool isPressureCellWorse(const PressureCellMetric& candidate, const PressureCellMetric& current) {
+    if (std::fabs(candidate.pressureScore - current.pressureScore) > 1e-9) {
+        return candidate.pressureScore > current.pressureScore;
+    }
+    if (candidate.intrudingPairCount != current.intrudingPairCount) {
+        return candidate.intrudingPairCount > current.intrudingPairCount;
+    }
+    return candidate.agentCount > current.agentCount;
+}
+
+bool isPressureHotspotWorse(const ScenarioPressureHotspot& candidate, const ScenarioPressureHotspot& current) {
+    if (std::fabs(candidate.pressureScore - current.pressureScore) > 1e-9) {
+        return candidate.pressureScore > current.pressureScore;
+    }
+    if (candidate.intrudingPairCount != current.intrudingPairCount) {
+        return candidate.intrudingPairCount > current.intrudingPairCount;
+    }
+    return candidate.agentCount > current.agentCount;
+}
+
+bool isPressureAgentWorse(const ScenarioPressureAgentMetric& candidate, const ScenarioPressureAgentMetric& current) {
+    if (candidate.critical != current.critical) {
+        return candidate.critical;
+    }
+    if (std::fabs(candidate.exposureSeconds - current.exposureSeconds) > 1e-9) {
+        return candidate.exposureSeconds > current.exposureSeconds;
+    }
+    return candidate.compressionForce > current.compressionForce;
+}
+
+bool isCriticalPressureEventWorse(
+    const ScenarioCriticalPressureEvent& candidate,
+    const ScenarioCriticalPressureEvent& current) {
+    if (candidate.criticalAgentCount != current.criticalAgentCount) {
+        return candidate.criticalAgentCount > current.criticalAgentCount;
+    }
+    if (std::fabs(candidate.durationSeconds - current.durationSeconds) > 1e-9) {
+        return candidate.durationSeconds > current.durationSeconds;
+    }
+    return candidate.pressureScore > current.pressureScore;
 }
 
 bool intervalContains(const ConnectionBlockIntervalDraft& interval, double timeSeconds) {
@@ -643,6 +738,7 @@ void ScenarioResultArtifactsSystem::update(engine::EngineWorld& world, const eng
             .y = cell.positionSum.y + position.value.y,
         };
         ++cell.agentCount;
+        cell.entities.push_back(entity);
     }
 
     std::vector<DensityCellMetric> densityMetrics;
@@ -702,6 +798,163 @@ void ScenarioResultArtifactsSystem::update(engine::EngineWorld& world, const eng
     }
     result.densityTrackingInitialized = true;
     result.lastDensitySampleTimeSeconds = elapsedSeconds;
+
+    auto& pressureSummary = result.artifacts.pressureSummary;
+    pressureSummary.cellSizeMeters = kScenarioHotspotCellSize;
+    pressureSummary.hotspotScoreThreshold = kScenarioPressureScoreThreshold;
+    pressureSummary.criticalCompressionForceThreshold = kScenarioCriticalPressureForceThreshold;
+    pressureSummary.criticalExposureThresholdSeconds = kScenarioCriticalPressureExposureThresholdSeconds;
+    pressureSummary.criticalEventDurationThresholdSeconds = kScenarioCriticalPressureEventDurationThresholdSeconds;
+    pressureSummary.criticalEventAgentThreshold = kScenarioCriticalPressureEventAgentThreshold;
+
+    std::vector<PressureCellMetric> currentPressureMetrics;
+    currentPressureMetrics.reserve(densityCells.size());
+    for (const auto& [key, cell] : densityCells) {
+        auto metric = pressureMetricFromCell(query, cell, kScenarioHotspotCellSize);
+        if (metric.intrudingPairCount == 0 || metric.pressureScore <= 0.0) {
+            continue;
+        }
+        currentPressureMetrics.push_back(metric);
+        auto& peakMetric = result.peakPressureCellsByAddress[key];
+        if (peakMetric.pressureScore <= 0.0 || isPressureCellWorse(metric, peakMetric)) {
+            peakMetric = std::move(metric);
+        }
+    }
+
+    std::sort(currentPressureMetrics.begin(), currentPressureMetrics.end(), [](const auto& lhs, const auto& rhs) {
+        if (std::fabs(lhs.pressureScore - rhs.pressureScore) > 1e-9) {
+            return lhs.pressureScore > rhs.pressureScore;
+        }
+        if (lhs.intrudingPairCount != rhs.intrudingPairCount) {
+            return lhs.intrudingPairCount > rhs.intrudingPairCount;
+        }
+        return lhs.agentCount > rhs.agentCount;
+    });
+
+    std::vector<PressureCellMetric> cumulativePeakPressureMetrics;
+    cumulativePeakPressureMetrics.reserve(result.peakPressureCellsByAddress.size());
+    for (const auto& [_, cell] : result.peakPressureCellsByAddress) {
+        cumulativePeakPressureMetrics.push_back(cell);
+    }
+    std::sort(cumulativePeakPressureMetrics.begin(), cumulativePeakPressureMetrics.end(), [](const auto& lhs, const auto& rhs) {
+        if (std::fabs(lhs.pressureScore - rhs.pressureScore) > 1e-9) {
+            return lhs.pressureScore > rhs.pressureScore;
+        }
+        if (lhs.intrudingPairCount != rhs.intrudingPairCount) {
+            return lhs.intrudingPairCount > rhs.intrudingPairCount;
+        }
+        return lhs.agentCount > rhs.agentCount;
+    });
+
+    pressureSummary.peakField = {
+        .timeSeconds = elapsedSeconds,
+        .cellSizeMeters = kScenarioHotspotCellSize,
+        .cells = cumulativePeakPressureMetrics,
+    };
+    pressureSummary.peakCells = cumulativePeakPressureMetrics;
+    if (pressureSummary.peakCells.size() > kMaxResultPressureCells) {
+        pressureSummary.peakCells.resize(kMaxResultPressureCells);
+    }
+
+    if (!currentPressureMetrics.empty()) {
+        if (!pressureSummary.peakCell.has_value()
+            || isPressureCellWorse(currentPressureMetrics.front(), *pressureSummary.peakCell)) {
+            pressureSummary.peakPressureScore = currentPressureMetrics.front().pressureScore;
+            pressureSummary.peakAtSeconds = elapsedSeconds;
+            pressureSummary.peakCell = currentPressureMetrics.front();
+        }
+    }
+
+    if (resources.contains<ScenarioRiskMetricsResource>()) {
+        const auto& metrics = resources.get<ScenarioRiskMetricsResource>();
+        pressureSummary.peakExposedAgentCount =
+            std::max(pressureSummary.peakExposedAgentCount, metrics.peakSnapshot.pressureExposedAgentCount);
+        pressureSummary.peakCriticalAgentCount =
+            std::max(pressureSummary.peakCriticalAgentCount, metrics.peakSnapshot.criticalPressureAgentCount);
+
+        for (const auto& hotspot : metrics.snapshot.pressureHotspots) {
+            const DensityCellAddress address{
+                .cell = spatialCellFor(hotspot.center, kScenarioHotspotCellSize),
+                .floorId = hotspot.floorId,
+            };
+            auto& peakHotspot = result.peakPressureHotspotsByAddress[densitySpatialKey(address)];
+            if (peakHotspot.pressureScore <= 0.0 || isPressureHotspotWorse(hotspot, peakHotspot)) {
+                peakHotspot = hotspot;
+            }
+        }
+
+        for (const auto& agent : metrics.snapshot.pressureAgents) {
+            auto [peakAgentIt, inserted] = result.peakPressureAgentsById.try_emplace(agent.agentId, agent);
+            if (!inserted && isPressureAgentWorse(agent, peakAgentIt->second)) {
+                peakAgentIt->second = agent;
+            }
+        }
+
+        for (const auto& event : metrics.snapshot.criticalPressureEvents) {
+            const DensityCellAddress address{
+                .cell = spatialCellFor(event.center, kScenarioHotspotCellSize),
+                .floorId = event.floorId,
+            };
+            auto& peakEvent = result.peakCriticalPressureEventsByAddress[densitySpatialKey(address)];
+            if (peakEvent.pressureScore <= 0.0 || isCriticalPressureEventWorse(event, peakEvent)) {
+                peakEvent = event;
+            }
+        }
+    }
+
+    pressureSummary.peakHotspots.clear();
+    pressureSummary.peakHotspots.reserve(result.peakPressureHotspotsByAddress.size());
+    for (const auto& [_, hotspot] : result.peakPressureHotspotsByAddress) {
+        pressureSummary.peakHotspots.push_back(hotspot);
+    }
+    std::sort(pressureSummary.peakHotspots.begin(), pressureSummary.peakHotspots.end(), [](const auto& lhs, const auto& rhs) {
+        if (std::fabs(lhs.pressureScore - rhs.pressureScore) > 1e-9) {
+            return lhs.pressureScore > rhs.pressureScore;
+        }
+        if (lhs.intrudingPairCount != rhs.intrudingPairCount) {
+            return lhs.intrudingPairCount > rhs.intrudingPairCount;
+        }
+        return lhs.agentCount > rhs.agentCount;
+    });
+    if (pressureSummary.peakHotspots.size() > kMaxResultPressureHotspots) {
+        pressureSummary.peakHotspots.resize(kMaxResultPressureHotspots);
+    }
+
+    pressureSummary.peakAgents.clear();
+    pressureSummary.peakAgents.reserve(result.peakPressureAgentsById.size());
+    for (const auto& [_, agent] : result.peakPressureAgentsById) {
+        pressureSummary.peakAgents.push_back(agent);
+    }
+    std::sort(pressureSummary.peakAgents.begin(), pressureSummary.peakAgents.end(), [](const auto& lhs, const auto& rhs) {
+        if (lhs.critical != rhs.critical) {
+            return lhs.critical;
+        }
+        if (std::fabs(lhs.exposureSeconds - rhs.exposureSeconds) > 1e-9) {
+            return lhs.exposureSeconds > rhs.exposureSeconds;
+        }
+        return lhs.compressionForce > rhs.compressionForce;
+    });
+    if (pressureSummary.peakAgents.size() > kMaxResultPressureAgents) {
+        pressureSummary.peakAgents.resize(kMaxResultPressureAgents);
+    }
+
+    pressureSummary.criticalEvents.clear();
+    pressureSummary.criticalEvents.reserve(result.peakCriticalPressureEventsByAddress.size());
+    for (const auto& [_, event] : result.peakCriticalPressureEventsByAddress) {
+        pressureSummary.criticalEvents.push_back(event);
+    }
+    std::sort(pressureSummary.criticalEvents.begin(), pressureSummary.criticalEvents.end(), [](const auto& lhs, const auto& rhs) {
+        if (lhs.criticalAgentCount != rhs.criticalAgentCount) {
+            return lhs.criticalAgentCount > rhs.criticalAgentCount;
+        }
+        if (std::fabs(lhs.durationSeconds - rhs.durationSeconds) > 1e-9) {
+            return lhs.durationSeconds > rhs.durationSeconds;
+        }
+        return lhs.pressureScore > rhs.pressureScore;
+    });
+    if (pressureSummary.criticalEvents.size() > kMaxResultCriticalPressureEvents) {
+        pressureSummary.criticalEvents.resize(kMaxResultCriticalPressureEvents);
+    }
 
     const auto shouldRecordSample =
         result.artifacts.evacuationProgress.empty()

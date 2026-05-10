@@ -30,6 +30,9 @@ constexpr double kBottleneckFocusZoom = 2.4;
 constexpr double kDensityInfluenceRadiusMultiplier = 1.75;
 constexpr double kDensityMinimumScreenRadius = 14.0;
 constexpr double kDefaultDensityScaleMaxPeoplePerSquareMeter = 4.0;
+constexpr double kPressureInfluenceRadiusMultiplier = 1.45;
+constexpr double kPressureMinimumScreenRadius = 12.0;
+constexpr double kDefaultPressureScaleMaxScore = 1.0;
 constexpr int kHotspotMinCoreAlpha = 72;
 constexpr int kHotspotMaxCoreAlpha = 190;
 constexpr int kFloorSelectorMargin = 14;
@@ -108,6 +111,20 @@ QColor densityHeatmapColor(double ratio, int alpha) {
         return QColor(249, 115, 22, alpha);
     }
     return QColor(220, 38, 38, alpha);
+}
+
+QColor pressureHeatmapColor(double ratio, int alpha) {
+    const auto t = std::clamp(ratio, 0.0, 1.0);
+    if (t < 0.25) {
+        return QColor(250, 204, 21, alpha);
+    }
+    if (t < 0.55) {
+        return QColor(249, 115, 22, alpha);
+    }
+    if (t < 0.8) {
+        return QColor(239, 68, 68, alpha);
+    }
+    return QColor(153, 27, 27, alpha);
 }
 
 QString formatScheduleTooltip(const safecrowd::domain::ConnectionBlockDraft& block) {
@@ -406,6 +423,17 @@ void SimulationCanvasWidget::setDensityOverlay(
     update();
 }
 
+void SimulationCanvasWidget::setPressureOverlay(
+    std::vector<safecrowd::domain::PressureCellMetric> pressureCells,
+    double scaleMaxPressureScore) {
+    pressureOverlay_ = std::move(pressureCells);
+    pressureScaleMaxScore_ =
+        std::isfinite(scaleMaxPressureScore) && scaleMaxPressureScore > 0.0
+        ? scaleMaxPressureScore
+        : kDefaultPressureScaleMaxScore;
+    update();
+}
+
 void SimulationCanvasWidget::setHotspotOverlay(std::vector<safecrowd::domain::ScenarioCongestionHotspot> hotspots) {
     hotspotOverlay_ = std::move(hotspots);
     if (focusedHotspotIndex_.has_value() && *focusedHotspotIndex_ >= hotspotOverlay_.size()) {
@@ -615,6 +643,8 @@ void SimulationCanvasWidget::paintEvent(QPaintEvent* event) {
     drawRouteGuidanceOverlay(painter, transform);
     if (overlayMode_ == ResultOverlayMode::Density) {
         drawDensityOverlay(painter, transform);
+    } else if (overlayMode_ == ResultOverlayMode::Pressure) {
+        drawPressureOverlay(painter, transform);
     } else if (overlayMode_ == ResultOverlayMode::Hotspots) {
         drawHotspotOverlay(painter, transform);
     } else if (overlayMode_ == ResultOverlayMode::Bottlenecks) {
@@ -871,6 +901,83 @@ void SimulationCanvasWidget::drawDensityOverlay(QPainter& painter, const LayoutC
         gradient.setColorAt(0.0, coreColor);
         gradient.setColorAt(0.38, middleColor);
         gradient.setColorAt(1.0, densityHeatmapColor(intensity, 0));
+        painter.setBrush(gradient);
+        painter.drawEllipse(center, radius, radius);
+    }
+    painter.restore();
+}
+
+void SimulationCanvasWidget::drawPressureOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const {
+    if (pressureOverlay_.empty()) {
+        return;
+    }
+
+    std::vector<const safecrowd::domain::PressureCellMetric*> visibleCells;
+    visibleCells.reserve(pressureOverlay_.size());
+    for (const auto& cell : pressureOverlay_) {
+        if (!matchesFloor(cell.floorId, currentFloorId_)) {
+            continue;
+        }
+        if (cell.pressureScore <= 0.0) {
+            continue;
+        }
+        visibleCells.push_back(&cell);
+    }
+    if (visibleCells.empty()) {
+        return;
+    }
+
+    const auto scaleMax =
+        std::isfinite(pressureScaleMaxScore_) && pressureScaleMaxScore_ > 0.0
+        ? pressureScaleMaxScore_
+        : kDefaultPressureScaleMaxScore;
+    std::sort(visibleCells.begin(), visibleCells.end(), [](const auto* lhs, const auto* rhs) {
+        if (lhs->pressureScore != rhs->pressureScore) {
+            return lhs->pressureScore < rhs->pressureScore;
+        }
+        return lhs->intrudingPairCount < rhs->intrudingPairCount;
+    });
+
+    painter.save();
+    painter.setPen(Qt::NoPen);
+    painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+    QPainterPath walkableClip;
+    for (const auto& zone : layout_.zones) {
+        if (!matchesFloor(zone.floorId, currentFloorId_)) {
+            continue;
+        }
+        walkableClip.addPath(layoutCanvasPolygonPath(zone.area, transform));
+    }
+    if (!walkableClip.isEmpty()) {
+        painter.setClipPath(walkableClip);
+    }
+
+    for (const auto* cell : visibleCells) {
+        const auto center = transform.map(cell->center);
+        const auto cellWidth = cell->cellMax.x > cell->cellMin.x
+            ? cell->cellMax.x - cell->cellMin.x
+            : kDefaultHotspotCellSize;
+        const auto cellHeight = cell->cellMax.y > cell->cellMin.y
+            ? cell->cellMax.y - cell->cellMin.y
+            : kDefaultHotspotCellSize;
+        const auto influenceRadiusWorld =
+            std::max(cellWidth, cellHeight) * kPressureInfluenceRadiusMultiplier;
+        const auto radiusAnchor = transform.map({
+            .x = cell->center.x + influenceRadiusWorld,
+            .y = cell->center.y,
+        });
+        const auto radius = std::max(
+            kPressureMinimumScreenRadius,
+            std::hypot(radiusAnchor.x() - center.x(), radiusAnchor.y() - center.y()));
+        const auto intensity = std::clamp(cell->pressureScore / scaleMax, 0.0, 1.0);
+        const auto coreAlpha = 62 + static_cast<int>(138.0 * intensity);
+        const auto coreColor = pressureHeatmapColor(intensity, std::clamp(coreAlpha, 62, 200));
+        const auto middleColor = pressureHeatmapColor(intensity, static_cast<int>(coreAlpha * 0.46));
+
+        QRadialGradient gradient(center, radius);
+        gradient.setColorAt(0.0, coreColor);
+        gradient.setColorAt(0.34, middleColor);
+        gradient.setColorAt(1.0, pressureHeatmapColor(intensity, 0));
         painter.setBrush(gradient);
         painter.drawEllipse(center, radius, radius);
     }

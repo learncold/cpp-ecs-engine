@@ -17,9 +17,10 @@ const char* scenarioRiskLevelLabel(ScenarioRiskLevel level) noexcept {
 const char* scenarioRiskDefinition() noexcept {
     return "Low when evacuation is complete or no active risk is detected. "
            "Medium when elapsed time reaches 50% of the limit, stalled active agents reach 15%, "
-           "or any hotspot/bottleneck is detected. "
+           "any hotspot/pressure hotspot/bottleneck is detected, or any active agent reaches "
+           "critical pressure exposure. "
            "High when elapsed time reaches 80% of the limit, stalled active agents reach 35%, "
-           "or two or more bottlenecks are detected.";
+           "a critical pressure event is sustained, or two or more bottlenecks are detected.";
 }
 
 const char* scenarioStalledDefinition() noexcept {
@@ -29,6 +30,11 @@ const char* scenarioStalledDefinition() noexcept {
 
 const char* scenarioHotspotDefinition() noexcept {
     return "A hotspot is a 1.5 m by 1.5 m cell containing at least 5 active agents.";
+}
+
+const char* scenarioPressureHotspotDefinition() noexcept {
+    return "A pressure hotspot is a 1.5 m by 1.5 m cell containing at least 5 active agents "
+           "with overlapping personal-space intrusion between nearby occupants.";
 }
 
 const char* scenarioBottleneckDefinition() noexcept {

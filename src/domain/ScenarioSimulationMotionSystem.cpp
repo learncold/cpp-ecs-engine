@@ -71,6 +71,9 @@ public:
         replanBlockedRouteSegments(query, entities, layoutCache, clock.elapsedSeconds, layoutRevision);
         updateAgentPhysicsFloorIds(query, layoutCache, entities);
         const auto localNeighborIndex = buildAgentSpatialIndex(query, entities, 1.0);
+        const auto* pressureFeedback = resources.contains<ScenarioPressureFeedbackResource>()
+            ? &resources.get<ScenarioPressureFeedbackResource>()
+            : nullptr;
 
         if (!resources.contains<ScenarioTimingKeyframesResource>()) {
             resources.set(ScenarioTimingKeyframesResource{});
@@ -196,7 +199,19 @@ public:
             const auto& floorLayout = cachedLayoutForFloor(layoutCache, route.currentFloorId);
             const auto routeDirection = (target - position.value) * (1.0 / distance);
             const auto maxSpeed = effectiveMaxSpeed(layoutCache, agent, route, position.value);
-            const auto desiredVelocity = routeDirection * maxSpeed;
+            double pressureSpeedFactor = 1.0;
+            double pressureAvoidanceScale = 1.0;
+            double pressureBarrierScale = 1.0;
+            if (pressureFeedback != nullptr) {
+                const auto feedbackIt = pressureFeedback->agentsById.find(entity.index);
+                if (feedbackIt != pressureFeedback->agentsById.end()) {
+                    pressureSpeedFactor = feedbackIt->second.speedFactor;
+                    pressureAvoidanceScale = feedbackIt->second.avoidanceScale;
+                    pressureBarrierScale = feedbackIt->second.barrierScale;
+                }
+            }
+            const auto adjustedMaxSpeed = maxSpeed * pressureSpeedFactor;
+            const auto desiredVelocity = routeDirection * adjustedMaxSpeed;
             double speedScale = 1.0;
             const auto neighborRadius = std::max(
                 static_cast<double>(agent.radius) + kDefaultAgentRadius + kPersonalSpaceBuffer,
@@ -211,26 +226,31 @@ public:
                     neighborCandidates,
                     desiredVelocity,
                     clampedDelta,
-                    speedScale);
-            const auto barrierReferenceSpeed = std::max(maxSpeed, static_cast<double>(agent.maxSpeed) * 0.75);
-            const auto barrierVelocity = barrierSeparationVelocity(floorLayout, position, agent, barrierReferenceSpeed);
+                    speedScale)
+                * pressureAvoidanceScale;
+            const auto barrierReferenceSpeed = std::max(
+                adjustedMaxSpeed,
+                (static_cast<double>(agent.maxSpeed) * 0.75) * pressureSpeedFactor);
+            const auto barrierVelocity =
+                barrierSeparationVelocity(floorLayout, position, agent, barrierReferenceSpeed)
+                * pressureBarrierScale;
             auto finalVelocity = (desiredVelocity * speedScale) + avoidanceVelocity + barrierVelocity;
             const auto lateral = perpendicularLeft(routeDirection);
             if (dot(finalVelocity, routeDirection) < 0.0) {
-                finalVelocity = (routeDirection * (maxSpeed * 0.15))
+                finalVelocity = (routeDirection * (adjustedMaxSpeed * 0.15))
                     + (lateral * dot(finalVelocity, lateral));
             }
             const auto forwardComponent = dot(finalVelocity, routeDirection);
             const auto lateralComponent = dot(finalVelocity, lateral);
-            const auto maxLateralComponent = maxSpeed * 0.55;
+            const auto maxLateralComponent = adjustedMaxSpeed * 0.55;
             if (std::fabs(lateralComponent) > maxLateralComponent) {
                 finalVelocity = (routeDirection * std::max(0.0, forwardComponent))
                     + (lateral * std::clamp(lateralComponent, -maxLateralComponent, maxLateralComponent));
             }
-            finalVelocity = velocityWithBarrierEscape(finalVelocity, barrierVelocity, maxSpeed);
+            finalVelocity = velocityWithBarrierEscape(finalVelocity, barrierVelocity, adjustedMaxSpeed);
             plans.push_back({
                 .entity = entity,
-                .velocity = clampedToLength(finalVelocity, maxSpeed),
+                .velocity = clampedToLength(finalVelocity, adjustedMaxSpeed),
             });
         }
 

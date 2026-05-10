@@ -59,6 +59,26 @@ struct ScenarioRiskMetricsResource {
     ScenarioRiskSnapshot peakSnapshot{};
 };
 
+struct ScenarioPressureFeedbackAgentState {
+    std::uint64_t agentId{0};
+    Point2D position{};
+    std::string floorId{};
+    double compressionForce{0.0};
+    double exposureSeconds{0.0};
+    double feedbackLevel{0.0};
+    double speedFactor{1.0};
+    double avoidanceScale{1.0};
+    double barrierScale{1.0};
+    bool exposed{false};
+    bool critical{false};
+};
+
+struct ScenarioPressureFeedbackResource {
+    std::unordered_map<std::uint64_t, ScenarioPressureFeedbackAgentState> agentsById{};
+    std::size_t exposedAgentCount{0};
+    std::size_t criticalAgentCount{0};
+};
+
 struct ScenarioResultArtifactsResource {
     ScenarioResultArtifacts artifacts{};
     std::size_t lastRecordedEvacuatedCount{static_cast<std::size_t>(-1)};
@@ -70,6 +90,10 @@ struct ScenarioResultArtifactsResource {
     bool densityTrackingInitialized{false};
     double lastDensitySampleTimeSeconds{0.0};
     std::unordered_map<long long, DensityCellMetric> peakDensityCellsByAddress{};
+    std::unordered_map<long long, PressureCellMetric> peakPressureCellsByAddress{};
+    std::unordered_map<long long, ScenarioPressureHotspot> peakPressureHotspotsByAddress{};
+    std::unordered_map<std::uint64_t, ScenarioPressureAgentMetric> peakPressureAgentsById{};
+    std::unordered_map<long long, ScenarioCriticalPressureEvent> peakCriticalPressureEventsByAddress{};
 };
 
 struct ScenarioTimingKeyframesResource {
@@ -101,6 +125,7 @@ std::unique_ptr<engine::EngineSystem> makeScenarioSimulationMotionSystem(Facilit
 std::unique_ptr<engine::EngineSystem> makeScenarioSimulationMotionSystem(
     FacilityLayout2D layout,
     std::vector<RouteGuidanceDraft> routeGuidances);
+std::unique_ptr<engine::EngineSystem> makeScenarioPressureFeedbackSystem(FacilityLayout2D layout);
 std::unique_ptr<engine::EngineSystem> makeScenarioRiskMetricsSystem(FacilityLayout2D layout);
 
 class ScenarioAgentSpawnSystem final : public engine::EngineSystem {

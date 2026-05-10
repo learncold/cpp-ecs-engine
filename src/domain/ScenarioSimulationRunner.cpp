@@ -201,6 +201,11 @@ void ScenarioSimulationRunner::initializeRuntime() {
         {.phase = engine::UpdatePhase::PreSimulation,
          .triggerPolicy = engine::TriggerPolicy::EveryFrame});
     runtime_->addSystem(
+        makeScenarioPressureFeedbackSystem(layout_),
+        {.phase = engine::UpdatePhase::PostSimulation,
+         .order = -10,
+         .triggerPolicy = engine::TriggerPolicy::EveryFrame});
+    runtime_->addSystem(
         makeScenarioSimulationMotionSystem(layout_, scenario_.control.routeGuidances),
         {.phase = engine::UpdatePhase::PostSimulation,
          .triggerPolicy = engine::TriggerPolicy::EveryFrame});

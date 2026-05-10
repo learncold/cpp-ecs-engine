@@ -18,6 +18,7 @@ class QCheckBox;
 class QComboBox;
 class QPushButton;
 class QSlider;
+class QTableWidget;
 class QTimer;
 
 namespace safecrowd::application {
@@ -46,9 +47,10 @@ public:
 private:
     enum class OverlayMode {
         Density = 0,
-        Hotspots = 1,
-        Bottlenecks = 2,
-        None = 3,
+        Pressure = 1,
+        Hotspots = 2,
+        Bottlenecks = 3,
+        None = 4,
     };
 
     QWidget* createCanvasPanel();
@@ -62,6 +64,7 @@ private:
     void navigateToAuthoring();
     void pauseReplay();
     void refreshComparisonSelection();
+    void refreshPressureComparisonTable();
     void refreshResultNavigationPanel();
     void refreshSelectedResult();
     void rerunBatch();
@@ -90,6 +93,7 @@ private:
     QSlider* replaySlider_{nullptr};
     QLabel* replayTimeLabel_{nullptr};
     QLabel* detailLabel_{nullptr};
+    QTableWidget* pressureTable_{nullptr};
     std::vector<QCheckBox*> compareCheckBoxes_{};
     QWidget* remainingChart_{nullptr};
     QWidget* exitsChart_{nullptr};
