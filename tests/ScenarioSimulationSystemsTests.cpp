@@ -182,6 +182,46 @@ public:
     }
 };
 
+class ConfigureQuietAgentWithPriorPressureFeedbackSystem final : public safecrowd::engine::EngineSystem {
+public:
+    void configure(safecrowd::engine::EngineWorld& world) override {
+        world.resources().set(safecrowd::domain::ScenarioSimulationClockResource{
+            .elapsedSeconds = 0.0,
+            .timeLimitSeconds = 10.0,
+            .complete = false,
+        });
+        world.resources().set(safecrowd::domain::ScenarioPressureFeedbackResource{
+            .agentsById = {
+                {0U,
+                 safecrowd::domain::ScenarioPressureFeedbackAgentState{
+                     .agentId = 0U,
+                     .position = {.x = 0.5, .y = 0.5},
+                     .floorId = "L1",
+                     .compressionForce = 0.22,
+                     .exposureSeconds = 0.6,
+                     .feedbackLevel = 0.4,
+                     .speedFactor = 0.96,
+                     .avoidanceScale = 1.12,
+                     .barrierScale = 1.06,
+                     .exposed = true,
+                     .critical = false,
+                 }},
+            },
+            .exposedAgentCount = 1,
+            .criticalAgentCount = 0,
+        });
+        world.commands().spawnEntity(
+            safecrowd::domain::Position{.value = {.x = 0.5, .y = 0.5}},
+            safecrowd::domain::Agent{.radius = 0.25f, .maxSpeed = 1.5f},
+            safecrowd::domain::Velocity{.value = {0.0, 0.0}},
+            safecrowd::domain::EvacuationRoute{.currentFloorId = "L1", .displayFloorId = "L1"},
+            safecrowd::domain::EvacuationStatus{});
+    }
+
+    void update(safecrowd::engine::EngineWorld&, const safecrowd::engine::EngineStepContext&) override {
+    }
+};
+
 class ConfigureMovingFloorDensityAgentsSystem final : public safecrowd::engine::EngineSystem {
 public:
     void configure(safecrowd::engine::EngineWorld& world) override {
@@ -450,6 +490,34 @@ safecrowd::domain::FacilityLayout2D verticalPortalTransitionLayoutWithBlockedLan
     return layout;
 }
 
+std::vector<safecrowd::domain::ScenarioAgentSeed> pressureFeedbackMotionSeeds() {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    for (int index = 0; index < 3; ++index) {
+        const auto x = 0.08 + (0.12 * static_cast<double>(index));
+        seeds.push_back({
+            .position = {.value = {.x = x, .y = 0.0}},
+            .agent = {.radius = 0.25f, .maxSpeed = 1.0f},
+            .velocity = {.value = {}},
+            .route = {
+                .waypoints = {{.x = 1.0, .y = 0.0}},
+                .waypointPassages = {{{.x = 1.0, .y = -0.3}, {.x = 1.0, .y = 0.3}}},
+                .waypointFromZoneIds = {"room"},
+                .waypointZoneIds = {"exit"},
+                .waypointConnectionIds = {"room-exit"},
+                .nextWaypointIndex = 0,
+                .currentSegmentStart = {.x = x, .y = 0.0},
+                .previousDistanceToWaypoint = 1.0 - x,
+                .stalledSeconds = 0.0,
+                .destinationZoneId = "exit",
+                .currentFloorId = "L1",
+                .displayFloorId = "L1",
+            },
+            .status = {},
+        });
+    }
+    return seeds;
+}
+
 }  // namespace
 
 SC_TEST(ScenarioAgentSpawnSystem_ConfiguresClockAndSpawnsAgentSeeds) {
@@ -707,6 +775,216 @@ SC_TEST(ScenarioSimulationMotionSystem_AdvancesAgentsFromStepResource) {
     SC_EXPECT_NEAR(frame.agents.front().position.x, 0.5, 1e-9);
     SC_EXPECT_NEAR(frame.agents.front().velocity.x, 1.0, 1e-9);
     SC_EXPECT_TRUE(!frame.agents.front().stalled);
+}
+
+SC_TEST(ScenarioPressureFeedbackSystem_PublishesSoftFeedbackForDenseCluster) {
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 43,
+    });
+    runtime.addSystem(std::make_unique<ConfigureDenseActiveAgentsSystem>());
+    runtime.addSystem(
+        std::make_unique<safecrowd::domain::ScenarioSpatialIndexSystem>(1.0),
+        {.phase = safecrowd::engine::UpdatePhase::PreSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioPressureFeedbackSystem(straightExitLayout()),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .order = -10,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 1.0});
+    runtime.stepFrame(0.0);
+
+    const auto& feedback =
+        runtime.world().resources().get<safecrowd::domain::ScenarioPressureFeedbackResource>();
+    SC_EXPECT_TRUE(feedback.exposedAgentCount > 0);
+    SC_EXPECT_TRUE(!feedback.agentsById.empty());
+    const auto hasSlowAgent = std::any_of(feedback.agentsById.begin(), feedback.agentsById.end(), [](const auto& entry) {
+        return entry.second.speedFactor < 0.999;
+    });
+    const auto hasBoostedAvoidance = std::any_of(feedback.agentsById.begin(), feedback.agentsById.end(), [](const auto& entry) {
+        return entry.second.avoidanceScale > 1.0 && entry.second.barrierScale > 1.0;
+    });
+    SC_EXPECT_TRUE(hasSlowAgent);
+    SC_EXPECT_TRUE(hasBoostedAvoidance);
+}
+
+SC_TEST(ScenarioPressureFeedbackSystem_DoesNotPublishFeedbackForLooseCluster) {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    for (const auto& point : std::vector<safecrowd::domain::Point2D>{
+             {0.10, 0.10},
+             {1.30, 0.10},
+             {0.10, 1.30},
+             {1.30, 1.30},
+             {0.75, 0.75},
+         }) {
+        seeds.push_back({
+            .position = {.value = point},
+            .agent = {.radius = 0.25f, .maxSpeed = 1.0f},
+            .velocity = {.value = {}},
+            .route = {
+                .waypoints = {{.x = 1.0, .y = 0.0}},
+                .waypointPassages = {{{.x = 1.0, .y = -0.4}, {.x = 1.0, .y = 0.4}}},
+                .waypointFromZoneIds = {"room"},
+                .waypointZoneIds = {"exit"},
+                .nextWaypointIndex = 0,
+                .currentSegmentStart = point,
+                .previousDistanceToWaypoint = 0.25,
+                .destinationZoneId = "exit",
+                .currentFloorId = "L1",
+                .displayFloorId = "L1",
+            },
+            .status = {},
+        });
+    }
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 44,
+    });
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    runtime.addSystem(
+        std::make_unique<safecrowd::domain::ScenarioSpatialIndexSystem>(1.0),
+        {.phase = safecrowd::engine::UpdatePhase::PreSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioPressureFeedbackSystem(straightExitLayout()),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .order = -10,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 1.0});
+    runtime.stepFrame(0.0);
+
+    const auto& feedback =
+        runtime.world().resources().get<safecrowd::domain::ScenarioPressureFeedbackResource>();
+    SC_EXPECT_EQ(feedback.exposedAgentCount, std::size_t{0});
+    SC_EXPECT_EQ(feedback.criticalAgentCount, std::size_t{0});
+    SC_EXPECT_TRUE(feedback.agentsById.empty());
+}
+
+SC_TEST(ScenarioPressureFeedbackSystem_SeparatesOverlappingFloors) {
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 45,
+    });
+    runtime.addSystem(std::make_unique<ConfigureOverlappingFloorAgentsSystem>());
+    runtime.addSystem(
+        std::make_unique<safecrowd::domain::ScenarioSpatialIndexSystem>(1.0),
+        {.phase = safecrowd::engine::UpdatePhase::PreSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioPressureFeedbackSystem(overlappingFloorBottleneckLayout()),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .order = -10,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 1.0});
+    runtime.stepFrame(0.0);
+
+    const auto& feedback =
+        runtime.world().resources().get<safecrowd::domain::ScenarioPressureFeedbackResource>();
+    SC_EXPECT_EQ(feedback.exposedAgentCount, std::size_t{0});
+    SC_EXPECT_EQ(feedback.criticalAgentCount, std::size_t{0});
+    SC_EXPECT_TRUE(feedback.agentsById.empty());
+}
+
+SC_TEST(ScenarioPressureFeedbackSystem_ReusesAndDecaysQuietFeedbackBetweenBucketUpdates) {
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 47,
+    });
+    runtime.addSystem(std::make_unique<ConfigureQuietAgentWithPriorPressureFeedbackSystem>());
+    runtime.addSystem(
+        std::make_unique<safecrowd::domain::ScenarioSpatialIndexSystem>(1.0),
+        {.phase = safecrowd::engine::UpdatePhase::PreSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioPressureFeedbackSystem(straightExitLayout()),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .order = -10,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.5});
+    runtime.stepFrame(0.0);
+
+    const auto& feedback =
+        runtime.world().resources().get<safecrowd::domain::ScenarioPressureFeedbackResource>();
+    SC_EXPECT_EQ(feedback.exposedAgentCount, std::size_t{1});
+    SC_EXPECT_EQ(feedback.criticalAgentCount, std::size_t{0});
+    const auto feedbackIt = feedback.agentsById.find(0U);
+    SC_EXPECT_TRUE(feedbackIt != feedback.agentsById.end());
+    if (feedbackIt != feedback.agentsById.end()) {
+        SC_EXPECT_NEAR(feedbackIt->second.compressionForce, 0.0, 1e-9);
+        SC_EXPECT_TRUE(feedbackIt->second.exposureSeconds < 0.6);
+        SC_EXPECT_TRUE(feedbackIt->second.exposureSeconds > 0.0);
+        SC_EXPECT_TRUE(feedbackIt->second.speedFactor > 0.96);
+    }
+}
+
+SC_TEST(ScenarioSimulationMotionSystem_UsesPressureFeedbackToReduceProgressWithoutFreezing) {
+    auto runAverageX = [](bool withFeedback) {
+        safecrowd::engine::EngineRuntime runtime({
+            .fixedDeltaTime = 1.0 / 30.0,
+            .maxCatchUpSteps = 1,
+            .baseSeed = 46,
+        });
+        runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(
+            pressureFeedbackMotionSeeds(),
+            10.0));
+        runtime.addSystem(
+            std::make_unique<safecrowd::domain::ScenarioSpatialIndexSystem>(1.0),
+            {.phase = safecrowd::engine::UpdatePhase::PreSimulation,
+             .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+        if (withFeedback) {
+            runtime.addSystem(
+                safecrowd::domain::makeScenarioPressureFeedbackSystem(straightExitLayout()),
+                {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+                 .order = -10,
+                 .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+        }
+        runtime.addSystem(
+            safecrowd::domain::makeScenarioSimulationMotionSystem(straightExitLayout()),
+            {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+             .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+        runtime.addSystem(
+            std::make_unique<safecrowd::domain::ScenarioFrameSyncSystem>(),
+            {.phase = safecrowd::engine::UpdatePhase::RenderSync,
+             .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+        runtime.play();
+        runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.5});
+        runtime.stepFrame(0.0);
+
+        const auto& frame =
+            runtime.world().resources().get<safecrowd::domain::ScenarioSimulationFrameResource>().frame;
+        double xSum = 0.0;
+        for (const auto& agent : frame.agents) {
+            xSum += agent.position.x;
+        }
+        return std::pair<double, std::size_t>{
+            frame.agents.empty() ? 0.0 : xSum / static_cast<double>(frame.agents.size()),
+            frame.agents.size(),
+        };
+    };
+
+    const auto [baselineAverageX, baselineCount] = runAverageX(false);
+    const auto [feedbackAverageX, feedbackCount] = runAverageX(true);
+
+    SC_EXPECT_EQ(baselineCount, std::size_t{3});
+    SC_EXPECT_EQ(feedbackCount, std::size_t{3});
+    SC_EXPECT_TRUE(baselineAverageX > 0.2);
+    SC_EXPECT_TRUE(feedbackAverageX > 0.2);
+    SC_EXPECT_TRUE(feedbackAverageX < baselineAverageX);
 }
 
 SC_TEST(ScenarioSimulationMotionSystem_TreatsZeroGuidanceDetourAsStrictTolerance) {

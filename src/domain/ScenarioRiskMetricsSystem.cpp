@@ -39,6 +39,15 @@ struct ActiveAgentContext {
     double radius{0.25};
 };
 
+struct ActivePressureFeedbackContext {
+    engine::Entity entity{};
+    std::uint64_t agentId{0};
+    Point2D position{};
+    std::string displayFloorId{};
+    std::string collisionFloorId{};
+    double radius{0.25};
+};
+
 struct ScenarioPressureAgentTrackingState {
     double currentForce{0.0};
     double exposureSeconds{0.0};
@@ -248,6 +257,48 @@ double barrierCompression(const Barrier2D& barrier, const Point2D& position, dou
     return force;
 }
 
+double pressureFeedbackLevel(double compressionForce, double exposureSeconds, bool critical) {
+    if (critical) {
+        return 1.0;
+    }
+
+    const auto forceRange =
+        std::max(1e-9, kScenarioCriticalPressureForceThreshold - kScenarioPressureFeedbackForceThreshold);
+    const auto forceLevel = compressionForce <= kScenarioPressureFeedbackForceThreshold
+        ? 0.0
+        : std::clamp(
+            (compressionForce - kScenarioPressureFeedbackForceThreshold) / forceRange,
+            0.0,
+            1.0);
+    const auto exposureLevel = kScenarioCriticalPressureExposureThresholdSeconds <= 1e-9
+        ? 0.0
+        : std::clamp(
+            exposureSeconds / kScenarioCriticalPressureExposureThresholdSeconds,
+            0.0,
+            1.0);
+    return std::clamp(std::max(forceLevel, exposureLevel * 0.7), 0.0, 1.0);
+}
+
+double pressureFeedbackProbeRadius(double radius) {
+    return std::max(
+        kScenarioPressureFeedbackNeighborProbeRadius,
+        (radius * 2.0) + kPersonalSpaceBuffer);
+}
+
+std::uint64_t pressureFeedbackUpdateDivisor(
+    bool previouslyExposed,
+    bool previouslyCritical,
+    std::size_t nearbyOtherCount) {
+    if (previouslyCritical
+        || nearbyOtherCount >= kScenarioPressureFeedbackDenseNeighborThreshold) {
+        return 1U;
+    }
+    if (previouslyExposed || nearbyOtherCount > 0) {
+        return kScenarioPressureFeedbackCrowdedUpdateDivisor;
+    }
+    return kScenarioPressureFeedbackQuietUpdateDivisor;
+}
+
 ScenarioRiskLevel completionRiskLevel(
     const ScenarioSimulationClockResource& clock,
     std::size_t totalAgentCount,
@@ -323,6 +374,231 @@ SimulationFrame captureSimulationFrame(
     }
     return frame;
 }
+
+class ScenarioPressureFeedbackSystem final : public engine::EngineSystem {
+public:
+    explicit ScenarioPressureFeedbackSystem(FacilityLayout2D layout)
+        : layoutCache_(buildScenarioLayoutCache(std::move(layout))) {
+    }
+
+    void configure(engine::EngineWorld& world) override {
+        if (layoutCache_.has_value() && !world.resources().contains<ScenarioLayoutCacheResource>()) {
+            world.resources().set(*layoutCache_);
+        }
+        if (!world.resources().contains<ScenarioPressureFeedbackResource>()) {
+            world.resources().set(ScenarioPressureFeedbackResource{});
+        }
+    }
+
+    void update(engine::EngineWorld& world, const engine::EngineStepContext& step) override {
+        (void)step;
+
+        auto& resources = world.resources();
+        if (!resources.contains<ScenarioSimulationStepResource>()) {
+            return;
+        }
+        if (!resources.contains<ScenarioLayoutCacheResource>()) {
+            return;
+        }
+
+        auto& feedback = resources.get<ScenarioPressureFeedbackResource>();
+        const auto& clock = resources.get<ScenarioSimulationClockResource>();
+        if (clock.complete) {
+            feedback = ScenarioPressureFeedbackResource{};
+            return;
+        }
+
+        const auto deltaSeconds = std::max(0.0, resources.get<ScenarioSimulationStepResource>().deltaSeconds);
+        auto& query = world.query();
+        const auto entities = query.view<Position, Agent, EvacuationRoute, EvacuationStatus>();
+        const auto& activeLayout = resources.get<ScenarioLayoutCacheResource>().layout;
+        const auto* spatialIndex = resources.contains<ScenarioAgentSpatialIndexResource>()
+            ? &resources.get<ScenarioAgentSpatialIndexResource>()
+            : nullptr;
+
+        std::vector<ActivePressureFeedbackContext> activeAgents;
+        activeAgents.reserve(entities.size());
+        for (const auto entity : entities) {
+            const auto& status = query.get<EvacuationStatus>(entity);
+            if (status.evacuated) {
+                continue;
+            }
+
+            const auto& position = query.get<Position>(entity);
+            const auto& agent = query.get<Agent>(entity);
+            const auto& route = query.get<EvacuationRoute>(entity);
+            activeAgents.push_back({
+                .entity = entity,
+                .agentId = entity.index,
+                .position = position.value,
+                .displayFloorId = agentDisplayFloorId(route),
+                .collisionFloorId = agentCollisionFloorId(route),
+                .radius = static_cast<double>(agent.radius),
+            });
+        }
+
+        auto previousStates = std::move(feedback.agentsById);
+        feedback.agentsById.clear();
+        feedback.exposedAgentCount = 0;
+        feedback.criticalAgentCount = 0;
+
+        std::vector<double> forces(activeAgents.size(), 0.0);
+        std::vector<bool> recomputed(activeAgents.size(), true);
+        if (spatialIndex == nullptr) {
+            for (std::size_t lhsIndex = 0; lhsIndex < activeAgents.size(); ++lhsIndex) {
+                for (std::size_t rhsIndex = lhsIndex + 1; rhsIndex < activeAgents.size(); ++rhsIndex) {
+                    if (activeAgents[lhsIndex].collisionFloorId != activeAgents[rhsIndex].collisionFloorId) {
+                        continue;
+                    }
+
+                    const auto distance =
+                        distanceBetween(activeAgents[lhsIndex].position, activeAgents[rhsIndex].position);
+                    const auto combinedRadius = activeAgents[lhsIndex].radius + activeAgents[rhsIndex].radius;
+                    if (distance >= combinedRadius) {
+                        continue;
+                    }
+
+                    const auto overlap = combinedRadius - distance;
+                    forces[lhsIndex] += overlap;
+                    forces[rhsIndex] += overlap;
+                }
+            }
+
+            for (std::size_t index = 0; index < activeAgents.size(); ++index) {
+                for (const auto& barrier : activeLayout.barriers) {
+                    if (!barrierMatchesFloor(barrier, activeAgents[index].collisionFloorId)) {
+                        continue;
+                    }
+                    forces[index] += barrierCompression(
+                        barrier,
+                        activeAgents[index].position,
+                        activeAgents[index].radius);
+                }
+            }
+        } else {
+            std::vector<std::vector<engine::Entity>> neighborCandidates(activeAgents.size());
+            std::vector<std::size_t> nearbyOtherCounts(activeAgents.size(), 0);
+            for (std::size_t index = 0; index < activeAgents.size(); ++index) {
+                neighborCandidates[index] = scenarioNearbyAgents(
+                    query,
+                    *spatialIndex,
+                    activeAgents[index].position,
+                    activeAgents[index].collisionFloorId,
+                    pressureFeedbackProbeRadius(activeAgents[index].radius));
+                nearbyOtherCounts[index] = static_cast<std::size_t>(std::count_if(
+                    neighborCandidates[index].begin(),
+                    neighborCandidates[index].end(),
+                    [&](const auto candidate) {
+                        return candidate != activeAgents[index].entity;
+                    }));
+            }
+
+            for (std::size_t index = 0; index < activeAgents.size(); ++index) {
+                const auto previousIt = previousStates.find(activeAgents[index].agentId);
+                const bool previouslyExposed =
+                    previousIt != previousStates.end() && previousIt->second.exposed;
+                const bool previouslyCritical =
+                    previousIt != previousStates.end() && previousIt->second.critical;
+                const auto updateDivisor = pressureFeedbackUpdateDivisor(
+                    previouslyExposed,
+                    previouslyCritical,
+                    nearbyOtherCounts[index]);
+                recomputed[index] = updateDivisor <= 1U
+                    || ((step.frameIndex + activeAgents[index].agentId) % updateDivisor) == 0U;
+                if (!recomputed[index]) {
+                    continue;
+                }
+
+                for (const auto otherEntity : neighborCandidates[index]) {
+                    if (otherEntity == activeAgents[index].entity) {
+                        continue;
+                    }
+                    const auto& otherPosition = query.get<Position>(otherEntity);
+                    const auto& otherAgent = query.get<Agent>(otherEntity);
+                    const auto distance =
+                        distanceBetween(activeAgents[index].position, otherPosition.value);
+                    const auto combinedRadius =
+                        activeAgents[index].radius + static_cast<double>(otherAgent.radius);
+                    if (distance >= combinedRadius) {
+                        continue;
+                    }
+
+                    forces[index] += combinedRadius - distance;
+                }
+
+                for (const auto& barrier : activeLayout.barriers) {
+                    if (!barrierMatchesFloor(barrier, activeAgents[index].collisionFloorId)) {
+                        continue;
+                    }
+                    forces[index] += barrierCompression(
+                        barrier,
+                        activeAgents[index].position,
+                        activeAgents[index].radius);
+                }
+            }
+        }
+
+        for (std::size_t index = 0; index < activeAgents.size(); ++index) {
+            const auto& context = activeAgents[index];
+            ScenarioPressureFeedbackAgentState state{
+                .agentId = context.agentId,
+                .position = context.position,
+                .floorId = context.displayFloorId,
+            };
+            if (const auto previousIt = previousStates.find(context.agentId);
+                previousIt != previousStates.end()) {
+                state.exposureSeconds = previousIt->second.exposureSeconds;
+            }
+
+            state.compressionForce = recomputed[index] ? forces[index] : 0.0;
+            if (recomputed[index]
+                && state.compressionForce > kScenarioPressureFeedbackForceThreshold) {
+                state.exposureSeconds += deltaSeconds;
+            } else if (state.exposureSeconds > 0.0) {
+                state.exposureSeconds = std::max(
+                    0.0,
+                    state.exposureSeconds - (deltaSeconds * kScenarioPressureFeedbackExposureRecoveryPerSecond));
+            }
+
+            state.critical =
+                state.compressionForce > kScenarioCriticalPressureForceThreshold
+                && state.exposureSeconds >= kScenarioCriticalPressureExposureThresholdSeconds;
+            state.exposed =
+                state.compressionForce > kScenarioPressureFeedbackForceThreshold
+                || state.exposureSeconds > 1e-9;
+            if (!state.exposed) {
+                continue;
+            }
+
+            state.feedbackLevel =
+                pressureFeedbackLevel(state.compressionForce, state.exposureSeconds, state.critical);
+            const auto slowdown =
+                (state.critical
+                        ? kScenarioPressureFeedbackMaxCriticalSlowdown
+                        : kScenarioPressureFeedbackMaxExposedSlowdown)
+                * state.feedbackLevel;
+            state.speedFactor = std::clamp(
+                1.0 - slowdown,
+                1.0 - kScenarioPressureFeedbackMaxCriticalSlowdown,
+                1.0);
+            state.avoidanceScale =
+                1.0 + (state.feedbackLevel * (kScenarioPressureFeedbackMaxAvoidanceScale - 1.0));
+            state.barrierScale =
+                1.0 + (state.feedbackLevel * (kScenarioPressureFeedbackMaxBarrierScale - 1.0));
+
+            if (state.exposed) {
+                ++feedback.exposedAgentCount;
+            }
+            if (state.critical) {
+                ++feedback.criticalAgentCount;
+            }
+            feedback.agentsById.emplace(context.agentId, std::move(state));
+        }
+    }
+
+private:
+    std::optional<ScenarioLayoutCacheResource> layoutCache_{};
+};
 
 class ScenarioRiskMetricsSystem final : public engine::EngineSystem {
 public:
@@ -858,6 +1134,10 @@ private:
 };
 
 }  // namespace
+
+std::unique_ptr<engine::EngineSystem> makeScenarioPressureFeedbackSystem(FacilityLayout2D layout) {
+    return std::make_unique<ScenarioPressureFeedbackSystem>(std::move(layout));
+}
 
 std::unique_ptr<engine::EngineSystem> makeScenarioRiskMetricsSystem(FacilityLayout2D layout) {
     return std::make_unique<ScenarioRiskMetricsSystem>(std::move(layout));
