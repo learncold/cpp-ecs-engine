@@ -727,6 +727,7 @@ QWidget* createResultCanvasPanel(
     const safecrowd::domain::SimulationFrame& frame,
     const safecrowd::domain::ScenarioResultArtifacts& artifacts,
     ResultReplayControls** replayControlsOut,
+    std::function<void(ResultOverlayMode)>* overlayModeHandlerOut,
     QWidget* parent) {
     auto* panel = new QWidget(parent);
     auto* layout = new QVBoxLayout(panel);
@@ -751,17 +752,46 @@ QWidget* createResultCanvasPanel(
     overlayLayout->addWidget(overlayLabel);
     overlayLayout->addWidget(overlayCombo);
     overlayLayout->addSpacing(10);
-    overlayLayout->addWidget(new DensityLegendWidget(artifacts.densitySummary, overlayBar));
+    auto* densityLegend = new DensityLegendWidget(artifacts.densitySummary, overlayBar);
+    overlayLayout->addWidget(densityLegend);
     overlayLayout->addStretch(1);
     layout->addWidget(overlayBar);
     canvas->setDensityOverlay(artifacts.densitySummary.peakField.cells.empty()
             ? artifacts.densitySummary.peakCells
             : artifacts.densitySummary.peakField.cells,
         artifacts.densitySummary.highDensityThresholdPeoplePerSquareMeter);
-    canvas->setResultOverlayMode(ResultOverlayMode::Density);
-    QObject::connect(overlayCombo, &QComboBox::currentIndexChanged, panel, [canvas, overlayCombo](int index) {
-        const auto mode = static_cast<ResultOverlayMode>(overlayCombo->itemData(index).toInt());
-        canvas->setResultOverlayMode(mode);
+    const QPointer<SimulationCanvasWidget> canvasGuard(canvas);
+    const QPointer<QComboBox> overlayComboGuard(overlayCombo);
+    const QPointer<QWidget> densityLegendGuard(densityLegend);
+    const std::function<void(ResultOverlayMode)> applyOverlayMode =
+        [canvasGuard, overlayComboGuard, densityLegendGuard](ResultOverlayMode mode) {
+            if (overlayComboGuard != nullptr) {
+                const auto comboIndex = overlayComboGuard->findData(static_cast<int>(mode));
+                if (comboIndex >= 0 && overlayComboGuard->currentIndex() != comboIndex) {
+                    const QSignalBlocker blocker(overlayComboGuard);
+                    overlayComboGuard->setCurrentIndex(comboIndex);
+                }
+            }
+            if (densityLegendGuard != nullptr) {
+                densityLegendGuard->setVisible(mode == ResultOverlayMode::Density);
+            }
+            if (canvasGuard != nullptr) {
+                canvasGuard->setResultOverlayMode(mode);
+            }
+        };
+    if (overlayModeHandlerOut != nullptr) {
+        *overlayModeHandlerOut = applyOverlayMode;
+    }
+    applyOverlayMode(ResultOverlayMode::Density);
+    QObject::connect(overlayCombo, &QComboBox::currentIndexChanged, panel, [overlayComboGuard, applyOverlayMode](int index) {
+        if (overlayComboGuard == nullptr || index < 0) {
+            return;
+        }
+        const auto data = overlayComboGuard->itemData(index);
+        if (!data.isValid()) {
+            return;
+        }
+        applyOverlayMode(static_cast<ResultOverlayMode>(data.toInt()));
     });
     layout->addWidget(canvas, 1);
     EvacuationProgressWidget* progressWidget = nullptr;
@@ -1049,8 +1079,15 @@ ScenarioResultWidget::ScenarioResultWidget(
     canvas->setHotspotOverlay(risk_.hotspots);
     canvas->setBottleneckOverlay(risk_.bottlenecks);
     ResultReplayControls* replayControls = nullptr;
-    shell_->setCanvas(createResultCanvasPanel(canvas, frame_, artifacts_, &replayControls, shell_));
-    bottleneckFocusHandler_ = [this, canvas, replayControls](std::size_t index) {
+    std::function<void(ResultOverlayMode)> applyResultOverlayMode;
+    shell_->setCanvas(createResultCanvasPanel(
+        canvas,
+        frame_,
+        artifacts_,
+        &replayControls,
+        &applyResultOverlayMode,
+        shell_));
+    bottleneckFocusHandler_ = [this, canvas, replayControls, applyResultOverlayMode](std::size_t index) {
         if (index < risk_.bottlenecks.size() && replayControls != nullptr) {
             const auto& bottleneck = risk_.bottlenecks[index];
             if (bottleneck.detectionFrame.has_value()) {
@@ -1059,10 +1096,14 @@ ScenarioResultWidget::ScenarioResultWidget(
                 replayControls->showClosestFrameAtSeconds(*bottleneck.detectedAtSeconds);
             }
         }
-        canvas->setResultOverlayMode(ResultOverlayMode::Bottlenecks);
+        if (applyResultOverlayMode) {
+            applyResultOverlayMode(ResultOverlayMode::Bottlenecks);
+        } else {
+            canvas->setResultOverlayMode(ResultOverlayMode::Bottlenecks);
+        }
         canvas->focusBottleneck(index);
     };
-    hotspotFocusHandler_ = [this, canvas, replayControls](std::size_t index) {
+    hotspotFocusHandler_ = [this, canvas, replayControls, applyResultOverlayMode](std::size_t index) {
         if (index < risk_.hotspots.size() && replayControls != nullptr) {
             const auto& hotspot = risk_.hotspots[index];
             if (hotspot.detectionFrame.has_value()) {
@@ -1071,7 +1112,11 @@ ScenarioResultWidget::ScenarioResultWidget(
                 replayControls->showClosestFrameAtSeconds(*hotspot.detectedAtSeconds);
             }
         }
-        canvas->setResultOverlayMode(ResultOverlayMode::Hotspots);
+        if (applyResultOverlayMode) {
+            applyResultOverlayMode(ResultOverlayMode::Hotspots);
+        } else {
+            canvas->setResultOverlayMode(ResultOverlayMode::Hotspots);
+        }
         canvas->focusHotspot(index);
     };
     refreshResultNavigationPanel();

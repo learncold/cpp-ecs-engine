@@ -759,7 +759,14 @@ QWidget* ScenarioBatchResultWidget::createCanvasPanel() {
         }
     });
     connect(overlayCombo_, &QComboBox::currentIndexChanged, this, [this](int index) {
-        setOverlayMode(static_cast<OverlayMode>(overlayCombo_->itemData(index).toInt()));
+        if (overlayCombo_ == nullptr || index < 0) {
+            return;
+        }
+        const auto data = overlayCombo_->itemData(index);
+        if (!data.isValid()) {
+            return;
+        }
+        setOverlayMode(static_cast<OverlayMode>(data.toInt()));
     });
     connect(playButton_, &QPushButton::clicked, this, [this]() {
         if (replayTimer_ == nullptr || replayFrames_.size() <= 1) {
