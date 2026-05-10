@@ -281,18 +281,6 @@ bool hasSmokeHazard(const safecrowd::domain::EnvironmentState& environment) {
     });
 }
 
-QString nextHazardId(const std::vector<safecrowd::domain::EnvironmentHazardDraft>& hazards) {
-    for (int index = static_cast<int>(hazards.size()) + 1;; ++index) {
-        const auto candidate = QString("hazard-%1").arg(index);
-        const auto exists = std::any_of(hazards.begin(), hazards.end(), [&](const auto& hazard) {
-            return QString::fromStdString(hazard.id) == candidate;
-        });
-        if (!exists) {
-            return candidate;
-        }
-    }
-}
-
 int draftOccupantCount(const safecrowd::domain::ScenarioDraft& scenario) {
     int total = 0;
     for (const auto& placement : scenario.population.initialPlacements) {
@@ -896,34 +884,15 @@ QWidget* createEventsPanel(
     const safecrowd::domain::FacilityLayout2D& layout,
     const ScenarioAuthoringWidget::ScenarioState* scenario,
     QWidget* parent,
-    std::function<void()> addHazardHandler,
     std::function<void(const QString&)> deleteItemHandler,
     std::function<void(const QString&)> settingsItemHandler) {
-    auto* header = new QWidget(parent);
-    auto* headerLayout = new QHBoxLayout(header);
-    headerLayout->setContentsMargins(0, 0, 0, 0);
-    headerLayout->setSpacing(8);
-    auto* title = createLabel("Events / Hazards", header, ui::FontRole::Title);
-    title->setWordWrap(false);
-    headerLayout->addWidget(title, 1, Qt::AlignVCenter);
-    auto* addButton = new QPushButton("Add Hazard", header);
-    addButton->setFont(ui::font(ui::FontRole::Body));
-    addButton->setStyleSheet(ui::secondaryButtonStyleSheet());
-    addButton->setEnabled(static_cast<bool>(addHazardHandler));
-    QObject::connect(addButton, &QPushButton::clicked, header, [addHazardHandler = std::move(addHazardHandler)]() {
-        if (addHazardHandler) {
-            addHazardHandler();
-        }
-    });
-    headerLayout->addWidget(addButton, 0, Qt::AlignVCenter);
-
     return new NavigationTreeWidget(
         "Events / Hazards",
         buildEventsTree(layout, scenario),
         "No operational events, hazards, or blocked exits yet",
         {},
         parent,
-        header,
+        createLabel("Events / Hazards", parent, ui::FontRole::Title),
         {},
         {},
         std::move(deleteItemHandler),
@@ -1192,6 +1161,17 @@ void ScenarioAuthoringWidget::refreshCanvas() {
         refreshNavigationPanel();
         refreshInspector();
     });
+    canvas_->setEnvironmentHazards(scenario->draft.environment.hazards);
+    canvas_->setEnvironmentHazardsChangedHandler([this](const std::vector<safecrowd::domain::EnvironmentHazardDraft>& hazards) {
+        auto* current = currentScenario();
+        if (current == nullptr) {
+            return;
+        }
+        current->draft.environment.hazards = hazards;
+        recomputeDiffKeysAfterScenarioChanged(*current);
+        refreshNavigationPanel();
+        refreshInspector();
+    });
     if (!selectedLayoutElementId_.isEmpty()) {
         canvas_->focusLayoutElement(selectedLayoutElementId_);
     } else if (!selectedCrowdElementId_.isEmpty()) {
@@ -1417,31 +1397,6 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
         layout_,
         currentScenario(),
         shell_,
-        [this]() {
-            auto* scenario = currentScenario();
-            if (scenario == nullptr) {
-                return;
-            }
-
-            auto& hazards = scenario->draft.environment.hazards;
-            safecrowd::domain::EnvironmentHazardDraft hazard{
-                .id = nextHazardId(hazards).toStdString(),
-                .kind = safecrowd::domain::EnvironmentHazardKind::Fire,
-                .name = QString("Fire hazard %1").arg(static_cast<int>(hazards.size()) + 1).toStdString(),
-                .affectedZoneId = {},
-                .startSeconds = 0.0,
-                .endSeconds = 60.0,
-                .severity = safecrowd::domain::ScenarioElementSeverity::Medium,
-            };
-            if (!editEnvironmentHazard(&hazard, layout_, this)) {
-                return;
-            }
-
-            hazards.push_back(std::move(hazard));
-            recomputeDiffKeysAfterScenarioChanged(*scenario);
-            refreshNavigationPanel();
-            refreshInspector();
-        },
         [this](const QString& rawId) {
             auto* scenario = currentScenario();
             if (scenario == nullptr || rawId.isEmpty()) {

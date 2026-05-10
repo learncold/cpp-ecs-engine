@@ -663,6 +663,35 @@ QIcon makeToolIcon(const QString& type, const QColor& color) {
         return QIcon(pixmap);
     }
 
+    if (type == "fire") {
+        QPainterPath flame;
+        flame.moveTo(QPointF(22, 35));
+        flame.cubicTo(QPointF(11, 29), QPointF(14, 18), QPointF(20, 13));
+        flame.cubicTo(QPointF(22, 10), QPointF(23, 7), QPointF(22, 4));
+        flame.cubicTo(QPointF(31, 10), QPointF(36, 19), QPointF(31, 28));
+        flame.cubicTo(QPointF(29, 32), QPointF(26, 34), QPointF(22, 35));
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(color);
+        painter.drawPath(flame);
+        painter.setBrush(QColor("#fff4d6"));
+        QPainterPath inner;
+        inner.moveTo(QPointF(22, 31));
+        inner.cubicTo(QPointF(17, 27), QPointF(19, 20), QPointF(23, 16));
+        inner.cubicTo(QPointF(28, 22), QPointF(28, 28), QPointF(22, 31));
+        painter.drawPath(inner);
+        return QIcon(pixmap);
+    }
+
+    if (type == "smoke") {
+        painter.setPen(QPen(color, 3.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.drawArc(QRectF(9, 24, 14, 10), 20 * 16, 220 * 16);
+        painter.drawArc(QRectF(19, 22, 16, 12), 20 * 16, 220 * 16);
+        painter.drawArc(QRectF(12, 14, 13, 10), 20 * 16, 220 * 16);
+        painter.drawArc(QRectF(24, 11, 12, 10), 20 * 16, 220 * 16);
+        painter.drawLine(QPointF(13, 36), QPointF(34, 36));
+        return QIcon(pixmap);
+    }
+
     if (type != "group") {
         return QIcon(pixmap);
     }
@@ -1255,6 +1284,16 @@ void ScenarioCanvasWidget::setRouteGuidancesChangedHandler(
     routeGuidancesChangedHandler_ = std::move(handler);
 }
 
+void ScenarioCanvasWidget::setEnvironmentHazards(std::vector<safecrowd::domain::EnvironmentHazardDraft> hazards) {
+    environmentHazards_ = std::move(hazards);
+    update();
+}
+
+void ScenarioCanvasWidget::setEnvironmentHazardsChangedHandler(
+    std::function<void(const std::vector<safecrowd::domain::EnvironmentHazardDraft>&)> handler) {
+    environmentHazardsChangedHandler_ = std::move(handler);
+}
+
 void ScenarioCanvasWidget::setLayoutElementActivatedHandler(std::function<void(const QString&)> handler) {
     layoutElementActivatedHandler_ = std::move(handler);
 }
@@ -1315,6 +1354,20 @@ void ScenarioCanvasWidget::activateLayoutElement(const QString& elementId) {
             return;
         }
         addRouteGuidanceForConnection(*connectionIt);
+        return;
+    }
+
+    if (toolMode_ == ToolMode::FireHazard || toolMode_ == ToolMode::SmokeHazard) {
+        const auto targetId = elementId.toStdString();
+        const auto it = std::find_if(layout_.zones.begin(), layout_.zones.end(), [&](const auto& zone) {
+            return zone.id == targetId;
+        });
+        if (it == layout_.zones.end()) {
+            return;
+        }
+        addEnvironmentHazardForZone(*it, toolMode_ == ToolMode::FireHazard
+            ? safecrowd::domain::EnvironmentHazardKind::Fire
+            : safecrowd::domain::EnvironmentHazardKind::Smoke);
     }
 }
 
@@ -1623,6 +1676,14 @@ void ScenarioCanvasWidget::mousePressEvent(QMouseEvent* event) {
         return;
     }
 
+    if (toolMode_ == ToolMode::FireHazard || toolMode_ == ToolMode::SmokeHazard) {
+        addEnvironmentHazard(event->position(), toolMode_ == ToolMode::FireHazard
+            ? safecrowd::domain::EnvironmentHazardKind::Fire
+            : safecrowd::domain::EnvironmentHazardKind::Smoke);
+        event->accept();
+        return;
+    }
+
     if (toolMode_ == ToolMode::Select) {
         selectionDragging_ = true;
         selectionDragStart_ = event->position();
@@ -1734,6 +1795,7 @@ void ScenarioCanvasWidget::paintEvent(QPaintEvent* event) {
     drawFocusedPlacement(painter, transform);
     drawConnectionBlocks(painter, transform);
     drawRouteGuidances(painter, transform);
+    drawEnvironmentHazards(painter, transform);
 
     if (dragging_ || selectionDragging_) {
         const auto start = dragging_ ? dragStart_ : selectionDragStart_;
@@ -1940,6 +2002,42 @@ void ScenarioCanvasWidget::drawRouteGuidances(QPainter& painter, const LayoutCan
         painter.drawLine(QPointF(markerCenter.x() + 6.3, markerCenter.y() - 2.0), QPointF(markerCenter.x() + 9.2, markerCenter.y() - 2.8));
         painter.drawLine(QPointF(markerCenter.x() + 3.7, markerCenter.y() - 7.2), QPointF(markerCenter.x() + 4.8, markerCenter.y() - 9.8));
         painter.setPen(Qt::NoPen);
+    }
+}
+
+void ScenarioCanvasWidget::drawEnvironmentHazards(QPainter& painter, const LayoutCanvasTransform& transform) const {
+    for (const auto& hazard : environmentHazards_) {
+        if (hazard.affectedZoneId.empty()) {
+            continue;
+        }
+        const auto zoneIt = std::find_if(layout_.zones.begin(), layout_.zones.end(), [&](const auto& zone) {
+            return zone.id == hazard.affectedZoneId;
+        });
+        if (zoneIt == layout_.zones.end() || !matchesFloor(zoneIt->floorId, currentFloorId_)) {
+            continue;
+        }
+
+        const auto center = transform.map(polygonCenter(zoneIt->area));
+        const QColor fill = hazard.kind == safecrowd::domain::EnvironmentHazardKind::Fire
+            ? QColor("#c2410c")
+            : QColor("#64748b");
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(fill);
+        painter.drawEllipse(center, 11.0, 11.0);
+
+        painter.setPen(QPen(Qt::white, 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.setBrush(Qt::NoBrush);
+        if (hazard.kind == safecrowd::domain::EnvironmentHazardKind::Fire) {
+            QPainterPath flame;
+            flame.moveTo(center + QPointF(0.0, 6.0));
+            flame.cubicTo(center + QPointF(-5.0, 2.0), center + QPointF(-3.5, -4.0), center + QPointF(-0.5, -7.0));
+            flame.cubicTo(center + QPointF(4.0, -3.0), center + QPointF(4.0, 3.0), center + QPointF(0.0, 6.0));
+            painter.drawPath(flame);
+        } else {
+            painter.drawArc(QRectF(center.x() - 7.0, center.y() - 1.0, 9.0, 7.0), 20 * 16, 220 * 16);
+            painter.drawArc(QRectF(center.x() - 1.0, center.y() - 3.0, 10.0, 7.0), 20 * 16, 220 * 16);
+            painter.drawArc(QRectF(center.x() - 5.0, center.y() - 8.0, 8.0, 6.0), 20 * 16, 220 * 16);
+        }
     }
 }
 
@@ -2288,6 +2386,18 @@ QString ScenarioCanvasWidget::nextRouteGuidanceId() const {
     return QString("guidance-%1").arg(static_cast<int>(routeGuidances_.size()) + 1);
 }
 
+QString ScenarioCanvasWidget::nextEnvironmentHazardId() const {
+    for (int index = static_cast<int>(environmentHazards_.size()) + 1;; ++index) {
+        const auto candidate = QString("hazard-%1").arg(index);
+        const auto exists = std::any_of(environmentHazards_.begin(), environmentHazards_.end(), [&](const auto& hazard) {
+            return QString::fromStdString(hazard.id) == candidate;
+        });
+        if (!exists) {
+            return candidate;
+        }
+    }
+}
+
 void ScenarioCanvasWidget::addGroupPlacement(const QPointF& start, const QPointF& end) {
     if ((QLineF(start, end).length()) < 8.0) {
         return;
@@ -2557,6 +2667,49 @@ void ScenarioCanvasWidget::addRouteGuidanceForConnection(const safecrowd::domain
     update();
 }
 
+void ScenarioCanvasWidget::addEnvironmentHazard(
+    const QPointF& position,
+    safecrowd::domain::EnvironmentHazardKind kind) {
+    const auto point = unmapPoint(position);
+    const auto zoneId = zoneAt(point);
+    if (zoneId.isEmpty()) {
+        QMessageBox::information(this, "Hazard", "Click inside a zone to place a fire or smoke hazard.");
+        return;
+    }
+
+    const auto zoneIdStd = zoneId.toStdString();
+    const auto it = std::find_if(layout_.zones.begin(), layout_.zones.end(), [&](const auto& zone) {
+        return zone.id == zoneIdStd;
+    });
+    if (it == layout_.zones.end()) {
+        return;
+    }
+    addEnvironmentHazardForZone(*it, kind);
+}
+
+void ScenarioCanvasWidget::addEnvironmentHazardForZone(
+    const safecrowd::domain::Zone2D& zone,
+    safecrowd::domain::EnvironmentHazardKind kind) {
+    if (!matchesFloor(zone.floorId, currentFloorId_)) {
+        return;
+    }
+
+    safecrowd::domain::EnvironmentHazardDraft draft;
+    draft.id = nextEnvironmentHazardId().toStdString();
+    draft.kind = kind;
+    draft.name = QString("%1 hazard %2")
+        .arg(kind == safecrowd::domain::EnvironmentHazardKind::Fire ? "Fire" : "Smoke")
+        .arg(static_cast<int>(environmentHazards_.size()) + 1)
+        .toStdString();
+    draft.affectedZoneId = zone.id;
+    draft.startSeconds = 0.0;
+    draft.endSeconds = 60.0;
+    draft.severity = safecrowd::domain::ScenarioElementSeverity::Medium;
+    environmentHazards_.push_back(std::move(draft));
+    emitEnvironmentHazardsChanged();
+    update();
+}
+
 void ScenarioCanvasWidget::selectSingleAt(const QPointF& position, const LayoutCanvasTransform& transform) {
     const auto crowdElementId = placementAt(position, transform);
     if (!crowdElementId.isEmpty()) {
@@ -2813,6 +2966,12 @@ void ScenarioCanvasWidget::emitRouteGuidancesChanged() {
     }
 }
 
+void ScenarioCanvasWidget::emitEnvironmentHazardsChanged() {
+    if (environmentHazardsChangedHandler_) {
+        environmentHazardsChangedHandler_(environmentHazards_);
+    }
+}
+
 void ScenarioCanvasWidget::repositionToolbars() {
     if (topToolbar_ != nullptr) {
         topToolbar_->setGeometry(0, 0, width(), kTopToolbarHeight);
@@ -2840,6 +2999,12 @@ void ScenarioCanvasWidget::setToolMode(ToolMode mode) {
     }
     if (routeGuidanceToolButton_ != nullptr) {
         routeGuidanceToolButton_->setChecked(mode == ToolMode::RouteGuidance);
+    }
+    if (fireHazardToolButton_ != nullptr) {
+        fireHazardToolButton_->setChecked(mode == ToolMode::FireHazard);
+    }
+    if (smokeHazardToolButton_ != nullptr) {
+        smokeHazardToolButton_->setChecked(mode == ToolMode::SmokeHazard);
     }
     if (groupCountLabel_ != nullptr) {
         groupCountLabel_->setVisible(mode == ToolMode::GroupPlacement);
@@ -2893,6 +3058,8 @@ void ScenarioCanvasWidget::setupToolbars() {
     groupToolButton_ = makeButton(makeToolIcon("group", QColor("#1f5fae")), "Add Occupant Group");
     blockDoorToolButton_ = makeButton(makeToolIcon("block", QColor("#c0392b")), "block door");
     routeGuidanceToolButton_ = makeButton(makeToolIcon("guidance", QColor("#1f5fae")), "Route guidance");
+    fireHazardToolButton_ = makeButton(makeToolIcon("fire", QColor("#c2410c")), "Add Fire Hazard");
+    smokeHazardToolButton_ = makeButton(makeToolIcon("smoke", QColor("#64748b")), "Add Smoke Hazard");
     topLayout->addStretch(1);
 
     groupCountLabel_ = new QLabel("Group count", propertyPanel_);
@@ -2917,6 +3084,8 @@ void ScenarioCanvasWidget::setupToolbars() {
     connect(groupToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::GroupPlacement); });
     connect(blockDoorToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::BlockDoor); });
     connect(routeGuidanceToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::RouteGuidance); });
+    connect(fireHazardToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::FireHazard); });
+    connect(smokeHazardToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::SmokeHazard); });
 
     setToolMode(ToolMode::Select);
     repositionToolbars();
