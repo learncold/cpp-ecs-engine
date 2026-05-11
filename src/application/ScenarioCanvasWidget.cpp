@@ -211,7 +211,6 @@ QString formatEnvironmentHazardTooltip(const safecrowd::domain::EnvironmentHazar
     }
     text.append(QString("\nActive: %1s ~ %2s").arg(hazard.startSeconds, 0, 'f', 1).arg(hazard.endSeconds, 0, 'f', 1));
     text.append(QString("\nSeverity: %1").arg(severityLabel(hazard.severity)));
-    text.append("\nv2 input only; runtime effect is handled separately.");
     return text;
 }
 
@@ -408,6 +407,15 @@ bool pointInRing(const std::vector<safecrowd::domain::Point2D>& ring, const safe
         }
     }
     return inside;
+}
+
+bool pointInPolygon(const safecrowd::domain::Polygon2D& polygon, const safecrowd::domain::Point2D& point) {
+    if (!pointInRing(polygon.outline, point)) {
+        return false;
+    }
+    return std::none_of(polygon.holes.begin(), polygon.holes.end(), [&](const auto& hole) {
+        return pointInRing(hole, point);
+    });
 }
 
 double distancePointToSegment(
@@ -2265,7 +2273,7 @@ QString ScenarioCanvasWidget::zoneAt(const safecrowd::domain::Point2D& point) co
         if (!matchesFloor(zone.floorId, currentFloorId_)) {
             continue;
         }
-        if (pointInRing(zone.area.outline, point)) {
+        if (pointInPolygon(zone.area, point)) {
             return QString::fromStdString(zone.id);
         }
     }

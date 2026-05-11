@@ -286,11 +286,6 @@ bool editEnvironmentHazard(
     noteEdit->setPlainText(QString::fromStdString(hazard->note));
     noteEdit->setMinimumHeight(72);
 
-    auto* scopeHint = createLabel(
-        "Fire/Smoke hazards are v2 simulation inputs. This authoring step stores scenario data only; runtime movement/result effects are handled separately.",
-        &dialog);
-    scopeHint->setStyleSheet(ui::mutedTextStyleSheet());
-
     form->addRow("Kind", kindCombo);
     form->addRow("Name", nameEdit);
     form->addRow("Affected zone", zoneCombo);
@@ -301,7 +296,6 @@ bool editEnvironmentHazard(
     form->addRow("Severity", severityCombo);
     form->addRow("Note", noteEdit);
     root->addLayout(form);
-    root->addWidget(scopeHint);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, [&]() {
