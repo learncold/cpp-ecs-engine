@@ -357,6 +357,72 @@ safecrowd::domain::FacilityLayout2D twoExitGuidanceDetourLayout() {
     return layout;
 }
 
+safecrowd::domain::ScenarioAgentSeed straightRouteSeed(
+    safecrowd::domain::Point2D start,
+    double maxSpeed = 1.0,
+    double reactionDelaySeconds = 0.0,
+    std::string destinationZoneId = "exit") {
+    return {
+        .position = {.value = start},
+        .agent = {
+            .radius = 0.25f,
+            .maxSpeed = static_cast<float>(maxSpeed),
+            .reactionDelaySeconds = reactionDelaySeconds,
+        },
+        .velocity = {.value = {}},
+        .route = {
+            .waypoints = {{.x = 1.0, .y = 0.0}},
+            .waypointPassages = {{{.x = 1.0, .y = -0.4}, {.x = 1.0, .y = 0.4}}},
+            .waypointFromZoneIds = {"room"},
+            .waypointZoneIds = {destinationZoneId},
+            .nextWaypointIndex = 0,
+            .currentSegmentStart = start,
+            .previousDistanceToWaypoint = 1.0,
+            .destinationZoneId = destinationZoneId,
+        },
+        .status = {},
+    };
+}
+
+safecrowd::domain::EnvironmentHazardDraft hazardDraft(
+    std::string id,
+    safecrowd::domain::EnvironmentHazardKind kind,
+    safecrowd::domain::ScenarioElementSeverity severity,
+    safecrowd::domain::Point2D position,
+    std::string affectedZoneId = "room",
+    std::string floorId = {}) {
+    return {
+        .id = std::move(id),
+        .kind = kind,
+        .name = "Test hazard",
+        .affectedZoneId = std::move(affectedZoneId),
+        .floorId = std::move(floorId),
+        .position = position,
+        .startSeconds = 0.0,
+        .endSeconds = 0.0,
+        .severity = severity,
+    };
+}
+
+void addHazardMotionSystems(
+    safecrowd::engine::EngineRuntime& runtime,
+    const safecrowd::domain::FacilityLayout2D& layout,
+    std::vector<safecrowd::domain::EnvironmentHazardDraft> hazards) {
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioEnvironmentHazardSystem(layout, std::move(hazards)),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .order = -20,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioSimulationMotionSystem(layout),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+    runtime.addSystem(
+        std::make_unique<safecrowd::domain::ScenarioFrameSyncSystem>(),
+        {.phase = safecrowd::engine::UpdatePhase::RenderSync,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+}
+
 safecrowd::domain::FacilityLayout2D overlappingFloorBottleneckLayout() {
     safecrowd::domain::FacilityLayout2D layout;
     layout.floors.push_back({.id = "L1", .label = "Floor 1"});
@@ -825,6 +891,216 @@ SC_TEST(ScenarioSimulationMotionSystem_AdvancesAgentsFromStepResource) {
     SC_EXPECT_NEAR(frame.agents.front().position.x, 0.5, 1e-9);
     SC_EXPECT_NEAR(frame.agents.front().velocity.x, 1.0, 1e-9);
     SC_EXPECT_TRUE(!frame.agents.front().stalled);
+}
+
+SC_TEST(ScenarioEnvironmentHazardSystem_DelaysFireAvoidanceUntilReactionReady) {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    seeds.push_back(straightRouteSeed({.x = 0.0, .y = 0.0}, 1.0, 0.5));
+
+    auto fire = hazardDraft(
+        "fire-a",
+        safecrowd::domain::EnvironmentHazardKind::Fire,
+        safecrowd::domain::ScenarioElementSeverity::High,
+        {.x = 0.0, .y = 0.4});
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 43,
+    });
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    addHazardMotionSystems(runtime, straightExitLayout(), {fire});
+
+    runtime.play();
+    runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.25});
+    runtime.stepFrame(0.0);
+
+    const auto& reactions =
+        runtime.world().resources().get<safecrowd::domain::ScenarioEnvironmentReactionResource>();
+    const auto& firstState = reactions.agentsById.at(0);
+    SC_EXPECT_TRUE(firstState.hazardDetected);
+    SC_EXPECT_TRUE(!firstState.hazardAware);
+
+    const auto firstFrame =
+        runtime.world().resources().get<safecrowd::domain::ScenarioSimulationFrameResource>().frame;
+    SC_EXPECT_NEAR(firstFrame.agents.front().position.y, 0.0, 1e-6);
+
+    runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.25});
+    runtime.stepFrame(0.0);
+    runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.25});
+    runtime.stepFrame(0.0);
+
+    const auto& awareState =
+        runtime.world().resources().get<safecrowd::domain::ScenarioEnvironmentReactionResource>().agentsById.at(0);
+    const auto& awareFrame =
+        runtime.world().resources().get<safecrowd::domain::ScenarioSimulationFrameResource>().frame;
+    SC_EXPECT_TRUE(awareState.hazardAware);
+    SC_EXPECT_TRUE(awareFrame.agents.front().position.y < -0.01);
+}
+
+SC_TEST(ScenarioEnvironmentHazardSystem_SmokeSlowsButDoesNotStopAgent) {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> baselineSeeds;
+    baselineSeeds.push_back(straightRouteSeed({.x = 0.0, .y = 0.0}, 1.0));
+
+    safecrowd::engine::EngineRuntime baselineRuntime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 44,
+    });
+    baselineRuntime.addSystem(
+        std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(baselineSeeds), 10.0));
+    baselineRuntime.addSystem(
+        safecrowd::domain::makeScenarioSimulationMotionSystem(straightExitLayout()),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+    baselineRuntime.addSystem(
+        std::make_unique<safecrowd::domain::ScenarioFrameSyncSystem>(),
+        {.phase = safecrowd::engine::UpdatePhase::RenderSync,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    baselineRuntime.play();
+    baselineRuntime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.5});
+    baselineRuntime.stepFrame(0.0);
+    const auto baselineVelocity =
+        baselineRuntime.world().resources().get<safecrowd::domain::ScenarioSimulationFrameResource>().frame.agents.front().velocity;
+    const auto baselineSpeed = std::hypot(baselineVelocity.x, baselineVelocity.y);
+
+    std::vector<safecrowd::domain::ScenarioAgentSeed> smokeSeeds;
+    smokeSeeds.push_back(straightRouteSeed({.x = 0.0, .y = 0.0}, 1.0));
+    auto smoke = hazardDraft(
+        "smoke-a",
+        safecrowd::domain::EnvironmentHazardKind::Smoke,
+        safecrowd::domain::ScenarioElementSeverity::High,
+        {.x = 0.0, .y = 0.0});
+
+    safecrowd::engine::EngineRuntime smokeRuntime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 45,
+    });
+    smokeRuntime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(smokeSeeds), 10.0));
+    addHazardMotionSystems(smokeRuntime, straightExitLayout(), {smoke});
+
+    smokeRuntime.play();
+    smokeRuntime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.5});
+    smokeRuntime.stepFrame(0.0);
+
+    const auto smokeVelocity =
+        smokeRuntime.world().resources().get<safecrowd::domain::ScenarioSimulationFrameResource>().frame.agents.front().velocity;
+    const auto smokeSpeed = std::hypot(smokeVelocity.x, smokeVelocity.y);
+    SC_EXPECT_TRUE(smokeSpeed < baselineSpeed);
+    SC_EXPECT_TRUE(smokeSpeed > 0.1);
+}
+
+SC_TEST(ScenarioEnvironmentHazardSystem_ReroutesOnlyAfterHazardAwareness) {
+    safecrowd::domain::ScenarioAgentSeed seed;
+    seed.position = {.value = {.x = 1.2, .y = 0.5}};
+    seed.agent = {.radius = 0.25f, .maxSpeed = 1.0f, .reactionDelaySeconds = 0.2};
+    seed.velocity = {};
+    seed.route = {
+        .waypoints = {{.x = 2.0, .y = 0.5}, {.x = 3.0, .y = 0.5}},
+        .waypointPassages = {
+            {{.x = 2.0, .y = 0.3}, {.x = 2.0, .y = 0.7}},
+            {{.x = 3.0, .y = 0.5}, {.x = 3.0, .y = 0.5}},
+        },
+        .waypointFromZoneIds = {"room", ""},
+        .waypointZoneIds = {"near-exit", "near-exit"},
+        .nextWaypointIndex = 0,
+        .currentSegmentStart = {.x = 1.2, .y = 0.5},
+        .previousDistanceToWaypoint = 0.8,
+        .destinationZoneId = "near-exit",
+    };
+
+    auto fire = hazardDraft(
+        "near-exit-fire",
+        safecrowd::domain::EnvironmentHazardKind::Fire,
+        safecrowd::domain::ScenarioElementSeverity::Low,
+        {.x = 3.0, .y = 0.5},
+        "near-exit");
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 46,
+    });
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(
+        std::vector<safecrowd::domain::ScenarioAgentSeed>{seed},
+        10.0));
+    addHazardMotionSystems(runtime, twoExitGuidanceDetourLayout(), {fire});
+
+    runtime.play();
+    runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.1});
+    runtime.stepFrame(0.0);
+
+    auto entities = runtime.world().query().view<safecrowd::domain::EvacuationRoute>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{1});
+    auto& route = runtime.world().query().get<safecrowd::domain::EvacuationRoute>(entities.front());
+    SC_EXPECT_EQ(route.destinationZoneId, std::string{"near-exit"});
+
+    runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.1});
+    runtime.stepFrame(0.0);
+    runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.1});
+    runtime.stepFrame(0.0);
+
+    SC_EXPECT_EQ(route.destinationZoneId, std::string{"far-exit"});
+}
+
+SC_TEST(ScenarioEnvironmentHazardSystem_IgnoresInactiveAndDifferentFloorHazards) {
+    auto layout = overlappingFloorBottleneckLayout();
+    auto seed = straightRouteSeed({.x = 0.25, .y = 0.0}, 1.0, 0.0, "exit-l1");
+    seed.route.waypoints = {{.x = 1.0, .y = 0.0}};
+    seed.route.waypointZoneIds = {"exit-l1"};
+    seed.route.destinationZoneId = "exit-l1";
+    seed.route.currentFloorId = "L1";
+    seed.route.displayFloorId = "L1";
+
+    auto inactive = hazardDraft(
+        "inactive-fire",
+        safecrowd::domain::EnvironmentHazardKind::Fire,
+        safecrowd::domain::ScenarioElementSeverity::High,
+        {.x = 0.25, .y = 0.0},
+        "room-l1",
+        "L1");
+    inactive.startSeconds = 5.0;
+    inactive.endSeconds = 10.0;
+    auto otherFloor = hazardDraft(
+        "other-floor-smoke",
+        safecrowd::domain::EnvironmentHazardKind::Smoke,
+        safecrowd::domain::ScenarioElementSeverity::High,
+        {.x = 0.25, .y = 0.0},
+        "room-l2",
+        "L2");
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 47,
+    });
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(
+        std::vector<safecrowd::domain::ScenarioAgentSeed>{seed},
+        10.0));
+    addHazardMotionSystems(runtime, layout, {inactive, otherFloor});
+
+    runtime.play();
+    runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.5});
+    runtime.stepFrame(0.0);
+
+    const auto& frame =
+        runtime.world().resources().get<safecrowd::domain::ScenarioSimulationFrameResource>().frame;
+    SC_EXPECT_TRUE(frame.agents.front().velocity.x > 0.9);
+    SC_EXPECT_NEAR(frame.agents.front().velocity.y, 0.0, 1e-6);
+
+    const auto& reactions =
+        runtime.world().resources().get<safecrowd::domain::ScenarioEnvironmentReactionResource>();
+    const auto reactionIt = reactions.agentsById.find(0);
+    SC_EXPECT_TRUE(reactionIt == reactions.agentsById.end() || !reactionIt->second.hazardInRange);
+
+    const auto& exposure =
+        runtime.world().resources().get<safecrowd::domain::ScenarioHazardExposureResource>();
+    for (const auto& [_, metric] : exposure.hazardsById) {
+        SC_EXPECT_NEAR(metric.exposedAgentSeconds, 0.0, 1e-9);
+        SC_EXPECT_NEAR(metric.exposureScore, 0.0, 1e-9);
+    }
 }
 
 SC_TEST(ScenarioPressureFeedbackSystem_PublishesSoftFeedbackForDenseCluster) {

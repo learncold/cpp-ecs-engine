@@ -258,6 +258,124 @@ bool connectionShouldBeBlocked(const ConnectionBlockDraft& block, double timeSec
     });
 }
 
+std::string hazardRuntimeKey(const EnvironmentHazardDraft& hazard, std::size_t index) {
+    if (!hazard.id.empty()) {
+        return hazard.id;
+    }
+    return "hazard-" + std::to_string(index + 1);
+}
+
+double severityRadiusMeters(ScenarioElementSeverity severity) {
+    switch (severity) {
+    case ScenarioElementSeverity::Low:
+        return 2.0;
+    case ScenarioElementSeverity::High:
+        return 5.0;
+    case ScenarioElementSeverity::Medium:
+    default:
+        return 3.5;
+    }
+}
+
+double severityRoutePenaltyMeters(ScenarioElementSeverity severity) {
+    switch (severity) {
+    case ScenarioElementSeverity::Low:
+        return 25.0;
+    case ScenarioElementSeverity::High:
+        return 150.0;
+    case ScenarioElementSeverity::Medium:
+    default:
+        return 75.0;
+    }
+}
+
+double severityWeight(ScenarioElementSeverity severity) {
+    switch (severity) {
+    case ScenarioElementSeverity::Low:
+        return 1.0;
+    case ScenarioElementSeverity::High:
+        return 3.0;
+    case ScenarioElementSeverity::Medium:
+    default:
+        return 2.0;
+    }
+}
+
+double hazardSpeedFactor(EnvironmentHazardKind kind, ScenarioElementSeverity severity) {
+    if (kind == EnvironmentHazardKind::Smoke) {
+        switch (severity) {
+        case ScenarioElementSeverity::Low:
+            return 0.85;
+        case ScenarioElementSeverity::High:
+            return 0.55;
+        case ScenarioElementSeverity::Medium:
+        default:
+            return 0.70;
+        }
+    }
+
+    switch (severity) {
+    case ScenarioElementSeverity::Low:
+        return 0.90;
+    case ScenarioElementSeverity::High:
+        return 0.60;
+    case ScenarioElementSeverity::Medium:
+    default:
+        return 0.75;
+    }
+}
+
+bool hazardActiveAt(const EnvironmentHazardDraft& hazard, double elapsedSeconds) {
+    const auto start = std::max(0.0, hazard.startSeconds);
+    if (elapsedSeconds + 1e-9 < start) {
+        return false;
+    }
+    if (hazard.endSeconds <= hazard.startSeconds) {
+        return true;
+    }
+    return elapsedSeconds <= std::max(start, hazard.endSeconds) + 1e-9;
+}
+
+std::string hazardFloorId(
+    const FacilityLayout2D& layout,
+    const EnvironmentHazardDraft& hazard) {
+    if (!hazard.floorId.empty()) {
+        return hazard.floorId;
+    }
+    return zoneFloorId(layout, hazard.affectedZoneId);
+}
+
+HazardExposureMetric hazardExposureMetric(
+    const EnvironmentHazardDraft& hazard,
+    const std::string& key,
+    const std::string& floorId) {
+    return {
+        .hazardId = key,
+        .hazardName = hazard.name,
+        .kind = hazard.kind,
+        .severity = hazard.severity,
+        .affectedZoneId = hazard.affectedZoneId,
+        .floorId = floorId,
+        .position = hazard.position,
+    };
+}
+
+ScenarioActiveEnvironmentHazard activeHazardFromDraft(
+    const EnvironmentHazardDraft& hazard,
+    const std::string& key,
+    const std::string& floorId) {
+    const auto factor = std::max(0.35, hazardSpeedFactor(hazard.kind, hazard.severity));
+    return {
+        .key = key,
+        .draft = hazard,
+        .floorId = floorId,
+        .radiusMeters = severityRadiusMeters(hazard.severity),
+        .speedFactor = factor,
+        .routePenaltyMeters = severityRoutePenaltyMeters(hazard.severity),
+        .severityWeight = severityWeight(hazard.severity),
+    };
+}
+
 Connection2D* findConnectionById(FacilityLayout2D& layout, const std::string& connectionId) {
     const auto it = std::find_if(layout.connections.begin(), layout.connections.end(), [&](const auto& connection) {
         return connection.id == connectionId;
@@ -350,6 +468,181 @@ private:
     std::vector<ConnectionBlockDraft> blocks_{};
     std::unordered_set<std::string> previousBlockedConnectionIds_{};
     std::uint64_t revision_{0};
+};
+
+class ScenarioEnvironmentHazardSystem final : public engine::EngineSystem {
+public:
+    ScenarioEnvironmentHazardSystem(FacilityLayout2D layout, std::vector<EnvironmentHazardDraft> hazards)
+        : layout_(std::move(layout)),
+          hazards_(std::move(hazards)) {
+    }
+
+    void configure(engine::EngineWorld& world) override {
+        world.resources().set(ScenarioEnvironmentReactionResource{});
+        world.resources().set(ScenarioActiveEnvironmentHazardsResource{});
+
+        ScenarioHazardExposureResource exposure;
+        exposure.hazardsById.reserve(hazards_.size());
+        for (std::size_t index = 0; index < hazards_.size(); ++index) {
+            const auto key = hazardRuntimeKey(hazards_[index], index);
+            exposure.hazardsById.emplace(key, hazardExposureMetric(hazards_[index], key, hazardFloorId(layout_, hazards_[index])));
+        }
+        world.resources().set(std::move(exposure));
+    }
+
+    void update(engine::EngineWorld& world, const engine::EngineStepContext& step) override {
+        (void)step;
+
+        auto& resources = world.resources();
+        if (!resources.contains<ScenarioEnvironmentReactionResource>()
+            || !resources.contains<ScenarioActiveEnvironmentHazardsResource>()
+            || !resources.contains<ScenarioHazardExposureResource>()) {
+            configure(world);
+        }
+
+        double elapsedSeconds = 0.0;
+        if (resources.contains<ScenarioSimulationClockResource>()) {
+            elapsedSeconds = resources.get<ScenarioSimulationClockResource>().elapsedSeconds;
+        }
+        const auto deltaSeconds = resources.contains<ScenarioSimulationStepResource>()
+            ? std::max(0.0, resources.get<ScenarioSimulationStepResource>().deltaSeconds)
+            : 0.0;
+
+        auto activeHazards = buildActiveHazards(elapsedSeconds);
+        auto& activeResource = resources.get<ScenarioActiveEnvironmentHazardsResource>();
+        activeResource.hazards = activeHazards;
+
+        auto& reactions = resources.get<ScenarioEnvironmentReactionResource>();
+        auto& exposure = resources.get<ScenarioHazardExposureResource>();
+        std::unordered_map<std::string, std::size_t> currentExposureCounts;
+        currentExposureCounts.reserve(activeHazards.size());
+
+        auto& query = world.query();
+        const auto entities = query.view<Position, Agent, EvacuationRoute, EvacuationStatus>();
+        for (const auto entity : entities) {
+            const auto& status = query.get<EvacuationStatus>(entity);
+            if (status.evacuated) {
+                continue;
+            }
+
+            const auto& position = query.get<Position>(entity);
+            const auto& agent = query.get<Agent>(entity);
+            const auto& route = query.get<EvacuationRoute>(entity);
+            const auto agentFloorId = !route.displayFloorId.empty() ? route.displayFloorId : route.currentFloorId;
+
+            const ScenarioActiveEnvironmentHazard* detectedHazard = nullptr;
+            double detectedDistance = 0.0;
+            double detectedRadius = 0.0;
+            double bestProximity = std::numeric_limits<double>::max();
+
+            for (const auto& hazard : activeHazards) {
+                if (!sameFloor(agentFloorId, hazard.floorId)) {
+                    continue;
+                }
+
+                const auto sensitivity = hazard.draft.kind == EnvironmentHazardKind::Smoke
+                    ? agent.smokeSensitivity
+                    : agent.hazardSensitivity;
+                const auto radius = std::max(0.0, hazard.radiusMeters * std::max(0.0, sensitivity));
+                if (radius <= 1e-9) {
+                    continue;
+                }
+
+                const auto distance = distanceBetween(position.value, hazard.draft.position);
+                if (distance > radius + 1e-9) {
+                    continue;
+                }
+
+                ++currentExposureCounts[hazard.key];
+                const auto proximity = distance / radius;
+                if (proximity < bestProximity) {
+                    bestProximity = proximity;
+                    detectedHazard = &hazard;
+                    detectedDistance = distance;
+                    detectedRadius = radius;
+                }
+            }
+
+            auto& state = reactions.agentsById[entity.index];
+            if (detectedHazard == nullptr) {
+                state.hazardInRange = false;
+                continue;
+            }
+
+            if (!state.hazardDetected || state.hazardKey != detectedHazard->key) {
+                state.hazardDetected = true;
+                state.hazardAware = false;
+                state.hazardKey = detectedHazard->key;
+                state.hazardDetectedAtSeconds = elapsedSeconds;
+                state.hazardReactionReadySeconds =
+                    elapsedSeconds + std::max(0.0, agent.reactionDelaySeconds);
+            }
+
+            state.hazardInRange = true;
+            state.hazardAware = elapsedSeconds + 1e-9 >= state.hazardReactionReadySeconds;
+            state.hazardKind = detectedHazard->draft.kind;
+            state.hazardSeverity = detectedHazard->draft.severity;
+            state.hazardPosition = detectedHazard->draft.position;
+            state.hazardFloorId = detectedHazard->floorId;
+            state.hazardAffectedZoneId = detectedHazard->draft.affectedZoneId;
+            state.hazardDistanceMeters = detectedDistance;
+            state.hazardRadiusMeters = detectedRadius;
+            state.hazardSpeedFactor = detectedHazard->speedFactor;
+            state.hazardRoutePenaltyMeters = detectedHazard->routePenaltyMeters;
+        }
+
+        if (deltaSeconds <= 0.0) {
+            return;
+        }
+
+        for (const auto& hazard : activeHazards) {
+            const auto currentCountIt = currentExposureCounts.find(hazard.key);
+            const auto currentCount = currentCountIt == currentExposureCounts.end()
+                ? std::size_t{0}
+                : currentCountIt->second;
+            if (currentCount == 0) {
+                continue;
+            }
+
+            auto& metric = exposure.hazardsById[hazard.key];
+            if (metric.hazardId.empty()) {
+                metric = hazardExposureMetric(hazard.draft, hazard.key, hazard.floorId);
+            }
+            metric.exposedAgentSeconds += static_cast<double>(currentCount) * deltaSeconds;
+            metric.exposureScore += static_cast<double>(currentCount) * deltaSeconds * hazard.severityWeight;
+            if (!metric.firstExposureSeconds.has_value()) {
+                metric.firstExposureSeconds = elapsedSeconds;
+            }
+            if (currentCount > metric.peakExposedAgentCount) {
+                metric.peakExposedAgentCount = currentCount;
+                metric.peakAtSeconds = elapsedSeconds;
+            }
+        }
+    }
+
+private:
+    std::vector<ScenarioActiveEnvironmentHazard> buildActiveHazards(double elapsedSeconds) const {
+        std::vector<ScenarioActiveEnvironmentHazard> active;
+        active.reserve(hazards_.size());
+        for (std::size_t index = 0; index < hazards_.size(); ++index) {
+            const auto& hazard = hazards_[index];
+            if (!hazardActiveAt(hazard, elapsedSeconds)) {
+                continue;
+            }
+            active.push_back(activeHazardFromDraft(
+                hazard,
+                hazardRuntimeKey(hazard, index),
+                hazardFloorId(layout_, hazard)));
+        }
+        return active;
+    }
+
+    static bool sameFloor(const std::string& lhs, const std::string& rhs) {
+        return lhs == rhs || lhs.empty() || rhs.empty();
+    }
+
+    FacilityLayout2D layout_{};
+    std::vector<EnvironmentHazardDraft> hazards_{};
 };
 
 }  // namespace
@@ -956,6 +1249,28 @@ void ScenarioResultArtifactsSystem::update(engine::EngineWorld& world, const eng
         pressureSummary.criticalEvents.resize(kMaxResultCriticalPressureEvents);
     }
 
+    result.artifacts.hazardExposureSummary = {};
+    if (resources.contains<ScenarioHazardExposureResource>()) {
+        const auto& hazardExposure = resources.get<ScenarioHazardExposureResource>();
+        result.artifacts.hazardExposureSummary.hazards.reserve(hazardExposure.hazardsById.size());
+        for (const auto& [_, metric] : hazardExposure.hazardsById) {
+            result.artifacts.hazardExposureSummary.totalExposureScore += metric.exposureScore;
+            result.artifacts.hazardExposureSummary.hazards.push_back(metric);
+        }
+        std::sort(
+            result.artifacts.hazardExposureSummary.hazards.begin(),
+            result.artifacts.hazardExposureSummary.hazards.end(),
+            [](const auto& lhs, const auto& rhs) {
+                if (std::fabs(lhs.exposureScore - rhs.exposureScore) > 1e-9) {
+                    return lhs.exposureScore > rhs.exposureScore;
+                }
+                if (lhs.peakExposedAgentCount != rhs.peakExposedAgentCount) {
+                    return lhs.peakExposedAgentCount > rhs.peakExposedAgentCount;
+                }
+                return lhs.hazardId < rhs.hazardId;
+            });
+    }
+
     const auto shouldRecordSample =
         result.artifacts.evacuationProgress.empty()
         || evacuatedCount != result.lastRecordedEvacuatedCount
@@ -983,6 +1298,12 @@ std::unique_ptr<engine::EngineSystem> makeScenarioControlSystem(
     FacilityLayout2D baseLayout,
     std::vector<ConnectionBlockDraft> blocks) {
     return std::make_unique<ScenarioControlSystem>(std::move(baseLayout), std::move(blocks));
+}
+
+std::unique_ptr<engine::EngineSystem> makeScenarioEnvironmentHazardSystem(
+    FacilityLayout2D layout,
+    std::vector<EnvironmentHazardDraft> hazards) {
+    return std::make_unique<ScenarioEnvironmentHazardSystem>(std::move(layout), std::move(hazards));
 }
 
 }  // namespace safecrowd::domain

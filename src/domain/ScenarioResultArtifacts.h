@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "domain/Geometry2D.h"
+#include "domain/ScenarioAuthoring.h"
 #include "domain/ScenarioRiskMetrics.h"
 #include "domain/ScenarioSimulationFrame.h"
 
@@ -92,6 +93,26 @@ struct PressureSummary {
     std::vector<ScenarioCriticalPressureEvent> criticalEvents{};
 };
 
+struct HazardExposureMetric {
+    std::string hazardId{};
+    std::string hazardName{};
+    EnvironmentHazardKind kind{EnvironmentHazardKind::Fire};
+    ScenarioElementSeverity severity{ScenarioElementSeverity::Medium};
+    std::string affectedZoneId{};
+    std::string floorId{};
+    Point2D position{};
+    double exposedAgentSeconds{0.0};
+    std::size_t peakExposedAgentCount{0};
+    std::optional<double> firstExposureSeconds{};
+    std::optional<double> peakAtSeconds{};
+    double exposureScore{0.0};
+};
+
+struct HazardExposureSummary {
+    double totalExposureScore{0.0};
+    std::vector<HazardExposureMetric> hazards{};
+};
+
 struct ExitUsageMetric {
     std::string exitZoneId{};
     std::string exitLabel{};
@@ -125,6 +146,7 @@ struct ScenarioResultArtifacts {
     EvacuationTimingSummary timingSummary{};
     DensitySummary densitySummary{};
     PressureSummary pressureSummary{};
+    HazardExposureSummary hazardExposureSummary{};
     std::vector<ExitUsageMetric> exitUsage{};
     std::vector<ZoneCompletionMetric> zoneCompletion{};
     std::vector<PlacementCompletionMetric> placementCompletion{};

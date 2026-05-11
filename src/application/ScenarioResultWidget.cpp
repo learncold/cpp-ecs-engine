@@ -1284,6 +1284,7 @@ ScenarioResultWidget::ScenarioResultWidget(
 
     auto* canvas = new SimulationCanvasWidget(layout_, shell_);
     canvas->setFrame(frame_);
+    canvas->setEnvironmentHazards(scenario_.environment.hazards);
     canvas->setHotspotOverlay(risk_.hotspots);
     canvas->setBottleneckOverlay(risk_.bottlenecks);
     ResultReplayControls* replayControls = nullptr;

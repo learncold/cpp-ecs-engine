@@ -63,12 +63,19 @@ public:
         const auto entities = simulationEntities(query);
         std::vector<MovementPlan> plans;
         plans.reserve(entities.size());
+        const auto* reactions = resources.contains<ScenarioEnvironmentReactionResource>()
+            ? &resources.get<ScenarioEnvironmentReactionResource>()
+            : nullptr;
+        const auto* activeHazards = resources.contains<ScenarioActiveEnvironmentHazardsResource>()
+            ? &resources.get<ScenarioActiveEnvironmentHazardsResource>()
+            : nullptr;
 
         applyRouteGuidance(query, entities, layoutCache, clock.elapsedSeconds, step.derivedSeed);
         advanceRoutesForCurrentZones(query, entities, layoutCache);
         advanceRoutesForWaypointProgress(query, 0.0, entities, layoutCache);
         replanBlockedExitRoutes(query, entities, layoutCache, clock.elapsedSeconds, layoutRevision);
         replanBlockedRouteSegments(query, entities, layoutCache, clock.elapsedSeconds, layoutRevision);
+        replanHazardAwareExitRoutes(query, entities, layoutCache, clock.elapsedSeconds, reactions, activeHazards);
         updateAgentPhysicsFloorIds(query, layoutCache, entities);
         const auto localNeighborIndex = buildAgentSpatialIndex(query, entities, 1.0);
         const auto* pressureFeedback = resources.contains<ScenarioPressureFeedbackResource>()
@@ -211,7 +218,12 @@ public:
                 }
             }
             const auto adjustedMaxSpeed = maxSpeed * pressureSpeedFactor;
-            const auto desiredVelocity = routeDirection * adjustedMaxSpeed;
+            const auto* hazardState = activeHazardState(reactions, entity.index);
+            const auto hazardSpeedFactor = hazardState == nullptr
+                ? 1.0
+                : std::clamp(hazardState->hazardSpeedFactor, 0.35, 1.0);
+            const auto adjustedHazardMaxSpeed = adjustedMaxSpeed * hazardSpeedFactor;
+            const auto desiredVelocity = routeDirection * adjustedHazardMaxSpeed;
             double speedScale = 1.0;
             const auto neighborRadius = std::max(
                 static_cast<double>(agent.radius) + kDefaultAgentRadius + kPersonalSpaceBuffer,
@@ -229,28 +241,32 @@ public:
                     speedScale)
                 * pressureAvoidanceScale;
             const auto barrierReferenceSpeed = std::max(
-                adjustedMaxSpeed,
+                adjustedHazardMaxSpeed,
                 (static_cast<double>(agent.maxSpeed) * 0.75) * pressureSpeedFactor);
             const auto barrierVelocity =
                 barrierSeparationVelocity(floorLayout, position, agent, barrierReferenceSpeed)
                 * pressureBarrierScale;
-            auto finalVelocity = (desiredVelocity * speedScale) + avoidanceVelocity + barrierVelocity;
+            const auto hazardAvoidanceVelocity =
+                hazardState == nullptr
+                ? Point2D{}
+                : hazardAvoidanceVelocityFor(*hazardState, position.value, routeDirection, adjustedHazardMaxSpeed);
+            auto finalVelocity = (desiredVelocity * speedScale) + avoidanceVelocity + barrierVelocity + hazardAvoidanceVelocity;
             const auto lateral = perpendicularLeft(routeDirection);
             if (dot(finalVelocity, routeDirection) < 0.0) {
-                finalVelocity = (routeDirection * (adjustedMaxSpeed * 0.15))
+                finalVelocity = (routeDirection * (adjustedHazardMaxSpeed * 0.15))
                     + (lateral * dot(finalVelocity, lateral));
             }
             const auto forwardComponent = dot(finalVelocity, routeDirection);
             const auto lateralComponent = dot(finalVelocity, lateral);
-            const auto maxLateralComponent = adjustedMaxSpeed * 0.55;
+            const auto maxLateralComponent = adjustedHazardMaxSpeed * 0.75;
             if (std::fabs(lateralComponent) > maxLateralComponent) {
                 finalVelocity = (routeDirection * std::max(0.0, forwardComponent))
                     + (lateral * std::clamp(lateralComponent, -maxLateralComponent, maxLateralComponent));
             }
-            finalVelocity = velocityWithBarrierEscape(finalVelocity, barrierVelocity, adjustedMaxSpeed);
+            finalVelocity = velocityWithBarrierEscape(finalVelocity, barrierVelocity, adjustedHazardMaxSpeed);
             plans.push_back({
                 .entity = entity,
-                .velocity = clampedToLength(finalVelocity, adjustedMaxSpeed),
+                .velocity = clampedToLength(finalVelocity, adjustedHazardMaxSpeed),
             });
         }
 
@@ -313,6 +329,43 @@ private:
         Point2D position{};
         bool advanced{false};
     };
+
+    static const ScenarioEnvironmentReactionAgentState* activeHazardState(
+        const ScenarioEnvironmentReactionResource* reactions,
+        std::uint64_t agentId) {
+        if (reactions == nullptr) {
+            return nullptr;
+        }
+        const auto it = reactions->agentsById.find(agentId);
+        if (it == reactions->agentsById.end()
+            || !it->second.hazardAware
+            || !it->second.hazardInRange) {
+            return nullptr;
+        }
+        return &it->second;
+    }
+
+    static bool sameFloor(const std::string& lhs, const std::string& rhs) {
+        return lhs == rhs || lhs.empty() || rhs.empty();
+    }
+
+    static Point2D hazardAvoidanceVelocityFor(
+        const ScenarioEnvironmentReactionAgentState& state,
+        const Point2D& position,
+        const Point2D& routeDirection,
+        double maxSpeed) {
+        if (state.hazardRadiusMeters <= 1e-9 || maxSpeed <= 1e-9) {
+            return {};
+        }
+
+        const auto away = normalizedOr(position - state.hazardPosition, perpendicularLeft(routeDirection));
+        const auto proximity = std::clamp(
+            1.0 - (std::max(0.0, state.hazardDistanceMeters) / state.hazardRadiusMeters),
+            0.0,
+            1.0);
+        const auto kindScale = state.hazardKind == EnvironmentHazardKind::Fire ? 0.85 : 0.65;
+        return away * (maxSpeed * kindScale * (0.35 + (0.65 * proximity)));
+    }
 
     const Connection2D* findConnectionById(
         const ScenarioLayoutCacheResource& layoutCache,
@@ -1094,6 +1147,90 @@ private:
         return plan;
     }
 
+    double hazardRoutePenalty(
+        const ScenarioLayoutCacheResource& layoutCache,
+        const ZoneRouteToExit& route,
+        const std::string& agentFloorId,
+        const ScenarioActiveEnvironmentHazardsResource& activeHazards) const {
+        double penalty = 0.0;
+        for (const auto& hazard : activeHazards.hazards) {
+            if (!sameFloor(agentFloorId, hazard.floorId)) {
+                continue;
+            }
+
+            bool routeTouchesHazard = false;
+            for (const auto& zoneId : route.zoneIds) {
+                const auto* zone = findCachedZone(layoutCache, zoneId);
+                if (zone == nullptr || !sameFloor(zone->floorId, hazard.floorId)) {
+                    continue;
+                }
+                if (zoneId == hazard.draft.affectedZoneId
+                    || distanceBetween(polygonCenter(zone->area), hazard.draft.position) <= hazard.radiusMeters + 1e-9) {
+                    routeTouchesHazard = true;
+                    break;
+                }
+            }
+
+            if (!routeTouchesHazard) {
+                for (const auto connectionIndex : route.connectionIndices) {
+                    if (connectionIndex >= layoutCache.layout.connections.size()) {
+                        continue;
+                    }
+                    const auto& connection = layoutCache.layout.connections[connectionIndex];
+                    const auto connectionFloorId = connection.floorId.empty()
+                        ? cachedFloorIdForZone(layoutCache, connection.fromZoneId)
+                        : connection.floorId;
+                    if (sameFloor(connectionFloorId, hazard.floorId)
+                        && distanceBetween(midpoint(connection.centerSpan), hazard.draft.position) <= hazard.radiusMeters + 1e-9) {
+                        routeTouchesHazard = true;
+                        break;
+                    }
+                }
+            }
+
+            if (routeTouchesHazard) {
+                penalty += hazard.routePenaltyMeters;
+            }
+        }
+        return penalty;
+    }
+
+    RoutePlan routePlanToHazardAwareNearestExit(
+        const ScenarioLayoutCacheResource& layoutCache,
+        const Point2D& start,
+        const std::string& startZoneId,
+        const std::string& agentFloorId,
+        const ScenarioActiveEnvironmentHazardsResource& activeHazards) const {
+        std::string bestExitZoneId;
+        double bestScore = std::numeric_limits<double>::max();
+        double bestDistance = std::numeric_limits<double>::max();
+
+        for (const auto& zone : layoutCache.layout.zones) {
+            if (zone.kind != ZoneKind::Exit) {
+                continue;
+            }
+
+            const auto result = zoneRouteToExit(layoutCache, start, startZoneId, zone.id);
+            if (!result.has_value() || result->route.empty()) {
+                continue;
+            }
+
+            const auto penalty = hazardRoutePenalty(layoutCache, result->route, agentFloorId, activeHazards);
+            const auto score = result->distance + penalty;
+            if (score + 1e-9 < bestScore
+                || (std::fabs(score - bestScore) <= 1e-9 && result->distance < bestDistance)) {
+                bestScore = score;
+                bestDistance = result->distance;
+                bestExitZoneId = zone.id;
+            }
+        }
+
+        if (bestExitZoneId.empty()) {
+            return {};
+        }
+        return routePlanToExit(layoutCache, start, startZoneId, bestExitZoneId);
+    }
+
     void replaceRouteWithPlan(EvacuationRoute& route, const RoutePlan& plan, const Point2D& start) const {
         route.destinationZoneId = plan.destinationZoneId;
         route.waypoints = plan.waypoints;
@@ -1422,6 +1559,57 @@ private:
                     }
                 }
             }
+        }
+    }
+
+    void replanHazardAwareExitRoutes(
+        engine::WorldQuery& query,
+        const std::vector<engine::Entity>& entities,
+        const ScenarioLayoutCacheResource& layoutCache,
+        double elapsedSeconds,
+        const ScenarioEnvironmentReactionResource* reactions,
+        const ScenarioActiveEnvironmentHazardsResource* activeHazards) const {
+        if (reactions == nullptr || activeHazards == nullptr || activeHazards->hazards.empty()) {
+            return;
+        }
+
+        for (const auto entity : entities) {
+            const auto* hazardState = activeHazardState(reactions, entity.index);
+            if (hazardState == nullptr) {
+                continue;
+            }
+
+            const auto& status = query.get<EvacuationStatus>(entity);
+            if (status.evacuated) {
+                continue;
+            }
+
+            const auto& position = query.get<Position>(entity);
+            auto& route = query.get<EvacuationRoute>(entity);
+            if (elapsedSeconds + 1e-9 < route.nextExitReplanSeconds) {
+                continue;
+            }
+
+            const auto startZoneId = zoneAt(layoutCache, position.value, route.currentFloorId);
+            if (startZoneId.empty()) {
+                route.nextExitReplanSeconds = elapsedSeconds + kExitReplanCooldownSeconds;
+                continue;
+            }
+
+            const auto agentFloorId = !route.displayFloorId.empty() ? route.displayFloorId : route.currentFloorId;
+            const auto plan =
+                routePlanToHazardAwareNearestExit(layoutCache, position.value, startZoneId, agentFloorId, *activeHazards);
+            if (plan.destinationZoneId.empty()) {
+                route.nextExitReplanSeconds = elapsedSeconds + kExitReplanCooldownSeconds;
+                continue;
+            }
+            if (plan.destinationZoneId == route.destinationZoneId && !route.waypoints.empty() && !route.noExitAvailable) {
+                route.nextExitReplanSeconds = elapsedSeconds + kExitReplanCooldownSeconds;
+                continue;
+            }
+
+            replaceRouteWithPlan(route, plan, position.value);
+            route.nextExitReplanSeconds = elapsedSeconds + kExitReplanCooldownSeconds;
         }
     }
 
