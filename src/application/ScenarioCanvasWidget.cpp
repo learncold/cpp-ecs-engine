@@ -485,6 +485,36 @@ PointBounds boundsOfPoints(const std::vector<safecrowd::domain::Point2D>& points
     return bounds;
 }
 
+std::optional<safecrowd::domain::Point2D> representativePointInPolygon(const safecrowd::domain::Polygon2D& polygon) {
+    const auto center = polygonCenter(polygon);
+    if (pointInPolygon(polygon, center)) {
+        return center;
+    }
+
+    const auto bounds = boundsOfPoints(polygon.outline);
+    const auto width = bounds.maxX - bounds.minX;
+    const auto height = bounds.maxY - bounds.minY;
+    if (width <= kGeometryEpsilon || height <= kGeometryEpsilon) {
+        return std::nullopt;
+    }
+
+    constexpr int kSampleCount = 24;
+    for (int yIndex = 0; yIndex < kSampleCount; ++yIndex) {
+        const auto y = bounds.minY + (height * (static_cast<double>(yIndex) + 0.5) / kSampleCount);
+        for (int xIndex = 0; xIndex < kSampleCount; ++xIndex) {
+            const safecrowd::domain::Point2D candidate{
+                .x = bounds.minX + (width * (static_cast<double>(xIndex) + 0.5) / kSampleCount),
+                .y = y,
+            };
+            if (pointInPolygon(polygon, candidate)) {
+                return candidate;
+            }
+        }
+    }
+
+    return std::nullopt;
+}
+
 bool pointInsidePlacementArea(
     const std::vector<safecrowd::domain::Point2D>& area,
     const safecrowd::domain::Point2D& point) {
@@ -2703,6 +2733,14 @@ void ScenarioCanvasWidget::addEnvironmentHazardForZone(
     safecrowd::domain::EnvironmentHazardKind kind) {
     if (!matchesFloor(zone.floorId, currentFloorId_)) {
         return;
+    }
+
+    if (!pointInPolygon(zone.area, position)) {
+        const auto fallbackPosition = representativePointInPolygon(zone.area);
+        if (!fallbackPosition.has_value()) {
+            return;
+        }
+        position = *fallbackPosition;
     }
 
     safecrowd::domain::EnvironmentHazardDraft draft;
