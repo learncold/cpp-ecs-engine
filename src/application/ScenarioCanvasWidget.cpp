@@ -2,6 +2,7 @@
 
 #include "application/ToolIconResources.h"
 #include "application/UiStyle.h"
+#include "domain/GeometryQueries.h"
 
 #include <algorithm>
 #include <cmath>
@@ -52,6 +53,11 @@ constexpr double kSelectionDragThresholdPixels = 4.0;
 const QColor kSelectionHighlightColor("#0b3d78");
 
 [[nodiscard]] safecrowd::domain::Point2D polygonCenter(const safecrowd::domain::Polygon2D& polygon);
+
+using safecrowd::domain::distancePointToSegment;
+using safecrowd::domain::pointInPolygon;
+using safecrowd::domain::pointInRing;
+using safecrowd::domain::representativePointInPolygon;
 
 struct PointBounds {
     double minX{0.0};
@@ -391,51 +397,6 @@ QString defaultFloorId(const safecrowd::domain::FacilityLayout2D& layout) {
     return {};
 }
 
-bool pointInRing(const std::vector<safecrowd::domain::Point2D>& ring, const safecrowd::domain::Point2D& point) {
-    if (ring.size() < 3) {
-        return false;
-    }
-
-    bool inside = false;
-    for (std::size_t i = 0, j = ring.size() - 1; i < ring.size(); j = i++) {
-        const auto& a = ring[i];
-        const auto& b = ring[j];
-        const auto intersects = ((a.y > point.y) != (b.y > point.y))
-            && (point.x < ((b.x - a.x) * (point.y - a.y) / ((b.y - a.y) == 0.0 ? 1e-9 : (b.y - a.y)) + a.x));
-        if (intersects) {
-            inside = !inside;
-        }
-    }
-    return inside;
-}
-
-bool pointInPolygon(const safecrowd::domain::Polygon2D& polygon, const safecrowd::domain::Point2D& point) {
-    if (!pointInRing(polygon.outline, point)) {
-        return false;
-    }
-    return std::none_of(polygon.holes.begin(), polygon.holes.end(), [&](const auto& hole) {
-        return pointInRing(hole, point);
-    });
-}
-
-double distancePointToSegment(
-    const safecrowd::domain::Point2D& point,
-    const safecrowd::domain::Point2D& start,
-    const safecrowd::domain::Point2D& end) {
-    const auto dx = end.x - start.x;
-    const auto dy = end.y - start.y;
-    const auto lengthSquared = (dx * dx) + (dy * dy);
-    if (lengthSquared <= kGeometryEpsilon) {
-        return std::hypot(point.x - start.x, point.y - start.y);
-    }
-
-    const auto t = std::clamp(
-        (((point.x - start.x) * dx) + ((point.y - start.y) * dy)) / lengthSquared,
-        0.0,
-        1.0);
-    return std::hypot(point.x - (start.x + (dx * t)), point.y - (start.y + (dy * t)));
-}
-
 safecrowd::domain::Point2D polygonCenter(const safecrowd::domain::Polygon2D& polygon) {
     if (polygon.outline.empty()) {
         return {};
@@ -483,36 +444,6 @@ PointBounds boundsOfPoints(const std::vector<safecrowd::domain::Point2D>& points
         bounds.maxY = std::max(bounds.maxY, point.y);
     }
     return bounds;
-}
-
-std::optional<safecrowd::domain::Point2D> representativePointInPolygon(const safecrowd::domain::Polygon2D& polygon) {
-    const auto center = polygonCenter(polygon);
-    if (pointInPolygon(polygon, center)) {
-        return center;
-    }
-
-    const auto bounds = boundsOfPoints(polygon.outline);
-    const auto width = bounds.maxX - bounds.minX;
-    const auto height = bounds.maxY - bounds.minY;
-    if (width <= kGeometryEpsilon || height <= kGeometryEpsilon) {
-        return std::nullopt;
-    }
-
-    constexpr int kSampleCount = 24;
-    for (int yIndex = 0; yIndex < kSampleCount; ++yIndex) {
-        const auto y = bounds.minY + (height * (static_cast<double>(yIndex) + 0.5) / kSampleCount);
-        for (int xIndex = 0; xIndex < kSampleCount; ++xIndex) {
-            const safecrowd::domain::Point2D candidate{
-                .x = bounds.minX + (width * (static_cast<double>(xIndex) + 0.5) / kSampleCount),
-                .y = y,
-            };
-            if (pointInPolygon(polygon, candidate)) {
-                return candidate;
-            }
-        }
-    }
-
-    return std::nullopt;
 }
 
 bool pointInsidePlacementArea(
@@ -2738,6 +2669,7 @@ void ScenarioCanvasWidget::addEnvironmentHazardForZone(
     if (!pointInPolygon(zone.area, position)) {
         const auto fallbackPosition = representativePointInPolygon(zone.area);
         if (!fallbackPosition.has_value()) {
+            QMessageBox::information(this, "Hazard", "Could not find a valid point inside this zone.");
             return;
         }
         position = *fallbackPosition;

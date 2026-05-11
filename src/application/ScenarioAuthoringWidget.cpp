@@ -1,5 +1,7 @@
 #include "application/ScenarioAuthoringWidget.h"
 
+#include "domain/GeometryQueries.h"
+
 #include <algorithm>
 #include <cstddef>
 #include <utility>
@@ -35,6 +37,8 @@
 
 namespace safecrowd::application {
 namespace {
+
+using safecrowd::domain::pointInPolygon;
 
 QLabel* createLabel(const QString& text, QWidget* parent, ui::FontRole role = ui::FontRole::Body) {
     auto* label = new QLabel(text, parent);
@@ -187,33 +191,6 @@ QString hazardPositionSummary(const safecrowd::domain::EnvironmentHazardDraft& h
 bool hasSmokeHazard(const safecrowd::domain::EnvironmentState& environment) {
     return std::any_of(environment.hazards.begin(), environment.hazards.end(), [](const auto& hazard) {
         return hazard.kind == safecrowd::domain::EnvironmentHazardKind::Smoke;
-    });
-}
-
-bool pointInRing(const std::vector<safecrowd::domain::Point2D>& ring, const safecrowd::domain::Point2D& point) {
-    if (ring.size() < 3) {
-        return false;
-    }
-
-    bool inside = false;
-    for (std::size_t i = 0, j = ring.size() - 1; i < ring.size(); j = i++) {
-        const auto& a = ring[i];
-        const auto& b = ring[j];
-        const auto intersects = ((a.y > point.y) != (b.y > point.y))
-            && (point.x < ((b.x - a.x) * (point.y - a.y) / ((b.y - a.y) == 0.0 ? 1e-9 : (b.y - a.y)) + a.x));
-        if (intersects) {
-            inside = !inside;
-        }
-    }
-    return inside;
-}
-
-bool pointInPolygon(const safecrowd::domain::Polygon2D& polygon, const safecrowd::domain::Point2D& point) {
-    if (!pointInRing(polygon.outline, point)) {
-        return false;
-    }
-    return std::none_of(polygon.holes.begin(), polygon.holes.end(), [&](const auto& hole) {
-        return pointInRing(hole, point);
     });
 }
 

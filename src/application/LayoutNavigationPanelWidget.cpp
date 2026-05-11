@@ -1,5 +1,7 @@
 #include "application/LayoutNavigationPanelWidget.h"
 
+#include "domain/GeometryQueries.h"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -18,6 +20,9 @@ namespace {
 constexpr double kGeometryEpsilon = 1e-4;
 const QColor kExitAccentColor("#2d8f5b");
 const QColor kDoorAccentColor("#ff8c00");
+
+using safecrowd::domain::distanceToPolygonBoundary;
+using safecrowd::domain::pointInPolygon;
 
 QString floorActionId(const std::string& floorId) {
     return QString("floor:%1").arg(QString::fromStdString(floorId));
@@ -110,79 +115,6 @@ NavigationTreeNode makeSection(const QString& label, std::vector<NavigationTreeN
         .expanded = false,
         .selectable = !id.isEmpty(),
     };
-}
-
-double distancePointToSegment(
-    const safecrowd::domain::Point2D& point,
-    const safecrowd::domain::Point2D& start,
-    const safecrowd::domain::Point2D& end) {
-    const auto dx = end.x - start.x;
-    const auto dy = end.y - start.y;
-    const auto lengthSquared = (dx * dx) + (dy * dy);
-    if (lengthSquared <= kGeometryEpsilon) {
-        return std::hypot(point.x - start.x, point.y - start.y);
-    }
-
-    const auto t = std::clamp(
-        (((point.x - start.x) * dx) + ((point.y - start.y) * dy)) / lengthSquared,
-        0.0,
-        1.0);
-    return std::hypot(point.x - (start.x + (dx * t)), point.y - (start.y + (dy * t)));
-}
-
-double distanceToPolygonBoundary(
-    const safecrowd::domain::Polygon2D& polygon,
-    const safecrowd::domain::Point2D& point) {
-    double best = std::numeric_limits<double>::max();
-    const auto checkRing = [&](const std::vector<safecrowd::domain::Point2D>& ring) {
-        if (ring.size() < 2) {
-            return;
-        }
-        for (std::size_t index = 0; index < ring.size(); ++index) {
-            best = std::min(best, distancePointToSegment(point, ring[index], ring[(index + 1) % ring.size()]));
-        }
-    };
-
-    checkRing(polygon.outline);
-    for (const auto& hole : polygon.holes) {
-        checkRing(hole);
-    }
-    return best;
-}
-
-bool pointInRing(
-    const std::vector<safecrowd::domain::Point2D>& ring,
-    const safecrowd::domain::Point2D& point) {
-    if (ring.size() < 3) {
-        return false;
-    }
-
-    bool inside = false;
-    for (std::size_t i = 0, j = ring.size() - 1; i < ring.size(); j = i++) {
-        const auto& a = ring[i];
-        const auto& b = ring[j];
-        const auto intersects = ((a.y > point.y) != (b.y > point.y))
-            && (point.x < ((b.x - a.x) * (point.y - a.y) / ((b.y - a.y) == 0.0 ? 1e-9 : (b.y - a.y)) + a.x));
-        if (intersects) {
-            inside = !inside;
-        }
-    }
-    return inside;
-}
-
-bool pointInPolygon(
-    const safecrowd::domain::Polygon2D& polygon,
-    const safecrowd::domain::Point2D& point) {
-    if (!pointInRing(polygon.outline, point)) {
-        return false;
-    }
-
-    for (const auto& hole : polygon.holes) {
-        if (pointInRing(hole, point)) {
-            return false;
-        }
-    }
-    return true;
 }
 
 double overlapLength(double firstStart, double firstEnd, double secondStart, double secondEnd) {

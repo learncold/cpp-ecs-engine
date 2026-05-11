@@ -79,6 +79,8 @@ add_library(safecrowd_domain STATIC
     src/domain/DemoLayouts.h
     src/domain/DemoLayouts.cpp
     src/domain/Geometry2D.h
+    src/domain/GeometryQueries.h
+    src/domain/GeometryQueries.cpp
     src/domain/PopulationSpec.h
     src/domain/ScenarioAuthoring.h
     src/domain/ScenarioAuthoring.cpp
@@ -159,6 +161,7 @@ if (BUILD_TESTING)
         tests/ScenarioSimulationRunnerTests.cpp
         tests/ScenarioAuthoringTests.cpp
         tests/ScenarioBatchRunnerTests.cpp
+        tests/GeometryQueriesTests.cpp
     )
 
     target_include_directories(safecrowd_tests
