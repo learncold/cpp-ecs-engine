@@ -1794,3 +1794,24 @@ SC_TEST(ScenarioSimulationRunnerRoutesAroundClosedObstructions) {
     SC_EXPECT_EQ(runner.frame().totalAgentCount, static_cast<std::size_t>(1));
     SC_EXPECT_EQ(runner.frame().evacuatedAgentCount, static_cast<std::size_t>(1));
 }
+
+SC_TEST(ScenarioSimulationRunnerNoHazardNoBlockBaselineStillEvacuates) {
+    safecrowd::domain::InitialPlacement2D placement;
+    placement.id = "baseline-crowd";
+    placement.zoneId = "room";
+    placement.targetAgentCount = 4;
+    placement.initialVelocity = {.x = 1.0, .y = 0.0};
+    placement.area.outline = {{.x = 0.8, .y = 1.0}, {.x = 1.6, .y = 1.0}, {.x = 1.6, .y = 3.0}, {.x = 0.8, .y = 3.0}};
+
+    safecrowd::domain::ScenarioDraft scenario;
+    scenario.execution.timeLimitSeconds = 12.0;
+    scenario.population.initialPlacements.push_back(placement);
+
+    safecrowd::domain::ScenarioSimulationRunner runner(wideDoorLayout(), scenario);
+    for (int i = 0; i < 48 && !runner.complete(); ++i) {
+        runner.step(0.25);
+    }
+
+    SC_EXPECT_EQ(runner.frame().totalAgentCount, static_cast<std::size_t>(4));
+    SC_EXPECT_EQ(runner.frame().evacuatedAgentCount, static_cast<std::size_t>(4));
+}

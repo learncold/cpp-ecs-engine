@@ -79,6 +79,23 @@ struct ScenarioPressureFeedbackResource {
     std::size_t criticalAgentCount{0};
 };
 
+struct ScenarioEnvironmentReactionAgentState {
+    bool hazardDetected{false};
+    bool hazardAware{false};
+    std::string hazardKey{};
+    double hazardDetectedAtSeconds{0.0};
+    double hazardReactionReadySeconds{0.0};
+    bool closureDetected{false};
+    bool closureAware{false};
+    std::string blockedConnectionId{};
+    double closureDetectedAtSeconds{0.0};
+    double closureReactionReadySeconds{0.0};
+};
+
+struct ScenarioEnvironmentReactionResource {
+    std::unordered_map<std::uint64_t, ScenarioEnvironmentReactionAgentState> agentsById{};
+};
+
 struct ScenarioResultArtifactsResource {
     ScenarioResultArtifacts artifacts{};
     std::size_t lastRecordedEvacuatedCount{static_cast<std::size_t>(-1)};

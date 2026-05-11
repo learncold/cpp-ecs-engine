@@ -19,6 +19,10 @@ struct Agent {
     std::string sourcePlacementId{};
     std::string sourceZoneId{};
     double guidancePropensity{0.5};
+    double hazardSensitivity{1.0};
+    double smokeSensitivity{1.0};
+    double reactionDelaySeconds{0.0};
+    double closurePatienceSeconds{0.0};
 };
 
 struct Velocity {
