@@ -1471,6 +1471,9 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
                 return;
             }
             hazards.erase(hazardIt, hazards.end());
+            if (canvas_ != nullptr) {
+                canvas_->setEnvironmentHazards(hazards);
+            }
             recomputeDiffKeysAfterScenarioChanged(*scenario);
             refreshNavigationPanel();
             refreshInspector();
@@ -1516,6 +1519,9 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
             });
             if (hazardIt == hazards.end() || !editEnvironmentHazard(&(*hazardIt), layout_, this)) {
                 return;
+            }
+            if (canvas_ != nullptr) {
+                canvas_->setEnvironmentHazards(hazards);
             }
             recomputeDiffKeysAfterScenarioChanged(*scenario);
             refreshNavigationPanel();
