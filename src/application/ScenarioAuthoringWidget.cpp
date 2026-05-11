@@ -124,6 +124,10 @@ bool editEnvironmentHazard(
     if (hazard == nullptr) {
         return false;
     }
+    if (layout.zones.empty()) {
+        QMessageBox::warning(parent, "Edit hazard", "A hazard must be assigned to a zone.");
+        return false;
+    }
 
     QDialog dialog(parent);
     dialog.setWindowTitle("Edit hazard");
@@ -145,7 +149,6 @@ bool editEnvironmentHazard(
     nameEdit->setText(QString::fromStdString(hazard->name));
 
     auto* zoneCombo = new QComboBox(&dialog);
-    zoneCombo->addItem("Unassigned zone", QString{});
     for (const auto& zone : layout.zones) {
         zoneCombo->addItem(zoneLabel(zone), QString::fromStdString(zone.id));
     }
@@ -216,7 +219,15 @@ bool editEnvironmentHazard(
 
     hazard->kind = static_cast<safecrowd::domain::EnvironmentHazardKind>(kindCombo->currentData().toInt());
     hazard->name = name.toStdString();
-    hazard->affectedZoneId = zoneCombo->currentData().toString().toStdString();
+    const auto selectedZoneId = zoneCombo->currentData().toString().toStdString();
+    const auto selectedZone = std::find_if(layout.zones.begin(), layout.zones.end(), [&](const auto& zone) {
+        return zone.id == selectedZoneId;
+    });
+    if (selectedZone == layout.zones.end()) {
+        return false;
+    }
+    hazard->affectedZoneId = selectedZoneId;
+    hazard->floorId = selectedZone->floorId;
     hazard->position = {
         .x = xSpin->value(),
         .y = ySpin->value(),

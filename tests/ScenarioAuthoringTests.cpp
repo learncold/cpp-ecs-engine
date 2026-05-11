@@ -146,6 +146,28 @@ SC_TEST(computeScenarioDiffKeys_detectsGuidanceProfileChange) {
     SC_EXPECT_TRUE(containsKey(keys, "environment.guidanceProfile"));
 }
 
+SC_TEST(computeScenarioDiffKeys_detectsEnvironmentHazardsChange) {
+    const auto baseline = makeBaselineDraft();
+    auto variant = duplicateScenarioDraft(baseline, "scenario-2", "Variant");
+    EnvironmentHazardDraft hazard;
+    hazard.id = "hazard-1";
+    hazard.kind = EnvironmentHazardKind::Smoke;
+    hazard.name = "Smoke near lobby";
+    hazard.affectedZoneId = "zone-a";
+    hazard.floorId = "L1";
+    hazard.position = {.x = 1.0, .y = 2.0};
+    hazard.startSeconds = 5.0;
+    hazard.endSeconds = 60.0;
+    hazard.severity = ScenarioElementSeverity::High;
+    hazard.note = "Visibility concept only";
+    variant.environment.hazards.push_back(hazard);
+
+    const auto keys = computeScenarioDiffKeys(baseline, variant);
+
+    SC_EXPECT_EQ(keys.size(), std::size_t{1});
+    SC_EXPECT_TRUE(containsKey(keys, "environment.hazards"));
+}
+
 SC_TEST(computeScenarioDiffKeys_detectsControlEventsChange) {
     const auto baseline = makeBaselineDraft();
     auto variant = duplicateScenarioDraft(baseline, "scenario-2", "Variant");
