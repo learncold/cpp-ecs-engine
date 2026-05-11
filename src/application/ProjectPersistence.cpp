@@ -12,6 +12,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonValue>
 #include <QStandardPaths>
 #include <QStorageInfo>
 
@@ -720,20 +721,117 @@ safecrowd::domain::PopulationSpec populationFromJson(const QJsonObject& object) 
     return population;
 }
 
+QString hazardKindToJson(safecrowd::domain::EnvironmentHazardKind kind) {
+    switch (kind) {
+    case safecrowd::domain::EnvironmentHazardKind::Smoke:
+        return "Smoke";
+    case safecrowd::domain::EnvironmentHazardKind::Fire:
+    default:
+        return "Fire";
+    }
+}
+
+safecrowd::domain::EnvironmentHazardKind hazardKindFromJson(const QJsonValue& value) {
+    if (value.isDouble()) {
+        return value.toInt() == static_cast<int>(safecrowd::domain::EnvironmentHazardKind::Smoke)
+            ? safecrowd::domain::EnvironmentHazardKind::Smoke
+            : safecrowd::domain::EnvironmentHazardKind::Fire;
+    }
+
+    const auto raw = value.toString().toLower();
+    if (raw == "smoke") {
+        return safecrowd::domain::EnvironmentHazardKind::Smoke;
+    }
+    return safecrowd::domain::EnvironmentHazardKind::Fire;
+}
+
+QString severityToJson(safecrowd::domain::ScenarioElementSeverity severity) {
+    switch (severity) {
+    case safecrowd::domain::ScenarioElementSeverity::Low:
+        return "Low";
+    case safecrowd::domain::ScenarioElementSeverity::High:
+        return "High";
+    case safecrowd::domain::ScenarioElementSeverity::Medium:
+    default:
+        return "Medium";
+    }
+}
+
+safecrowd::domain::ScenarioElementSeverity severityFromJson(const QJsonValue& value) {
+    if (value.isDouble()) {
+        const auto raw = value.toInt();
+        if (raw == static_cast<int>(safecrowd::domain::ScenarioElementSeverity::Low)) {
+            return safecrowd::domain::ScenarioElementSeverity::Low;
+        }
+        if (raw == static_cast<int>(safecrowd::domain::ScenarioElementSeverity::High)) {
+            return safecrowd::domain::ScenarioElementSeverity::High;
+        }
+        return safecrowd::domain::ScenarioElementSeverity::Medium;
+    }
+
+    const auto raw = value.toString().toLower();
+    if (raw == "low") {
+        return safecrowd::domain::ScenarioElementSeverity::Low;
+    }
+    if (raw == "high") {
+        return safecrowd::domain::ScenarioElementSeverity::High;
+    }
+    return safecrowd::domain::ScenarioElementSeverity::Medium;
+}
+
+QJsonObject hazardToJson(const safecrowd::domain::EnvironmentHazardDraft& hazard) {
+    QJsonObject object;
+    object["id"] = QString::fromStdString(hazard.id);
+    object["kind"] = hazardKindToJson(hazard.kind);
+    object["name"] = QString::fromStdString(hazard.name);
+    object["affectedZoneId"] = QString::fromStdString(hazard.affectedZoneId);
+    object["floorId"] = QString::fromStdString(hazard.floorId);
+    object["position"] = pointArray(hazard.position);
+    object["startSeconds"] = hazard.startSeconds;
+    object["endSeconds"] = hazard.endSeconds;
+    object["severity"] = severityToJson(hazard.severity);
+    object["note"] = QString::fromStdString(hazard.note);
+    return object;
+}
+
+safecrowd::domain::EnvironmentHazardDraft hazardFromJson(const QJsonObject& object) {
+    return {
+        .id = object.value("id").toString().toStdString(),
+        .kind = hazardKindFromJson(object.value("kind")),
+        .name = object.value("name").toString().toStdString(),
+        .affectedZoneId = object.value("affectedZoneId").toString().toStdString(),
+        .floorId = object.value("floorId").toString().toStdString(),
+        .position = pointFromJson(object.value("position")),
+        .startSeconds = object.value("startSeconds").toDouble(0.0),
+        .endSeconds = object.value("endSeconds").toDouble(0.0),
+        .severity = severityFromJson(object.value("severity")),
+        .note = object.value("note").toString().toStdString(),
+    };
+}
+
 QJsonObject environmentToJson(const safecrowd::domain::EnvironmentState& environment) {
     QJsonObject object;
     object["reducedVisibility"] = environment.reducedVisibility;
     object["familiarityProfile"] = QString::fromStdString(environment.familiarityProfile);
     object["guidanceProfile"] = QString::fromStdString(environment.guidanceProfile);
+    QJsonArray hazards;
+    for (const auto& hazard : environment.hazards) {
+        hazards.append(hazardToJson(hazard));
+    }
+    object["hazards"] = hazards;
     return object;
 }
 
 safecrowd::domain::EnvironmentState environmentFromJson(const QJsonObject& object) {
-    return {
+    safecrowd::domain::EnvironmentState environment{
         .reducedVisibility = object.value("reducedVisibility").toBool(false),
         .familiarityProfile = object.value("familiarityProfile").toString().toStdString(),
         .guidanceProfile = object.value("guidanceProfile").toString().toStdString(),
     };
+    for (const auto& value : object.value("hazards").toArray()) {
+        environment.hazards.push_back(hazardFromJson(value.toObject()));
+    }
+    return environment;
 }
 
 QJsonObject eventToJson(const safecrowd::domain::OperationalEventDraft& event) {

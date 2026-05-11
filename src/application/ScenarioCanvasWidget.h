@@ -57,6 +57,8 @@ public:
     void setPlacementsChangedHandler(std::function<void(const std::vector<ScenarioCrowdPlacement>&)> handler);
     void setConnectionBlocks(std::vector<safecrowd::domain::ConnectionBlockDraft> blocks);
     void setConnectionBlocksChangedHandler(std::function<void(const std::vector<safecrowd::domain::ConnectionBlockDraft>&)> handler);
+    void setEnvironmentHazards(std::vector<safecrowd::domain::EnvironmentHazardDraft> hazards);
+    void setEnvironmentHazardsChangedHandler(std::function<void(const std::vector<safecrowd::domain::EnvironmentHazardDraft>&)> handler);
     void setRouteGuidances(std::vector<safecrowd::domain::RouteGuidanceDraft> guidances);
     void setRouteGuidancesChangedHandler(std::function<void(const std::vector<safecrowd::domain::RouteGuidanceDraft>&)> handler);
     void setLayoutElementActivatedHandler(std::function<void(const QString&)> handler);
@@ -67,6 +69,7 @@ public:
     bool deleteCrowdElementById(const QString& crowdElementId);
     bool deleteConnectionBlockById(const QString& blockId);
     bool editConnectionBlockScheduleById(const QString& blockId);
+    bool deleteEnvironmentHazardById(const QString& hazardId);
     bool deleteRouteGuidanceById(const QString& guidanceId);
     bool editRouteGuidanceById(const QString& guidanceId);
 
@@ -89,6 +92,8 @@ private:
         IndividualPlacement,
         GroupPlacement,
         BlockDoor,
+        FireHazard,
+        SmokeHazard,
         RouteGuidance,
     };
 
@@ -109,11 +114,17 @@ private:
     safecrowd::domain::Point2D defaultVelocityFrom(const safecrowd::domain::Point2D& point) const;
     QString nextPlacementId(ScenarioCrowdPlacementKind kind) const;
     QString nextConnectionBlockId() const;
+    QString nextEnvironmentHazardId() const;
     QString nextRouteGuidanceId() const;
     void addGroupPlacement(const QPointF& start, const QPointF& end);
     void addIndividualPlacement(const QPointF& position);
     void addConnectionBlock(const QPointF& position);
     void addConnectionBlockForConnection(const safecrowd::domain::Connection2D& connection);
+    void addEnvironmentHazard(const QPointF& position, safecrowd::domain::EnvironmentHazardKind kind);
+    void addEnvironmentHazardForZone(
+        const safecrowd::domain::Zone2D& zone,
+        safecrowd::domain::Point2D position,
+        safecrowd::domain::EnvironmentHazardKind kind);
     void addRouteGuidance(const QPointF& position);
     void addRouteGuidanceForExitZone(const safecrowd::domain::Zone2D& zone);
     void addRouteGuidanceForConnection(const safecrowd::domain::Connection2D& connection);
@@ -127,9 +138,11 @@ private:
     void drawFocusedLayoutElement(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawFocusedPlacement(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawConnectionBlocks(QPainter& painter, const LayoutCanvasTransform& transform) const;
+    void drawEnvironmentHazards(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawRouteGuidances(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void emitPlacementsChanged();
     void emitConnectionBlocksChanged();
+    void emitEnvironmentHazardsChanged();
     void emitRouteGuidancesChanged();
     void repositionToolbars();
     void setToolMode(ToolMode mode);
@@ -138,6 +151,7 @@ private:
     safecrowd::domain::FacilityLayout2D layout_{};
     std::vector<ScenarioCrowdPlacement> placements_{};
     std::vector<safecrowd::domain::ConnectionBlockDraft> connectionBlocks_{};
+    std::vector<safecrowd::domain::EnvironmentHazardDraft> environmentHazards_{};
     std::vector<safecrowd::domain::RouteGuidanceDraft> routeGuidances_{};
     QString currentFloorId_{};
     QString focusedLayoutElementId_{};
@@ -158,17 +172,21 @@ private:
     QToolButton* individualToolButton_{nullptr};
     QToolButton* groupToolButton_{nullptr};
     QToolButton* blockDoorToolButton_{nullptr};
+    QToolButton* fireHazardToolButton_{nullptr};
+    QToolButton* smokeHazardToolButton_{nullptr};
     QToolButton* routeGuidanceToolButton_{nullptr};
     QLabel* groupCountLabel_{nullptr};
     QSpinBox* groupCountSpinBox_{nullptr};
     QLabel* groupDistributionLabel_{nullptr};
     QComboBox* groupDistributionComboBox_{nullptr};
     QString hoveredConnectionBlockId_{};
+    QString hoveredEnvironmentHazardId_{};
     QString hoveredRouteGuidanceId_{};
     std::function<void(const QString&)> layoutElementActivatedHandler_{};
     std::function<void(const QString&)> crowdSelectionChangedHandler_{};
     std::function<void(const std::vector<ScenarioCrowdPlacement>&)> placementsChangedHandler_{};
     std::function<void(const std::vector<safecrowd::domain::ConnectionBlockDraft>&)> connectionBlocksChangedHandler_{};
+    std::function<void(const std::vector<safecrowd::domain::EnvironmentHazardDraft>&)> environmentHazardsChangedHandler_{};
     std::function<void(const std::vector<safecrowd::domain::RouteGuidanceDraft>&)> routeGuidancesChangedHandler_{};
 };
 

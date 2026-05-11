@@ -58,6 +58,28 @@ bool populationsEqual(const PopulationSpec& lhs, const PopulationSpec& rhs) {
     return true;
 }
 
+bool hazardsEqual(const std::vector<EnvironmentHazardDraft>& lhs,
+                  const std::vector<EnvironmentHazardDraft>& rhs) {
+    if (lhs.size() != rhs.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < lhs.size(); ++i) {
+        if (lhs[i].id != rhs[i].id
+            || lhs[i].kind != rhs[i].kind
+            || lhs[i].name != rhs[i].name
+            || lhs[i].affectedZoneId != rhs[i].affectedZoneId
+            || lhs[i].floorId != rhs[i].floorId
+            || !pointsEqual(lhs[i].position, rhs[i].position)
+            || lhs[i].startSeconds != rhs[i].startSeconds
+            || lhs[i].endSeconds != rhs[i].endSeconds
+            || lhs[i].severity != rhs[i].severity
+            || lhs[i].note != rhs[i].note) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool eventsEqual(const std::vector<OperationalEventDraft>& lhs,
                  const std::vector<OperationalEventDraft>& rhs) {
     if (lhs.size() != rhs.size()) {
@@ -159,6 +181,9 @@ std::vector<std::string> computeScenarioDiffKeys(const ScenarioDraft& baseline,
     }
     if (baseline.environment.guidanceProfile != variant.environment.guidanceProfile) {
         keys.emplace_back("environment.guidanceProfile");
+    }
+    if (!hazardsEqual(baseline.environment.hazards, variant.environment.hazards)) {
+        keys.emplace_back("environment.hazards");
     }
     if (!eventsEqual(baseline.control.events, variant.control.events)) {
         keys.emplace_back("control.events");
