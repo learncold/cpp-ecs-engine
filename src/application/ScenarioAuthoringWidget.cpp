@@ -1,7 +1,9 @@
 #include "application/ScenarioAuthoringWidget.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <utility>
+#include <vector>
 
 #include <QComboBox>
 #include <QDialog>
@@ -188,6 +190,33 @@ bool hasSmokeHazard(const safecrowd::domain::EnvironmentState& environment) {
     });
 }
 
+bool pointInRing(const std::vector<safecrowd::domain::Point2D>& ring, const safecrowd::domain::Point2D& point) {
+    if (ring.size() < 3) {
+        return false;
+    }
+
+    bool inside = false;
+    for (std::size_t i = 0, j = ring.size() - 1; i < ring.size(); j = i++) {
+        const auto& a = ring[i];
+        const auto& b = ring[j];
+        const auto intersects = ((a.y > point.y) != (b.y > point.y))
+            && (point.x < ((b.x - a.x) * (point.y - a.y) / ((b.y - a.y) == 0.0 ? 1e-9 : (b.y - a.y)) + a.x));
+        if (intersects) {
+            inside = !inside;
+        }
+    }
+    return inside;
+}
+
+bool pointInPolygon(const safecrowd::domain::Polygon2D& polygon, const safecrowd::domain::Point2D& point) {
+    if (!pointInRing(polygon.outline, point)) {
+        return false;
+    }
+    return std::none_of(polygon.holes.begin(), polygon.holes.end(), [&](const auto& hole) {
+        return pointInRing(hole, point);
+    });
+}
+
 bool editEnvironmentHazard(
     safecrowd::domain::EnvironmentHazardDraft* hazard,
     const safecrowd::domain::FacilityLayout2D& layout,
@@ -275,7 +304,35 @@ bool editEnvironmentHazard(
     root->addWidget(scopeHint);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, [&]() {
+        if (nameEdit->text().trimmed().isEmpty()) {
+            QMessageBox::warning(&dialog, "Edit hazard", "Enter a hazard name.");
+            nameEdit->setFocus();
+            return;
+        }
+
+        const auto selectedZoneId = zoneCombo->currentData().toString().toStdString();
+        const auto selectedZone = std::find_if(layout.zones.begin(), layout.zones.end(), [&](const auto& zone) {
+            return zone.id == selectedZoneId;
+        });
+        if (selectedZone == layout.zones.end()) {
+            QMessageBox::warning(&dialog, "Edit hazard", "Select a valid affected zone.");
+            zoneCombo->setFocus();
+            return;
+        }
+
+        const safecrowd::domain::Point2D selectedPosition{
+            .x = xSpin->value(),
+            .y = ySpin->value(),
+        };
+        if (!pointInPolygon(selectedZone->area, selectedPosition)) {
+            QMessageBox::warning(&dialog, "Edit hazard", "The hazard location must stay inside the affected zone.");
+            xSpin->setFocus();
+            return;
+        }
+
+        dialog.accept();
+    });
     QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     root->addWidget(buttons);
 
@@ -296,14 +353,20 @@ bool editEnvironmentHazard(
         return false;
     }
 
+    const safecrowd::domain::Point2D selectedPosition{
+        .x = xSpin->value(),
+        .y = ySpin->value(),
+    };
+    if (!pointInPolygon(selectedZone->area, selectedPosition)) {
+        QMessageBox::warning(parent, "Edit hazard", "The hazard location must stay inside the affected zone.");
+        return false;
+    }
+
     hazard->kind = static_cast<safecrowd::domain::EnvironmentHazardKind>(kindCombo->currentData().toInt());
     hazard->name = name.toStdString();
     hazard->affectedZoneId = selectedZoneId;
     hazard->floorId = selectedZone->floorId;
-    hazard->position = {
-        .x = xSpin->value(),
-        .y = ySpin->value(),
-    };
+    hazard->position = selectedPosition;
     hazard->startSeconds = startSpin->value();
     hazard->endSeconds = std::max(hazard->startSeconds, endSpin->value());
     hazard->severity = static_cast<safecrowd::domain::ScenarioElementSeverity>(severityCombo->currentData().toInt());
