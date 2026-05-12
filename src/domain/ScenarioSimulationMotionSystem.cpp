@@ -221,7 +221,7 @@ public:
             const auto* hazardState = activeHazardState(reactions, entity.index);
             const auto hazardSpeedFactor = hazardState == nullptr
                 ? 1.0
-                : std::clamp(hazardState->hazardSpeedFactor, 0.35, 1.0);
+                : std::clamp(hazardState->hazardSpeedFactor, 0.0, 1.0);
             const auto adjustedHazardMaxSpeed = adjustedMaxSpeed * hazardSpeedFactor;
             const auto desiredVelocity = routeDirection * adjustedHazardMaxSpeed;
             double speedScale = 1.0;
@@ -1149,42 +1149,55 @@ private:
 
     double hazardRoutePenalty(
         const ScenarioLayoutCacheResource& layoutCache,
-        const ZoneRouteToExit& route,
-        const std::string& agentFloorId,
+        const RoutePlan& plan,
+        const Point2D& start,
+        const std::string& startFloorId,
         const ScenarioActiveEnvironmentHazardsResource& activeHazards) const {
         double penalty = 0.0;
         for (const auto& hazard : activeHazards.hazards) {
-            if (!sameFloor(agentFloorId, hazard.floorId)) {
-                continue;
-            }
-
             bool routeTouchesHazard = false;
-            for (const auto& zoneId : route.zoneIds) {
-                const auto* zone = findCachedZone(layoutCache, zoneId);
-                if (zone == nullptr || !sameFloor(zone->floorId, hazard.floorId)) {
-                    continue;
-                }
-                if (zoneId == hazard.draft.affectedZoneId
-                    || distanceBetween(polygonCenter(zone->area), hazard.draft.position) <= hazard.radiusMeters + 1e-9) {
+
+            Point2D segmentStart = start;
+            std::string segmentFloorId = startFloorId;
+            for (std::size_t waypointIndex = 0; waypointIndex < plan.waypoints.size(); ++waypointIndex) {
+                const auto& segmentEnd = plan.waypoints[waypointIndex];
+                if (sameFloor(segmentFloorId, hazard.floorId)
+                    && distanceBetween(
+                        hazard.draft.position,
+                        closestPointOnSegment(hazard.draft.position, segmentStart, segmentEnd)) <= hazard.radiusMeters + 1e-9) {
                     routeTouchesHazard = true;
                     break;
                 }
-            }
 
-            if (!routeTouchesHazard) {
-                for (const auto connectionIndex : route.connectionIndices) {
-                    if (connectionIndex >= layoutCache.layout.connections.size()) {
+                if (waypointIndex < plan.waypointConnectionIds.size()) {
+                    const auto* connection = findConnectionById(layoutCache, plan.waypointConnectionIds[waypointIndex]);
+                    if (connection == nullptr) {
+                        segmentStart = segmentEnd;
+                        if (waypointIndex < plan.waypointFloorIds.size()
+                            && !plan.waypointFloorIds[waypointIndex].empty()) {
+                            segmentFloorId = plan.waypointFloorIds[waypointIndex];
+                        }
                         continue;
                     }
-                    const auto& connection = layoutCache.layout.connections[connectionIndex];
-                    const auto connectionFloorId = connection.floorId.empty()
-                        ? cachedFloorIdForZone(layoutCache, connection.fromZoneId)
-                        : connection.floorId;
+                    const auto connectionFloorId = connection->floorId.empty()
+                        ? cachedFloorIdForZone(layoutCache, connection->fromZoneId)
+                        : connection->floorId;
                     if (sameFloor(connectionFloorId, hazard.floorId)
-                        && distanceBetween(midpoint(connection.centerSpan), hazard.draft.position) <= hazard.radiusMeters + 1e-9) {
+                        && distanceBetween(
+                            hazard.draft.position,
+                            closestPointOnSegment(
+                                hazard.draft.position,
+                                connection->centerSpan.start,
+                                connection->centerSpan.end)) <= hazard.radiusMeters + 1e-9) {
                         routeTouchesHazard = true;
                         break;
                     }
+                }
+
+                segmentStart = segmentEnd;
+                if (waypointIndex < plan.waypointFloorIds.size()
+                    && !plan.waypointFloorIds[waypointIndex].empty()) {
+                    segmentFloorId = plan.waypointFloorIds[waypointIndex];
                 }
             }
 
@@ -1215,7 +1228,12 @@ private:
                 continue;
             }
 
-            const auto penalty = hazardRoutePenalty(layoutCache, result->route, agentFloorId, activeHazards);
+            const auto plan = routePlanToExit(layoutCache, start, startZoneId, zone.id);
+            if (plan.destinationZoneId.empty()) {
+                continue;
+            }
+
+            const auto penalty = hazardRoutePenalty(layoutCache, plan, start, agentFloorId, activeHazards);
             const auto score = result->distance + penalty;
             if (score + 1e-9 < bestScore
                 || (std::fabs(score - bestScore) <= 1e-9 && result->distance < bestDistance)) {

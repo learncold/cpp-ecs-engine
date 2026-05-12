@@ -72,45 +72,6 @@ bool connectionShouldBeBlocked(const safecrowd::domain::ConnectionBlockDraft& bl
     return false;
 }
 
-bool hazardIsActive(const safecrowd::domain::EnvironmentHazardDraft& hazard, double timeSeconds) {
-    const auto start = std::max(0.0, hazard.startSeconds);
-    if (timeSeconds + 1e-9 < start) {
-        return false;
-    }
-    if (hazard.endSeconds <= hazard.startSeconds) {
-        return true;
-    }
-    const auto end = std::max(start, hazard.endSeconds);
-    return timeSeconds <= end + 1e-9;
-}
-
-double hazardRadiusMeters(safecrowd::domain::ScenarioElementSeverity severity) {
-    switch (severity) {
-    case safecrowd::domain::ScenarioElementSeverity::Low:
-        return 2.0;
-    case safecrowd::domain::ScenarioElementSeverity::High:
-        return 5.0;
-    case safecrowd::domain::ScenarioElementSeverity::Medium:
-    default:
-        return 3.5;
-    }
-}
-
-std::string hazardFloorId(
-    const safecrowd::domain::FacilityLayout2D& layout,
-    const safecrowd::domain::EnvironmentHazardDraft& hazard) {
-    if (!hazard.floorId.empty()) {
-        return hazard.floorId;
-    }
-    if (hazard.affectedZoneId.empty()) {
-        return {};
-    }
-    const auto zoneIt = std::find_if(layout.zones.begin(), layout.zones.end(), [&](const auto& zone) {
-        return zone.id == hazard.affectedZoneId;
-    });
-    return zoneIt == layout.zones.end() ? std::string{} : zoneIt->floorId;
-}
-
 QString hazardKindLabel(safecrowd::domain::EnvironmentHazardKind kind) {
     switch (kind) {
     case safecrowd::domain::EnvironmentHazardKind::Smoke:
@@ -139,7 +100,7 @@ QString formatEnvironmentHazardTooltip(const safecrowd::domain::EnvironmentHazar
         text.append(QString("\n%1").arg(QString::fromStdString(hazard.name)));
     }
     const auto start = std::max(0.0, hazard.startSeconds);
-    if (hazard.endSeconds <= hazard.startSeconds) {
+    if (safecrowd::domain::environmentHazardHasOpenEndedSchedule(hazard)) {
         text.append(QString("\nActive: %1s ~ open").arg(start, 0, 'f', 1));
     } else {
         text.append(QString("\nActive: %1s ~ %2s")
@@ -295,10 +256,10 @@ std::optional<std::size_t> hoveredActiveEnvironmentHazardIndex(
     double closestDistanceSq = kHoverRadiusPixels * kHoverRadiusPixels;
     for (std::size_t index = 0; index < hazards.size(); ++index) {
         const auto& hazard = hazards[index];
-        if (!hazardIsActive(hazard, elapsedSeconds)) {
+        if (!safecrowd::domain::environmentHazardActiveAt(hazard, elapsedSeconds)) {
             continue;
         }
-        if (!matchesFloor(hazardFloorId(layout, hazard), currentFloorId)) {
+        if (!matchesFloor(safecrowd::domain::environmentHazardFloorId(layout, hazard), currentFloorId)) {
             continue;
         }
 
@@ -960,15 +921,15 @@ void SimulationCanvasWidget::drawEnvironmentHazardOverlay(QPainter& painter, con
     painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
 
     for (const auto& hazard : environmentHazards_) {
-        if (!hazardIsActive(hazard, elapsedSeconds)) {
+        if (!safecrowd::domain::environmentHazardActiveAt(hazard, elapsedSeconds)) {
             continue;
         }
-        if (!matchesFloor(hazardFloorId(layout_, hazard), currentFloorId_)) {
+        if (!matchesFloor(safecrowd::domain::environmentHazardFloorId(layout_, hazard), currentFloorId_)) {
             continue;
         }
 
         const auto center = transform.map(hazard.position);
-        const auto radiusMeters = hazardRadiusMeters(hazard.severity);
+        const auto radiusMeters = safecrowd::domain::environmentHazardRuntimeProfile(hazard).radiusMeters;
         const auto radiusAnchor = transform.map({
             .x = hazard.position.x + radiusMeters,
             .y = hazard.position.y,

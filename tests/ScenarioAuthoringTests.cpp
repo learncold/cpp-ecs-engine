@@ -90,6 +90,52 @@ SC_TEST(duplicateScenarioDraft_doesNotMutateSource) {
     SC_EXPECT_NEAR(baseline.execution.timeLimitSeconds, 600.0, 1e-9);
 }
 
+SC_TEST(environmentHazardRuntimeProfile_UsesSharedSeverityAndScheduleRules) {
+    auto hazard = makeSmokeHazard();
+    hazard.startSeconds = 10.0;
+    hazard.endSeconds = 10.0;
+
+    const auto profile = environmentHazardRuntimeProfile(hazard);
+
+    SC_EXPECT_NEAR(profile.radiusMeters, 5.0, 1e-9);
+    SC_EXPECT_NEAR(profile.speedFactor, 0.65 / 1.5, 1e-9);
+    SC_EXPECT_NEAR(profile.routePenaltyMeters, 150.0, 1e-9);
+    SC_EXPECT_NEAR(profile.severityWeight, 3.0, 1e-9);
+    SC_EXPECT_TRUE(environmentHazardHasOpenEndedSchedule(hazard));
+    SC_EXPECT_TRUE(!environmentHazardActiveAt(hazard, 9.9));
+    SC_EXPECT_TRUE(environmentHazardActiveAt(hazard, 10.0));
+    SC_EXPECT_TRUE(environmentHazardActiveAt(hazard, 120.0));
+
+    hazard.endSeconds = 20.0;
+    SC_EXPECT_TRUE(!environmentHazardHasOpenEndedSchedule(hazard));
+}
+
+SC_TEST(environmentHazardSmokeSpeed_UsesVisibilityBasedPathfinderRule) {
+    auto hazard = makeSmokeHazard();
+    hazard.severity = ScenarioElementSeverity::High;
+
+    SC_EXPECT_NEAR(environmentHazardSmokeVisibilityMetersAt(hazard, 0.0), 0.5, 1e-9);
+    SC_EXPECT_NEAR(environmentHazardSmokeVisibilityMetersAt(hazard, 5.0), 3.0, 1e-9);
+    SC_EXPECT_NEAR(environmentHazardSmokeSpeedMetersPerSecond(1.5, 0.5), 0.65, 1e-9);
+    SC_EXPECT_NEAR(environmentHazardSpeedFactorAt(hazard, 0.0, 1.5), 0.65 / 1.5, 1e-9);
+    SC_EXPECT_NEAR(environmentHazardSpeedFactorAt(hazard, 5.0, 1.5), 1.0, 1e-9);
+}
+
+SC_TEST(environmentHazardFloorId_FallsBackToAffectedZoneFloor) {
+    FacilityLayout2D layout;
+    layout.zones.push_back({
+        .id = "zone-a",
+        .floorId = "L2",
+    });
+    auto hazard = makeSmokeHazard();
+    hazard.floorId.clear();
+
+    SC_EXPECT_EQ(environmentHazardFloorId(layout, hazard), std::string{"L2"});
+
+    hazard.floorId = "Manual";
+    SC_EXPECT_EQ(environmentHazardFloorId(layout, hazard), std::string{"Manual"});
+}
+
 SC_TEST(computeScenarioDiffKeys_returnsEmptyForFreshDuplicate) {
     const auto baseline = makeBaselineDraft();
     const auto variant = duplicateScenarioDraft(baseline, "scenario-2", "Variant");

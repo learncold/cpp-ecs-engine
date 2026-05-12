@@ -215,7 +215,14 @@ QString formatEnvironmentHazardTooltip(const safecrowd::domain::EnvironmentHazar
     if (!hazard.name.empty()) {
         text.append(QString("\n%1").arg(QString::fromStdString(hazard.name)));
     }
-    text.append(QString("\nActive: %1s ~ %2s").arg(hazard.startSeconds, 0, 'f', 1).arg(hazard.endSeconds, 0, 'f', 1));
+    const auto start = std::max(0.0, hazard.startSeconds);
+    if (safecrowd::domain::environmentHazardHasOpenEndedSchedule(hazard)) {
+        text.append(QString("\nActive: %1s ~ open").arg(start, 0, 'f', 1));
+    } else {
+        text.append(QString("\nActive: %1s ~ %2s")
+            .arg(start, 0, 'f', 1)
+            .arg(std::max(start, hazard.endSeconds), 0, 'f', 1));
+    }
     text.append(QString("\nSeverity: %1").arg(severityLabel(hazard.severity)));
     return text;
 }
@@ -232,16 +239,7 @@ std::optional<std::size_t> hoveredEnvironmentHazardIndex(
     double closestDistanceSq = kHoverRadiusPixels * kHoverRadiusPixels;
     for (std::size_t index = 0; index < hazards.size(); ++index) {
         const auto& hazard = hazards[index];
-        auto floorId = hazard.floorId;
-        if (floorId.empty() && !hazard.affectedZoneId.empty()) {
-            const auto zoneIt = std::find_if(layout.zones.begin(), layout.zones.end(), [&](const auto& zone) {
-                return zone.id == hazard.affectedZoneId;
-            });
-            if (zoneIt != layout.zones.end()) {
-                floorId = zoneIt->floorId;
-            }
-        }
-        if (!matchesFloor(floorId, currentFloorId)) {
+        if (!matchesFloor(safecrowd::domain::environmentHazardFloorId(layout, hazard), currentFloorId)) {
             continue;
         }
 
@@ -2045,16 +2043,7 @@ void ScenarioCanvasWidget::drawConnectionBlocks(QPainter& painter, const LayoutC
 
 void ScenarioCanvasWidget::drawEnvironmentHazards(QPainter& painter, const LayoutCanvasTransform& transform) const {
     for (const auto& hazard : environmentHazards_) {
-        auto floorId = hazard.floorId;
-        if (floorId.empty() && !hazard.affectedZoneId.empty()) {
-            const auto zoneIt = std::find_if(layout_.zones.begin(), layout_.zones.end(), [&](const auto& zone) {
-                return zone.id == hazard.affectedZoneId;
-            });
-            if (zoneIt != layout_.zones.end()) {
-                floorId = zoneIt->floorId;
-            }
-        }
-        if (!matchesFloor(floorId, currentFloorId_)) {
+        if (!matchesFloor(safecrowd::domain::environmentHazardFloorId(layout_, hazard), currentFloorId_)) {
             continue;
         }
 

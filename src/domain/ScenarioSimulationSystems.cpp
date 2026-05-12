@@ -265,86 +265,6 @@ std::string hazardRuntimeKey(const EnvironmentHazardDraft& hazard, std::size_t i
     return "hazard-" + std::to_string(index + 1);
 }
 
-double severityRadiusMeters(ScenarioElementSeverity severity) {
-    switch (severity) {
-    case ScenarioElementSeverity::Low:
-        return 2.0;
-    case ScenarioElementSeverity::High:
-        return 5.0;
-    case ScenarioElementSeverity::Medium:
-    default:
-        return 3.5;
-    }
-}
-
-double severityRoutePenaltyMeters(ScenarioElementSeverity severity) {
-    switch (severity) {
-    case ScenarioElementSeverity::Low:
-        return 25.0;
-    case ScenarioElementSeverity::High:
-        return 150.0;
-    case ScenarioElementSeverity::Medium:
-    default:
-        return 75.0;
-    }
-}
-
-double severityWeight(ScenarioElementSeverity severity) {
-    switch (severity) {
-    case ScenarioElementSeverity::Low:
-        return 1.0;
-    case ScenarioElementSeverity::High:
-        return 3.0;
-    case ScenarioElementSeverity::Medium:
-    default:
-        return 2.0;
-    }
-}
-
-double hazardSpeedFactor(EnvironmentHazardKind kind, ScenarioElementSeverity severity) {
-    if (kind == EnvironmentHazardKind::Smoke) {
-        switch (severity) {
-        case ScenarioElementSeverity::Low:
-            return 0.85;
-        case ScenarioElementSeverity::High:
-            return 0.55;
-        case ScenarioElementSeverity::Medium:
-        default:
-            return 0.70;
-        }
-    }
-
-    switch (severity) {
-    case ScenarioElementSeverity::Low:
-        return 0.90;
-    case ScenarioElementSeverity::High:
-        return 0.60;
-    case ScenarioElementSeverity::Medium:
-    default:
-        return 0.75;
-    }
-}
-
-bool hazardActiveAt(const EnvironmentHazardDraft& hazard, double elapsedSeconds) {
-    const auto start = std::max(0.0, hazard.startSeconds);
-    if (elapsedSeconds + 1e-9 < start) {
-        return false;
-    }
-    if (hazard.endSeconds <= hazard.startSeconds) {
-        return true;
-    }
-    return elapsedSeconds <= std::max(start, hazard.endSeconds) + 1e-9;
-}
-
-std::string hazardFloorId(
-    const FacilityLayout2D& layout,
-    const EnvironmentHazardDraft& hazard) {
-    if (!hazard.floorId.empty()) {
-        return hazard.floorId;
-    }
-    return zoneFloorId(layout, hazard.affectedZoneId);
-}
-
 HazardExposureMetric hazardExposureMetric(
     const EnvironmentHazardDraft& hazard,
     const std::string& key,
@@ -364,15 +284,15 @@ ScenarioActiveEnvironmentHazard activeHazardFromDraft(
     const EnvironmentHazardDraft& hazard,
     const std::string& key,
     const std::string& floorId) {
-    const auto factor = std::max(0.35, hazardSpeedFactor(hazard.kind, hazard.severity));
+    const auto profile = environmentHazardRuntimeProfile(hazard);
     return {
         .key = key,
         .draft = hazard,
         .floorId = floorId,
-        .radiusMeters = severityRadiusMeters(hazard.severity),
-        .speedFactor = factor,
-        .routePenaltyMeters = severityRoutePenaltyMeters(hazard.severity),
-        .severityWeight = severityWeight(hazard.severity),
+        .radiusMeters = profile.radiusMeters,
+        .speedFactor = profile.speedFactor,
+        .routePenaltyMeters = profile.routePenaltyMeters,
+        .severityWeight = profile.severityWeight,
     };
 }
 
@@ -485,7 +405,9 @@ public:
         exposure.hazardsById.reserve(hazards_.size());
         for (std::size_t index = 0; index < hazards_.size(); ++index) {
             const auto key = hazardRuntimeKey(hazards_[index], index);
-            exposure.hazardsById.emplace(key, hazardExposureMetric(hazards_[index], key, hazardFloorId(layout_, hazards_[index])));
+            exposure.hazardsById.emplace(
+                key,
+                hazardExposureMetric(hazards_[index], key, environmentHazardFloorId(layout_, hazards_[index])));
         }
         world.resources().set(std::move(exposure));
     }
@@ -540,6 +462,11 @@ public:
                     continue;
                 }
 
+                const auto distance = distanceBetween(position.value, hazard.draft.position);
+                if (distance <= hazard.radiusMeters + 1e-9) {
+                    ++currentExposureCounts[hazard.key];
+                }
+
                 const auto sensitivity = hazard.draft.kind == EnvironmentHazardKind::Smoke
                     ? agent.smokeSensitivity
                     : agent.hazardSensitivity;
@@ -548,12 +475,10 @@ public:
                     continue;
                 }
 
-                const auto distance = distanceBetween(position.value, hazard.draft.position);
                 if (distance > radius + 1e-9) {
                     continue;
                 }
 
-                ++currentExposureCounts[hazard.key];
                 const auto proximity = distance / radius;
                 if (proximity < bestProximity) {
                     bestProximity = proximity;
@@ -586,8 +511,11 @@ public:
             state.hazardFloorId = detectedHazard->floorId;
             state.hazardAffectedZoneId = detectedHazard->draft.affectedZoneId;
             state.hazardDistanceMeters = detectedDistance;
-            state.hazardRadiusMeters = detectedRadius;
-            state.hazardSpeedFactor = detectedHazard->speedFactor;
+            state.hazardRadiusMeters = detectedHazard->radiusMeters;
+            state.hazardSpeedFactor = environmentHazardSpeedFactorAt(
+                detectedHazard->draft,
+                detectedDistance,
+                static_cast<double>(agent.maxSpeed));
             state.hazardRoutePenaltyMeters = detectedHazard->routePenaltyMeters;
         }
 
@@ -626,13 +554,13 @@ private:
         active.reserve(hazards_.size());
         for (std::size_t index = 0; index < hazards_.size(); ++index) {
             const auto& hazard = hazards_[index];
-            if (!hazardActiveAt(hazard, elapsedSeconds)) {
+            if (!environmentHazardActiveAt(hazard, elapsedSeconds)) {
                 continue;
             }
             active.push_back(activeHazardFromDraft(
                 hazard,
                 hazardRuntimeKey(hazard, index),
-                hazardFloorId(layout_, hazard)));
+                environmentHazardFloorId(layout_, hazard)));
         }
         return active;
     }
