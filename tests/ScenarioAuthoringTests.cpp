@@ -136,6 +136,31 @@ SC_TEST(environmentHazardFloorId_FallsBackToAffectedZoneFloor) {
     SC_EXPECT_EQ(environmentHazardFloorId(layout, hazard), std::string{"Manual"});
 }
 
+SC_TEST(connectionBlockActiveAt_UsesCentralScheduleSemantics) {
+    ConnectionBlockDraft emptyConnection;
+    SC_EXPECT_TRUE(!connectionBlockActiveAt(emptyConnection, 5.0));
+
+    ConnectionBlockDraft alwaysClosed;
+    alwaysClosed.connectionId = "door-a";
+    SC_EXPECT_TRUE(connectionBlockActiveAt(alwaysClosed, 0.0));
+    SC_EXPECT_TRUE(connectionBlockActiveAt(alwaysClosed, 120.0));
+
+    ConnectionBlockDraft finite;
+    finite.connectionId = "door-b";
+    finite.intervals.push_back({.startSeconds = 5.0, .endSeconds = 10.0});
+    SC_EXPECT_TRUE(!connectionBlockActiveAt(finite, 4.9));
+    SC_EXPECT_TRUE(connectionBlockActiveAt(finite, 5.0));
+    SC_EXPECT_TRUE(connectionBlockActiveAt(finite, 10.0));
+    SC_EXPECT_TRUE(!connectionBlockActiveAt(finite, 10.1));
+
+    ConnectionBlockDraft openEnded;
+    openEnded.connectionId = "door-c";
+    openEnded.intervals.push_back({.startSeconds = 15.0, .endSeconds = 15.0});
+    SC_EXPECT_TRUE(!connectionBlockActiveAt(openEnded, 14.9));
+    SC_EXPECT_TRUE(connectionBlockActiveAt(openEnded, 15.0));
+    SC_EXPECT_TRUE(connectionBlockActiveAt(openEnded, 90.0));
+}
+
 SC_TEST(computeScenarioDiffKeys_returnsEmptyForFreshDuplicate) {
     const auto baseline = makeBaselineDraft();
     const auto variant = duplicateScenarioDraft(baseline, "scenario-2", "Variant");

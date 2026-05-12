@@ -51,27 +51,6 @@ bool matchesFloor(const std::string& elementFloorId, const std::string& floorId)
     return floorId.empty() || elementFloorId.empty() || elementFloorId == floorId;
 }
 
-bool intervalContains(const safecrowd::domain::ConnectionBlockIntervalDraft& interval, double timeSeconds) {
-    const auto start = std::max(0.0, interval.startSeconds);
-    const auto end = std::max(start, interval.endSeconds);
-    return timeSeconds + 1e-9 >= start && timeSeconds <= end + 1e-9;
-}
-
-bool connectionShouldBeBlocked(const safecrowd::domain::ConnectionBlockDraft& block, double timeSeconds) {
-    if (block.connectionId.empty()) {
-        return false;
-    }
-    if (block.intervals.empty()) {
-        return true;
-    }
-    for (const auto& interval : block.intervals) {
-        if (intervalContains(interval, timeSeconds)) {
-            return true;
-        }
-    }
-    return false;
-}
-
 QString hazardKindLabel(safecrowd::domain::EnvironmentHazardKind kind) {
     switch (kind) {
     case safecrowd::domain::EnvironmentHazardKind::Smoke:
@@ -217,7 +196,7 @@ std::optional<std::size_t> hoveredBlockedConnectionIndex(
 
     for (std::size_t index = 0; index < blocks.size(); ++index) {
         const auto& block = blocks[index];
-        if (!connectionShouldBeBlocked(block, elapsedSeconds)) {
+        if (!safecrowd::domain::connectionBlockActiveAt(block, elapsedSeconds)) {
             continue;
         }
         const auto it = std::find_if(layout.connections.begin(), layout.connections.end(), [&](const auto& connection) {
@@ -363,7 +342,7 @@ std::optional<QPointF> routeGuidanceMarkerCenter(
     std::vector<QPointF> blockedCenters;
     blockedCenters.reserve(blocks.size());
     for (const auto& block : blocks) {
-        if (!connectionShouldBeBlocked(block, elapsedSeconds)) {
+        if (!safecrowd::domain::connectionBlockActiveAt(block, elapsedSeconds)) {
             continue;
         }
         const auto connectionIt = std::find_if(layout.connections.begin(), layout.connections.end(), [&](const auto& connection) {
@@ -886,7 +865,7 @@ void SimulationCanvasWidget::drawConnectionBlockOverlay(QPainter& painter, const
     painter.setPen(QPen(QColor("#c0392b"), 2.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
 
     for (const auto& block : connectionBlocks_) {
-        if (!connectionShouldBeBlocked(block, elapsedSeconds)) {
+        if (!safecrowd::domain::connectionBlockActiveAt(block, elapsedSeconds)) {
             continue;
         }
 

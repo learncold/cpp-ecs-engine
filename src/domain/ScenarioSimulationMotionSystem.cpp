@@ -1,5 +1,6 @@
 #include "domain/ScenarioSimulationSystems.h"
 
+#include "domain/GeometryQueries.h"
 #include "domain/ScenarioRiskMetrics.h"
 #include "domain/ScenarioSimulationInternal.h"
 
@@ -63,17 +64,18 @@ public:
         const auto entities = simulationEntities(query);
         std::vector<MovementPlan> plans;
         plans.reserve(entities.size());
-        const auto* reactions = resources.contains<ScenarioEnvironmentReactionResource>()
-            ? &resources.get<ScenarioEnvironmentReactionResource>()
-            : nullptr;
+        if (!resources.contains<ScenarioEnvironmentReactionResource>()) {
+            resources.set(ScenarioEnvironmentReactionResource{});
+        }
+        auto* reactions = &resources.get<ScenarioEnvironmentReactionResource>();
         const auto* activeHazards = resources.contains<ScenarioActiveEnvironmentHazardsResource>()
             ? &resources.get<ScenarioActiveEnvironmentHazardsResource>()
             : nullptr;
 
         applyRouteGuidance(query, entities, layoutCache, clock.elapsedSeconds, step.derivedSeed);
         advanceRoutesForCurrentZones(query, entities, layoutCache);
+        replanBlockedExitRoutes(query, entities, layoutCache, clock.elapsedSeconds, layoutRevision, reactions);
         advanceRoutesForWaypointProgress(query, 0.0, entities, layoutCache);
-        replanBlockedExitRoutes(query, entities, layoutCache, clock.elapsedSeconds, layoutRevision);
         replanBlockedRouteSegments(query, entities, layoutCache, clock.elapsedSeconds, layoutRevision);
         replanHazardAwareExitRoutes(query, entities, layoutCache, clock.elapsedSeconds, reactions, activeHazards);
         updateAgentPhysicsFloorIds(query, layoutCache, entities);
@@ -107,7 +109,8 @@ public:
 
             const auto& floorLayout = cachedLayoutForFloor(layoutCache, route.currentFloorId);
             const auto* destinationZone = findZone(floorLayout, route.destinationZoneId);
-            if (destinationZone != nullptr && pointInRing(destinationZone->area.outline, position.value)) {
+            if (destinationZone != nullptr
+                && simulation_internal::pointInRing(destinationZone->area.outline, position.value)) {
                 status.evacuated = true;
                 status.completionTimeSeconds = clock.elapsedSeconds;
                 velocity.value = {};
@@ -222,7 +225,9 @@ public:
             const auto hazardSpeedFactor = hazardState == nullptr
                 ? 1.0
                 : std::clamp(hazardState->hazardSpeedFactor, 0.0, 1.0);
-            const auto adjustedHazardMaxSpeed = adjustedMaxSpeed * hazardSpeedFactor;
+            const auto* closureState = activeClosureSlowdownState(reactions, entity.index);
+            const auto closureSpeedFactor = closureState == nullptr ? 1.0 : kClosureApproachSpeedFactor;
+            const auto adjustedHazardMaxSpeed = adjustedMaxSpeed * hazardSpeedFactor * closureSpeedFactor;
             const auto desiredVelocity = routeDirection * adjustedHazardMaxSpeed;
             double speedScale = 1.0;
             const auto neighborRadius = std::max(
@@ -313,6 +318,7 @@ private:
     static constexpr double kNoExitReplanCooldownSeconds = 7.0;
     static constexpr double kSegmentReplanCooldownSeconds = 0.25;
     static constexpr double kFailedSegmentReplanCooldownSeconds = 1.25;
+    static constexpr double kClosureApproachSpeedFactor = 0.35;
 
     struct RoutePlan {
         std::vector<Point2D> waypoints{};
@@ -343,6 +349,39 @@ private:
             return nullptr;
         }
         return &it->second;
+    }
+
+    static const ScenarioEnvironmentReactionAgentState* activeClosureSlowdownState(
+        const ScenarioEnvironmentReactionResource* reactions,
+        std::uint64_t agentId) {
+        if (reactions == nullptr) {
+            return nullptr;
+        }
+        const auto it = reactions->agentsById.find(agentId);
+        if (it == reactions->agentsById.end()
+            || !it->second.closureDetected
+            || it->second.closureAware
+            || it->second.blockedConnectionId.empty()) {
+            return nullptr;
+        }
+        return &it->second;
+    }
+
+    static void clearClosureReaction(
+        ScenarioEnvironmentReactionResource* reactions,
+        std::uint64_t agentId) {
+        if (reactions == nullptr) {
+            return;
+        }
+        const auto it = reactions->agentsById.find(agentId);
+        if (it == reactions->agentsById.end()) {
+            return;
+        }
+        it->second.closureDetected = false;
+        it->second.closureAware = false;
+        it->second.blockedConnectionId.clear();
+        it->second.closureDetectedAtSeconds = 0.0;
+        it->second.closureReactionReadySeconds = 0.0;
     }
 
     static bool sameFloor(const std::string& lhs, const std::string& rhs) {
@@ -382,10 +421,12 @@ private:
         return it == layoutCache.layout.connections.end() ? nullptr : &(*it);
     }
 
-    bool nextConnectionBlocked(const ScenarioLayoutCacheResource& layoutCache, const EvacuationRoute& route) const {
+    const Connection2D* nextBlockedConnection(
+        const ScenarioLayoutCacheResource& layoutCache,
+        const EvacuationRoute& route) const {
         if (route.nextWaypointIndex >= route.waypoints.size()
             || route.nextWaypointIndex >= route.waypointConnectionIds.size()) {
-            return false;
+            return nullptr;
         }
         for (std::size_t index = route.nextWaypointIndex; index < route.waypointConnectionIds.size(); ++index) {
             const auto& connectionId = route.waypointConnectionIds[index];
@@ -393,9 +434,16 @@ private:
                 continue;
             }
             const auto* connection = findConnectionById(layoutCache, connectionId);
-            return connection != nullptr && connection->directionality == TravelDirection::Closed;
+            if (connection != nullptr && connection->directionality == TravelDirection::Closed) {
+                return connection;
+            }
+            return nullptr;
         }
-        return false;
+        return nullptr;
+    }
+
+    bool nextConnectionBlocked(const ScenarioLayoutCacheResource& layoutCache, const EvacuationRoute& route) const {
+        return nextBlockedConnection(layoutCache, route) != nullptr;
     }
 
     std::optional<Point2D> verticalTransitionNormal(
@@ -555,7 +603,7 @@ private:
             if (dot(movement, *normal) < -kGeometryEpsilon) {
                 return false;
             }
-            return pointInRing(endpointZone->area.outline, candidate)
+            return simulation_internal::pointInRing(endpointZone->area.outline, candidate)
                 && !movementCrossesBarrier(layout, from, candidate);
         };
 
@@ -680,7 +728,7 @@ private:
         }
 
         auto validLanding = [&](const Point2D& candidate) {
-            return pointInRing(toZone->area.outline, candidate)
+            return simulation_internal::pointInRing(toZone->area.outline, candidate)
                 && pointHasBarrierClearance(targetLayout, candidate, clearance);
         };
 
@@ -1266,6 +1314,8 @@ private:
             : distanceToRouteWaypoint(route, start);
         route.stalledSeconds = 0.0;
         route.noExitAvailable = false;
+        route.holdingForClosure = false;
+        route.closureHoldTarget = {};
         route.nextSegmentReplanSeconds = 0.0;
     }
 
@@ -1631,12 +1681,124 @@ private:
         }
     }
 
+    bool closureReadyForBlockedConnection(
+        ScenarioEnvironmentReactionResource* reactions,
+        engine::Entity entity,
+        const Agent& agent,
+        const Connection2D& blockedConnection,
+        double elapsedSeconds) const {
+        if (reactions == nullptr) {
+            return true;
+        }
+
+        auto& state = reactions->agentsById[entity.index];
+        if (!state.closureDetected || state.blockedConnectionId != blockedConnection.id) {
+            state.closureDetected = true;
+            state.closureAware = false;
+            state.blockedConnectionId = blockedConnection.id;
+            state.closureDetectedAtSeconds = elapsedSeconds;
+            state.closureReactionReadySeconds = elapsedSeconds + std::max(0.0, agent.closurePatienceSeconds);
+        }
+
+        state.closureAware = elapsedSeconds + 1e-9 >= state.closureReactionReadySeconds;
+        return state.closureAware;
+    }
+
+    Point2D closureHoldTarget(
+        const ScenarioLayoutCacheResource& layoutCache,
+        const std::string& zoneId,
+        const Point2D& currentPosition,
+        engine::Entity entity,
+        double clearance) const {
+        const auto* zone = findCachedZone(layoutCache, zoneId);
+        if (zone == nullptr) {
+            return currentPosition;
+        }
+
+        auto center = representativePointInPolygon(zone->area).value_or(polygonCenter(zone->area));
+        if (!pointInPolygon(zone->area, center)) {
+            center = currentPosition;
+        }
+
+        constexpr double kTwoPi = 6.28318530717958647692;
+        constexpr double kGoldenAngle = 2.39996322972865332223;
+        const auto baseAngle =
+            std::fmod(static_cast<double>((entity.index % 997U) + 1U) * kGoldenAngle, kTwoPi);
+        const auto boundaryRadius =
+            std::max(0.0, distanceToPolygonBoundary(zone->area, center) - clearance - 0.05);
+        const auto radiusScale = 0.35 + (static_cast<double>(entity.index % 5U) * 0.10);
+
+        for (int attempt = 0; attempt < 16; ++attempt) {
+            const auto angle = baseAngle + (static_cast<double>(attempt) * 0.71);
+            const auto candidateRadius =
+                boundaryRadius * std::max(0.15, radiusScale - (static_cast<double>(attempt) * 0.04));
+            const Point2D candidate{
+                .x = center.x + (std::cos(angle) * candidateRadius),
+                .y = center.y + (std::sin(angle) * candidateRadius),
+            };
+            if (pointInPolygon(zone->area, candidate)
+                && distanceToPolygonBoundary(zone->area, candidate) + 1e-9 >= clearance * 0.75) {
+                return candidate;
+            }
+        }
+
+        if (pointInPolygon(zone->area, center)
+            && distanceToPolygonBoundary(zone->area, center) + 1e-9 >= clearance * 0.5) {
+            return center;
+        }
+        return currentPosition;
+    }
+
+    void replaceRouteWithClosureHold(
+        EvacuationRoute& route,
+        const Point2D& position,
+        const Point2D& holdTarget) const {
+        route.destinationZoneId.clear();
+        route.waypoints.clear();
+        route.waypointPassages.clear();
+        route.waypointFromZoneIds.clear();
+        route.waypointZoneIds.clear();
+        route.waypointFloorIds.clear();
+        route.waypointConnectionIds.clear();
+        route.waypointVerticalTransitions.clear();
+        if (distanceBetween(position, holdTarget) > kArrivalEpsilon) {
+            route.waypoints.push_back(holdTarget);
+            route.waypointPassages.push_back(pointPassage(holdTarget));
+            route.waypointFromZoneIds.push_back({});
+            route.waypointZoneIds.push_back({});
+            route.waypointFloorIds.push_back(route.currentFloorId);
+            route.waypointConnectionIds.push_back({});
+            route.waypointVerticalTransitions.push_back(false);
+        }
+        route.nextWaypointIndex = 0;
+        route.currentSegmentStart = position;
+        route.displayFloorId = route.currentFloorId;
+        route.previousDistanceToWaypoint = route.waypoints.empty()
+            ? 0.0
+            : distanceToRouteWaypoint(route, position);
+        route.stalledSeconds = 0.0;
+        route.noExitAvailable = true;
+        route.holdingForClosure = true;
+        route.closureHoldTarget = holdTarget;
+        route.nextSegmentReplanSeconds = 0.0;
+    }
+
+    static bool routePlanUsesConnection(const RoutePlan& plan, const std::string& connectionId) {
+        if (connectionId.empty()) {
+            return false;
+        }
+        return std::any_of(plan.waypointConnectionIds.begin(), plan.waypointConnectionIds.end(), [&](const auto& id) {
+            return id == connectionId;
+        });
+    }
+
     void replanBlockedExitRoutes(
         engine::WorldQuery& query,
         const std::vector<engine::Entity>& entities,
         const ScenarioLayoutCacheResource& layoutCache,
         double elapsedSeconds,
-        std::uint64_t layoutRevision) const {
+        std::uint64_t layoutRevision,
+        ScenarioEnvironmentReactionResource* reactions) const {
         for (const auto entity : entities) {
             const auto& status = query.get<EvacuationStatus>(entity);
             if (status.evacuated) {
@@ -1644,17 +1806,34 @@ private:
             }
 
             auto& route = query.get<EvacuationRoute>(entity);
+            const auto& agent = query.get<Agent>(entity);
             if (layoutRevision != route.observedLayoutRevision) {
                 route.observedLayoutRevision = layoutRevision;
                 route.nextExitReplanSeconds = 0.0;
                 route.nextSegmentReplanSeconds = 0.0;
             }
 
-            const bool blockedAhead = nextConnectionBlocked(layoutCache, route);
-            if (!blockedAhead && !route.noExitAvailable) {
+            const auto* blockedConnection = nextBlockedConnection(layoutCache, route);
+            if (blockedConnection == nullptr) {
+                clearClosureReaction(reactions, entity.index);
+            }
+            if (blockedConnection == nullptr && !route.noExitAvailable) {
                 continue;
             }
             if (elapsedSeconds + 1e-9 < route.nextExitReplanSeconds) {
+                continue;
+            }
+
+            if (blockedConnection != nullptr
+                && !closureReadyForBlockedConnection(reactions, entity, agent, *blockedConnection, elapsedSeconds)) {
+                auto retryAt = elapsedSeconds + kExitReplanCooldownSeconds;
+                if (reactions != nullptr) {
+                    const auto stateIt = reactions->agentsById.find(entity.index);
+                    if (stateIt != reactions->agentsById.end()) {
+                        retryAt = std::min(retryAt, stateIt->second.closureReactionReadySeconds);
+                    }
+                }
+                route.nextExitReplanSeconds = retryAt;
                 continue;
             }
 
@@ -1672,42 +1851,23 @@ private:
             if (plan.destinationZoneId.empty()) {
                 plan = routePlanToNearestExit(layoutCache, position.value, startZoneId);
             }
+            if (blockedConnection != nullptr && routePlanUsesConnection(plan, blockedConnection->id)) {
+                plan = {};
+            }
             if (plan.destinationZoneId.empty()) {
-                route.noExitAvailable = true;
-                route.destinationZoneId.clear();
-                route.waypoints.clear();
-                route.waypointPassages.clear();
-                route.waypointFromZoneIds.clear();
-                route.waypointZoneIds.clear();
-                route.waypointFloorIds.clear();
-                route.waypointConnectionIds.clear();
-                route.waypointVerticalTransitions.clear();
-                route.nextWaypointIndex = 0;
-                route.currentSegmentStart = position.value;
-                route.displayFloorId = route.currentFloorId;
-                route.previousDistanceToWaypoint = 0.0;
-                route.stalledSeconds = 0.0;
+                const auto holdTarget = closureHoldTarget(
+                    layoutCache,
+                    startZoneId,
+                    position.value,
+                    entity,
+                    static_cast<double>(agent.radius) + kPathClearance);
+                replaceRouteWithClosureHold(route, position.value, holdTarget);
                 route.nextExitReplanSeconds = elapsedSeconds + kNoExitReplanCooldownSeconds;
                 continue;
             }
 
-            route.destinationZoneId = plan.destinationZoneId;
-            route.waypoints = plan.waypoints;
-            route.waypointPassages = plan.waypointPassages;
-            route.waypointFromZoneIds = plan.waypointFromZoneIds;
-            route.waypointZoneIds = plan.waypointZoneIds;
-            route.waypointFloorIds = plan.waypointFloorIds;
-            route.waypointConnectionIds = plan.waypointConnectionIds;
-            route.waypointVerticalTransitions = plan.waypointVerticalTransitions;
-            route.nextWaypointIndex = 0;
-            route.currentSegmentStart = position.value;
-            route.displayFloorId = route.currentFloorId;
-            route.previousDistanceToWaypoint = route.waypoints.empty()
-                ? 0.0
-                : distanceToRouteWaypoint(route, position.value);
-            route.stalledSeconds = 0.0;
-            route.noExitAvailable = false;
-            route.nextSegmentReplanSeconds = 0.0;
+            replaceRouteWithPlan(route, plan, position.value);
+            clearClosureReaction(reactions, entity.index);
             route.nextExitReplanSeconds = elapsedSeconds + kExitReplanCooldownSeconds;
         }
     }

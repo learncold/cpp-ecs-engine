@@ -51,6 +51,8 @@ struct EvacuationRoute {
     double nextSegmentReplanSeconds{0.0};
     std::uint64_t observedLayoutRevision{0};
     bool noExitAvailable{false};
+    bool holdingForClosure{false};
+    Point2D closureHoldTarget{};
     bool followsGuidance{false};
     std::string destinationZoneId{};
     std::string originalDestinationZoneId{};

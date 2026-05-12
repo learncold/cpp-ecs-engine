@@ -143,5 +143,7 @@ EnvironmentHazardRuntimeProfile environmentHazardRuntimeProfile(const Environmen
 bool environmentHazardHasOpenEndedSchedule(const EnvironmentHazardDraft& hazard);
 bool environmentHazardActiveAt(const EnvironmentHazardDraft& hazard, double elapsedSeconds);
 std::string environmentHazardFloorId(const FacilityLayout2D& layout, const EnvironmentHazardDraft& hazard);
+bool connectionBlockIntervalActiveAt(const ConnectionBlockIntervalDraft& interval, double elapsedSeconds);
+bool connectionBlockActiveAt(const ConnectionBlockDraft& block, double elapsedSeconds);
 
 }  // namespace safecrowd::domain
