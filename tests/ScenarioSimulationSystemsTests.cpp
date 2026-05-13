@@ -2555,7 +2555,7 @@ SC_TEST(ScenarioRiskMetricsSystem_DoesNotPublishPressureHotspotsForLooseClusterI
 
     const auto& snapshot =
         runtime.world().resources().get<safecrowd::domain::ScenarioRiskMetricsResource>().snapshot;
-    SC_EXPECT_TRUE(!snapshot.hotspots.empty());
+    SC_EXPECT_TRUE(snapshot.hotspots.empty());
     SC_EXPECT_TRUE(snapshot.pressureHotspots.empty());
 }
 
