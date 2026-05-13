@@ -20,7 +20,6 @@ constexpr std::size_t kMaxReportedPressureHotspots = 5;
 constexpr std::size_t kMaxReportedPressureAgents = 5;
 constexpr std::size_t kMaxReportedCriticalPressureEvents = 5;
 constexpr std::size_t kMaxReportedBottlenecks = 5;
-constexpr double kScenarioPressureScoreThreshold = 1.0;
 
 struct RiskCellAccumulator {
     Point2D positionSum{};
@@ -235,7 +234,7 @@ bool barrierMatchesFloor(const Barrier2D& barrier, const std::string& floorId) {
     return barrier.floorId.empty() || floorId.empty() || barrier.floorId == floorId;
 }
 
-double barrierCompression(const Barrier2D& barrier, const Point2D& position, double radius) {
+double barrierCompression(const Barrier2D& barrier, const Point2D& position, double referenceDistance) {
     if (!barrier.blocksMovement || barrier.geometry.vertices.size() < 2) {
         return 0.0;
     }
@@ -244,17 +243,25 @@ double barrierCompression(const Barrier2D& barrier, const Point2D& position, dou
     const auto& vertices = barrier.geometry.vertices;
     for (std::size_t index = 0; index + 1 < vertices.size(); ++index) {
         const auto distance = distancePointToSegment(position, vertices[index], vertices[index + 1]);
-        if (distance < radius) {
-            force += radius - distance;
+        if (distance < referenceDistance) {
+            force += (referenceDistance - distance) / referenceDistance;
         }
     }
     if (barrier.geometry.closed) {
         const auto distance = distancePointToSegment(position, vertices.back(), vertices.front());
-        if (distance < radius) {
-            force += radius - distance;
+        if (distance < referenceDistance) {
+            force += (referenceDistance - distance) / referenceDistance;
         }
     }
     return force;
+}
+
+double localDensityRatio(std::size_t nearbyCount) {
+    constexpr double kPi = 3.14159265358979323846;
+    const auto areaSquareMeters = kPi * kPressureReferenceDistanceMeters * kPressureReferenceDistanceMeters;
+    const auto densityPeoplePerSquareMeter =
+        static_cast<double>(nearbyCount) / areaSquareMeters;
+    return densityPeoplePerSquareMeter / kPressureHighDensityThresholdPeoplePerSquareMeter;
 }
 
 double pressureFeedbackLevel(double compressionForce, double exposureSeconds, bool critical) {
@@ -774,33 +781,40 @@ private:
         tracking.previousElapsedSeconds = elapsedSeconds;
         tracking.hasPreviousElapsedSeconds = true;
 
-        std::vector<double> forces(activeAgents.size(), 0.0);
+        std::vector<double> proximityForces(activeAgents.size(), 0.0);
+        std::vector<std::size_t> nearbyCounts(activeAgents.size(), 0);
         for (std::size_t lhsIndex = 0; lhsIndex < activeAgents.size(); ++lhsIndex) {
             for (std::size_t rhsIndex = lhsIndex + 1; rhsIndex < activeAgents.size(); ++rhsIndex) {
                 if (activeAgents[lhsIndex].floorId != activeAgents[rhsIndex].floorId) {
                     continue;
                 }
                 const auto distance = distanceBetween(activeAgents[lhsIndex].position, activeAgents[rhsIndex].position);
-                const auto combinedRadius = activeAgents[lhsIndex].radius + activeAgents[rhsIndex].radius;
-                if (distance >= combinedRadius) {
+                if (distance >= kPressureReferenceDistanceMeters) {
                     continue;
                 }
 
-                const auto overlap = combinedRadius - distance;
-                forces[lhsIndex] += overlap;
-                forces[rhsIndex] += overlap;
+                const auto proximityScore =
+                    (kPressureReferenceDistanceMeters - distance) / kPressureReferenceDistanceMeters;
+                proximityForces[lhsIndex] += proximityScore;
+                proximityForces[rhsIndex] += proximityScore;
+                ++nearbyCounts[lhsIndex];
+                ++nearbyCounts[rhsIndex];
             }
         }
 
+        std::vector<double> forces(activeAgents.size(), 0.0);
         for (std::size_t index = 0; index < activeAgents.size(); ++index) {
+            forces[index] = std::max(proximityForces[index], localDensityRatio(nearbyCounts[index]));
             for (const auto& barrier : layout.barriers) {
                 if (!barrierMatchesFloor(barrier, activeAgents[index].floorId)) {
                     continue;
                 }
-                forces[index] += barrierCompression(
-                    barrier,
-                    activeAgents[index].position,
-                    activeAgents[index].radius);
+                forces[index] = std::max(
+                    forces[index],
+                    proximityForces[index] + barrierCompression(
+                        barrier,
+                        activeAgents[index].position,
+                        kPressureReferenceDistanceMeters));
             }
         }
 
@@ -812,14 +826,14 @@ private:
             activeAgentIds.insert(context.agentId);
             auto& state = tracking.agentStates[context.agentId];
             state.currentForce = forces[index];
-            if (state.currentForce > kScenarioCriticalPressureForceThreshold) {
+            if (state.currentForce >= kScenarioCriticalPressureForceThreshold) {
                 state.exposureSeconds += deltaSeconds;
             }
 
             const bool critical =
-                state.currentForce > kScenarioCriticalPressureForceThreshold
+                state.currentForce >= kScenarioCriticalPressureForceThreshold
                 && state.exposureSeconds >= kScenarioCriticalPressureExposureThresholdSeconds;
-            if (state.exposureSeconds > 0.0 || state.currentForce > kScenarioCriticalPressureForceThreshold) {
+            if (state.exposureSeconds > 0.0 || state.currentForce >= kScenarioCriticalPressureForceThreshold) {
                 ++snapshot.pressureExposedAgentCount;
                 snapshot.pressureAgents.push_back({
                     .agentId = context.agentId,
@@ -863,8 +877,12 @@ private:
         ScenarioRiskSnapshot& snapshot,
         const std::unordered_map<long long, RiskCellAccumulator>& cells) const {
         snapshot.hotspots.reserve(cells.size());
+        const auto hotspotCellArea = kScenarioHotspotCellSize * kScenarioHotspotCellSize;
         for (const auto& [_, cell] : cells) {
-            if (cell.agentCount < kScenarioHotspotAgentThreshold) {
+            const auto densityPeoplePerSquareMeter = hotspotCellArea <= 0.0
+                ? 0.0
+                : static_cast<double>(cell.agentCount) / hotspotCellArea;
+            if (densityPeoplePerSquareMeter < kScenarioHotspotDensityThresholdPeoplePerSquareMeter) {
                 continue;
             }
             const auto count = static_cast<double>(cell.agentCount);
@@ -893,7 +911,10 @@ private:
         const auto cellArea = kScenarioHotspotCellSize * kScenarioHotspotCellSize;
 
         for (const auto& [_, cell] : cells) {
-            if (cell.agentCount < kScenarioPressureHotspotAgentThreshold) {
+            const auto densityPeoplePerSquareMeter = cellArea <= 1e-9
+                ? 0.0
+                : static_cast<double>(cell.agentCount) / cellArea;
+            if (densityPeoplePerSquareMeter < kScenarioPressureHotspotDensityThresholdPeoplePerSquareMeter) {
                 continue;
             }
 
@@ -902,22 +923,16 @@ private:
             for (std::size_t lhsIndex = 0; lhsIndex < cell.entities.size(); ++lhsIndex) {
                 const auto lhsEntity = cell.entities[lhsIndex];
                 const auto& lhsPosition = query.get<Position>(lhsEntity);
-                const auto& lhsAgent = query.get<Agent>(lhsEntity);
                 for (std::size_t rhsIndex = lhsIndex + 1; rhsIndex < cell.entities.size(); ++rhsIndex) {
                     const auto rhsEntity = cell.entities[rhsIndex];
                     const auto& rhsPosition = query.get<Position>(rhsEntity);
-                    const auto& rhsAgent = query.get<Agent>(rhsEntity);
-                    const auto comfortDistance =
-                        static_cast<double>(lhsAgent.radius + rhsAgent.radius) + kPersonalSpaceBuffer;
-                    if (comfortDistance <= 1e-9) {
-                        continue;
-                    }
                     const auto distance = distanceBetween(lhsPosition.value, rhsPosition.value);
-                    if (distance >= comfortDistance) {
+                    if (distance >= kPressureReferenceDistanceMeters) {
                         continue;
                     }
 
-                    pressureScore += (comfortDistance - distance) / comfortDistance;
+                    pressureScore +=
+                        (kPressureReferenceDistanceMeters - distance) / kPressureReferenceDistanceMeters;
                     ++intrudingPairCount;
                 }
             }
@@ -934,7 +949,7 @@ private:
                 .floorId = cell.floorId,
                 .agentCount = cell.agentCount,
                 .intrudingPairCount = intrudingPairCount,
-                .densityPeoplePerSquareMeter = cellArea <= 1e-9 ? 0.0 : count / cellArea,
+                .densityPeoplePerSquareMeter = densityPeoplePerSquareMeter,
                 .pressureScore = pressureScore,
             });
         }
@@ -975,9 +990,9 @@ private:
                 const auto& state = stateIt->second;
                 const bool exposed =
                     state.exposureSeconds > 0.0
-                    || state.currentForce > kScenarioCriticalPressureForceThreshold;
+                    || state.currentForce >= kScenarioCriticalPressureForceThreshold;
                 const bool critical =
-                    state.currentForce > kScenarioCriticalPressureForceThreshold
+                    state.currentForce >= kScenarioCriticalPressureForceThreshold
                     && state.exposureSeconds >= kScenarioCriticalPressureExposureThresholdSeconds;
                 if (exposed) {
                     ++exposedAgentCount;

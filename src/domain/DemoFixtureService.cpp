@@ -3,6 +3,7 @@
 #include <utility>
 
 #include "domain/DemoLayouts.h"
+#include "domain/PressureTuning.h"
 
 namespace safecrowd::domain {
 namespace {
@@ -704,7 +705,8 @@ ScenarioResultArtifacts makeBlockedDoorResultArtifacts(std::vector<SimulationFra
     };
 
     artifacts.densitySummary.cellSizeMeters = 1.5;
-    artifacts.densitySummary.highDensityThresholdPeoplePerSquareMeter = 4.0;
+    artifacts.densitySummary.highDensityThresholdPeoplePerSquareMeter =
+        kPressureHighDensityThresholdPeoplePerSquareMeter;
     artifacts.densitySummary.peakDensityPeoplePerSquareMeter = 11.1111;
     artifacts.densitySummary.peakAgentCount = 25;
     artifacts.densitySummary.peakAtSeconds = 0.0;

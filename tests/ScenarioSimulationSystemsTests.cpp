@@ -2460,7 +2460,7 @@ SC_TEST(ScenarioSimulationMotionSystem_CombinesHazardExposureWithDoorClosureRero
 
 SC_TEST(ScenarioRiskMetricsSystem_PublishesStalledHotspotAndBottleneckMetrics) {
     std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
-    for (int index = 0; index < 5; ++index) {
+    for (int index = 0; index < 8; ++index) {
         seeds.push_back({
             .position = {.value = {.x = 0.75 + (static_cast<double>(index) * 0.03), .y = 0.0}},
             .agent = {.radius = 0.25f, .maxSpeed = 1.0f},
@@ -2496,14 +2496,14 @@ SC_TEST(ScenarioRiskMetricsSystem_PublishesStalledHotspotAndBottleneckMetrics) {
 
     const auto& snapshot =
         runtime.world().resources().get<safecrowd::domain::ScenarioRiskMetricsResource>().snapshot;
-    SC_EXPECT_EQ(snapshot.stalledAgentCount, std::size_t{5});
+    SC_EXPECT_EQ(snapshot.stalledAgentCount, std::size_t{8});
     SC_EXPECT_TRUE(!snapshot.hotspots.empty());
     SC_EXPECT_NEAR(snapshot.hotspots.front().cellMin.x, 0.0, 1e-9);
     SC_EXPECT_NEAR(snapshot.hotspots.front().cellMin.y, 0.0, 1e-9);
     SC_EXPECT_NEAR(snapshot.hotspots.front().cellMax.x, 1.5, 1e-9);
     SC_EXPECT_NEAR(snapshot.hotspots.front().cellMax.y, 1.5, 1e-9);
     SC_EXPECT_TRUE(!snapshot.pressureHotspots.empty());
-    SC_EXPECT_EQ(snapshot.pressureHotspots.front().agentCount, std::size_t{5});
+    SC_EXPECT_EQ(snapshot.pressureHotspots.front().agentCount, std::size_t{8});
     SC_EXPECT_TRUE(snapshot.pressureHotspots.front().intrudingPairCount > 0);
     SC_EXPECT_TRUE(snapshot.pressureHotspots.front().pressureScore >= 1.0);
     SC_EXPECT_TRUE(!snapshot.bottlenecks.empty());
@@ -2585,7 +2585,7 @@ SC_TEST(ScenarioRiskMetricsSystem_AccumulatesCompressionExposureAndCriticalPress
     SC_EXPECT_TRUE(snapshot.criticalPressureAgentCount > 0);
     SC_EXPECT_TRUE(!snapshot.pressureAgents.empty());
     SC_EXPECT_TRUE(snapshot.pressureAgents.front().critical);
-    SC_EXPECT_TRUE(snapshot.pressureAgents.front().compressionForce > 0.5);
+    SC_EXPECT_TRUE(snapshot.pressureAgents.front().compressionForce >= 1.0);
     SC_EXPECT_TRUE(snapshot.pressureAgents.front().exposureSeconds >= 2.0);
 }
 
@@ -2670,7 +2670,7 @@ SC_TEST(ScenarioRiskMetricsSystem_FiltersBottlenecksByConnectionFloor) {
 
 SC_TEST(ScenarioRiskMetricsSystem_UsesDisplayFloorForVirtualPhysicsBuckets) {
     std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
-    for (int index = 0; index < 5; ++index) {
+    for (int index = 0; index < 8; ++index) {
         seeds.push_back({
             .position = {.value = {.x = 0.75 + (static_cast<double>(index) * 0.03), .y = 0.0}},
             .agent = {.radius = 0.25f, .maxSpeed = 1.0f},
@@ -2719,7 +2719,7 @@ SC_TEST(ScenarioRiskMetricsSystem_UsesDisplayFloorForVirtualPhysicsBuckets) {
 
 SC_TEST(ScenarioRiskMetricsSystem_PreservesPeakMetricsAfterAllAgentsEvacuate) {
     std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
-    for (int index = 0; index < 5; ++index) {
+    for (int index = 0; index < 8; ++index) {
         seeds.push_back({
             .position = {.value = {.x = 0.75 + (static_cast<double>(index) * 0.03), .y = 0.0}},
             .agent = {.radius = 0.25f, .maxSpeed = 1.0f},
@@ -2767,7 +2767,7 @@ SC_TEST(ScenarioRiskMetricsSystem_PreservesPeakMetricsAfterAllAgentsEvacuate) {
     SC_EXPECT_TRUE(!metrics.peakSnapshot.hotspots.empty());
     SC_EXPECT_TRUE(!metrics.peakSnapshot.pressureHotspots.empty());
     SC_EXPECT_TRUE(!metrics.peakSnapshot.bottlenecks.empty());
-    SC_EXPECT_EQ(metrics.peakSnapshot.stalledAgentCount, std::size_t{5});
+    SC_EXPECT_EQ(metrics.peakSnapshot.stalledAgentCount, std::size_t{8});
     SC_EXPECT_EQ(metrics.peakSnapshot.completionRisk, safecrowd::domain::ScenarioRiskLevel::High);
 }
 

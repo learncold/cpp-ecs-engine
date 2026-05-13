@@ -24,7 +24,8 @@ constexpr std::size_t kMaxResultPressureCells = 5;
 constexpr std::size_t kMaxResultPressureHotspots = 5;
 constexpr std::size_t kMaxResultPressureAgents = 5;
 constexpr std::size_t kMaxResultCriticalPressureEvents = 5;
-constexpr double kHighDensityThresholdPeoplePerSquareMeter = 4.0;
+constexpr double kHighDensityThresholdPeoplePerSquareMeter =
+    kPressureHighDensityThresholdPeoplePerSquareMeter;
 
 struct SpatialCell {
     int x{0};
@@ -175,22 +176,16 @@ PressureCellMetric pressureMetricFromCell(
     for (std::size_t lhsIndex = 0; lhsIndex < cell.entities.size(); ++lhsIndex) {
         const auto lhsEntity = cell.entities[lhsIndex];
         const auto& lhsPosition = query.get<Position>(lhsEntity);
-        const auto& lhsAgent = query.get<Agent>(lhsEntity);
         for (std::size_t rhsIndex = lhsIndex + 1; rhsIndex < cell.entities.size(); ++rhsIndex) {
             const auto rhsEntity = cell.entities[rhsIndex];
             const auto& rhsPosition = query.get<Position>(rhsEntity);
-            const auto& rhsAgent = query.get<Agent>(rhsEntity);
-            const auto comfortDistance =
-                static_cast<double>(lhsAgent.radius + rhsAgent.radius) + simulation_internal::kPersonalSpaceBuffer;
-            if (comfortDistance <= 1e-9) {
-                continue;
-            }
             const auto distance = distanceBetween(lhsPosition.value, rhsPosition.value);
-            if (distance >= comfortDistance) {
+            if (distance >= kPressureReferenceDistanceMeters) {
                 continue;
             }
 
-            metric.pressureScore += (comfortDistance - distance) / comfortDistance;
+            metric.pressureScore +=
+                (kPressureReferenceDistanceMeters - distance) / kPressureReferenceDistanceMeters;
             ++metric.intrudingPairCount;
         }
     }
