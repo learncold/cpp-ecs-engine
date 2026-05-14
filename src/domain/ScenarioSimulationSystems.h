@@ -35,6 +35,8 @@ struct ScenarioSimulationStepResource {
 struct ScenarioAgentSpatialIndexResource {
     double cellSize{1.0};
     std::unordered_map<std::string, std::unordered_map<long long, std::vector<engine::Entity>>> cellsByFloor{};
+    std::unordered_map<std::string, std::unordered_map<long long, std::vector<engine::Entity>>> displayCellsByFloor{};
+    std::unordered_map<std::string, std::unordered_map<long long, std::vector<std::size_t>>> barrierIndicesByFloor{};
 };
 
 struct ScenarioConnectionTraversal {
@@ -157,6 +159,12 @@ struct ScenarioAgentSeed {
 
 std::vector<engine::Entity> scenarioNearbyAgents(
     engine::WorldQuery& query,
+    const ScenarioAgentSpatialIndexResource& index,
+    const Point2D& point,
+    const std::string& floorId,
+    double radius);
+std::vector<const Barrier2D*> scenarioNearbyBarriers(
+    const FacilityLayout2D& layout,
     const ScenarioAgentSpatialIndexResource& index,
     const Point2D& point,
     const std::string& floorId,

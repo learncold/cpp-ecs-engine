@@ -188,6 +188,11 @@ Point2D barrierSeparationVelocity(
     const Position& position,
     const Agent& agent,
     double referenceSpeed);
+Point2D barrierSeparationVelocity(
+    const std::vector<const Barrier2D*>& barriers,
+    const Position& position,
+    const Agent& agent,
+    double referenceSpeed);
 bool movementCrossesBarrier(const FacilityLayout2D& layout, const Point2D& from, const Point2D& to);
 bool lineOfSightClear(const FacilityLayout2D& layout, const Point2D& from, const Point2D& to, double clearance);
 std::vector<Point2D> buildPath(const FacilityLayout2D& layout, const Point2D& start, const Point2D& goal, double clearance);

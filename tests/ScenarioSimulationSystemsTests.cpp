@@ -107,6 +107,28 @@ private:
     safecrowd::domain::Point2D position_{};
 };
 
+class ConfigureBarrierIndexedLayoutSystem final : public safecrowd::engine::EngineSystem {
+public:
+    explicit ConfigureBarrierIndexedLayoutSystem(safecrowd::domain::FacilityLayout2D layout)
+        : layout_(std::move(layout)) {
+    }
+
+    void configure(safecrowd::engine::EngineWorld& world) override {
+        world.resources().set(safecrowd::domain::ScenarioSimulationClockResource{
+            .elapsedSeconds = 0.0,
+            .timeLimitSeconds = 10.0,
+            .complete = false,
+        });
+        world.resources().set(safecrowd::domain::simulation_internal::buildScenarioLayoutCache(layout_));
+    }
+
+    void update(safecrowd::engine::EngineWorld&, const safecrowd::engine::EngineStepContext&) override {
+    }
+
+private:
+    safecrowd::domain::FacilityLayout2D layout_{};
+};
+
 class ConfigureEvacuatedAgentsSystem final : public safecrowd::engine::EngineSystem {
 public:
     void configure(safecrowd::engine::EngineWorld& world) override {
@@ -936,6 +958,61 @@ SC_TEST(ScenarioSpatialIndexSystem_SeparatesConnectedStairEndpointsAwayFromVerti
     SC_EXPECT_EQ(verticalNearby.size(), std::size_t{0});
     SC_EXPECT_EQ(l1Nearby.size(), std::size_t{1});
     SC_EXPECT_EQ(l2Nearby.size(), std::size_t{1});
+}
+
+SC_TEST(ScenarioSpatialIndexSystem_BuildsNearbyBarrierResourceByFloor) {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.floors = {
+        {.id = "L1"},
+        {.id = "L2"},
+    };
+    layout.barriers.push_back({
+        .id = "wall-l1",
+        .floorId = "L1",
+        .geometry = {.vertices = {{.x = -1.0, .y = 0.0}, {.x = 1.0, .y = 0.0}}},
+        .blocksMovement = true,
+    });
+    layout.barriers.push_back({
+        .id = "wall-l2",
+        .floorId = "L2",
+        .geometry = {.vertices = {{.x = -1.0, .y = 0.0}, {.x = 1.0, .y = 0.0}}},
+        .blocksMovement = true,
+    });
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 34,
+    });
+    runtime.addSystem(std::make_unique<ConfigureBarrierIndexedLayoutSystem>(layout));
+    runtime.addSystem(
+        std::make_unique<safecrowd::domain::ScenarioSpatialIndexSystem>(1.0),
+        {.phase = safecrowd::engine::UpdatePhase::PreSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(1.0 / 30.0);
+
+    const auto& resources = runtime.world().resources();
+    const auto& index = resources.get<safecrowd::domain::ScenarioAgentSpatialIndexResource>();
+    const auto& activeLayout = resources.get<safecrowd::domain::ScenarioLayoutCacheResource>().layout;
+    const auto l1Barriers = safecrowd::domain::scenarioNearbyBarriers(
+        activeLayout,
+        index,
+        {.x = 0.0, .y = 0.15},
+        "L1",
+        0.4);
+    const auto l2Barriers = safecrowd::domain::scenarioNearbyBarriers(
+        activeLayout,
+        index,
+        {.x = 0.0, .y = 0.15},
+        "L2",
+        0.4);
+
+    SC_EXPECT_EQ(l1Barriers.size(), std::size_t{1});
+    SC_EXPECT_EQ(l2Barriers.size(), std::size_t{1});
+    SC_EXPECT_EQ(l1Barriers.front()->id, std::string{"wall-l1"});
+    SC_EXPECT_EQ(l2Barriers.front()->id, std::string{"wall-l2"});
 }
 
 SC_TEST(ScenarioClockSystem_AdvancesClockResourceOnFixedSteps) {

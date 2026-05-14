@@ -1302,7 +1302,7 @@ Point2D forwardPreservingAgentAvoidanceVelocity(
 }
 
 Point2D barrierSeparationVelocity(
-    const FacilityLayout2D& layout,
+    const std::vector<const Barrier2D*>& barriers,
     const Position& position,
     const Agent& agent,
     double referenceSpeed) {
@@ -1310,12 +1310,12 @@ Point2D barrierSeparationVelocity(
     const auto keepoutDistance = static_cast<double>(agent.radius) + kBarrierAvoidanceBuffer;
     const auto separationSpeed = std::max(0.0, referenceSpeed);
 
-    for (const auto& barrier : layout.barriers) {
-        if (!barrier.blocksMovement || barrier.geometry.vertices.size() < 2) {
+    for (const auto* barrier : barriers) {
+        if (barrier == nullptr || !barrier->blocksMovement || barrier->geometry.vertices.size() < 2) {
             continue;
         }
 
-        const auto& vertices = barrier.geometry.vertices;
+        const auto& vertices = barrier->geometry.vertices;
         for (std::size_t index = 0; index + 1 < vertices.size(); ++index) {
             const auto closest = closestPointOnSegment(position.value, vertices[index], vertices[index + 1]);
             const auto delta = position.value - closest;
@@ -1327,7 +1327,7 @@ Point2D barrierSeparationVelocity(
             }
         }
 
-        if (barrier.geometry.closed) {
+        if (barrier->geometry.closed) {
             const auto closest = closestPointOnSegment(position.value, vertices.back(), vertices.front());
             const auto delta = position.value - closest;
             const auto distance = lengthOf(delta);
@@ -1340,6 +1340,19 @@ Point2D barrierSeparationVelocity(
     }
 
     return correction;
+}
+
+Point2D barrierSeparationVelocity(
+    const FacilityLayout2D& layout,
+    const Position& position,
+    const Agent& agent,
+    double referenceSpeed) {
+    std::vector<const Barrier2D*> barriers;
+    barriers.reserve(layout.barriers.size());
+    for (const auto& barrier : layout.barriers) {
+        barriers.push_back(&barrier);
+    }
+    return barrierSeparationVelocity(barriers, position, agent, referenceSpeed);
 }
 
 bool movementCrossesBarrier(const FacilityLayout2D& layout, const Point2D& from, const Point2D& to) {
@@ -1477,7 +1490,11 @@ bool nearlySamePoint(const Point2D& lhs, const Point2D& rhs) {
     return distanceBetween(lhs, rhs) <= 1e-6;
 }
 
-std::vector<Point2D> buildVisibilityPath(const FacilityLayout2D& layout, const Point2D& start, const Point2D& goal, double clearance) {
+std::vector<Point2D> buildVisibilityPath(
+    const FacilityLayout2D& layout,
+    const Point2D& start,
+    const Point2D& goal,
+    double clearance) {
     std::vector<VisibilityNode> nodes;
     nodes.push_back({.point = start});
     nodes.push_back({.point = goal});

@@ -990,28 +990,12 @@ void ScenarioBatchResultWidget::applyReplayFrameData(const safecrowd::domain::Si
     if (results_.empty() || currentResultIndex_ < 0 || currentResultIndex_ >= static_cast<int>(results_.size())) {
         return;
     }
-    const auto& result = results_[static_cast<std::size_t>(currentResultIndex_)];
     replayFrameIndex_ = replayFrames_.empty()
         ? 0
         : std::clamp(sliderIndex, 0, static_cast<int>(replayFrames_.size()) - 1);
 
     if (canvas_ != nullptr) {
-        canvas_->setConnectionBlocks(result.scenario.control.connectionBlocks);
-        canvas_->setEnvironmentHazards(result.scenario.environment.hazards);
         canvas_->setFrame(frame);
-        canvas_->setHotspotOverlay(result.risk.hotspots);
-        canvas_->setBottleneckOverlay(result.risk.bottlenecks);
-        canvas_->setDensityOverlay(result.artifacts.densitySummary.peakField.cells.empty()
-            ? result.artifacts.densitySummary.peakCells
-            : result.artifacts.densitySummary.peakField.cells,
-            result.artifacts.densitySummary.highDensityThresholdPeoplePerSquareMeter);
-        canvas_->setPressureOverlay(result.artifacts.pressureSummary.peakField.cells.empty()
-            ? result.artifacts.pressureSummary.peakCells
-            : result.artifacts.pressureSummary.peakField.cells,
-            std::max(
-                result.artifacts.pressureSummary.hotspotScoreThreshold,
-                result.artifacts.pressureSummary.peakPressureScore));
-        applyOverlayModeToCanvas();
     }
     if (replaySlider_ != nullptr && replaySlider_->value() != replayFrameIndex_) {
         const QSignalBlocker blocker(replaySlider_);
@@ -1029,6 +1013,34 @@ void ScenarioBatchResultWidget::applyReplayFrameData(const safecrowd::domain::Si
             .arg(frame.elapsedSeconds, 0, 'f', 1)
             .arg(totalSeconds, 0, 'f', 1));
     }
+}
+
+void ScenarioBatchResultWidget::applySelectedResultStaticCanvasState() {
+    if (canvas_ == nullptr
+        || results_.empty()
+        || currentResultIndex_ < 0
+        || currentResultIndex_ >= static_cast<int>(results_.size())) {
+        return;
+    }
+
+    const auto& result = results_[static_cast<std::size_t>(currentResultIndex_)];
+    canvas_->setConnectionBlocks(result.scenario.control.connectionBlocks);
+    canvas_->setEnvironmentHazards(result.scenario.environment.hazards);
+    canvas_->setHotspotOverlay(result.risk.hotspots);
+    canvas_->setBottleneckOverlay(result.risk.bottlenecks);
+    canvas_->setDensityOverlay(
+        result.artifacts.densitySummary.peakField.cells.empty()
+            ? result.artifacts.densitySummary.peakCells
+            : result.artifacts.densitySummary.peakField.cells,
+        result.artifacts.densitySummary.highDensityThresholdPeoplePerSquareMeter);
+    canvas_->setPressureOverlay(
+        result.artifacts.pressureSummary.peakField.cells.empty()
+            ? result.artifacts.pressureSummary.peakCells
+            : result.artifacts.pressureSummary.peakField.cells,
+        std::max(
+            result.artifacts.pressureSummary.hotspotScoreThreshold,
+            result.artifacts.pressureSummary.peakPressureScore));
+    applyOverlayModeToCanvas();
 }
 
 void ScenarioBatchResultWidget::applyOverlayModeToCanvas() {
@@ -1125,6 +1137,7 @@ void ScenarioBatchResultWidget::loadReplayForSelectedResult() {
         replayFrames_.clear();
         return;
     }
+    applySelectedResultStaticCanvasState();
     replayFrames_ = replayFramesForResult(results_[static_cast<std::size_t>(currentResultIndex_)]);
     replayFrameIndex_ = replayFrames_.empty() ? 0 : static_cast<int>(replayFrames_.size()) - 1;
     if (replaySlider_ != nullptr) {

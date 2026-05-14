@@ -544,6 +544,7 @@ void SimulationCanvasWidget::setDensityOverlay(
         std::isfinite(scaleMaxPeoplePerSquareMeter) && scaleMaxPeoplePerSquareMeter > 0.0
         ? scaleMaxPeoplePerSquareMeter
         : kDefaultDensityScaleMaxPeoplePerSquareMeter;
+    invalidateOverlayCache();
     update();
 }
 
@@ -555,6 +556,7 @@ void SimulationCanvasWidget::setPressureOverlay(
         std::isfinite(scaleMaxPressureScore) && scaleMaxPressureScore > 0.0
         ? scaleMaxPressureScore
         : kDefaultPressureScaleMaxScore;
+    invalidateOverlayCache();
     update();
 }
 
@@ -563,6 +565,7 @@ void SimulationCanvasWidget::setHotspotOverlay(std::vector<safecrowd::domain::Sc
     if (focusedHotspotIndex_.has_value() && *focusedHotspotIndex_ >= hotspotOverlay_.size()) {
         focusedHotspotIndex_.reset();
     }
+    invalidateOverlayCache();
     update();
 }
 
@@ -571,11 +574,16 @@ void SimulationCanvasWidget::setBottleneckOverlay(std::vector<safecrowd::domain:
     if (focusedBottleneckIndex_.has_value() && *focusedBottleneckIndex_ >= bottleneckOverlay_.size()) {
         focusedBottleneckIndex_.reset();
     }
+    invalidateOverlayCache();
     update();
 }
 
 void SimulationCanvasWidget::setResultOverlayMode(ResultOverlayMode mode) {
+    if (overlayMode_ == mode) {
+        return;
+    }
     overlayMode_ = mode;
+    invalidateOverlayCache();
     update();
 }
 
@@ -589,6 +597,7 @@ void SimulationCanvasWidget::focusHotspot(std::size_t index) {
     }
     focusedHotspotIndex_ = index;
     focusedBottleneckIndex_.reset();
+    invalidateOverlayCache();
     focusWorldPoint(hotspotOverlay_[index].center, std::max(camera_.zoom(), kHotspotFocusZoom));
 }
 
@@ -603,6 +612,7 @@ void SimulationCanvasWidget::focusBottleneck(std::size_t index) {
     }
     focusedBottleneckIndex_ = index;
     focusedHotspotIndex_.reset();
+    invalidateOverlayCache();
     focusWorldPoint(
         {.x = (passage.start.x + passage.end.x) / 2.0, .y = (passage.start.y + passage.end.y) / 2.0},
         std::max(camera_.zoom(), kBottleneckFocusZoom));
@@ -640,6 +650,7 @@ void SimulationCanvasWidget::mouseDoubleClickEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton) {
         camera_.reset();
         layoutCacheValid_ = false;
+        invalidateOverlayCache();
         update();
         event->accept();
         return;
@@ -658,6 +669,7 @@ void SimulationCanvasWidget::mouseMoveEvent(QMouseEvent* event) {
             QToolTip::hideText();
         }
         layoutCacheValid_ = false;
+        invalidateOverlayCache();
         update();
         return;
     }
@@ -807,14 +819,9 @@ void SimulationCanvasWidget::paintEvent(QPaintEvent* event) {
     painter.drawPixmap(0, 0, layoutCache_);
 
     const auto transform = currentTransform(*bounds);
-    if (overlayMode_ == ResultOverlayMode::Density) {
-        drawDensityOverlay(painter, transform);
-    } else if (overlayMode_ == ResultOverlayMode::Pressure) {
-        drawPressureOverlay(painter, transform);
-    } else if (overlayMode_ == ResultOverlayMode::Hotspots) {
-        drawHotspotOverlay(painter, transform);
-    } else if (overlayMode_ == ResultOverlayMode::Bottlenecks) {
-        drawBottleneckOverlay(painter, transform);
+    refreshOverlayCache(*bounds);
+    if (!overlayCache_.isNull()) {
+        painter.drawPixmap(0, 0, overlayCache_);
     }
     drawEnvironmentHazardOverlay(painter, transform);
     drawConnectionBlockOverlay(painter, transform);
@@ -847,6 +854,7 @@ void SimulationCanvasWidget::wheelEvent(QWheelEvent* event) {
     }
     if (camera_.zoomAt(event, *bounds, previewViewport())) {
         layoutCacheValid_ = false;
+        invalidateOverlayCache();
         update();
         return;
     }
@@ -901,6 +909,69 @@ void SimulationCanvasWidget::refreshLayoutCache(const LayoutCanvasBounds& bounds
     layoutCacheValid_ = true;
 }
 
+void SimulationCanvasWidget::refreshOverlayCache(const LayoutCanvasBounds& bounds) {
+    if (overlayMode_ == ResultOverlayMode::None) {
+        overlayCache_ = QPixmap();
+        overlayCacheValid_ = true;
+        overlayCacheMode_ = overlayMode_;
+        overlayCacheFloorId_ = currentFloorId_;
+        return;
+    }
+
+    const auto currentSize = size();
+    if (currentSize.isEmpty()) {
+        overlayCache_ = QPixmap();
+        overlayCacheSize_ = currentSize;
+        overlayCacheDevicePixelRatio_ = 0.0;
+        overlayCacheValid_ = false;
+        return;
+    }
+
+    const auto devicePixelRatio = devicePixelRatioF();
+    if (overlayCacheValid_
+        && overlayCacheSize_ == currentSize
+        && overlayCacheDevicePixelRatio_ == devicePixelRatio
+        && overlayCacheZoom_ == camera_.zoom()
+        && overlayCachePan_ == camera_.panOffset()
+        && overlayCacheMode_ == overlayMode_
+        && overlayCacheFloorId_ == currentFloorId_) {
+        return;
+    }
+
+    const QSize physicalSize{
+        std::max(1, static_cast<int>(std::ceil(currentSize.width() * devicePixelRatio))),
+        std::max(1, static_cast<int>(std::ceil(currentSize.height() * devicePixelRatio))),
+    };
+    overlayCache_ = QPixmap(physicalSize);
+    overlayCache_.setDevicePixelRatio(devicePixelRatio);
+    overlayCache_.fill(Qt::transparent);
+
+    QPainter painter(&overlayCache_);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    const auto transform = currentTransform(bounds);
+    if (overlayMode_ == ResultOverlayMode::Density) {
+        drawDensityOverlay(painter, transform);
+    } else if (overlayMode_ == ResultOverlayMode::Pressure) {
+        drawPressureOverlay(painter, transform);
+    } else if (overlayMode_ == ResultOverlayMode::Hotspots) {
+        drawHotspotOverlay(painter, transform);
+    } else if (overlayMode_ == ResultOverlayMode::Bottlenecks) {
+        drawBottleneckOverlay(painter, transform);
+    }
+
+    overlayCacheSize_ = currentSize;
+    overlayCacheZoom_ = camera_.zoom();
+    overlayCachePan_ = camera_.panOffset();
+    overlayCacheDevicePixelRatio_ = devicePixelRatio;
+    overlayCacheMode_ = overlayMode_;
+    overlayCacheFloorId_ = currentFloorId_;
+    overlayCacheValid_ = true;
+}
+
+void SimulationCanvasWidget::invalidateOverlayCache() {
+    overlayCacheValid_ = false;
+}
+
 QRectF SimulationCanvasWidget::previewViewport() const {
     return QRectF(rect()).adjusted(kViewportPadding, kViewportPadding, -kViewportPadding, -kViewportPadding);
 }
@@ -922,6 +993,7 @@ void SimulationCanvasWidget::focusWorldPoint(const safecrowd::domain::Point2D& p
     const LayoutCanvasTransform transform(*bounds, viewport, camera_.zoom(), {});
     camera_.setPanOffset(viewport.center() - transform.map(point));
     layoutCacheValid_ = false;
+    invalidateOverlayCache();
     update();
 }
 
@@ -1404,6 +1476,7 @@ void SimulationCanvasWidget::setCurrentFloorId(std::string floorId, bool manualS
     manualFloorSelection_ = manualSelection;
     layoutBounds_ = collectLayoutCanvasBounds(layout_, currentFloorId_);
     layoutCacheValid_ = false;
+    invalidateOverlayCache();
     camera_.reset();
 
     if (floorComboBox_ != nullptr) {
