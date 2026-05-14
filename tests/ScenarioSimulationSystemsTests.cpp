@@ -520,6 +520,51 @@ std::vector<safecrowd::domain::ScenarioAgentSeed> pressureFeedbackMotionSeeds() 
 
 }  // namespace
 
+SC_TEST(Agent_DefaultsIncludeEnvironmentReactionTraits) {
+    const safecrowd::domain::Agent agent{};
+
+    SC_EXPECT_NEAR(agent.hazardSensitivity, 1.0, 1e-9);
+    SC_EXPECT_NEAR(agent.smokeSensitivity, 1.0, 1e-9);
+    SC_EXPECT_NEAR(agent.reactionDelaySeconds, 0.0, 1e-9);
+    SC_EXPECT_NEAR(agent.closurePatienceSeconds, 0.0, 1e-9);
+}
+
+SC_TEST(ScenarioEnvironmentReactionResource_DefaultsEmptyAndStoresAgentState) {
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 2,
+    });
+
+    auto& resources = runtime.world().resources();
+    resources.set(safecrowd::domain::ScenarioEnvironmentReactionResource{});
+
+    SC_EXPECT_TRUE(resources.contains<safecrowd::domain::ScenarioEnvironmentReactionResource>());
+    auto& reactions = resources.get<safecrowd::domain::ScenarioEnvironmentReactionResource>();
+    SC_EXPECT_TRUE(reactions.agentsById.empty());
+
+    reactions.agentsById.emplace(
+        7,
+        safecrowd::domain::ScenarioEnvironmentReactionAgentState{
+            .hazardDetected = true,
+            .hazardAware = false,
+            .hazardKey = "fire-a",
+            .hazardDetectedAtSeconds = 1.25,
+            .hazardReactionReadySeconds = 2.0,
+            .closureDetected = true,
+            .closureAware = false,
+            .blockedConnectionId = "door-a",
+            .closureDetectedAtSeconds = 1.5,
+            .closureReactionReadySeconds = 3.0,
+        });
+
+    const auto& state = reactions.agentsById.at(7);
+    SC_EXPECT_TRUE(state.hazardDetected);
+    SC_EXPECT_EQ(state.hazardKey, std::string{"fire-a"});
+    SC_EXPECT_TRUE(state.closureDetected);
+    SC_EXPECT_EQ(state.blockedConnectionId, std::string{"door-a"});
+}
+
 SC_TEST(ScenarioAgentSpawnSystem_ConfiguresClockAndSpawnsAgentSeeds) {
     std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
     seeds.push_back({
@@ -551,6 +596,11 @@ SC_TEST(ScenarioAgentSpawnSystem_ConfiguresClockAndSpawnsAgentSeeds) {
         safecrowd::domain::EvacuationRoute,
         safecrowd::domain::EvacuationStatus>();
     SC_EXPECT_EQ(entities.size(), std::size_t{1});
+    const auto& agent = runtime.world().query().get<safecrowd::domain::Agent>(entities.front());
+    SC_EXPECT_NEAR(agent.hazardSensitivity, 1.0, 1e-9);
+    SC_EXPECT_NEAR(agent.smokeSensitivity, 1.0, 1e-9);
+    SC_EXPECT_NEAR(agent.reactionDelaySeconds, 0.0, 1e-9);
+    SC_EXPECT_NEAR(agent.closurePatienceSeconds, 0.0, 1e-9);
     const auto& clock = runtime.world().resources().get<safecrowd::domain::ScenarioSimulationClockResource>();
     SC_EXPECT_NEAR(clock.timeLimitSeconds, 15.0, 1e-9);
     const auto& frame = runtime.world().resources().get<safecrowd::domain::ScenarioSimulationFrameResource>().frame;
