@@ -71,6 +71,9 @@ public:
         const auto* activeHazards = resources.contains<ScenarioActiveEnvironmentHazardsResource>()
             ? &resources.get<ScenarioActiveEnvironmentHazardsResource>()
             : nullptr;
+        const auto* sharedSpatialIndex = resources.contains<ScenarioAgentSpatialIndexResource>()
+            ? &resources.get<ScenarioAgentSpatialIndexResource>()
+            : nullptr;
 
         applyRouteGuidance(query, entities, layoutCache, clock.elapsedSeconds, step.derivedSeed);
         advanceRoutesForCurrentZones(query, entities, layoutCache);
@@ -79,7 +82,10 @@ public:
         replanBlockedRouteSegments(query, entities, layoutCache, clock.elapsedSeconds, layoutRevision);
         replanHazardAwareExitRoutes(query, entities, layoutCache, clock.elapsedSeconds, reactions, activeHazards);
         updateAgentPhysicsFloorIds(query, layoutCache, entities);
-        const auto localNeighborIndex = buildAgentSpatialIndex(query, entities, 1.0);
+        std::optional<AgentSpatialIndex> localNeighborIndex;
+        if (sharedSpatialIndex == nullptr) {
+            localNeighborIndex = buildAgentSpatialIndex(query, entities, 1.0);
+        }
         const auto* pressureFeedback = resources.contains<ScenarioPressureFeedbackResource>()
             ? &resources.get<ScenarioPressureFeedbackResource>()
             : nullptr;
@@ -234,8 +240,19 @@ public:
                 static_cast<double>(agent.radius) + kDefaultAgentRadius + kPersonalSpaceBuffer,
                 kHeadOnLookAheadDistance);
             const auto collisionFloorId = agentCollisionFloorId(route);
-            const auto neighborCandidates =
-                nearbyAgents(query, localNeighborIndex, position.value, collisionFloorId, neighborRadius);
+            const auto neighborCandidates = sharedSpatialIndex != nullptr
+                ? scenarioNearbyAgents(
+                    query,
+                    *sharedSpatialIndex,
+                    position.value,
+                    collisionFloorId,
+                    neighborRadius)
+                : nearbyAgents(
+                    query,
+                    *localNeighborIndex,
+                    position.value,
+                    collisionFloorId,
+                    neighborRadius);
             const auto avoidanceVelocity =
                 forwardPreservingAgentAvoidanceVelocity(
                     query,
@@ -248,14 +265,25 @@ public:
             const auto barrierReferenceSpeed = std::max(
                 adjustedHazardMaxSpeed,
                 (static_cast<double>(agent.maxSpeed) * 0.75) * pressureSpeedFactor);
-            const auto barrierVelocity =
-                barrierSeparationVelocity(floorLayout, position, agent, barrierReferenceSpeed)
-                * pressureBarrierScale;
+            const auto barrierVelocity = sharedSpatialIndex != nullptr
+                ? barrierSeparationVelocity(
+                    scenarioNearbyBarriers(
+                        layoutCache.layout,
+                        *sharedSpatialIndex,
+                        position.value,
+                        route.currentFloorId,
+                        static_cast<double>(agent.radius) + kBarrierAvoidanceBuffer),
+                    position,
+                    agent,
+                    barrierReferenceSpeed)
+                : barrierSeparationVelocity(floorLayout, position, agent, barrierReferenceSpeed);
+            const auto scaledBarrierVelocity = barrierVelocity * pressureBarrierScale;
             const auto hazardAvoidanceVelocity =
                 hazardState == nullptr
                 ? Point2D{}
                 : hazardAvoidanceVelocityFor(*hazardState, position.value, routeDirection, adjustedHazardMaxSpeed);
-            auto finalVelocity = (desiredVelocity * speedScale) + avoidanceVelocity + barrierVelocity + hazardAvoidanceVelocity;
+            auto finalVelocity =
+                (desiredVelocity * speedScale) + avoidanceVelocity + scaledBarrierVelocity + hazardAvoidanceVelocity;
             const auto lateral = perpendicularLeft(routeDirection);
             if (dot(finalVelocity, routeDirection) < 0.0) {
                 finalVelocity = (routeDirection * (adjustedHazardMaxSpeed * 0.15))
@@ -268,7 +296,7 @@ public:
                 finalVelocity = (routeDirection * std::max(0.0, forwardComponent))
                     + (lateral * std::clamp(lateralComponent, -maxLateralComponent, maxLateralComponent));
             }
-            finalVelocity = velocityWithBarrierEscape(finalVelocity, barrierVelocity, adjustedHazardMaxSpeed);
+            finalVelocity = velocityWithBarrierEscape(finalVelocity, scaledBarrierVelocity, adjustedHazardMaxSpeed);
             plans.push_back({
                 .entity = entity,
                 .velocity = clampedToLength(finalVelocity, adjustedHazardMaxSpeed),

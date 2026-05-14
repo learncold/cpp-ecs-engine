@@ -73,6 +73,8 @@ private:
     std::optional<LayoutCanvasBounds> collectBounds() const;
     LayoutCanvasTransform currentTransform(const LayoutCanvasBounds& bounds) const;
     void refreshLayoutCache(const LayoutCanvasBounds& bounds);
+    void refreshOverlayCache(const LayoutCanvasBounds& bounds);
+    void invalidateOverlayCache();
     QRectF previewViewport() const;
     void focusWorldPoint(const safecrowd::domain::Point2D& point, double zoom);
     void drawConnectionBlockOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
@@ -113,6 +115,14 @@ private:
     double layoutCacheZoom_{0.0};
     double layoutCacheDevicePixelRatio_{0.0};
     bool layoutCacheValid_{false};
+    QPixmap overlayCache_{};
+    QSize overlayCacheSize_{};
+    QPointF overlayCachePan_{};
+    double overlayCacheZoom_{0.0};
+    double overlayCacheDevicePixelRatio_{0.0};
+    ResultOverlayMode overlayCacheMode_{ResultOverlayMode::None};
+    std::string overlayCacheFloorId_{};
+    bool overlayCacheValid_{false};
 
     std::string hoveredConnectionBlockId_{};
     std::string hoveredEnvironmentHazardId_{};

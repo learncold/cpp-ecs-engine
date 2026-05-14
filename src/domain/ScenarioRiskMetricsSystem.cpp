@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -254,6 +255,63 @@ double barrierCompression(const Barrier2D& barrier, const Point2D& position, dou
         }
     }
     return force;
+}
+
+ScenarioAgentSpatialIndexResource buildDisplayFloorPressureIndex(
+    const std::vector<ActiveAgentContext>& activeAgents,
+    const FacilityLayout2D& layout) {
+    ScenarioAgentSpatialIndexResource index;
+    index.cellSize = kPressureReferenceDistanceMeters;
+    index.displayCellsByFloor.reserve(4);
+    for (const auto& agent : activeAgents) {
+        const auto cellKey = spatialKey(spatialCellFor(agent.position, index.cellSize));
+        index.displayCellsByFloor[agent.floorId][cellKey].push_back(agent.entity);
+    }
+    index.barrierIndicesByFloor.reserve(std::max<std::size_t>(1, layout.floors.size()));
+    for (std::size_t barrierIndex = 0; barrierIndex < layout.barriers.size(); ++barrierIndex) {
+        const auto& barrier = layout.barriers[barrierIndex];
+        if (!barrier.blocksMovement || barrier.geometry.vertices.size() < 2) {
+            continue;
+        }
+
+        const auto& vertices = barrier.geometry.vertices;
+        auto insertCoverage = [&](const Point2D& minPoint, const Point2D& maxPoint) {
+            const auto minCell = spatialCellFor(minPoint, index.cellSize);
+            const auto maxCell = spatialCellFor(maxPoint, index.cellSize);
+            auto& floorCells = index.barrierIndicesByFloor[barrier.floorId];
+            for (int y = minCell.y; y <= maxCell.y; ++y) {
+                for (int x = minCell.x; x <= maxCell.x; ++x) {
+                    floorCells[spatialKey({.x = x, .y = y})].push_back(barrierIndex);
+                }
+            }
+        };
+
+        for (std::size_t vertexIndex = 0; vertexIndex + 1 < vertices.size(); ++vertexIndex) {
+            insertCoverage(
+                {
+                    .x = std::min(vertices[vertexIndex].x, vertices[vertexIndex + 1].x),
+                    .y = std::min(vertices[vertexIndex].y, vertices[vertexIndex + 1].y),
+                },
+                {
+                    .x = std::max(vertices[vertexIndex].x, vertices[vertexIndex + 1].x),
+                    .y = std::max(vertices[vertexIndex].y, vertices[vertexIndex + 1].y),
+                });
+        }
+        if (barrier.geometry.closed) {
+            auto minX = vertices.front().x;
+            auto minY = vertices.front().y;
+            auto maxX = vertices.front().x;
+            auto maxY = vertices.front().y;
+            for (const auto& vertex : vertices) {
+                minX = std::min(minX, vertex.x);
+                minY = std::min(minY, vertex.y);
+                maxX = std::max(maxX, vertex.x);
+                maxY = std::max(maxY, vertex.y);
+            }
+            insertCoverage({.x = minX, .y = minY}, {.x = maxX, .y = maxY});
+        }
+    }
+    return index;
 }
 
 double localDensityRatio(std::size_t nearbyCount) {
@@ -533,12 +591,17 @@ public:
                     forces[index] += combinedRadius - distance;
                 }
 
-                for (const auto& barrier : activeLayout.barriers) {
-                    if (!barrierMatchesFloor(barrier, activeAgents[index].collisionFloorId)) {
+                for (const auto* barrier : scenarioNearbyBarriers(
+                         activeLayout,
+                         *spatialIndex,
+                         activeAgents[index].position,
+                         activeAgents[index].collisionFloorId,
+                         activeAgents[index].radius)) {
+                    if (barrier == nullptr) {
                         continue;
                     }
                     forces[index] += barrierCompression(
-                        barrier,
+                        *barrier,
                         activeAgents[index].position,
                         activeAgents[index].radius);
                 }
@@ -678,6 +741,15 @@ public:
             cell.entities.push_back(entity);
         }
 
+        std::optional<ScenarioAgentSpatialIndexResource> fallbackPressureIndex;
+        const auto* pressureIndex = resources.contains<ScenarioAgentSpatialIndexResource>()
+            ? &resources.get<ScenarioAgentSpatialIndexResource>()
+            : nullptr;
+        if (pressureIndex == nullptr) {
+            fallbackPressureIndex = buildDisplayFloorPressureIndex(activeAgents, activeLayout);
+            pressureIndex = &*fallbackPressureIndex;
+        }
+
         ScenarioSimulationClockResource clock;
         if (resources.contains<ScenarioSimulationClockResource>()) {
             clock = resources.get<ScenarioSimulationClockResource>();
@@ -687,6 +759,7 @@ public:
             snapshot,
             activeLayout,
             activeAgents,
+            *pressureIndex,
             clock.elapsedSeconds,
             pressureTracking);
 
@@ -773,6 +846,7 @@ private:
         ScenarioRiskSnapshot& snapshot,
         const FacilityLayout2D& layout,
         const std::vector<ActiveAgentContext>& activeAgents,
+        const ScenarioAgentSpatialIndexResource& spatialIndex,
         double elapsedSeconds,
         ScenarioPressureTrackingResource& tracking) const {
         const auto deltaSeconds = tracking.hasPreviousElapsedSeconds
@@ -781,38 +855,77 @@ private:
         tracking.previousElapsedSeconds = elapsedSeconds;
         tracking.hasPreviousElapsedSeconds = true;
 
+        std::unordered_map<std::uint64_t, std::size_t> activeAgentIndices;
+        activeAgentIndices.reserve(activeAgents.size());
+        for (std::size_t index = 0; index < activeAgents.size(); ++index) {
+            activeAgentIndices.emplace(activeAgents[index].agentId, index);
+        }
+
         std::vector<double> proximityForces(activeAgents.size(), 0.0);
         std::vector<std::size_t> nearbyCounts(activeAgents.size(), 0);
+        const auto probeRange = std::max(1, static_cast<int>(std::ceil(
+            kPressureReferenceDistanceMeters / std::max(0.1, spatialIndex.cellSize))));
         for (std::size_t lhsIndex = 0; lhsIndex < activeAgents.size(); ++lhsIndex) {
-            for (std::size_t rhsIndex = lhsIndex + 1; rhsIndex < activeAgents.size(); ++rhsIndex) {
-                if (activeAgents[lhsIndex].floorId != activeAgents[rhsIndex].floorId) {
-                    continue;
-                }
-                const auto distance = distanceBetween(activeAgents[lhsIndex].position, activeAgents[rhsIndex].position);
-                if (distance >= kPressureReferenceDistanceMeters) {
-                    continue;
-                }
+            const auto& lhsAgent = activeAgents[lhsIndex];
+            const auto floorIt = spatialIndex.displayCellsByFloor.find(lhsAgent.floorId);
+            if (floorIt == spatialIndex.displayCellsByFloor.end()) {
+                continue;
+            }
 
-                const auto proximityScore =
-                    (kPressureReferenceDistanceMeters - distance) / kPressureReferenceDistanceMeters;
-                proximityForces[lhsIndex] += proximityScore;
-                proximityForces[rhsIndex] += proximityScore;
-                ++nearbyCounts[lhsIndex];
-                ++nearbyCounts[rhsIndex];
+            const auto centerCell = spatialCellFor(lhsAgent.position, spatialIndex.cellSize);
+            for (int dy = -probeRange; dy <= probeRange; ++dy) {
+                for (int dx = -probeRange; dx <= probeRange; ++dx) {
+                    const auto cellIt = floorIt->second.find(spatialKey({
+                        .x = centerCell.x + dx,
+                        .y = centerCell.y + dy,
+                    }));
+                    if (cellIt == floorIt->second.end()) {
+                        continue;
+                    }
+
+                    for (const auto rhsEntity : cellIt->second) {
+                        const auto rhsIndexIt = activeAgentIndices.find(rhsEntity.index);
+                        if (rhsIndexIt == activeAgentIndices.end()) {
+                            continue;
+                        }
+                        const auto rhsIndex = rhsIndexIt->second;
+                        if (rhsIndex <= lhsIndex) {
+                            continue;
+                        }
+
+                        const auto& rhsAgent = activeAgents[rhsIndex];
+                        const auto distance = distanceBetween(lhsAgent.position, rhsAgent.position);
+                        if (distance >= kPressureReferenceDistanceMeters) {
+                            continue;
+                        }
+
+                        const auto proximityScore =
+                            (kPressureReferenceDistanceMeters - distance) / kPressureReferenceDistanceMeters;
+                        proximityForces[lhsIndex] += proximityScore;
+                        proximityForces[rhsIndex] += proximityScore;
+                        ++nearbyCounts[lhsIndex];
+                        ++nearbyCounts[rhsIndex];
+                    }
+                }
             }
         }
 
         std::vector<double> forces(activeAgents.size(), 0.0);
         for (std::size_t index = 0; index < activeAgents.size(); ++index) {
             forces[index] = std::max(proximityForces[index], localDensityRatio(nearbyCounts[index]));
-            for (const auto& barrier : layout.barriers) {
-                if (!barrierMatchesFloor(barrier, activeAgents[index].floorId)) {
+            for (const auto* barrier : scenarioNearbyBarriers(
+                     layout,
+                     spatialIndex,
+                     activeAgents[index].position,
+                     activeAgents[index].floorId,
+                     kPressureReferenceDistanceMeters)) {
+                if (barrier == nullptr) {
                     continue;
                 }
                 forces[index] = std::max(
                     forces[index],
                     proximityForces[index] + barrierCompression(
-                        barrier,
+                        *barrier,
                         activeAgents[index].position,
                         kPressureReferenceDistanceMeters));
             }

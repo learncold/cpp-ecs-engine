@@ -59,6 +59,7 @@ private:
     void applyReplayFrame(int frameIndex);
     void applyReplayFrameData(const safecrowd::domain::SimulationFrame& frame, int sliderIndex);
     void applyOverlayModeToCanvas();
+    void applySelectedResultStaticCanvasState();
     void loadReplayForSelectedResult();
     int nearestReplayFrameIndex(double seconds) const;
     void navigateToAuthoring();

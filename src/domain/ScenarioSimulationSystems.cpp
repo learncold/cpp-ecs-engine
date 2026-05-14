@@ -81,6 +81,127 @@ Point2D cellMax(const SpatialCell& cell, double cellSize) {
     };
 }
 
+void insertBarrierCoverageCells(
+    std::unordered_map<std::string, std::unordered_map<long long, std::vector<std::size_t>>>& cellsByFloor,
+    const std::string& floorId,
+    const Point2D& minPoint,
+    const Point2D& maxPoint,
+    double cellSize,
+    std::size_t barrierIndex) {
+    const auto minCell = spatialCellFor(minPoint, cellSize);
+    const auto maxCell = spatialCellFor(maxPoint, cellSize);
+    auto& floorCells = cellsByFloor[floorId];
+    for (int y = minCell.y; y <= maxCell.y; ++y) {
+        for (int x = minCell.x; x <= maxCell.x; ++x) {
+            floorCells[spatialKey({.x = x, .y = y})].push_back(barrierIndex);
+        }
+    }
+}
+
+void appendBarrierIndexCoverage(
+    std::unordered_map<std::string, std::unordered_map<long long, std::vector<std::size_t>>>& cellsByFloor,
+    const Barrier2D& barrier,
+    double cellSize,
+    std::size_t barrierIndex) {
+    const auto& vertices = barrier.geometry.vertices;
+    if (!barrier.blocksMovement || vertices.size() < 2) {
+        return;
+    }
+
+    for (std::size_t index = 0; index + 1 < vertices.size(); ++index) {
+        insertBarrierCoverageCells(
+            cellsByFloor,
+            barrier.floorId,
+            {
+                .x = std::min(vertices[index].x, vertices[index + 1].x),
+                .y = std::min(vertices[index].y, vertices[index + 1].y),
+            },
+            {
+                .x = std::max(vertices[index].x, vertices[index + 1].x),
+                .y = std::max(vertices[index].y, vertices[index + 1].y),
+            },
+            cellSize,
+            barrierIndex);
+    }
+
+    if (barrier.geometry.closed) {
+        insertBarrierCoverageCells(
+            cellsByFloor,
+            barrier.floorId,
+            {
+                .x = std::min(vertices.back().x, vertices.front().x),
+                .y = std::min(vertices.back().y, vertices.front().y),
+            },
+            {
+                .x = std::max(vertices.back().x, vertices.front().x),
+                .y = std::max(vertices.back().y, vertices.front().y),
+            },
+            cellSize,
+            barrierIndex);
+
+        auto minX = vertices.front().x;
+        auto minY = vertices.front().y;
+        auto maxX = vertices.front().x;
+        auto maxY = vertices.front().y;
+        for (const auto& vertex : vertices) {
+            minX = std::min(minX, vertex.x);
+            minY = std::min(minY, vertex.y);
+            maxX = std::max(maxX, vertex.x);
+            maxY = std::max(maxY, vertex.y);
+        }
+        insertBarrierCoverageCells(
+            cellsByFloor,
+            barrier.floorId,
+            {.x = minX, .y = minY},
+            {.x = maxX, .y = maxY},
+            cellSize,
+            barrierIndex);
+    }
+}
+
+bool barrierWithinRadius(const Barrier2D& barrier, const Point2D& point, double radius) {
+    if (!barrier.blocksMovement || barrier.geometry.vertices.size() < 2) {
+        return false;
+    }
+
+    const auto& vertices = barrier.geometry.vertices;
+    for (std::size_t index = 0; index + 1 < vertices.size(); ++index) {
+        const auto closest =
+            simulation_internal::closestPointOnSegment(point, vertices[index], vertices[index + 1]);
+        if (distanceBetween(point, closest) <= radius) {
+            return true;
+        }
+    }
+
+    if (barrier.geometry.closed) {
+        const auto closest =
+            simulation_internal::closestPointOnSegment(point, vertices.back(), vertices.front());
+        if (distanceBetween(point, closest) <= radius
+            || simulation_internal::pointInRing(vertices, point)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+template <typename TEntry>
+void appendSpatialBucketEntries(
+    const std::unordered_map<long long, std::vector<TEntry>>& floorCells,
+    const SpatialCell& center,
+    int range,
+    std::vector<TEntry>& entries) {
+    for (int dy = -range; dy <= range; ++dy) {
+        for (int dx = -range; dx <= range; ++dx) {
+            const auto it = floorCells.find(spatialKey({.x = center.x + dx, .y = center.y + dy}));
+            if (it == floorCells.end()) {
+                continue;
+            }
+            entries.insert(entries.end(), it->second.begin(), it->second.end());
+        }
+    }
+}
+
 void appendReplayFrame(
     ScenarioResultArtifactsResource& result,
     const SimulationFrame& frame) {
@@ -594,18 +715,59 @@ std::vector<engine::Entity> scenarioNearbyAgents(
 
     const auto center = spatialCellFor(point, index.cellSize);
     const auto range = std::max(1, static_cast<int>(std::ceil(radius / index.cellSize)));
-    for (int dy = -range; dy <= range; ++dy) {
-        for (int dx = -range; dx <= range; ++dx) {
-            const auto it = floorIt->second.find(spatialKey({.x = center.x + dx, .y = center.y + dy}));
-            if (it == floorIt->second.end()) {
-                continue;
-            }
-            for (const auto entity : it->second) {
-                const auto& otherPosition = query.get<Position>(entity);
-                if (distanceBetween(point, otherPosition.value) <= radius) {
-                    candidates.push_back(entity);
-                }
-            }
+    std::vector<engine::Entity> bucketEntries;
+    appendSpatialBucketEntries(floorIt->second, center, range, bucketEntries);
+    for (const auto entity : bucketEntries) {
+        const auto& otherPosition = query.get<Position>(entity);
+        if (distanceBetween(point, otherPosition.value) <= radius) {
+            candidates.push_back(entity);
+        }
+    }
+    return candidates;
+}
+
+std::vector<const Barrier2D*> scenarioNearbyBarriers(
+    const FacilityLayout2D& layout,
+    const ScenarioAgentSpatialIndexResource& index,
+    const Point2D& point,
+    const std::string& floorId,
+    double radius) {
+    std::vector<const Barrier2D*> candidates;
+    if (layout.barriers.empty()) {
+        return candidates;
+    }
+
+    const auto center = spatialCellFor(point, index.cellSize);
+    const auto range = std::max(1, static_cast<int>(std::ceil(radius / index.cellSize)));
+    std::unordered_set<std::size_t> barrierIndices;
+    barrierIndices.reserve(16);
+
+    auto appendFloorCandidates = [&](const std::string& candidateFloorId) {
+        const auto floorIt = index.barrierIndicesByFloor.find(candidateFloorId);
+        if (floorIt == index.barrierIndicesByFloor.end()) {
+            return;
+        }
+        std::vector<std::size_t> bucketEntries;
+        appendSpatialBucketEntries(floorIt->second, center, range, bucketEntries);
+        barrierIndices.insert(bucketEntries.begin(), bucketEntries.end());
+    };
+
+    if (floorId.empty()) {
+        for (const auto& [candidateFloorId, _] : index.barrierIndicesByFloor) {
+            appendFloorCandidates(candidateFloorId);
+        }
+    } else {
+        appendFloorCandidates(floorId);
+        appendFloorCandidates(std::string{});
+    }
+
+    for (const auto barrierIndex : barrierIndices) {
+        if (barrierIndex >= layout.barriers.size()) {
+            continue;
+        }
+        const auto& barrier = layout.barriers[barrierIndex];
+        if (barrierWithinRadius(barrier, point, radius)) {
+            candidates.push_back(&barrier);
         }
     }
     return candidates;
@@ -633,17 +795,34 @@ void ScenarioSpatialIndexSystem::update(engine::EngineWorld& world, const engine
 
     const auto entities = query.view<Position, Agent, EvacuationStatus>();
     index.cellsByFloor.reserve(4);
+    index.displayCellsByFloor.reserve(4);
     for (const auto entity : entities) {
         const auto& status = query.get<EvacuationStatus>(entity);
         if (status.evacuated) {
             continue;
         }
         const auto& position = query.get<Position>(entity);
-        const auto floorId = query.contains<EvacuationRoute>(entity)
+        const auto collisionFloorId = query.contains<EvacuationRoute>(entity)
             ? simulation_internal::agentCollisionFloorId(query.get<EvacuationRoute>(entity))
             : std::string{};
-        auto& floorCells = index.cellsByFloor[floorId];
-        floorCells[spatialKey(spatialCellFor(position.value, index.cellSize))].push_back(entity);
+        const auto displayFloorId = query.contains<EvacuationRoute>(entity)
+            ? simulation_internal::agentDisplayFloorId(query.get<EvacuationRoute>(entity))
+            : collisionFloorId;
+        const auto cellKey = spatialKey(spatialCellFor(position.value, index.cellSize));
+        index.cellsByFloor[collisionFloorId][cellKey].push_back(entity);
+        index.displayCellsByFloor[displayFloorId][cellKey].push_back(entity);
+    }
+
+    if (resources.contains<ScenarioLayoutCacheResource>()) {
+        const auto& layout = resources.get<ScenarioLayoutCacheResource>().layout;
+        index.barrierIndicesByFloor.reserve(std::max<std::size_t>(1, layout.floors.size()));
+        for (std::size_t barrierIndex = 0; barrierIndex < layout.barriers.size(); ++barrierIndex) {
+            appendBarrierIndexCoverage(
+                index.barrierIndicesByFloor,
+                layout.barriers[barrierIndex],
+                index.cellSize,
+                barrierIndex);
+        }
     }
 
     resources.set(std::move(index));

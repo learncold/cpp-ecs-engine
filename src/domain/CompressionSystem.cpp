@@ -4,15 +4,24 @@
 #include "domain/FacilityLayout2D.h"
 #include "domain/Metrics.h"
 #include "domain/PressureTuning.h"
+#include "domain/ScenarioSimulationInternal.h"
+#include "domain/ScenarioSimulationSystems.h"
 
 #include <algorithm>
 #include <cmath>
+#include <unordered_map>
+#include <vector>
 
 namespace safecrowd::domain {
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kReferenceDistanceMeters = kPressureReferenceDistanceMeters;
+
+struct SpatialCell {
+    int x{0};
+    int y{0};
+};
 
 double distanceBetween(const Point2D& lhs, const Point2D& rhs) {
     const double dx = lhs.x - rhs.x;
@@ -72,6 +81,18 @@ double localDensityRatio(std::size_t nearbyCount) {
     return densityPeoplePerSquareMeter / kPressureHighDensityThresholdPeoplePerSquareMeter;
 }
 
+long long spatialKey(const SpatialCell& cell) {
+    return (static_cast<long long>(cell.x) << 32)
+        ^ static_cast<unsigned int>(cell.y);
+}
+
+SpatialCell spatialCellFor(const Point2D& point, double cellSize) {
+    return {
+        .x = static_cast<int>(std::floor(point.x / cellSize)),
+        .y = static_cast<int>(std::floor(point.y / cellSize)),
+    };
+}
+
 }  // namespace
 
 CompressionSystem::CompressionSystem(double timeStepSeconds)
@@ -83,8 +104,20 @@ void CompressionSystem::update(engine::EngineWorld& world,
     (void)step;
 
     auto& query = world.query();
+    auto& resources = world.resources();
     const auto agentEntities = query.view<Position, Agent, CompressionData>();
     const auto barrierEntities = query.view<Barrier2D>();
+    const auto* spatialIndex = resources.contains<ScenarioAgentSpatialIndexResource>()
+        ? &resources.get<ScenarioAgentSpatialIndexResource>()
+        : nullptr;
+    std::unordered_map<long long, std::vector<engine::Entity>> agentCells;
+    if (spatialIndex == nullptr) {
+        agentCells.reserve(agentEntities.size());
+        for (const auto entity : agentEntities) {
+            const auto& position = query.get<Position>(entity);
+            agentCells[spatialKey(spatialCellFor(position.value, kReferenceDistanceMeters))].push_back(entity);
+        }
+    }
 
     for (const auto entity : agentEntities) {
         const auto& position = query.get<Position>(entity);
@@ -92,17 +125,52 @@ void CompressionSystem::update(engine::EngineWorld& world,
 
         std::size_t nearbyCount = 0;
         double proximityScore = 0.0;
+        if (spatialIndex != nullptr) {
+            const auto floorId = query.contains<EvacuationRoute>(entity)
+                ? simulation_internal::agentCollisionFloorId(query.get<EvacuationRoute>(entity))
+                : std::string{};
+            const auto nearbyAgents = scenarioNearbyAgents(
+                query,
+                *spatialIndex,
+                position.value,
+                floorId,
+                kReferenceDistanceMeters);
+            for (const auto otherEntity : nearbyAgents) {
+                if (otherEntity == entity) {
+                    continue;
+                }
 
-        for (const auto otherEntity : agentEntities) {
-            if (otherEntity == entity) {
-                continue;
+                const auto& otherPosition = query.get<Position>(otherEntity);
+                const double distance = distanceBetween(position.value, otherPosition.value);
+                if (distance < kReferenceDistanceMeters) {
+                    proximityScore += (kReferenceDistanceMeters - distance) / kReferenceDistanceMeters;
+                    ++nearbyCount;
+                }
             }
+        } else {
+            const auto centerCell = spatialCellFor(position.value, kReferenceDistanceMeters);
+            for (int dy = -1; dy <= 1; ++dy) {
+                for (int dx = -1; dx <= 1; ++dx) {
+                    const auto cellIt = agentCells.find(spatialKey({
+                        .x = centerCell.x + dx,
+                        .y = centerCell.y + dy,
+                    }));
+                    if (cellIt == agentCells.end()) {
+                        continue;
+                    }
+                    for (const auto otherEntity : cellIt->second) {
+                        if (otherEntity == entity) {
+                            continue;
+                        }
 
-            const auto& otherPosition = query.get<Position>(otherEntity);
-            const double distance = distanceBetween(position.value, otherPosition.value);
-            if (distance < kReferenceDistanceMeters) {
-                proximityScore += (kReferenceDistanceMeters - distance) / kReferenceDistanceMeters;
-                ++nearbyCount;
+                        const auto& otherPosition = query.get<Position>(otherEntity);
+                        const double distance = distanceBetween(position.value, otherPosition.value);
+                        if (distance < kReferenceDistanceMeters) {
+                            proximityScore += (kReferenceDistanceMeters - distance) / kReferenceDistanceMeters;
+                            ++nearbyCount;
+                        }
+                    }
+                }
             }
         }
 
