@@ -79,14 +79,13 @@ public:
 private:
     QWidget* createRunCanvas();
     QWidget* createRunPanel();
+    void cycleFastForwardMode();
     bool hasCachedResults() const noexcept;
     std::vector<SavedScenarioResultState> completedResults();
-    void advanceFastForwardToResult();
     void returnToAuthoring();
     void refreshStatus();
     void selectRun(int index);
     void showResults();
-    void startFastForwardToResult();
     void stopRun();
     void togglePaused();
 
@@ -120,7 +119,7 @@ private:
     QPushButton* fastForwardButton_{nullptr};
     QPushButton* resultButton_{nullptr};
     int selectedRunIndex_{0};
-    bool fastForwardingToResult_{false};
+    int playbackSpeedMultiplier_{1};
     bool paused_{false};
 };
 
