@@ -42,6 +42,7 @@ public:
 
     void setFrame(safecrowd::domain::SimulationFrame frame);
     void setConnectionBlocks(std::vector<safecrowd::domain::ConnectionBlockDraft> blocks);
+    void setEnvironmentHazards(std::vector<safecrowd::domain::EnvironmentHazardDraft> hazards);
     void setRouteGuidances(std::vector<safecrowd::domain::RouteGuidanceDraft> guidances);
     void setDensityOverlay(
         std::vector<safecrowd::domain::DensityCellMetric> densityCells,
@@ -75,6 +76,7 @@ private:
     QRectF previewViewport() const;
     void focusWorldPoint(const safecrowd::domain::Point2D& point, double zoom);
     void drawConnectionBlockOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
+    void drawEnvironmentHazardOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawRouteGuidanceOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawDensityOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawPressureOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
@@ -88,6 +90,7 @@ private:
     safecrowd::domain::FacilityLayout2D layout_{};
     safecrowd::domain::SimulationFrame frame_{};
     std::vector<safecrowd::domain::ConnectionBlockDraft> connectionBlocks_{};
+    std::vector<safecrowd::domain::EnvironmentHazardDraft> environmentHazards_{};
     std::vector<safecrowd::domain::RouteGuidanceDraft> routeGuidances_{};
     std::vector<safecrowd::domain::DensityCellMetric> densityOverlay_{};
     double densityScaleMaxPeoplePerSquareMeter_{4.0};
@@ -112,6 +115,7 @@ private:
     bool layoutCacheValid_{false};
 
     std::string hoveredConnectionBlockId_{};
+    std::string hoveredEnvironmentHazardId_{};
     std::string hoveredRouteGuidanceId_{};
 };
 

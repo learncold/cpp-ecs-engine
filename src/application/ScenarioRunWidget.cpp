@@ -377,6 +377,7 @@ QWidget* ScenarioRunWidget::createRunCanvas() {
     if (!batchRunner_.empty()) {
         const auto& run = batchRunner_.run(0);
         canvas_->setConnectionBlocks(run.scenario.control.connectionBlocks);
+        canvas_->setEnvironmentHazards(run.scenario.environment.hazards);
         canvas_->setRouteGuidances(run.scenario.control.routeGuidances);
         canvas_->setFrame(run.frame);
     }
@@ -568,6 +569,7 @@ void ScenarioRunWidget::refreshStatus() {
     const auto& frame = selectedRun.frame;
     if (canvas_ != nullptr) {
         canvas_->setConnectionBlocks(selectedRun.scenario.control.connectionBlocks);
+        canvas_->setEnvironmentHazards(selectedRun.scenario.environment.hazards);
         canvas_->setRouteGuidances(selectedRun.scenario.control.routeGuidances);
         canvas_->setFrame(selectedRun.frame);
     }

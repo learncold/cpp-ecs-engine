@@ -997,6 +997,7 @@ void ScenarioBatchResultWidget::applyReplayFrameData(const safecrowd::domain::Si
 
     if (canvas_ != nullptr) {
         canvas_->setConnectionBlocks(result.scenario.control.connectionBlocks);
+        canvas_->setEnvironmentHazards(result.scenario.environment.hazards);
         canvas_->setFrame(frame);
         canvas_->setHotspotOverlay(result.risk.hotspots);
         canvas_->setBottleneckOverlay(result.risk.bottlenecks);

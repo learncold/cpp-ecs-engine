@@ -39,6 +39,13 @@ struct EnvironmentHazardDraft {
     std::string note{};
 };
 
+struct EnvironmentHazardRuntimeProfile {
+    double radiusMeters{0.0};
+    double speedFactor{1.0};
+    double routePenaltyMeters{0.0};
+    double severityWeight{1.0};
+};
+
 struct EnvironmentState {
     bool reducedVisibility{false};
     std::string familiarityProfile{};
@@ -121,5 +128,20 @@ ScenarioDraft duplicateScenarioDraft(const ScenarioDraft& source,
 
 std::vector<std::string> computeScenarioDiffKeys(const ScenarioDraft& baseline,
                                                  const ScenarioDraft& variant);
+
+double environmentHazardRadiusMeters(ScenarioElementSeverity severity);
+double environmentHazardRoutePenaltyMeters(ScenarioElementSeverity severity);
+double environmentHazardSeverityWeight(ScenarioElementSeverity severity);
+double environmentHazardSpeedFactor(EnvironmentHazardKind kind, ScenarioElementSeverity severity);
+double environmentHazardSmokeVisibilityMetersAt(const EnvironmentHazardDraft& hazard, double distanceMeters);
+double environmentHazardSmokeSpeedMetersPerSecond(double smokeFreeSpeedMetersPerSecond, double visibilityMeters);
+double environmentHazardSpeedFactorAt(
+    const EnvironmentHazardDraft& hazard,
+    double distanceMeters,
+    double smokeFreeSpeedMetersPerSecond);
+EnvironmentHazardRuntimeProfile environmentHazardRuntimeProfile(const EnvironmentHazardDraft& hazard);
+bool environmentHazardHasOpenEndedSchedule(const EnvironmentHazardDraft& hazard);
+bool environmentHazardActiveAt(const EnvironmentHazardDraft& hazard, double elapsedSeconds);
+std::string environmentHazardFloorId(const FacilityLayout2D& layout, const EnvironmentHazardDraft& hazard);
 
 }  // namespace safecrowd::domain

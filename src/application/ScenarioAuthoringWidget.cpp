@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -172,7 +173,11 @@ QString severityLabel(safecrowd::domain::ScenarioElementSeverity severity) {
 }
 
 QString hazardScheduleSummary(const safecrowd::domain::EnvironmentHazardDraft& hazard) {
-    return QString("%1s - %2s").arg(hazard.startSeconds, 0, 'f', 1).arg(hazard.endSeconds, 0, 'f', 1);
+    const auto start = std::max(0.0, hazard.startSeconds);
+    if (safecrowd::domain::environmentHazardHasOpenEndedSchedule(hazard)) {
+        return QString("%1s - open").arg(start, 0, 'f', 1);
+    }
+    return QString("%1s - %2s").arg(start, 0, 'f', 1).arg(std::max(start, hazard.endSeconds), 0, 'f', 1);
 }
 
 QString hazardZoneSummary(
@@ -245,13 +250,35 @@ bool editEnvironmentHazard(
     startSpin->setRange(0.0, 86400.0);
     startSpin->setDecimals(1);
     startSpin->setSuffix(" s");
-    startSpin->setValue(std::max(0.0, hazard->startSeconds));
+    const auto initialStartSeconds = std::max(0.0, hazard->startSeconds);
+    const auto initialOpenEnded = safecrowd::domain::environmentHazardHasOpenEndedSchedule(*hazard);
+    startSpin->setValue(initialStartSeconds);
 
     auto* endSpin = new QDoubleSpinBox(&dialog);
     endSpin->setRange(0.0, 86400.0);
     endSpin->setDecimals(1);
     endSpin->setSuffix(" s");
-    endSpin->setValue(std::max(0.0, hazard->endSeconds));
+    endSpin->setValue(initialOpenEnded
+        ? initialStartSeconds
+        : std::max(initialStartSeconds, hazard->endSeconds));
+
+    auto* openEndedCheck = new QCheckBox("Open ended", &dialog);
+    openEndedCheck->setChecked(initialOpenEnded);
+    endSpin->setEnabled(!initialOpenEnded);
+
+    QObject::connect(openEndedCheck, &QCheckBox::toggled, &dialog, [=](bool checked) {
+        endSpin->setEnabled(!checked);
+        if (checked) {
+            endSpin->setValue(startSpin->value());
+        } else if (endSpin->value() <= startSpin->value()) {
+            endSpin->setValue(std::min(86400.0, startSpin->value() + 60.0));
+        }
+    });
+    QObject::connect(startSpin, qOverload<double>(&QDoubleSpinBox::valueChanged), &dialog, [=](double value) {
+        if (openEndedCheck->isChecked()) {
+            endSpin->setValue(value);
+        }
+    });
 
     auto* severityCombo = new QComboBox(&dialog);
     severityCombo->addItem("Low", static_cast<int>(safecrowd::domain::ScenarioElementSeverity::Low));
@@ -270,6 +297,7 @@ bool editEnvironmentHazard(
     form->addRow("Y", ySpin);
     form->addRow("Start", startSpin);
     form->addRow("End", endSpin);
+    form->addRow("", openEndedCheck);
     form->addRow("Severity", severityCombo);
     form->addRow("Note", noteEdit);
     root->addLayout(form);
@@ -299,6 +327,11 @@ bool editEnvironmentHazard(
         if (!pointInPolygon(selectedZone->area, selectedPosition)) {
             QMessageBox::warning(&dialog, "Edit hazard", "The hazard location must stay inside the affected zone.");
             xSpin->setFocus();
+            return;
+        }
+        if (!openEndedCheck->isChecked() && endSpin->value() <= startSpin->value()) {
+            QMessageBox::warning(&dialog, "Edit hazard", "Set the end time after the start time.");
+            endSpin->setFocus();
             return;
         }
 
@@ -332,6 +365,10 @@ bool editEnvironmentHazard(
         QMessageBox::warning(parent, "Edit hazard", "The hazard location must stay inside the affected zone.");
         return false;
     }
+    if (!openEndedCheck->isChecked() && endSpin->value() <= startSpin->value()) {
+        QMessageBox::warning(parent, "Edit hazard", "Set the end time after the start time.");
+        return false;
+    }
 
     hazard->kind = static_cast<safecrowd::domain::EnvironmentHazardKind>(kindCombo->currentData().toInt());
     hazard->name = name.toStdString();
@@ -339,7 +376,7 @@ bool editEnvironmentHazard(
     hazard->floorId = selectedZone->floorId;
     hazard->position = selectedPosition;
     hazard->startSeconds = startSpin->value();
-    hazard->endSeconds = std::max(hazard->startSeconds, endSpin->value());
+    hazard->endSeconds = openEndedCheck->isChecked() ? hazard->startSeconds : endSpin->value();
     hazard->severity = static_cast<safecrowd::domain::ScenarioElementSeverity>(severityCombo->currentData().toInt());
     hazard->note = noteEdit->toPlainText().trimmed().toStdString();
     return true;

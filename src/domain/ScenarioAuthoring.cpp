@@ -1,5 +1,7 @@
 #include "domain/ScenarioAuthoring.h"
 
+#include <algorithm>
+#include <limits>
 #include <utility>
 
 namespace safecrowd::domain {
@@ -211,6 +213,170 @@ std::vector<std::string> computeScenarioDiffKeys(const ScenarioDraft& baseline,
     }
 
     return keys;
+}
+
+double environmentHazardRadiusMeters(ScenarioElementSeverity severity) {
+    switch (severity) {
+    case ScenarioElementSeverity::Low:
+        return 2.0;
+    case ScenarioElementSeverity::High:
+        return 5.0;
+    case ScenarioElementSeverity::Medium:
+    default:
+        return 3.5;
+    }
+}
+
+double environmentHazardRoutePenaltyMeters(ScenarioElementSeverity severity) {
+    switch (severity) {
+    case ScenarioElementSeverity::Low:
+        return 25.0;
+    case ScenarioElementSeverity::High:
+        return 150.0;
+    case ScenarioElementSeverity::Medium:
+    default:
+        return 75.0;
+    }
+}
+
+double environmentHazardSeverityWeight(ScenarioElementSeverity severity) {
+    switch (severity) {
+    case ScenarioElementSeverity::Low:
+        return 1.0;
+    case ScenarioElementSeverity::High:
+        return 3.0;
+    case ScenarioElementSeverity::Medium:
+    default:
+        return 2.0;
+    }
+}
+
+double environmentHazardSpeedFactor(EnvironmentHazardKind kind, ScenarioElementSeverity severity) {
+    if (kind == EnvironmentHazardKind::Smoke) {
+        EnvironmentHazardDraft hazard;
+        hazard.kind = EnvironmentHazardKind::Smoke;
+        hazard.severity = severity;
+        return environmentHazardSpeedFactorAt(hazard, 0.0, 1.5);
+    }
+
+    switch (severity) {
+    case ScenarioElementSeverity::Low:
+        return 0.90;
+    case ScenarioElementSeverity::High:
+        return 0.60;
+    case ScenarioElementSeverity::Medium:
+    default:
+        return 0.75;
+    }
+}
+
+double environmentHazardSmokeVisibilityMetersAt(const EnvironmentHazardDraft& hazard, double distanceMeters) {
+    if (hazard.kind != EnvironmentHazardKind::Smoke) {
+        return std::numeric_limits<double>::infinity();
+    }
+
+    const auto radius = environmentHazardRadiusMeters(hazard.severity);
+    if (radius <= 1e-9) {
+        return std::numeric_limits<double>::infinity();
+    }
+
+    double sourceVisibility = 1.5;
+    switch (hazard.severity) {
+    case ScenarioElementSeverity::Low:
+        sourceVisibility = 2.5;
+        break;
+    case ScenarioElementSeverity::High:
+        sourceVisibility = 0.5;
+        break;
+    case ScenarioElementSeverity::Medium:
+    default:
+        sourceVisibility = 1.5;
+        break;
+    }
+
+    const auto distance = std::max(0.0, distanceMeters);
+    if (distance >= radius) {
+        return 3.0;
+    }
+
+    const auto t = std::clamp(distance / radius, 0.0, 1.0);
+    return sourceVisibility + ((3.0 - sourceVisibility) * t);
+}
+
+double environmentHazardSmokeSpeedMetersPerSecond(double smokeFreeSpeedMetersPerSecond, double visibilityMeters) {
+    const auto smokeFreeSpeed = std::max(0.0, smokeFreeSpeedMetersPerSecond);
+    if (smokeFreeSpeed <= 1e-9) {
+        return 0.0;
+    }
+
+    if (visibilityMeters >= 3.0) {
+        return smokeFreeSpeed;
+    }
+
+    // Pathfinder applies the Fridolf et al. visibility relation and floors smoke walking speed at 0.2 m/s.
+    const auto smokeSpeed = std::max(0.2, smokeFreeSpeed - (0.34 * (3.0 - std::max(0.0, visibilityMeters))));
+    return std::min(smokeFreeSpeed, smokeSpeed);
+}
+
+double environmentHazardSpeedFactorAt(
+    const EnvironmentHazardDraft& hazard,
+    double distanceMeters,
+    double smokeFreeSpeedMetersPerSecond) {
+    const auto smokeFreeSpeed = std::max(0.0, smokeFreeSpeedMetersPerSecond);
+    if (smokeFreeSpeed <= 1e-9) {
+        return 1.0;
+    }
+
+    const auto radius = environmentHazardRadiusMeters(hazard.severity);
+    if (radius <= 1e-9 || distanceMeters >= radius) {
+        return 1.0;
+    }
+
+    if (hazard.kind == EnvironmentHazardKind::Smoke) {
+        const auto visibility = environmentHazardSmokeVisibilityMetersAt(hazard, distanceMeters);
+        return environmentHazardSmokeSpeedMetersPerSecond(smokeFreeSpeed, visibility) / smokeFreeSpeed;
+    }
+
+    const auto centerFactor = environmentHazardSpeedFactor(hazard.kind, hazard.severity);
+    const auto proximity = 1.0 - std::clamp(std::max(0.0, distanceMeters) / radius, 0.0, 1.0);
+    return 1.0 - ((1.0 - centerFactor) * proximity);
+}
+
+EnvironmentHazardRuntimeProfile environmentHazardRuntimeProfile(const EnvironmentHazardDraft& hazard) {
+    return {
+        .radiusMeters = environmentHazardRadiusMeters(hazard.severity),
+        .speedFactor = std::max(0.35, environmentHazardSpeedFactorAt(hazard, 0.0, 1.5)),
+        .routePenaltyMeters = environmentHazardRoutePenaltyMeters(hazard.severity),
+        .severityWeight = environmentHazardSeverityWeight(hazard.severity),
+    };
+}
+
+bool environmentHazardHasOpenEndedSchedule(const EnvironmentHazardDraft& hazard) {
+    return hazard.endSeconds <= hazard.startSeconds;
+}
+
+bool environmentHazardActiveAt(const EnvironmentHazardDraft& hazard, double elapsedSeconds) {
+    const auto start = std::max(0.0, hazard.startSeconds);
+    if (elapsedSeconds + 1e-9 < start) {
+        return false;
+    }
+    if (environmentHazardHasOpenEndedSchedule(hazard)) {
+        return true;
+    }
+    return elapsedSeconds <= std::max(start, hazard.endSeconds) + 1e-9;
+}
+
+std::string environmentHazardFloorId(const FacilityLayout2D& layout, const EnvironmentHazardDraft& hazard) {
+    if (!hazard.floorId.empty()) {
+        return hazard.floorId;
+    }
+    if (hazard.affectedZoneId.empty()) {
+        return {};
+    }
+    const auto it = std::find_if(layout.zones.begin(), layout.zones.end(), [&](const auto& zone) {
+        return zone.id == hazard.affectedZoneId;
+    });
+    return it == layout.zones.end() ? std::string{} : it->floorId;
 }
 
 }  // namespace safecrowd::domain

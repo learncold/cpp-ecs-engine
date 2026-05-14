@@ -1815,3 +1815,54 @@ SC_TEST(ScenarioSimulationRunnerNoHazardNoBlockBaselineStillEvacuates) {
     SC_EXPECT_EQ(runner.frame().totalAgentCount, static_cast<std::size_t>(4));
     SC_EXPECT_EQ(runner.frame().evacuatedAgentCount, static_cast<std::size_t>(4));
 }
+
+SC_TEST(ScenarioSimulationRunnerPublishesFireSmokeExposureSummary) {
+    safecrowd::domain::InitialPlacement2D placement;
+    placement.id = "hazard-exposed-agent";
+    placement.zoneId = "room";
+    placement.targetAgentCount = 1;
+    placement.initialVelocity = {.x = 1.0, .y = 0.0};
+    placement.area.outline = {{.x = 1.0, .y = 2.0}};
+
+    safecrowd::domain::EnvironmentHazardDraft fire;
+    fire.id = "fire-a";
+    fire.kind = safecrowd::domain::EnvironmentHazardKind::Fire;
+    fire.name = "Fire A";
+    fire.affectedZoneId = "room";
+    fire.position = {.x = 1.0, .y = 2.25};
+    fire.severity = safecrowd::domain::ScenarioElementSeverity::Medium;
+
+    safecrowd::domain::EnvironmentHazardDraft smoke;
+    smoke.id = "smoke-a";
+    smoke.kind = safecrowd::domain::EnvironmentHazardKind::Smoke;
+    smoke.name = "Smoke A";
+    smoke.affectedZoneId = "room";
+    smoke.position = {.x = 1.0, .y = 1.75};
+    smoke.severity = safecrowd::domain::ScenarioElementSeverity::High;
+
+    safecrowd::domain::ScenarioDraft scenario;
+    scenario.execution.timeLimitSeconds = 5.0;
+    scenario.population.initialPlacements.push_back(placement);
+    scenario.environment.hazards.push_back(fire);
+    scenario.environment.hazards.push_back(smoke);
+
+    safecrowd::domain::ScenarioSimulationRunner runner(wideDoorLayout(), scenario);
+    runner.step(0.5);
+
+    const auto& summary = runner.resultArtifacts().hazardExposureSummary;
+    SC_EXPECT_EQ(summary.hazards.size(), std::size_t{2});
+    SC_EXPECT_TRUE(summary.totalExposureScore > 0.0);
+
+    const auto fireIt = std::find_if(summary.hazards.begin(), summary.hazards.end(), [](const auto& metric) {
+        return metric.hazardId == "fire-a";
+    });
+    const auto smokeIt = std::find_if(summary.hazards.begin(), summary.hazards.end(), [](const auto& metric) {
+        return metric.hazardId == "smoke-a";
+    });
+    SC_EXPECT_TRUE(fireIt != summary.hazards.end());
+    SC_EXPECT_TRUE(smokeIt != summary.hazards.end());
+    SC_EXPECT_TRUE(fireIt->exposedAgentSeconds > 0.0);
+    SC_EXPECT_TRUE(smokeIt->exposedAgentSeconds > 0.0);
+    SC_EXPECT_EQ(fireIt->peakExposedAgentCount, std::size_t{1});
+    SC_EXPECT_EQ(smokeIt->peakExposedAgentCount, std::size_t{1});
+}

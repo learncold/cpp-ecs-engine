@@ -201,6 +201,11 @@ void ScenarioSimulationRunner::initializeRuntime() {
         {.phase = engine::UpdatePhase::PreSimulation,
          .triggerPolicy = engine::TriggerPolicy::EveryFrame});
     runtime_->addSystem(
+        makeScenarioEnvironmentHazardSystem(layout_, scenario_.environment.hazards),
+        {.phase = engine::UpdatePhase::PostSimulation,
+         .order = -20,
+         .triggerPolicy = engine::TriggerPolicy::EveryFrame});
+    runtime_->addSystem(
         makeScenarioPressureFeedbackSystem(layout_),
         {.phase = engine::UpdatePhase::PostSimulation,
          .order = -10,

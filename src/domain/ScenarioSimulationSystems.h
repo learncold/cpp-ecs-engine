@@ -82,7 +82,17 @@ struct ScenarioPressureFeedbackResource {
 struct ScenarioEnvironmentReactionAgentState {
     bool hazardDetected{false};
     bool hazardAware{false};
+    bool hazardInRange{false};
     std::string hazardKey{};
+    EnvironmentHazardKind hazardKind{EnvironmentHazardKind::Fire};
+    ScenarioElementSeverity hazardSeverity{ScenarioElementSeverity::Medium};
+    Point2D hazardPosition{};
+    std::string hazardFloorId{};
+    std::string hazardAffectedZoneId{};
+    double hazardDistanceMeters{0.0};
+    double hazardRadiusMeters{0.0};
+    double hazardSpeedFactor{1.0};
+    double hazardRoutePenaltyMeters{0.0};
     double hazardDetectedAtSeconds{0.0};
     double hazardReactionReadySeconds{0.0};
     bool closureDetected{false};
@@ -94,6 +104,24 @@ struct ScenarioEnvironmentReactionAgentState {
 
 struct ScenarioEnvironmentReactionResource {
     std::unordered_map<std::uint64_t, ScenarioEnvironmentReactionAgentState> agentsById{};
+};
+
+struct ScenarioActiveEnvironmentHazard {
+    std::string key{};
+    EnvironmentHazardDraft draft{};
+    std::string floorId{};
+    double radiusMeters{0.0};
+    double speedFactor{1.0};
+    double routePenaltyMeters{0.0};
+    double severityWeight{1.0};
+};
+
+struct ScenarioActiveEnvironmentHazardsResource {
+    std::vector<ScenarioActiveEnvironmentHazard> hazards{};
+};
+
+struct ScenarioHazardExposureResource {
+    std::unordered_map<std::string, HazardExposureMetric> hazardsById{};
 };
 
 struct ScenarioResultArtifactsResource {
@@ -138,6 +166,9 @@ std::unique_ptr<engine::EngineSystem> makeScenarioSimulationMotionSystem();
 std::unique_ptr<engine::EngineSystem> makeScenarioControlSystem(
     FacilityLayout2D baseLayout,
     std::vector<ConnectionBlockDraft> blocks);
+std::unique_ptr<engine::EngineSystem> makeScenarioEnvironmentHazardSystem(
+    FacilityLayout2D layout,
+    std::vector<EnvironmentHazardDraft> hazards);
 std::unique_ptr<engine::EngineSystem> makeScenarioSimulationMotionSystem(FacilityLayout2D layout);
 std::unique_ptr<engine::EngineSystem> makeScenarioSimulationMotionSystem(
     FacilityLayout2D layout,
