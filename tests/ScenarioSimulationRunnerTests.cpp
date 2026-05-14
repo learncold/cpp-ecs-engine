@@ -186,6 +186,45 @@ safecrowd::domain::FacilityLayout2D wideDoorToPassageLayout() {
     return layout;
 }
 
+safecrowd::domain::FacilityLayout2D horizontalDoorToCorridorLayout() {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.zones.push_back({
+        .id = "upper-room",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Upper Room",
+        .area = {.outline = {{0.0, 0.0}, {4.0, 0.0}, {4.0, 1.0}, {0.0, 1.0}}},
+    });
+    layout.zones.push_back({
+        .id = "corridor",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Corridor",
+        .area = {.outline = {{0.0, 1.0}, {4.0, 1.0}, {4.0, 3.0}, {0.0, 3.0}}},
+    });
+    layout.zones.push_back({
+        .id = "exit",
+        .kind = safecrowd::domain::ZoneKind::Exit,
+        .label = "Exit",
+        .area = {.outline = {{1.0, 3.0}, {3.0, 3.0}, {3.0, 4.0}, {1.0, 4.0}}},
+    });
+    layout.connections.push_back({
+        .id = "room-door",
+        .kind = safecrowd::domain::ConnectionKind::Doorway,
+        .fromZoneId = "upper-room",
+        .toZoneId = "corridor",
+        .effectiveWidth = 1.0,
+        .centerSpan = {{1.5, 1.0}, {2.5, 1.0}},
+    });
+    layout.connections.push_back({
+        .id = "exit-door",
+        .kind = safecrowd::domain::ConnectionKind::Exit,
+        .fromZoneId = "corridor",
+        .toZoneId = "exit",
+        .effectiveWidth = 2.0,
+        .centerSpan = {{1.0, 3.0}, {3.0, 3.0}},
+    });
+    return layout;
+}
+
 safecrowd::domain::FacilityLayout2D narrowDoorCrowdLayout() {
     safecrowd::domain::FacilityLayout2D layout;
     layout.zones.push_back({
@@ -1062,6 +1101,34 @@ SC_TEST(ScenarioSimulationRunnerSkipsPassedDoorwaysWhenAgentIsAlreadyInLaterZone
 
     SC_EXPECT_EQ(runner.frame().agents.size(), static_cast<std::size_t>(1));
     SC_EXPECT_TRUE(runner.frame().agents.front().velocity.x > 0.0);
+}
+
+SC_TEST(ScenarioSimulationRunnerDoesNotAdvanceDoorWaypointBeforeCenterCrossesDoorPlane) {
+    safecrowd::domain::InitialPlacement2D placement;
+    placement.id = "near-upper-door";
+    placement.zoneId = "upper-room";
+    placement.targetAgentCount = 1;
+    placement.initialVelocity = {.x = 0.0, .y = 1.0};
+    placement.area.outline = {{.x = 2.0, .y = 0.97}};
+
+    safecrowd::domain::ScenarioDraft scenario;
+    scenario.execution.timeLimitSeconds = 5.0;
+    scenario.population.initialPlacements.push_back(placement);
+
+    safecrowd::domain::ScenarioSimulationRunner runner(horizontalDoorToCorridorLayout(), scenario);
+    runner.step(0.01);
+
+    SC_EXPECT_EQ(runner.frame().agents.size(), static_cast<std::size_t>(1));
+    SC_EXPECT_TRUE(runner.frame().agents.front().position.y < 1.0);
+    SC_EXPECT_TRUE(runner.frame().agents.front().velocity.y > 0.0);
+
+    for (int i = 0; i < 16; ++i) {
+        runner.step(0.02);
+    }
+
+    SC_EXPECT_EQ(runner.frame().agents.size(), static_cast<std::size_t>(1));
+    SC_EXPECT_TRUE(runner.frame().agents.front().position.y > 1.02);
+    SC_EXPECT_TRUE(runner.frame().agents.front().velocity.y > 0.0);
 }
 
 SC_TEST(ScenarioSimulationRunnerKeepsCrowdedNarrowDoorAgentsOutOfWalls) {

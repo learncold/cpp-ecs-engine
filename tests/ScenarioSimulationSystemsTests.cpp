@@ -3163,6 +3163,13 @@ SC_TEST(ScenarioRoutePassageCrossed_DoesNotAdvanceWhileCenterRemainsInSourceRoom
         stillInsideSource,
         0.25));
 
+    const safecrowd::domain::Point2D onDoorPlane{.x = 0.5, .y = 1.0};
+    SC_EXPECT_TRUE(!safecrowd::domain::simulation_internal::routePassageCrossed(
+        layout,
+        route,
+        onDoorPlane,
+        0.25));
+
     const safecrowd::domain::Point2D crossedIntoCorridor{.x = 0.5, .y = 1.03};
     SC_EXPECT_TRUE(safecrowd::domain::simulation_internal::routePassageCrossed(
         layout,

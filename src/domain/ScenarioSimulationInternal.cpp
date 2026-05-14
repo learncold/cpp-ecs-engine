@@ -752,6 +752,7 @@ bool routePassageCrossed(
     const EvacuationRoute& route,
     const Point2D& position,
     double agentRadius) {
+    (void)agentRadius;
     if (route.nextWaypointIndex >= route.waypointPassages.size()
         || route.nextWaypointIndex >= route.waypointFromZoneIds.size()
         || route.nextWaypointIndex >= route.waypointZoneIds.size()) {
@@ -781,12 +782,7 @@ bool routePassageCrossed(
     }
 
     const auto signedDistance = dot(position - midpoint(passage), normal);
-    if (signedDistance > kPortalCrossingEpsilon) {
-        return true;
-    }
-
-    return pointInRing(toZone->area.outline, position)
-        && signedDistance > -std::max(kPortalCrossingEpsilon, static_cast<double>(agentRadius) * 0.10);
+    return signedDistance > kPortalCrossingEpsilon;
 }
 
 const Connection2D* findConnectionBetween(const FacilityLayout2D& layout, const std::string& from, const std::string& to) {
