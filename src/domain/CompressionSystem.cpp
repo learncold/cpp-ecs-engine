@@ -3,6 +3,7 @@
 #include "domain/AgentComponents.h"
 #include "domain/FacilityLayout2D.h"
 #include "domain/Metrics.h"
+#include "domain/PressureTuning.h"
 
 #include <algorithm>
 #include <cmath>
@@ -10,8 +11,8 @@
 namespace safecrowd::domain {
 namespace {
 
-constexpr float kForceThreshold = 0.5f;
-constexpr float kExposureThreshold = 2.0f;
+constexpr double kPi = 3.14159265358979323846;
+constexpr double kReferenceDistanceMeters = kPressureReferenceDistanceMeters;
 
 double distanceBetween(const Point2D& lhs, const Point2D& rhs) {
     const double dx = lhs.x - rhs.x;
@@ -39,7 +40,7 @@ double distancePointToSegment(const Point2D& point, const Point2D& start, const 
     return distanceBetween(point, projection);
 }
 
-double barrierCompression(const Barrier2D& barrier, const Point2D& position, double radius) {
+double barrierCompression(const Barrier2D& barrier, const Point2D& position, double referenceDistance) {
     if (!barrier.blocksMovement || barrier.geometry.vertices.size() < 2) {
         return 0.0;
     }
@@ -49,19 +50,26 @@ double barrierCompression(const Barrier2D& barrier, const Point2D& position, dou
 
     for (std::size_t index = 0; index + 1 < vertices.size(); ++index) {
         const double distance = distancePointToSegment(position, vertices[index], vertices[index + 1]);
-        if (distance < radius) {
-            force += radius - distance;
+        if (distance < referenceDistance) {
+            force += (referenceDistance - distance) / referenceDistance;
         }
     }
 
     if (barrier.geometry.closed) {
         const double distance = distancePointToSegment(position, vertices.back(), vertices.front());
-        if (distance < radius) {
-            force += radius - distance;
+        if (distance < referenceDistance) {
+            force += (referenceDistance - distance) / referenceDistance;
         }
     }
 
     return force;
+}
+
+double localDensityRatio(std::size_t nearbyCount) {
+    const auto areaSquareMeters = kPi * kReferenceDistanceMeters * kReferenceDistanceMeters;
+    const auto densityPeoplePerSquareMeter =
+        static_cast<double>(nearbyCount) / areaSquareMeters;
+    return densityPeoplePerSquareMeter / kPressureHighDensityThresholdPeoplePerSquareMeter;
 }
 
 }  // namespace
@@ -80,10 +88,10 @@ void CompressionSystem::update(engine::EngineWorld& world,
 
     for (const auto entity : agentEntities) {
         const auto& position = query.get<Position>(entity);
-        const auto& agent = query.get<Agent>(entity);
         auto& compression = query.get<CompressionData>(entity);
 
-        double currentForce = 0.0;
+        std::size_t nearbyCount = 0;
+        double proximityScore = 0.0;
 
         for (const auto otherEntity : agentEntities) {
             if (otherEntity == entity) {
@@ -91,30 +99,31 @@ void CompressionSystem::update(engine::EngineWorld& world,
             }
 
             const auto& otherPosition = query.get<Position>(otherEntity);
-            const auto& otherAgent = query.get<Agent>(otherEntity);
             const double distance = distanceBetween(position.value, otherPosition.value);
-            const double combinedRadius = static_cast<double>(agent.radius + otherAgent.radius);
-
-            if (distance < combinedRadius) {
-                currentForce += combinedRadius - distance;
+            if (distance < kReferenceDistanceMeters) {
+                proximityScore += (kReferenceDistanceMeters - distance) / kReferenceDistanceMeters;
+                ++nearbyCount;
             }
         }
 
+        double currentForce = std::max(proximityScore, localDensityRatio(nearbyCount));
         for (const auto barrierEntity : barrierEntities) {
-            currentForce += barrierCompression(
-                query.get<Barrier2D>(barrierEntity),
-                position.value,
-                static_cast<double>(agent.radius));
+            currentForce = std::max(
+                currentForce,
+                proximityScore + barrierCompression(
+                    query.get<Barrier2D>(barrierEntity),
+                    position.value,
+                    kReferenceDistanceMeters));
         }
 
         compression.force = static_cast<float>(currentForce);
-        if (compression.force > kForceThreshold) {
+        if (compression.force >= kPressureCriticalScoreThreshold) {
             compression.exposure += timeStepSeconds_;
         }
 
         compression.isCritical =
-            compression.force > kForceThreshold &&
-            compression.exposure >= kExposureThreshold;
+            compression.force >= kPressureCriticalScoreThreshold &&
+            compression.exposure >= kPressureCriticalExposureThresholdSeconds;
     }
 }
 

@@ -29,12 +29,12 @@ const char* scenarioStalledDefinition() noexcept {
 }
 
 const char* scenarioHotspotDefinition() noexcept {
-    return "A hotspot is a 1.5 m by 1.5 m cell containing at least 5 active agents.";
+    return "A hotspot is a 1.5 m by 1.5 m cell whose density reaches 3.55 occupants per square meter.";
 }
 
 const char* scenarioPressureHotspotDefinition() noexcept {
-    return "A pressure hotspot is a 1.5 m by 1.5 m cell containing at least 5 active agents "
-           "with overlapping personal-space intrusion between nearby occupants.";
+    return "A pressure hotspot is a 1.5 m by 1.5 m cell whose density reaches 3.55 occupants "
+           "per square meter and whose 1.0 m interpersonal-pressure score reaches 1.0.";
 }
 
 const char* scenarioBottleneckDefinition() noexcept {

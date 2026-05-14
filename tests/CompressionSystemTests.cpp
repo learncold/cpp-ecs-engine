@@ -60,7 +60,7 @@ SC_TEST(CompressionSystem_UpdatesAgentOverlapWithoutBarrierEntitiesAndPreservesE
     system.update(world, {});
 
     const auto& clusteredMetrics = world.query().get<CompressionData>(first);
-    SC_EXPECT_TRUE(clusteredMetrics.force > 0.5f);
+    SC_EXPECT_TRUE(clusteredMetrics.force >= 1.0f);
     SC_EXPECT_NEAR(clusteredMetrics.exposure, 0.5, 1e-6);
     SC_EXPECT_TRUE(!clusteredMetrics.isCritical);
 
@@ -72,6 +72,27 @@ SC_TEST(CompressionSystem_UpdatesAgentOverlapWithoutBarrierEntitiesAndPreservesE
     SC_EXPECT_NEAR(separatedMetrics.force, 0.0, 1e-6);
     SC_EXPECT_NEAR(separatedMetrics.exposure, 0.5, 1e-6);
     SC_EXPECT_TRUE(!separatedMetrics.isCritical);
+}
+
+SC_TEST(CompressionSystem_TracksPressureFromNearbyAgentsWithinOneMeterWithoutOverlap) {
+    EcsCore core;
+    safecrowd::engine::ResourceStore resources;
+    CommandBuffer buffer;
+    auto world = safecrowd::engine::internal::EngineWorldFactory::create(core, resources, buffer);
+
+    const Entity first = addAgent(core, 0.0, 0.0);
+    addAgent(core, 0.6, 0.0);
+    addAgent(core, -0.6, 0.0);
+    addAgent(core, 0.0, 0.6);
+    addAgent(core, 0.0, -0.6);
+
+    CompressionSystem system(0.5);
+    system.update(world, {});
+
+    const auto& metrics = world.query().get<CompressionData>(first);
+    SC_EXPECT_TRUE(metrics.force >= 1.0f);
+    SC_EXPECT_NEAR(metrics.exposure, 0.5, 1e-6);
+    SC_EXPECT_TRUE(!metrics.isCritical);
 }
 
 SC_TEST(CompressionSystem_CombinesExposureWithCurrentForceForCriticalState) {
@@ -90,7 +111,7 @@ SC_TEST(CompressionSystem_CombinesExposureWithCurrentForceForCriticalState) {
     system.update(world, {});
 
     const auto& highRiskMetrics = world.query().get<CompressionData>(first);
-    SC_EXPECT_TRUE(highRiskMetrics.force > 0.5f);
+    SC_EXPECT_TRUE(highRiskMetrics.force >= 1.0f);
     SC_EXPECT_NEAR(highRiskMetrics.exposure, 2.0, 1e-6);
     SC_EXPECT_TRUE(highRiskMetrics.isCritical);
 

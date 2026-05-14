@@ -212,7 +212,7 @@ public:
             double pressureSpeedFactor = 1.0;
             double pressureAvoidanceScale = 1.0;
             double pressureBarrierScale = 1.0;
-            if (pressureFeedback != nullptr) {
+            if (!verticalTransition && pressureFeedback != nullptr) {
                 const auto feedbackIt = pressureFeedback->agentsById.find(entity.index);
                 if (feedbackIt != pressureFeedback->agentsById.end()) {
                     pressureSpeedFactor = feedbackIt->second.speedFactor;
