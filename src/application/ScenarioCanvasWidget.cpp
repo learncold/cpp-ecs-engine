@@ -2,6 +2,7 @@
 
 #include "application/ToolIconResources.h"
 #include "application/UiStyle.h"
+#include "domain/GeometryQueries.h"
 
 #include <algorithm>
 #include <cmath>
@@ -52,6 +53,11 @@ constexpr double kSelectionDragThresholdPixels = 4.0;
 const QColor kSelectionHighlightColor("#0b3d78");
 
 [[nodiscard]] safecrowd::domain::Point2D polygonCenter(const safecrowd::domain::Polygon2D& polygon);
+
+using safecrowd::domain::distancePointToSegment;
+using safecrowd::domain::pointInPolygon;
+using safecrowd::domain::pointInRing;
+using safecrowd::domain::representativePointInPolygon;
 
 struct PointBounds {
     double minX{0.0};
@@ -179,6 +185,75 @@ std::optional<std::size_t> hoveredConnectionBlockIndex(
         }
     }
 
+    return closestIndex;
+}
+
+QString hazardKindLabel(safecrowd::domain::EnvironmentHazardKind kind) {
+    switch (kind) {
+    case safecrowd::domain::EnvironmentHazardKind::Smoke:
+        return "Smoke";
+    case safecrowd::domain::EnvironmentHazardKind::Fire:
+    default:
+        return "Fire";
+    }
+}
+
+QString severityLabel(safecrowd::domain::ScenarioElementSeverity severity) {
+    switch (severity) {
+    case safecrowd::domain::ScenarioElementSeverity::Low:
+        return "Low";
+    case safecrowd::domain::ScenarioElementSeverity::High:
+        return "High";
+    case safecrowd::domain::ScenarioElementSeverity::Medium:
+    default:
+        return "Medium";
+    }
+}
+
+QString formatEnvironmentHazardTooltip(const safecrowd::domain::EnvironmentHazardDraft& hazard) {
+    QString text = QString("%1 hazard").arg(hazardKindLabel(hazard.kind));
+    if (!hazard.name.empty()) {
+        text.append(QString("\n%1").arg(QString::fromStdString(hazard.name)));
+    }
+    text.append(QString("\nActive: %1s ~ %2s").arg(hazard.startSeconds, 0, 'f', 1).arg(hazard.endSeconds, 0, 'f', 1));
+    text.append(QString("\nSeverity: %1").arg(severityLabel(hazard.severity)));
+    return text;
+}
+
+std::optional<std::size_t> hoveredEnvironmentHazardIndex(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const std::vector<safecrowd::domain::EnvironmentHazardDraft>& hazards,
+    const LayoutCanvasTransform& transform,
+    const QString& currentFloorId,
+    const QPointF& screenPosition) {
+    constexpr double kHoverRadiusPixels = 15.0;
+
+    std::optional<std::size_t> closestIndex;
+    double closestDistanceSq = kHoverRadiusPixels * kHoverRadiusPixels;
+    for (std::size_t index = 0; index < hazards.size(); ++index) {
+        const auto& hazard = hazards[index];
+        auto floorId = hazard.floorId;
+        if (floorId.empty() && !hazard.affectedZoneId.empty()) {
+            const auto zoneIt = std::find_if(layout.zones.begin(), layout.zones.end(), [&](const auto& zone) {
+                return zone.id == hazard.affectedZoneId;
+            });
+            if (zoneIt != layout.zones.end()) {
+                floorId = zoneIt->floorId;
+            }
+        }
+        if (!matchesFloor(floorId, currentFloorId)) {
+            continue;
+        }
+
+        const auto center = transform.map(hazard.position);
+        const auto dx = center.x() - screenPosition.x();
+        const auto dy = center.y() - screenPosition.y();
+        const auto distanceSq = (dx * dx) + (dy * dy);
+        if (distanceSq <= closestDistanceSq) {
+            closestDistanceSq = distanceSq;
+            closestIndex = index;
+        }
+    }
     return closestIndex;
 }
 
@@ -320,42 +395,6 @@ QString defaultFloorId(const safecrowd::domain::FacilityLayout2D& layout) {
         return QString::fromStdString(layout.levelId);
     }
     return {};
-}
-
-bool pointInRing(const std::vector<safecrowd::domain::Point2D>& ring, const safecrowd::domain::Point2D& point) {
-    if (ring.size() < 3) {
-        return false;
-    }
-
-    bool inside = false;
-    for (std::size_t i = 0, j = ring.size() - 1; i < ring.size(); j = i++) {
-        const auto& a = ring[i];
-        const auto& b = ring[j];
-        const auto intersects = ((a.y > point.y) != (b.y > point.y))
-            && (point.x < ((b.x - a.x) * (point.y - a.y) / ((b.y - a.y) == 0.0 ? 1e-9 : (b.y - a.y)) + a.x));
-        if (intersects) {
-            inside = !inside;
-        }
-    }
-    return inside;
-}
-
-double distancePointToSegment(
-    const safecrowd::domain::Point2D& point,
-    const safecrowd::domain::Point2D& start,
-    const safecrowd::domain::Point2D& end) {
-    const auto dx = end.x - start.x;
-    const auto dy = end.y - start.y;
-    const auto lengthSquared = (dx * dx) + (dy * dy);
-    if (lengthSquared <= kGeometryEpsilon) {
-        return std::hypot(point.x - start.x, point.y - start.y);
-    }
-
-    const auto t = std::clamp(
-        (((point.x - start.x) * dx) + ((point.y - start.y) * dy)) / lengthSquared,
-        0.0,
-        1.0);
-    return std::hypot(point.x - (start.x + (dx * t)), point.y - (start.y + (dy * t)));
 }
 
 safecrowd::domain::Point2D polygonCenter(const safecrowd::domain::Polygon2D& polygon) {
@@ -660,6 +699,31 @@ QIcon makeToolIcon(const QString& type, const QColor& color) {
         painter.drawLine(QPointF(32, 10), QPointF(36, 6));
         painter.drawLine(QPointF(34, 15), QPointF(39, 13));
         painter.drawLine(QPointF(29, 7), QPointF(31, 2));
+        return QIcon(pixmap);
+    }
+
+    if (type == "fire") {
+        painter.setBrush(color);
+        painter.setPen(Qt::NoPen);
+        QPainterPath flame;
+        flame.moveTo(22.0, 34.0);
+        flame.cubicTo(13.0, 28.0, 17.0, 17.0, 22.0, 10.0);
+        flame.cubicTo(31.0, 17.0, 31.0, 28.0, 22.0, 34.0);
+        painter.drawPath(flame);
+        painter.setBrush(Qt::white);
+        QPainterPath core;
+        core.moveTo(22.0, 31.0);
+        core.cubicTo(18.0, 27.0, 20.0, 22.0, 23.0, 18.0);
+        core.cubicTo(26.0, 22.0, 26.0, 28.0, 22.0, 31.0);
+        painter.drawPath(core);
+        return QIcon(pixmap);
+    }
+
+    if (type == "smoke") {
+        painter.setPen(QPen(color, 3.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.drawArc(QRectF(10, 23, 18, 10), 20 * 16, 220 * 16);
+        painter.drawArc(QRectF(18, 17, 17, 10), 20 * 16, 220 * 16);
+        painter.drawArc(QRectF(12, 11, 15, 9), 20 * 16, 220 * 16);
         return QIcon(pixmap);
     }
 
@@ -1245,6 +1309,16 @@ void ScenarioCanvasWidget::setConnectionBlocksChangedHandler(std::function<void(
     connectionBlocksChangedHandler_ = std::move(handler);
 }
 
+void ScenarioCanvasWidget::setEnvironmentHazards(std::vector<safecrowd::domain::EnvironmentHazardDraft> hazards) {
+    environmentHazards_ = std::move(hazards);
+    update();
+}
+
+void ScenarioCanvasWidget::setEnvironmentHazardsChangedHandler(
+    std::function<void(const std::vector<safecrowd::domain::EnvironmentHazardDraft>&)> handler) {
+    environmentHazardsChangedHandler_ = std::move(handler);
+}
+
 void ScenarioCanvasWidget::setRouteGuidances(std::vector<safecrowd::domain::RouteGuidanceDraft> guidances) {
     routeGuidances_ = std::move(guidances);
     update();
@@ -1295,6 +1369,23 @@ void ScenarioCanvasWidget::activateLayoutElement(const QString& elementId) {
             return;
         }
         addConnectionBlockForConnection(*it);
+        return;
+    }
+
+    if (toolMode_ == ToolMode::FireHazard || toolMode_ == ToolMode::SmokeHazard) {
+        const auto targetId = elementId.toStdString();
+        const auto it = std::find_if(layout_.zones.begin(), layout_.zones.end(), [&](const auto& zone) {
+            return zone.id == targetId;
+        });
+        if (it == layout_.zones.end()) {
+            return;
+        }
+        addEnvironmentHazardForZone(
+            *it,
+            polygonCenter(it->area),
+            toolMode_ == ToolMode::FireHazard
+                ? safecrowd::domain::EnvironmentHazardKind::Fire
+                : safecrowd::domain::EnvironmentHazardKind::Smoke);
         return;
     }
 
@@ -1370,6 +1461,20 @@ bool ScenarioCanvasWidget::editConnectionBlockScheduleById(const QString& blockI
     return true;
 }
 
+bool ScenarioCanvasWidget::deleteEnvironmentHazardById(const QString& hazardId) {
+    auto it = std::find_if(environmentHazards_.begin(), environmentHazards_.end(), [&](const auto& hazard) {
+        return QString::fromStdString(hazard.id) == hazardId;
+    });
+    if (it == environmentHazards_.end()) {
+        return false;
+    }
+
+    environmentHazards_.erase(it);
+    emitEnvironmentHazardsChanged();
+    update();
+    return true;
+}
+
 bool ScenarioCanvasWidget::deleteRouteGuidanceById(const QString& guidanceId) {
     auto it = std::find_if(routeGuidances_.begin(), routeGuidances_.end(), [&](const auto& guidance) {
         return QString::fromStdString(guidance.id) == guidanceId;
@@ -1425,6 +1530,7 @@ void ScenarioCanvasWidget::keyReleaseEvent(QKeyEvent* event) {
 
 void ScenarioCanvasWidget::leaveEvent(QEvent* event) {
     hoveredConnectionBlockId_.clear();
+    hoveredEnvironmentHazardId_.clear();
     hoveredRouteGuidanceId_.clear();
     QToolTip::hideText();
     QWidget::leaveEvent(event);
@@ -1447,8 +1553,9 @@ void ScenarioCanvasWidget::mouseMoveEvent(QMouseEvent* event) {
     }
 
     if (dragging_) {
-        if (!hoveredConnectionBlockId_.isEmpty() || !hoveredRouteGuidanceId_.isEmpty()) {
+        if (!hoveredConnectionBlockId_.isEmpty() || !hoveredEnvironmentHazardId_.isEmpty() || !hoveredRouteGuidanceId_.isEmpty()) {
             hoveredConnectionBlockId_.clear();
+            hoveredEnvironmentHazardId_.clear();
             hoveredRouteGuidanceId_.clear();
             QToolTip::hideText();
         }
@@ -1458,8 +1565,9 @@ void ScenarioCanvasWidget::mouseMoveEvent(QMouseEvent* event) {
         return;
     }
     if (selectionDragging_) {
-        if (!hoveredConnectionBlockId_.isEmpty() || !hoveredRouteGuidanceId_.isEmpty()) {
+        if (!hoveredConnectionBlockId_.isEmpty() || !hoveredEnvironmentHazardId_.isEmpty() || !hoveredRouteGuidanceId_.isEmpty()) {
             hoveredConnectionBlockId_.clear();
+            hoveredEnvironmentHazardId_.clear();
             hoveredRouteGuidanceId_.clear();
             QToolTip::hideText();
         }
@@ -1478,6 +1586,12 @@ void ScenarioCanvasWidget::mouseMoveEvent(QMouseEvent* event) {
             transform,
             currentFloorId_,
             event->position());
+        const auto hoveredHazard = hoveredEnvironmentHazardIndex(
+            layout_,
+            environmentHazards_,
+            transform,
+            currentFloorId_,
+            event->position());
         const auto hoveredBlock = hoveredConnectionBlockIndex(layout_, connectionBlocks_, transform, currentFloorId_, event->position());
 
         if (hoveredGuidance.has_value()) {
@@ -1489,6 +1603,17 @@ void ScenarioCanvasWidget::mouseMoveEvent(QMouseEvent* event) {
             if (hoveredId != hoveredRouteGuidanceId_) {
                 hoveredRouteGuidanceId_ = hoveredId;
                 hoveredConnectionBlockId_.clear();
+                hoveredEnvironmentHazardId_.clear();
+                QToolTip::showText(event->globalPosition().toPoint(), tooltip, this);
+            }
+        } else if (hoveredHazard.has_value()) {
+            const auto& hazard = environmentHazards_[*hoveredHazard];
+            const auto tooltip = formatEnvironmentHazardTooltip(hazard);
+            const auto hoveredId = QString::fromStdString(hazard.id);
+            if (hoveredId != hoveredEnvironmentHazardId_) {
+                hoveredEnvironmentHazardId_ = hoveredId;
+                hoveredConnectionBlockId_.clear();
+                hoveredRouteGuidanceId_.clear();
                 QToolTip::showText(event->globalPosition().toPoint(), tooltip, this);
             }
         } else if (hoveredBlock.has_value()) {
@@ -1498,13 +1623,15 @@ void ScenarioCanvasWidget::mouseMoveEvent(QMouseEvent* event) {
                 const auto hoveredId = QString::fromStdString(block.id.empty() ? block.connectionId : block.id);
                 if (hoveredId != hoveredConnectionBlockId_) {
                     hoveredConnectionBlockId_ = hoveredId;
+                    hoveredEnvironmentHazardId_.clear();
                     hoveredRouteGuidanceId_.clear();
                     QToolTip::showText(event->globalPosition().toPoint(), tooltip, this);
                 }
             }
         } else {
-            if (!hoveredConnectionBlockId_.isEmpty() || !hoveredRouteGuidanceId_.isEmpty()) {
+            if (!hoveredConnectionBlockId_.isEmpty() || !hoveredEnvironmentHazardId_.isEmpty() || !hoveredRouteGuidanceId_.isEmpty()) {
                 hoveredConnectionBlockId_.clear();
+                hoveredEnvironmentHazardId_.clear();
                 hoveredRouteGuidanceId_.clear();
                 QToolTip::hideText();
             }
@@ -1613,6 +1740,16 @@ void ScenarioCanvasWidget::mousePressEvent(QMouseEvent* event) {
 
     if (toolMode_ == ToolMode::BlockDoor) {
         addConnectionBlock(event->position());
+        event->accept();
+        return;
+    }
+
+    if (toolMode_ == ToolMode::FireHazard || toolMode_ == ToolMode::SmokeHazard) {
+        addEnvironmentHazard(
+            event->position(),
+            toolMode_ == ToolMode::FireHazard
+                ? safecrowd::domain::EnvironmentHazardKind::Fire
+                : safecrowd::domain::EnvironmentHazardKind::Smoke);
         event->accept();
         return;
     }
@@ -1733,6 +1870,7 @@ void ScenarioCanvasWidget::paintEvent(QPaintEvent* event) {
     }
     drawFocusedPlacement(painter, transform);
     drawConnectionBlocks(painter, transform);
+    drawEnvironmentHazards(painter, transform);
     drawRouteGuidances(painter, transform);
 
     if (dragging_ || selectionDragging_) {
@@ -1905,6 +2043,45 @@ void ScenarioCanvasWidget::drawConnectionBlocks(QPainter& painter, const LayoutC
     }
 }
 
+void ScenarioCanvasWidget::drawEnvironmentHazards(QPainter& painter, const LayoutCanvasTransform& transform) const {
+    for (const auto& hazard : environmentHazards_) {
+        auto floorId = hazard.floorId;
+        if (floorId.empty() && !hazard.affectedZoneId.empty()) {
+            const auto zoneIt = std::find_if(layout_.zones.begin(), layout_.zones.end(), [&](const auto& zone) {
+                return zone.id == hazard.affectedZoneId;
+            });
+            if (zoneIt != layout_.zones.end()) {
+                floorId = zoneIt->floorId;
+            }
+        }
+        if (!matchesFloor(floorId, currentFloorId_)) {
+            continue;
+        }
+
+        const auto center = transform.map(hazard.position);
+        const QColor fill = hazard.kind == safecrowd::domain::EnvironmentHazardKind::Fire
+            ? QColor("#c2410c")
+            : QColor("#64748b");
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(fill);
+        painter.drawEllipse(center, 11.0, 11.0);
+
+        painter.setPen(QPen(Qt::white, 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.setBrush(Qt::NoBrush);
+        if (hazard.kind == safecrowd::domain::EnvironmentHazardKind::Fire) {
+            QPainterPath flame;
+            flame.moveTo(center + QPointF(0.0, 6.0));
+            flame.cubicTo(center + QPointF(-5.0, 2.0), center + QPointF(-3.5, -4.0), center + QPointF(-0.5, -7.0));
+            flame.cubicTo(center + QPointF(4.0, -3.0), center + QPointF(4.0, 3.0), center + QPointF(0.0, 6.0));
+            painter.drawPath(flame);
+        } else {
+            painter.drawArc(QRectF(center.x() - 7.0, center.y() - 1.0, 9.0, 7.0), 20 * 16, 220 * 16);
+            painter.drawArc(QRectF(center.x() - 1.0, center.y() - 3.0, 10.0, 7.0), 20 * 16, 220 * 16);
+            painter.drawArc(QRectF(center.x() - 5.0, center.y() - 8.0, 8.0, 6.0), 20 * 16, 220 * 16);
+        }
+    }
+}
+
 void ScenarioCanvasWidget::drawRouteGuidances(QPainter& painter, const LayoutCanvasTransform& transform) const {
     painter.setPen(Qt::NoPen);
     painter.setBrush(QColor("#1f5fae"));
@@ -2057,7 +2234,7 @@ QString ScenarioCanvasWidget::zoneAt(const safecrowd::domain::Point2D& point) co
         if (!matchesFloor(zone.floorId, currentFloorId_)) {
             continue;
         }
-        if (pointInRing(zone.area.outline, point)) {
+        if (pointInPolygon(zone.area, point)) {
             return QString::fromStdString(zone.id);
         }
     }
@@ -2284,6 +2461,18 @@ QString ScenarioCanvasWidget::nextConnectionBlockId() const {
     return QString("block-%1").arg(static_cast<int>(connectionBlocks_.size()) + 1);
 }
 
+QString ScenarioCanvasWidget::nextEnvironmentHazardId() const {
+    for (int index = static_cast<int>(environmentHazards_.size()) + 1;; ++index) {
+        const auto candidate = QString("hazard-%1").arg(index);
+        const auto exists = std::any_of(environmentHazards_.begin(), environmentHazards_.end(), [&](const auto& hazard) {
+            return QString::fromStdString(hazard.id) == candidate;
+        });
+        if (!exists) {
+            return candidate;
+        }
+    }
+}
+
 QString ScenarioCanvasWidget::nextRouteGuidanceId() const {
     return QString("guidance-%1").arg(static_cast<int>(routeGuidances_.size()) + 1);
 }
@@ -2446,6 +2635,61 @@ void ScenarioCanvasWidget::addConnectionBlockForConnection(const safecrowd::doma
     draft.connectionId = connection.id;
     connectionBlocks_.push_back(std::move(draft));
     emitConnectionBlocksChanged();
+    update();
+}
+
+void ScenarioCanvasWidget::addEnvironmentHazard(
+    const QPointF& position,
+    safecrowd::domain::EnvironmentHazardKind kind) {
+    const auto point = unmapPoint(position);
+    const auto zoneId = zoneAt(point);
+    if (zoneId.isEmpty()) {
+        QMessageBox::information(this, "Hazard", "Click inside a zone to place a fire or smoke hazard.");
+        return;
+    }
+
+    const auto zoneIdStd = zoneId.toStdString();
+    const auto it = std::find_if(layout_.zones.begin(), layout_.zones.end(), [&](const auto& zone) {
+        return zone.id == zoneIdStd;
+    });
+    if (it == layout_.zones.end()) {
+        return;
+    }
+    addEnvironmentHazardForZone(*it, point, kind);
+}
+
+void ScenarioCanvasWidget::addEnvironmentHazardForZone(
+    const safecrowd::domain::Zone2D& zone,
+    safecrowd::domain::Point2D position,
+    safecrowd::domain::EnvironmentHazardKind kind) {
+    if (!matchesFloor(zone.floorId, currentFloorId_)) {
+        return;
+    }
+
+    if (!pointInPolygon(zone.area, position)) {
+        const auto fallbackPosition = representativePointInPolygon(zone.area);
+        if (!fallbackPosition.has_value()) {
+            QMessageBox::information(this, "Hazard", "Could not find a valid point inside this zone.");
+            return;
+        }
+        position = *fallbackPosition;
+    }
+
+    safecrowd::domain::EnvironmentHazardDraft draft;
+    draft.id = nextEnvironmentHazardId().toStdString();
+    draft.kind = kind;
+    draft.name = QString("%1 hazard %2")
+        .arg(kind == safecrowd::domain::EnvironmentHazardKind::Fire ? "Fire" : "Smoke")
+        .arg(static_cast<int>(environmentHazards_.size()) + 1)
+        .toStdString();
+    draft.affectedZoneId = zone.id;
+    draft.floorId = zone.floorId.empty() ? currentFloorId_.toStdString() : zone.floorId;
+    draft.position = position;
+    draft.startSeconds = 0.0;
+    draft.endSeconds = 60.0;
+    draft.severity = safecrowd::domain::ScenarioElementSeverity::Medium;
+    environmentHazards_.push_back(std::move(draft));
+    emitEnvironmentHazardsChanged();
     update();
 }
 
@@ -2807,6 +3051,12 @@ void ScenarioCanvasWidget::emitConnectionBlocksChanged() {
     }
 }
 
+void ScenarioCanvasWidget::emitEnvironmentHazardsChanged() {
+    if (environmentHazardsChangedHandler_) {
+        environmentHazardsChangedHandler_(environmentHazards_);
+    }
+}
+
 void ScenarioCanvasWidget::emitRouteGuidancesChanged() {
     if (routeGuidancesChangedHandler_) {
         routeGuidancesChangedHandler_(routeGuidances_);
@@ -2837,6 +3087,12 @@ void ScenarioCanvasWidget::setToolMode(ToolMode mode) {
     }
     if (blockDoorToolButton_ != nullptr) {
         blockDoorToolButton_->setChecked(mode == ToolMode::BlockDoor);
+    }
+    if (fireHazardToolButton_ != nullptr) {
+        fireHazardToolButton_->setChecked(mode == ToolMode::FireHazard);
+    }
+    if (smokeHazardToolButton_ != nullptr) {
+        smokeHazardToolButton_->setChecked(mode == ToolMode::SmokeHazard);
     }
     if (routeGuidanceToolButton_ != nullptr) {
         routeGuidanceToolButton_->setChecked(mode == ToolMode::RouteGuidance);
@@ -2892,6 +3148,8 @@ void ScenarioCanvasWidget::setupToolbars() {
     individualToolButton_ = makeButton(makeToolIcon("individual", QColor("#1f5fae")), "Add Individual Occupant");
     groupToolButton_ = makeButton(makeToolIcon("group", QColor("#1f5fae")), "Add Occupant Group");
     blockDoorToolButton_ = makeButton(makeToolIcon("block", QColor("#c0392b")), "block door");
+    fireHazardToolButton_ = makeButton(makeToolIcon("fire", QColor("#c2410c")), "Add Fire Hazard");
+    smokeHazardToolButton_ = makeButton(makeToolIcon("smoke", QColor("#64748b")), "Add Smoke Hazard");
     routeGuidanceToolButton_ = makeButton(makeToolIcon("guidance", QColor("#1f5fae")), "Route guidance");
     topLayout->addStretch(1);
 
@@ -2916,6 +3174,8 @@ void ScenarioCanvasWidget::setupToolbars() {
     connect(individualToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::IndividualPlacement); });
     connect(groupToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::GroupPlacement); });
     connect(blockDoorToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::BlockDoor); });
+    connect(fireHazardToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::FireHazard); });
+    connect(smokeHazardToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::SmokeHazard); });
     connect(routeGuidanceToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::RouteGuidance); });
 
     setToolMode(ToolMode::Select);
