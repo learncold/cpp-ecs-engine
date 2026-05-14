@@ -240,24 +240,6 @@ bool isCriticalPressureEventWorse(
     return candidate.pressureScore > current.pressureScore;
 }
 
-bool intervalContains(const ConnectionBlockIntervalDraft& interval, double timeSeconds) {
-    const auto start = std::max(0.0, interval.startSeconds);
-    const auto end = std::max(start, interval.endSeconds);
-    return timeSeconds + 1e-9 >= start && timeSeconds <= end + 1e-9;
-}
-
-bool connectionShouldBeBlocked(const ConnectionBlockDraft& block, double timeSeconds) {
-    if (block.connectionId.empty()) {
-        return false;
-    }
-    if (block.intervals.empty()) {
-        return true;
-    }
-    return std::any_of(block.intervals.begin(), block.intervals.end(), [&](const auto& interval) {
-        return intervalContains(interval, timeSeconds);
-    });
-}
-
 std::string hazardRuntimeKey(const EnvironmentHazardDraft& hazard, std::size_t index) {
     if (!hazard.id.empty()) {
         return hazard.id;
@@ -310,7 +292,7 @@ std::unordered_set<std::string> activeBlockedConnectionIds(
     std::unordered_set<std::string> ids;
     ids.reserve(blocks.size());
     for (const auto& block : blocks) {
-        if (!connectionShouldBeBlocked(block, elapsedSeconds)) {
+        if (!connectionBlockActiveAt(block, elapsedSeconds)) {
             continue;
         }
         if (std::any_of(layout.connections.begin(), layout.connections.end(), [&](const auto& connection) {

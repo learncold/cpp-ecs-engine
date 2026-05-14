@@ -379,4 +379,27 @@ std::string environmentHazardFloorId(const FacilityLayout2D& layout, const Envir
     return it == layout.zones.end() ? std::string{} : it->floorId;
 }
 
+bool connectionBlockIntervalActiveAt(const ConnectionBlockIntervalDraft& interval, double elapsedSeconds) {
+    const auto start = std::max(0.0, interval.startSeconds);
+    if (elapsedSeconds + 1e-9 < start) {
+        return false;
+    }
+    if (interval.endSeconds <= interval.startSeconds) {
+        return true;
+    }
+    return elapsedSeconds <= std::max(start, interval.endSeconds) + 1e-9;
+}
+
+bool connectionBlockActiveAt(const ConnectionBlockDraft& block, double elapsedSeconds) {
+    if (block.connectionId.empty()) {
+        return false;
+    }
+    if (block.intervals.empty()) {
+        return true;
+    }
+    return std::any_of(block.intervals.begin(), block.intervals.end(), [&](const auto& interval) {
+        return connectionBlockIntervalActiveAt(interval, elapsedSeconds);
+    });
+}
+
 }  // namespace safecrowd::domain

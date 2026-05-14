@@ -423,6 +423,42 @@ safecrowd::domain::ScenarioAgentSeed straightRouteSeed(
     };
 }
 
+safecrowd::domain::ScenarioAgentSeed doorRouteSeed(
+    safecrowd::domain::Point2D start,
+    std::string destinationZoneId,
+    std::string connectionId,
+    safecrowd::domain::LineSegment2D passage,
+    double maxSpeed = 1.0,
+    double closurePatienceSeconds = 0.0) {
+    const auto target = safecrowd::domain::simulation_internal::closestPointOnSegment(
+        start,
+        passage.start,
+        passage.end);
+    return {
+        .position = {.value = start},
+        .agent = {
+            .radius = 0.25f,
+            .maxSpeed = static_cast<float>(maxSpeed),
+            .closurePatienceSeconds = closurePatienceSeconds,
+        },
+        .velocity = {.value = {}},
+        .route = {
+            .waypoints = {target},
+            .waypointPassages = {passage},
+            .waypointFromZoneIds = {"room"},
+            .waypointZoneIds = {destinationZoneId},
+            .waypointFloorIds = {""},
+            .waypointConnectionIds = {connectionId},
+            .waypointVerticalTransitions = {false},
+            .nextWaypointIndex = 0,
+            .currentSegmentStart = start,
+            .previousDistanceToWaypoint = 1.0,
+            .destinationZoneId = destinationZoneId,
+        },
+        .status = {},
+    };
+}
+
 safecrowd::domain::EnvironmentHazardDraft hazardDraft(
     std::string id,
     safecrowd::domain::EnvironmentHazardKind kind,
@@ -460,6 +496,29 @@ void addHazardMotionSystems(
         std::make_unique<safecrowd::domain::ScenarioFrameSyncSystem>(),
         {.phase = safecrowd::engine::UpdatePhase::RenderSync,
          .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+}
+
+void addClosureMotionSystems(
+    safecrowd::engine::EngineRuntime& runtime,
+    const safecrowd::domain::FacilityLayout2D& layout,
+    std::vector<safecrowd::domain::ConnectionBlockDraft> blocks) {
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioControlSystem(layout, std::move(blocks)),
+        {.phase = safecrowd::engine::UpdatePhase::PreSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioSimulationMotionSystem(layout),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+    runtime.addSystem(
+        std::make_unique<safecrowd::domain::ScenarioFrameSyncSystem>(),
+        {.phase = safecrowd::engine::UpdatePhase::RenderSync,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+}
+
+void stepScenarioRuntime(safecrowd::engine::EngineRuntime& runtime, double deltaSeconds) {
+    runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = deltaSeconds});
+    runtime.stepFrame(0.0);
 }
 
 safecrowd::domain::FacilityLayout2D overlappingFloorBottleneckLayout() {
@@ -2129,6 +2188,165 @@ SC_TEST(ScenarioControlSystem_BlocksConnectionsUsingScenarioClock) {
             safecrowd::domain::TravelDirection::Bidirectional);
         SC_EXPECT_EQ(layoutCache.layout.barriers.size(), std::size_t{0});
     }
+}
+
+SC_TEST(ScenarioSimulationMotionSystem_SlowsBeforeDoorClosureReroute) {
+    auto layout = twoExitGuidanceDetourLayout();
+    safecrowd::domain::ConnectionBlockDraft block;
+    block.id = "block-near";
+    block.connectionId = "room-near-exit";
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 0.1,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 91,
+    });
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(
+        std::vector<safecrowd::domain::ScenarioAgentSeed>{
+            doorRouteSeed(
+                {.x = 1.2, .y = 0.5},
+                "near-exit",
+                "room-near-exit",
+                {{.x = 2.0, .y = 0.3}, {.x = 2.0, .y = 0.7}},
+                1.0,
+                0.5),
+        },
+        5.0));
+    addClosureMotionSystems(runtime, layout, {block});
+
+    runtime.play();
+    stepScenarioRuntime(runtime, 0.1);
+
+    auto& query = runtime.world().query();
+    const auto entities = query.view<
+        safecrowd::domain::Position,
+        safecrowd::domain::Velocity,
+        safecrowd::domain::EvacuationRoute>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{1});
+    const auto entity = entities.front();
+    const auto& velocityBeforeReady = query.get<safecrowd::domain::Velocity>(entity).value;
+    const auto& routeBeforeReady = query.get<safecrowd::domain::EvacuationRoute>(entity);
+    SC_EXPECT_EQ(routeBeforeReady.destinationZoneId, std::string{"near-exit"});
+    SC_EXPECT_TRUE(safecrowd::domain::simulation_internal::lengthOf(velocityBeforeReady) > 0.0);
+    SC_EXPECT_TRUE(safecrowd::domain::simulation_internal::lengthOf(velocityBeforeReady) < 0.5);
+
+    const auto& reactions =
+        runtime.world().resources().get<safecrowd::domain::ScenarioEnvironmentReactionResource>();
+    const auto stateIt = reactions.agentsById.find(entity.index);
+    SC_EXPECT_TRUE(stateIt != reactions.agentsById.end());
+    SC_EXPECT_TRUE(stateIt->second.closureDetected);
+    SC_EXPECT_TRUE(!stateIt->second.closureAware);
+    SC_EXPECT_EQ(stateIt->second.blockedConnectionId, std::string{"room-near-exit"});
+
+    for (int i = 0; i < 6; ++i) {
+        stepScenarioRuntime(runtime, 0.1);
+    }
+
+    const auto& routeAfterReady = query.get<safecrowd::domain::EvacuationRoute>(entity);
+    SC_EXPECT_EQ(routeAfterReady.destinationZoneId, std::string{"far-exit"});
+    SC_EXPECT_TRUE(!routeAfterReady.noExitAvailable);
+}
+
+SC_TEST(ScenarioSimulationMotionSystem_HoldsInsideZoneWhenDoorClosureLeavesNoExit) {
+    auto layout = straightExitLayout();
+    safecrowd::domain::ConnectionBlockDraft block;
+    block.id = "block-exit";
+    block.connectionId = "room-exit";
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 0.1,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 92,
+    });
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(
+        std::vector<safecrowd::domain::ScenarioAgentSeed>{
+            doorRouteSeed(
+                {.x = 0.8, .y = 0.0},
+                "exit",
+                "room-exit",
+                {{.x = 1.0, .y = -0.4}, {.x = 1.0, .y = 0.4}}),
+        },
+        5.0));
+    addClosureMotionSystems(runtime, layout, {block});
+
+    runtime.play();
+    stepScenarioRuntime(runtime, 0.1);
+
+    auto& query = runtime.world().query();
+    const auto entities = query.view<
+        safecrowd::domain::Position,
+        safecrowd::domain::Velocity,
+        safecrowd::domain::EvacuationRoute>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{1});
+    const auto entity = entities.front();
+    const auto& route = query.get<safecrowd::domain::EvacuationRoute>(entity);
+    const auto& position = query.get<safecrowd::domain::Position>(entity).value;
+    const auto& layoutCache =
+        runtime.world().resources().get<safecrowd::domain::ScenarioLayoutCacheResource>();
+
+    SC_EXPECT_EQ(
+        layoutCache.layout.connections.front().directionality,
+        safecrowd::domain::TravelDirection::Closed);
+    SC_EXPECT_EQ(route.destinationZoneId, std::string{});
+    SC_EXPECT_TRUE(route.noExitAvailable);
+    SC_EXPECT_TRUE(route.holdingForClosure);
+    SC_EXPECT_TRUE(route.destinationZoneId.empty());
+    SC_EXPECT_TRUE(!route.waypoints.empty());
+    SC_EXPECT_TRUE(position.x < 0.8);
+}
+
+SC_TEST(ScenarioSimulationMotionSystem_RetriesNoExitAfterFiniteDoorClosureReopens) {
+    auto layout = straightExitLayout();
+    safecrowd::domain::ConnectionBlockDraft block;
+    block.id = "block-exit";
+    block.connectionId = "room-exit";
+    block.intervals.push_back({.startSeconds = 0.0, .endSeconds = 0.3});
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 0.1,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 93,
+    });
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(
+        std::vector<safecrowd::domain::ScenarioAgentSeed>{
+            doorRouteSeed(
+                {.x = 0.8, .y = 0.0},
+                "exit",
+                "room-exit",
+                {{.x = 1.0, .y = -0.4}, {.x = 1.0, .y = 0.4}}),
+        },
+        5.0));
+    addClosureMotionSystems(runtime, layout, {block});
+
+    runtime.play();
+    stepScenarioRuntime(runtime, 0.1);
+
+    auto& query = runtime.world().query();
+    const auto entities = query.view<
+        safecrowd::domain::Position,
+        safecrowd::domain::Velocity,
+        safecrowd::domain::EvacuationRoute>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{1});
+    const auto entity = entities.front();
+    const auto& layoutCache =
+        runtime.world().resources().get<safecrowd::domain::ScenarioLayoutCacheResource>();
+    SC_EXPECT_EQ(
+        layoutCache.layout.connections.front().directionality,
+        safecrowd::domain::TravelDirection::Closed);
+    SC_EXPECT_EQ(query.get<safecrowd::domain::EvacuationRoute>(entity).destinationZoneId, std::string{});
+    SC_EXPECT_TRUE(query.get<safecrowd::domain::EvacuationRoute>(entity).noExitAvailable);
+
+    bool routeRecovered = false;
+    for (int i = 0; i < 12; ++i) {
+        stepScenarioRuntime(runtime, 0.1);
+        const auto& route = query.get<safecrowd::domain::EvacuationRoute>(entity);
+        if (!route.noExitAvailable && route.destinationZoneId == "exit") {
+            routeRecovered = true;
+            break;
+        }
+    }
+
+    SC_EXPECT_TRUE(routeRecovered);
 }
 
 SC_TEST(ScenarioRiskMetricsSystem_PublishesStalledHotspotAndBottleneckMetrics) {
