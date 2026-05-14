@@ -40,6 +40,12 @@ constexpr int kFloorSelectorMargin = 14;
 const QColor kMovingAgentColor("#1f5fae");
 const QColor kStalledAgentColor("#7c3aed");
 
+enum class TimelineVisualState {
+    Future,
+    Active,
+    Expired,
+};
+
 std::string defaultFloorId(const safecrowd::domain::FacilityLayout2D& layout) {
     if (!layout.floors.empty() && !layout.floors.front().id.empty()) {
         return layout.floors.front().id;
@@ -87,6 +93,39 @@ QString formatEnvironmentHazardTooltip(const safecrowd::domain::EnvironmentHazar
             .arg(std::max(start, hazard.endSeconds), 0, 'f', 1));
     }
     text.append(QString("\nSeverity: %1").arg(severityLabel(hazard.severity)));
+    return text;
+}
+
+QString visualStateLabel(TimelineVisualState state) {
+    switch (state) {
+    case TimelineVisualState::Future:
+        return QStringLiteral("Future");
+    case TimelineVisualState::Expired:
+        return QStringLiteral("Expired");
+    case TimelineVisualState::Active:
+    default:
+        return QStringLiteral("Active");
+    }
+}
+
+std::optional<TimelineVisualState> environmentHazardVisualState(
+    const safecrowd::domain::EnvironmentHazardDraft& hazard,
+    double elapsedSeconds) {
+    if (safecrowd::domain::environmentHazardActiveAt(hazard, elapsedSeconds)) {
+        return TimelineVisualState::Active;
+    }
+    const auto start = std::max(0.0, hazard.startSeconds);
+    if (elapsedSeconds + 1e-9 < start) {
+        return TimelineVisualState::Future;
+    }
+    return TimelineVisualState::Expired;
+}
+
+QString formatEnvironmentHazardTooltip(
+    const safecrowd::domain::EnvironmentHazardDraft& hazard,
+    TimelineVisualState state) {
+    auto text = formatEnvironmentHazardTooltip(hazard);
+    text.append(QString("\nState: %1").arg(visualStateLabel(state)));
     return text;
 }
 
@@ -159,9 +198,38 @@ QString formatScheduleTooltip(const safecrowd::domain::ConnectionBlockDraft& blo
 
     for (const auto& interval : block.intervals) {
         const auto start = std::max(0.0, interval.startSeconds);
-        const auto end = std::max(start, interval.endSeconds);
-        text.append(QString("\n- %1s ~ %2s").arg(start, 0, 'f', 1).arg(end, 0, 'f', 1));
+        if (interval.endSeconds <= interval.startSeconds) {
+            text.append(QString("\n- %1s ~ open").arg(start, 0, 'f', 1));
+        } else {
+            text.append(QString("\n- %1s ~ %2s").arg(start, 0, 'f', 1).arg(std::max(start, interval.endSeconds), 0, 'f', 1));
+        }
     }
+    return text;
+}
+
+std::optional<TimelineVisualState> connectionBlockVisualState(
+    const safecrowd::domain::ConnectionBlockDraft& block,
+    double elapsedSeconds) {
+    if (block.connectionId.empty()) {
+        return std::nullopt;
+    }
+    if (safecrowd::domain::connectionBlockActiveAt(block, elapsedSeconds)) {
+        return TimelineVisualState::Active;
+    }
+    if (block.intervals.empty()) {
+        return TimelineVisualState::Active;
+    }
+    const auto hasFutureInterval = std::any_of(block.intervals.begin(), block.intervals.end(), [&](const auto& interval) {
+        return elapsedSeconds + 1e-9 < std::max(0.0, interval.startSeconds);
+    });
+    return hasFutureInterval ? TimelineVisualState::Future : TimelineVisualState::Expired;
+}
+
+QString formatScheduleTooltip(
+    const safecrowd::domain::ConnectionBlockDraft& block,
+    TimelineVisualState state) {
+    auto text = formatScheduleTooltip(block);
+    text.append(QString("\nState: %1").arg(visualStateLabel(state)));
     return text;
 }
 
@@ -182,7 +250,7 @@ QString formatRouteGuidanceTooltip(const safecrowd::domain::RouteGuidanceDraft& 
     return text;
 }
 
-std::optional<std::size_t> hoveredBlockedConnectionIndex(
+std::optional<std::size_t> hoveredConnectionBlockIndex(
     const safecrowd::domain::FacilityLayout2D& layout,
     const std::vector<safecrowd::domain::ConnectionBlockDraft>& blocks,
     const LayoutCanvasTransform& transform,
@@ -196,7 +264,7 @@ std::optional<std::size_t> hoveredBlockedConnectionIndex(
 
     for (std::size_t index = 0; index < blocks.size(); ++index) {
         const auto& block = blocks[index];
-        if (!safecrowd::domain::connectionBlockActiveAt(block, elapsedSeconds)) {
+        if (!connectionBlockVisualState(block, elapsedSeconds).has_value()) {
             continue;
         }
         const auto it = std::find_if(layout.connections.begin(), layout.connections.end(), [&](const auto& connection) {
@@ -222,7 +290,7 @@ std::optional<std::size_t> hoveredBlockedConnectionIndex(
     return closestIndex;
 }
 
-std::optional<std::size_t> hoveredActiveEnvironmentHazardIndex(
+std::optional<std::size_t> hoveredEnvironmentHazardIndex(
     const safecrowd::domain::FacilityLayout2D& layout,
     const std::vector<safecrowd::domain::EnvironmentHazardDraft>& hazards,
     const LayoutCanvasTransform& transform,
@@ -235,7 +303,7 @@ std::optional<std::size_t> hoveredActiveEnvironmentHazardIndex(
     double closestDistanceSq = kHoverRadiusPixels * kHoverRadiusPixels;
     for (std::size_t index = 0; index < hazards.size(); ++index) {
         const auto& hazard = hazards[index];
-        if (!safecrowd::domain::environmentHazardActiveAt(hazard, elapsedSeconds)) {
+        if (!environmentHazardVisualState(hazard, elapsedSeconds).has_value()) {
             continue;
         }
         if (!matchesFloor(safecrowd::domain::environmentHazardFloorId(layout, hazard), currentFloorId)) {
@@ -342,7 +410,7 @@ std::optional<QPointF> routeGuidanceMarkerCenter(
     std::vector<QPointF> blockedCenters;
     blockedCenters.reserve(blocks.size());
     for (const auto& block : blocks) {
-        if (!safecrowd::domain::connectionBlockActiveAt(block, elapsedSeconds)) {
+        if (!connectionBlockVisualState(block, elapsedSeconds).has_value()) {
             continue;
         }
         const auto connectionIt = std::find_if(layout.connections.begin(), layout.connections.end(), [&](const auto& connection) {
@@ -618,14 +686,14 @@ void SimulationCanvasWidget::mouseMoveEvent(QMouseEvent* event) {
         currentFloorId_,
         elapsedSeconds,
         event->position());
-    const auto hoveredIndex = hoveredBlockedConnectionIndex(
+    const auto hoveredIndex = hoveredConnectionBlockIndex(
         layout_,
         connectionBlocks_,
         transform,
         currentFloorId_,
         elapsedSeconds,
         event->position());
-    const auto hoveredHazard = hoveredActiveEnvironmentHazardIndex(
+    const auto hoveredHazard = hoveredEnvironmentHazardIndex(
         layout_,
         environmentHazards_,
         transform,
@@ -651,7 +719,8 @@ void SimulationCanvasWidget::mouseMoveEvent(QMouseEvent* event) {
 
     if (hoveredIndex.has_value()) {
         const auto& block = connectionBlocks_[*hoveredIndex];
-        const auto tooltip = formatScheduleTooltip(block);
+        const auto state = connectionBlockVisualState(block, elapsedSeconds);
+        const auto tooltip = state.has_value() ? formatScheduleTooltip(block, *state) : formatScheduleTooltip(block);
         if (tooltip.isEmpty()) {
             QWidget::mouseMoveEvent(event);
             return;
@@ -670,7 +739,10 @@ void SimulationCanvasWidget::mouseMoveEvent(QMouseEvent* event) {
 
     if (hoveredHazard.has_value()) {
         const auto& hazard = environmentHazards_[*hoveredHazard];
-        const auto tooltip = formatEnvironmentHazardTooltip(hazard);
+        const auto state = environmentHazardVisualState(hazard, elapsedSeconds);
+        const auto tooltip = state.has_value()
+            ? formatEnvironmentHazardTooltip(hazard, *state)
+            : formatEnvironmentHazardTooltip(hazard);
         const auto hoveredId = hazard.id.empty()
             ? QString("%1:%2:%3")
                   .arg(hazardKindLabel(hazard.kind))
@@ -861,11 +933,9 @@ void SimulationCanvasWidget::drawConnectionBlockOverlay(QPainter& painter, const
     const auto elapsedSeconds = std::max(0.0, frame_.elapsedSeconds);
 
     painter.save();
-    painter.setBrush(Qt::NoBrush);
-    painter.setPen(QPen(QColor("#c0392b"), 2.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-
     for (const auto& block : connectionBlocks_) {
-        if (!safecrowd::domain::connectionBlockActiveAt(block, elapsedSeconds)) {
+        const auto state = connectionBlockVisualState(block, elapsedSeconds);
+        if (!state.has_value()) {
             continue;
         }
 
@@ -880,9 +950,32 @@ void SimulationCanvasWidget::drawConnectionBlockOverlay(QPainter& painter, const
         }
 
         const auto center = transform.map(connectionCenter(*it));
+        QColor color("#c0392b");
+        Qt::PenStyle penStyle = Qt::SolidLine;
+        double penWidth = 2.8;
+        if (*state == TimelineVisualState::Future) {
+            color = QColor("#64748b");
+            penStyle = Qt::DashLine;
+            penWidth = 2.2;
+        } else if (*state == TimelineVisualState::Expired) {
+            color = QColor(100, 116, 139, 120);
+            penStyle = Qt::DotLine;
+            penWidth = 2.0;
+        }
+
         const double r = 10.0;
+        painter.setBrush(Qt::NoBrush);
+        painter.setPen(QPen(color, penWidth, penStyle, Qt::RoundCap, Qt::RoundJoin));
         painter.drawEllipse(center, r, r);
-        painter.drawLine(QPointF(center.x() - 6.5, center.y() + 6.5), QPointF(center.x() + 6.5, center.y() - 6.5));
+        if (*state == TimelineVisualState::Future) {
+            painter.drawLine(center, QPointF(center.x(), center.y() - 5.8));
+            painter.drawLine(center, QPointF(center.x() + 5.2, center.y()));
+        } else if (*state == TimelineVisualState::Expired) {
+            painter.drawLine(QPointF(center.x() - 5.6, center.y() + 0.4), QPointF(center.x() - 1.8, center.y() + 4.2));
+            painter.drawLine(QPointF(center.x() - 1.8, center.y() + 4.2), QPointF(center.x() + 6.0, center.y() - 5.0));
+        } else {
+            painter.drawLine(QPointF(center.x() - 6.5, center.y() + 6.5), QPointF(center.x() + 6.5, center.y() - 6.5));
+        }
     }
 
     painter.restore();
@@ -900,7 +993,8 @@ void SimulationCanvasWidget::drawEnvironmentHazardOverlay(QPainter& painter, con
     painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
 
     for (const auto& hazard : environmentHazards_) {
-        if (!safecrowd::domain::environmentHazardActiveAt(hazard, elapsedSeconds)) {
+        const auto state = environmentHazardVisualState(hazard, elapsedSeconds);
+        if (!state.has_value()) {
             continue;
         }
         if (!matchesFloor(safecrowd::domain::environmentHazardFloorId(layout_, hazard), currentFloorId_)) {
@@ -918,9 +1012,27 @@ void SimulationCanvasWidget::drawEnvironmentHazardOverlay(QPainter& painter, con
             std::hypot(radiusAnchor.x() - center.x(), radiusAnchor.y() - center.y()));
 
         const auto isFire = hazard.kind == safecrowd::domain::EnvironmentHazardKind::Fire;
-        const QColor core = isFire ? QColor(220, 38, 38, 110) : QColor(71, 85, 105, 92);
-        const QColor mid = isFire ? QColor(249, 115, 22, 46) : QColor(148, 163, 184, 40);
-        const QColor edge = isFire ? QColor(249, 115, 22, 0) : QColor(148, 163, 184, 0);
+        QColor core = isFire ? QColor(220, 38, 38, 110) : QColor(71, 85, 105, 92);
+        QColor mid = isFire ? QColor(249, 115, 22, 46) : QColor(148, 163, 184, 40);
+        QColor edge = isFire ? QColor(249, 115, 22, 0) : QColor(148, 163, 184, 0);
+        QColor outline = isFire ? QColor(185, 28, 28, 180) : QColor(71, 85, 105, 165);
+        Qt::PenStyle outlineStyle = Qt::DashLine;
+        QColor markerFill = isFire ? QColor("#c2410c") : QColor("#64748b");
+        if (*state == TimelineVisualState::Future) {
+            core = isFire ? QColor(220, 38, 38, 42) : QColor(71, 85, 105, 34);
+            mid = isFire ? QColor(249, 115, 22, 16) : QColor(148, 163, 184, 14);
+            edge = QColor(0, 0, 0, 0);
+            outline = QColor(100, 116, 139, 135);
+            outlineStyle = Qt::DashLine;
+            markerFill = QColor(100, 116, 139, 170);
+        } else if (*state == TimelineVisualState::Expired) {
+            core = QColor(100, 116, 139, 28);
+            mid = QColor(100, 116, 139, 10);
+            edge = QColor(100, 116, 139, 0);
+            outline = QColor(100, 116, 139, 90);
+            outlineStyle = Qt::DotLine;
+            markerFill = QColor(100, 116, 139, 115);
+        }
         QRadialGradient gradient(center, radius);
         gradient.setColorAt(0.0, core);
         gradient.setColorAt(0.48, mid);
@@ -931,16 +1043,15 @@ void SimulationCanvasWidget::drawEnvironmentHazardOverlay(QPainter& painter, con
 
         painter.setBrush(Qt::NoBrush);
         painter.setPen(QPen(
-            isFire ? QColor(185, 28, 28, 180) : QColor(71, 85, 105, 165),
+            outline,
             1.8,
-            Qt::DashLine,
+            outlineStyle,
             Qt::RoundCap,
             Qt::RoundJoin));
         painter.drawEllipse(center, radius, radius);
 
-        const QColor fill = isFire ? QColor("#c2410c") : QColor("#64748b");
         painter.setPen(Qt::NoPen);
-        painter.setBrush(fill);
+        painter.setBrush(markerFill);
         painter.drawEllipse(center, 11.0, 11.0);
 
         painter.setPen(QPen(Qt::white, 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
