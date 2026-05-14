@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <filesystem>
+#include <iterator>
 #include <string>
 #include <utility>
 
@@ -311,6 +312,29 @@ SavedScenarioAuthoringState savedStateFromInitial(const ScenarioAuthoringWidget:
     return saved;
 }
 
+int selectedRunIndexFor(
+    const std::vector<safecrowd::domain::ScenarioDraft>& scenarios,
+    const std::optional<safecrowd::domain::ScenarioDraft>& selectedScenario) {
+    if (!selectedScenario.has_value()) {
+        return 0;
+    }
+
+    if (!selectedScenario->scenarioId.empty()) {
+        const auto idIt = std::find_if(scenarios.begin(), scenarios.end(), [&](const auto& scenario) {
+            return scenario.scenarioId == selectedScenario->scenarioId;
+        });
+        if (idIt != scenarios.end()) {
+            return static_cast<int>(std::distance(scenarios.begin(), idIt));
+        }
+    }
+
+    const auto nameIt = std::find_if(scenarios.begin(), scenarios.end(), [&](const auto& scenario) {
+        return scenario.name == selectedScenario->name
+            && scenario.role == selectedScenario->role;
+    });
+    return nameIt == scenarios.end() ? 0 : static_cast<int>(std::distance(scenarios.begin(), nameIt));
+}
+
 template <typename Widget>
 Widget* visibleChild(QWidget* root) {
     if (root == nullptr) {
@@ -462,12 +486,17 @@ void MainWindow::openProject(const ProjectMetadata& metadata) {
         break;
     case ProjectWorkspaceView::ScenarioRun:
         if (!workspace.runningScenarios.empty()) {
+            auto returnAuthoringState = workspace.authoring.has_value()
+                ? std::make_optional(initialStateFromSaved(*workspace.authoring, *importResult.layout))
+                : std::optional<ScenarioAuthoringWidget::InitialState>{};
+            const auto initialSelectedRunIndex = selectedRunIndexFor(
+                workspace.runningScenarios,
+                workspace.runningScenario);
             showScenarioRun(
                 *importResult.layout,
                 std::move(workspace.runningScenarios),
-                workspace.authoring.has_value()
-                    ? std::make_optional(initialStateFromSaved(*workspace.authoring, *importResult.layout))
-                    : std::nullopt);
+                std::move(returnAuthoringState),
+                initialSelectedRunIndex);
             return;
         }
         if (workspace.runningScenario.has_value()) {
@@ -758,7 +787,8 @@ void MainWindow::showScenarioRun(
 void MainWindow::showScenarioRun(
     const safecrowd::domain::FacilityLayout2D& layout,
     std::vector<safecrowd::domain::ScenarioDraft> scenarios,
-    std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState) {
+    std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState,
+    int initialSelectedRunIndex) {
     setCentralWidget(new ScenarioRunWidget(
         currentProject_.name,
         layout,
@@ -779,7 +809,8 @@ void MainWindow::showScenarioRun(
             }
         },
         std::move(returnAuthoringState),
-        this));
+        this,
+        initialSelectedRunIndex));
 }
 
 void MainWindow::showScenarioBatchResult(

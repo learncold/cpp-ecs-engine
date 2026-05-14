@@ -35,10 +35,10 @@ ScenarioDraft makeTwoFloorEastExitGuidanceAlternative(const ScenarioDraft& basel
         .endSeconds = 180.0,
         .periods = {{.startSeconds = 0.0, .endSeconds = 180.0}},
         .guidedExitZoneId = Ids::EastExitZoneId,
-        .installConnectionId = Ids::UpperCorridorEastStairConnectionId,
-        .baseComplianceRate = 0.85,
-        .guidanceStrength = 0.85,
-        .maxDetourMeters = 30.0,
+        .installConnectionId = Ids::UpperWestTrainingToCorridorConnectionId,
+        .baseComplianceRate = 0.95,
+        .guidanceStrength = 0.95,
+        .maxDetourMeters = 60.0,
     });
     alternative.variationDiffKeys = computeScenarioDiffKeys(baseline, alternative);
     return alternative;

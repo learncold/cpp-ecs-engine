@@ -123,6 +123,15 @@ bool containsDiffKey(
     });
 }
 
+std::size_t evacuatedCountForExit(
+    const safecrowd::domain::ScenarioResultArtifacts& artifacts,
+    const std::string& exitZoneId) {
+    const auto it = std::find_if(artifacts.exitUsage.begin(), artifacts.exitUsage.end(), [&](const auto& exitUsage) {
+        return exitUsage.exitZoneId == exitZoneId;
+    });
+    return it == artifacts.exitUsage.end() ? std::size_t{0} : it->evacuatedCount;
+}
+
 }  // namespace
 
 SC_TEST(DemoFixtureServiceBuildsSprint1Fixture) {
@@ -232,6 +241,9 @@ SC_TEST(DemoFixtureServiceBuildsTwoFloorEvacuationFixture) {
     SC_EXPECT_EQ(
         fixture.alternativeScenario.control.routeGuidances.front().guidedExitZoneId,
         std::string(Ids::EastExitZoneId));
+    SC_EXPECT_EQ(
+        fixture.alternativeScenario.control.routeGuidances.front().installConnectionId,
+        std::string(Ids::UpperWestTrainingToCorridorConnectionId));
     SC_EXPECT_TRUE(containsDiffKey(fixture.alternativeScenario, "control.routeGuidances"));
 
     safecrowd::domain::ImportValidationService validator;
@@ -274,15 +286,32 @@ SC_TEST(TwoFloorEvacuationDemoCrowdCompletesAfterStairDescent) {
 SC_TEST(TwoFloorEvacuationDemoAlternativeCrowdCompletesAfterGuidedStairDescent) {
     safecrowd::domain::DemoFixtureService service;
     const auto fixture = service.createTwoFloorEvacuationDemoFixture();
+    using Ids = safecrowd::domain::DemoLayouts::TwoFloorEvacuationIds;
 
-    safecrowd::domain::ScenarioSimulationRunner runner(fixture.layout, fixture.alternativeScenario);
-    for (int step = 0; step < 6000 && !runner.complete(); ++step) {
-        runner.step(0.1);
+    safecrowd::domain::ScenarioSimulationRunner baselineRunner(fixture.layout, fixture.baselineScenario);
+    for (int step = 0; step < 6000 && !baselineRunner.complete(); ++step) {
+        baselineRunner.step(0.1);
     }
 
-    SC_EXPECT_EQ(runner.frame().totalAgentCount, std::size_t{80});
-    SC_EXPECT_EQ(runner.frame().evacuatedAgentCount, std::size_t{80});
-    SC_EXPECT_TRUE(runner.frame().agents.empty());
+    safecrowd::domain::ScenarioSimulationRunner alternativeRunner(fixture.layout, fixture.alternativeScenario);
+    for (int step = 0; step < 6000 && !alternativeRunner.complete(); ++step) {
+        alternativeRunner.step(0.1);
+    }
+
+    SC_EXPECT_EQ(baselineRunner.frame().totalAgentCount, std::size_t{80});
+    SC_EXPECT_EQ(baselineRunner.frame().evacuatedAgentCount, std::size_t{80});
+    SC_EXPECT_EQ(alternativeRunner.frame().totalAgentCount, std::size_t{80});
+    SC_EXPECT_EQ(alternativeRunner.frame().evacuatedAgentCount, std::size_t{80});
+    SC_EXPECT_TRUE(alternativeRunner.frame().agents.empty());
+
+    const auto baselineEastExitCount = evacuatedCountForExit(
+        baselineRunner.resultArtifacts(),
+        Ids::EastExitZoneId);
+    const auto alternativeEastExitCount = evacuatedCountForExit(
+        alternativeRunner.resultArtifacts(),
+        Ids::EastExitZoneId);
+    SC_EXPECT_TRUE(alternativeEastExitCount > baselineEastExitCount);
+    SC_EXPECT_TRUE(alternativeEastExitCount > std::size_t{0});
 }
 
 SC_TEST(TwoFloorEvacuationDemoCrowdMovesOffLowerStairPortalAfterLanding) {
