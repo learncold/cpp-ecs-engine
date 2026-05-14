@@ -7,7 +7,6 @@
 #include <utility>
 
 #include <QColor>
-#include <QElapsedTimer>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QIcon>
@@ -34,9 +33,6 @@ namespace {
 
 constexpr double kSimulationDeltaSeconds = 1.0 / 30.0;
 constexpr int kPlaybackTimerIntervalMs = 33;
-constexpr int kFastForwardTimerIntervalMs = 0;
-constexpr int kFastForwardStepBudgetMs = 8;
-constexpr int kFastForwardMaxStepsPerTick = 240;
 
 enum class TransportIconKind {
     Play,
@@ -152,6 +148,34 @@ const safecrowd::domain::Zone2D* firstDestinationZone(const safecrowd::domain::F
         return &(*exitIt);
     }
     return layout.zones.empty() ? nullptr : &layout.zones.back();
+}
+
+QString simulationStatusText(bool complete, bool paused, int playbackSpeedMultiplier) {
+    if (complete) {
+        return "Complete";
+    }
+    if (paused) {
+        return "Paused";
+    }
+    switch (playbackSpeedMultiplier) {
+    case 2:
+        return "x2 fastforward";
+    case 3:
+        return "x3 fastforward";
+    default:
+        return "running";
+    }
+}
+
+QString fastForwardButtonText(int playbackSpeedMultiplier) {
+    switch (playbackSpeedMultiplier) {
+    case 2:
+        return "Fast Forward x3";
+    case 3:
+        return "Fast Forward Off";
+    default:
+        return "Fast Forward x2";
+    }
 }
 
 ScenarioAuthoringWidget::ScenarioState scenarioStateFromDraft(
@@ -303,12 +327,11 @@ ScenarioRunWidget::ScenarioRunWidget(
     timer_ = new QTimer(this);
     timer_->setInterval(kPlaybackTimerIntervalMs);
     connect(timer_, &QTimer::timeout, this, [this]() {
-        if (fastForwardingToResult_) {
-            advanceFastForwardToResult();
-            return;
-        }
         if (!paused_) {
-            batchRunner_.step(kSimulationDeltaSeconds);
+            const auto stepsPerTick = std::max(playbackSpeedMultiplier_, 1);
+            for (int step = 0; step < stepsPerTick && !batchRunner_.complete(); ++step) {
+                batchRunner_.step(kSimulationDeltaSeconds);
+            }
             refreshStatus();
             if (batchRunner_.complete()) {
                 timer_->stop();
@@ -501,7 +524,7 @@ QWidget* ScenarioRunWidget::createRunPanel() {
         stopRun();
     });
     connect(fastForwardButton_, &QPushButton::clicked, this, [this]() {
-        startFastForwardToResult();
+        cycleFastForwardMode();
     });
     connect(resultButton_, &QPushButton::clicked, this, [this]() {
         showResults();
@@ -511,10 +534,9 @@ QWidget* ScenarioRunWidget::createRunPanel() {
 }
 
 void ScenarioRunWidget::returnToAuthoring() {
-    fastForwardingToResult_ = false;
+    playbackSpeedMultiplier_ = 1;
     if (timer_ != nullptr) {
         timer_->stop();
-        timer_->setInterval(kPlaybackTimerIntervalMs);
     }
 
     auto* rootLayout = qobject_cast<QVBoxLayout*>(layout());
@@ -585,7 +607,7 @@ void ScenarioRunWidget::refreshStatus() {
         }
         if (index < previewStatusLabels_.size() && previewStatusLabels_[index] != nullptr) {
             previewStatusLabels_[index]->setText(QString("%1  -  %2 / %3 evacuated")
-                .arg(run.complete ? "Complete" : fastForwardingToResult_ ? "Fast forwarding" : paused_ ? "Paused" : "Running")
+                .arg(simulationStatusText(run.complete, paused_, playbackSpeedMultiplier_))
                 .arg(static_cast<int>(run.frame.evacuatedAgentCount))
                 .arg(static_cast<int>(run.frame.totalAgentCount)));
         }
@@ -602,10 +624,8 @@ void ScenarioRunWidget::refreshStatus() {
             .arg(static_cast<int>(batchRunner_.size())));
     }
     if (statusLabel_ != nullptr) {
-        statusLabel_->setText(QString("Status: %1").arg(
-            frame.complete
-                ? "Complete"
-                : fastForwardingToResult_ ? "Fast forwarding" : paused_ ? "Paused" : "Running"));
+        statusLabel_->setText(QString("Status: %1")
+            .arg(simulationStatusText(frame.complete, paused_, playbackSpeedMultiplier_)));
     }
     if (elapsedLabel_ != nullptr) {
         elapsedLabel_->setText(QString("Elapsed: %1 / %2 sec")
@@ -659,23 +679,22 @@ void ScenarioRunWidget::refreshStatus() {
             QColor("#16202b"));
         pauseButton_->setToolTip(paused_ ? "Resume simulation" : "Pause simulation");
         pauseButton_->setAccessibleName(paused_ ? "Resume simulation" : "Pause simulation");
-        pauseButton_->setEnabled(!batchRunner_.complete() && !fastForwardingToResult_);
+        pauseButton_->setEnabled(!batchRunner_.complete());
     }
     if (stopButton_ != nullptr) {
-        stopButton_->setEnabled(frame.totalAgentCount > 0 || fastForwardingToResult_ || hasCachedResults());
+        stopButton_->setEnabled(frame.totalAgentCount > 0 || hasCachedResults());
     }
     if (fastForwardButton_ != nullptr) {
+        fastForwardButton_->setText(fastForwardButtonText(playbackSpeedMultiplier_));
         fastForwardButton_->setEnabled(
             !batchRunner_.complete()
             && !batchRunner_.empty()
-            && !hasCachedResults()
-            && !fastForwardingToResult_);
+            && !hasCachedResults());
     }
     if (resultButton_ != nullptr) {
         resultButton_->setEnabled(
-            !fastForwardingToResult_
-            && ((batchRunner_.complete() && !batchRunner_.empty())
-                || hasCachedResults()));
+            (batchRunner_.complete() && !batchRunner_.empty())
+            || hasCachedResults());
     }
 }
 
@@ -688,7 +707,7 @@ void ScenarioRunWidget::selectRun(int index) {
     refreshStatus();
 }
 
-void ScenarioRunWidget::startFastForwardToResult() {
+void ScenarioRunWidget::cycleFastForwardMode() {
     if (batchRunner_.empty()) {
         refreshStatus();
         return;
@@ -703,49 +722,26 @@ void ScenarioRunWidget::startFastForwardToResult() {
         return;
     }
 
-    fastForwardingToResult_ = true;
-    paused_ = true;
-    if (timer_ != nullptr) {
-        timer_->stop();
-        timer_->setInterval(kFastForwardTimerIntervalMs);
+    if (playbackSpeedMultiplier_ == 1) {
+        playbackSpeedMultiplier_ = 2;
+    } else if (playbackSpeedMultiplier_ == 2) {
+        playbackSpeedMultiplier_ = 3;
+    } else {
+        playbackSpeedMultiplier_ = 1;
+    }
+    paused_ = false;
+    if (timer_ != nullptr && !timer_->isActive()) {
         timer_->start();
     }
     refreshStatus();
 }
 
-void ScenarioRunWidget::advanceFastForwardToResult() {
-    if (!fastForwardingToResult_) {
-        return;
-    }
-
-    QElapsedTimer elapsed;
-    elapsed.start();
-    int steps = 0;
-    while (!batchRunner_.complete()
-           && steps < kFastForwardMaxStepsPerTick
-           && elapsed.elapsed() < kFastForwardStepBudgetMs) {
-        batchRunner_.step(kSimulationDeltaSeconds);
-        ++steps;
-    }
-
-    if (batchRunner_.complete()) {
-        fastForwardingToResult_ = false;
-        batchRunner_.syncResultArtifacts();
-        if (timer_ != nullptr) {
-            timer_->stop();
-            timer_->setInterval(kPlaybackTimerIntervalMs);
-        }
-    }
-    refreshStatus();
-}
-
 void ScenarioRunWidget::stopRun() {
-    fastForwardingToResult_ = false;
+    playbackSpeedMultiplier_ = 1;
     paused_ = true;
     cachedResults_.clear();
     if (timer_ != nullptr) {
         timer_->stop();
-        timer_->setInterval(kPlaybackTimerIntervalMs);
     }
     batchRunner_.reset(layout_, scenarios_);
     refreshStatus();
@@ -755,10 +751,6 @@ void ScenarioRunWidget::stopRun() {
 }
 
 void ScenarioRunWidget::showResults() {
-    if (fastForwardingToResult_) {
-        return;
-    }
-
     std::vector<SavedScenarioResultState> results;
     if (batchRunner_.complete() && !batchRunner_.empty()) {
         results = completedResults();
@@ -829,7 +821,7 @@ void ScenarioRunWidget::showResults() {
 }
 
 void ScenarioRunWidget::togglePaused() {
-    if (batchRunner_.complete() || fastForwardingToResult_) {
+    if (batchRunner_.complete()) {
         return;
     }
     paused_ = !paused_;
