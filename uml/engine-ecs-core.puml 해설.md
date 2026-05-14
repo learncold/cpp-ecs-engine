@@ -20,8 +20,9 @@
 - 개요: ECS 컴포넌트 조회와 값 접근용 API다.
 - 목적: 필요한 컴포넌트 조합을 읽고 개별 엔티티의 컴포넌트 값을 조회하거나 갱신하게 한다.
 - 접근 경계: 상위 계층은 raw `EcsCore`를 받아 `WorldQuery`를 직접 만들지 않고, `EngineWorld`가 제공하는 query facade를 사용한다.
-- 유의사항: 초기에는 단순 signature 필터로 충분하지만, query 중 엔티티 생성/삭제나 컴포넌트 추가/제거 같은 구조 변경은 허용하지 않는 원칙이 중요하다.
-- 후속 개선 사항: cached query, typed iterator, optional access 지원을 확장할 수 있다.
+- 현재 구현 포인트: `view<T...>()`는 가장 작은 packed component storage의 entity 목록을 기준으로 후보를 줄인 뒤 entity index 순서로 결과를 반환한다. 시스템 hot loop는 결과 vector 생성을 피하기 위해 `forEach<T...>()`를 사용할 수 있다.
+- 유의사항: query 중 엔티티 생성/삭제나 컴포넌트 추가/제거 같은 구조 변경은 허용하지 않는 원칙이 중요하다.
+- 후속 개선 사항: cached query, optional access 지원을 확장할 수 있다.
 
 ## `WorldCommands`
 - 개요: ECS 구조 변경 요청을 표현하는 좁은 명령 면이다.

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -26,6 +27,18 @@ constexpr std::size_t kMaxResultPressureAgents = 5;
 constexpr std::size_t kMaxResultCriticalPressureEvents = 5;
 constexpr double kHighDensityThresholdPeoplePerSquareMeter =
     kPressureHighDensityThresholdPeoplePerSquareMeter;
+
+template <typename T, typename Compare>
+void sortAndTrimTop(std::vector<T>& values, std::size_t maxCount, Compare compare) {
+    if (values.size() <= maxCount) {
+        std::sort(values.begin(), values.end(), compare);
+        return;
+    }
+
+    const auto trimEnd = values.begin() + static_cast<std::ptrdiff_t>(maxCount);
+    std::partial_sort(values.begin(), trimEnd, values.end(), compare);
+    values.resize(maxCount);
+}
 
 struct SpatialCell {
     int x{0};
@@ -1284,7 +1297,7 @@ void ScenarioResultArtifactsSystem::update(engine::EngineWorld& world, const eng
     for (const auto& [_, hotspot] : result.peakPressureHotspotsByAddress) {
         pressureSummary.peakHotspots.push_back(hotspot);
     }
-    std::sort(pressureSummary.peakHotspots.begin(), pressureSummary.peakHotspots.end(), [](const auto& lhs, const auto& rhs) {
+    sortAndTrimTop(pressureSummary.peakHotspots, kMaxResultPressureHotspots, [](const auto& lhs, const auto& rhs) {
         if (std::fabs(lhs.pressureScore - rhs.pressureScore) > 1e-9) {
             return lhs.pressureScore > rhs.pressureScore;
         }
@@ -1293,16 +1306,13 @@ void ScenarioResultArtifactsSystem::update(engine::EngineWorld& world, const eng
         }
         return lhs.agentCount > rhs.agentCount;
     });
-    if (pressureSummary.peakHotspots.size() > kMaxResultPressureHotspots) {
-        pressureSummary.peakHotspots.resize(kMaxResultPressureHotspots);
-    }
 
     pressureSummary.peakAgents.clear();
     pressureSummary.peakAgents.reserve(result.peakPressureAgentsById.size());
     for (const auto& [_, agent] : result.peakPressureAgentsById) {
         pressureSummary.peakAgents.push_back(agent);
     }
-    std::sort(pressureSummary.peakAgents.begin(), pressureSummary.peakAgents.end(), [](const auto& lhs, const auto& rhs) {
+    sortAndTrimTop(pressureSummary.peakAgents, kMaxResultPressureAgents, [](const auto& lhs, const auto& rhs) {
         if (lhs.critical != rhs.critical) {
             return lhs.critical;
         }
@@ -1311,16 +1321,13 @@ void ScenarioResultArtifactsSystem::update(engine::EngineWorld& world, const eng
         }
         return lhs.compressionForce > rhs.compressionForce;
     });
-    if (pressureSummary.peakAgents.size() > kMaxResultPressureAgents) {
-        pressureSummary.peakAgents.resize(kMaxResultPressureAgents);
-    }
 
     pressureSummary.criticalEvents.clear();
     pressureSummary.criticalEvents.reserve(result.peakCriticalPressureEventsByAddress.size());
     for (const auto& [_, event] : result.peakCriticalPressureEventsByAddress) {
         pressureSummary.criticalEvents.push_back(event);
     }
-    std::sort(pressureSummary.criticalEvents.begin(), pressureSummary.criticalEvents.end(), [](const auto& lhs, const auto& rhs) {
+    sortAndTrimTop(pressureSummary.criticalEvents, kMaxResultCriticalPressureEvents, [](const auto& lhs, const auto& rhs) {
         if (lhs.criticalAgentCount != rhs.criticalAgentCount) {
             return lhs.criticalAgentCount > rhs.criticalAgentCount;
         }
@@ -1329,9 +1336,6 @@ void ScenarioResultArtifactsSystem::update(engine::EngineWorld& world, const eng
         }
         return lhs.pressureScore > rhs.pressureScore;
     });
-    if (pressureSummary.criticalEvents.size() > kMaxResultCriticalPressureEvents) {
-        pressureSummary.criticalEvents.resize(kMaxResultCriticalPressureEvents);
-    }
 
     result.artifacts.hazardExposureSummary = {};
     if (resources.contains<ScenarioHazardExposureResource>()) {

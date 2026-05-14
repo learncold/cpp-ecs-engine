@@ -930,6 +930,44 @@ SC_TEST(ScenarioSimulationRunnerInitializesAndRoutesAgentsThroughLayoutConnectio
     SC_EXPECT_TRUE(!runner.complete());
 }
 
+SC_TEST(ScenarioSimulationRunnerSplitsLargeDeltaIntoStableFixedSteps) {
+    safecrowd::domain::ScenarioDraft scenario;
+    scenario.execution.timeLimitSeconds = 10.0;
+    scenario.population.initialPlacements.push_back(groupPlacement());
+
+    safecrowd::domain::ScenarioSimulationRunner largeStepRunner(
+        safecrowd::domain::DemoLayouts::demoFacility(),
+        scenario);
+    safecrowd::domain::ScenarioSimulationRunner fixedStepRunner(
+        safecrowd::domain::DemoLayouts::demoFacility(),
+        scenario);
+
+    largeStepRunner.step(0.5);
+    for (int i = 0; i < 5; ++i) {
+        fixedStepRunner.step(0.1);
+    }
+
+    const auto& largeFrame = largeStepRunner.frame();
+    const auto& fixedFrame = fixedStepRunner.frame();
+    SC_EXPECT_NEAR(largeFrame.elapsedSeconds, 0.5, 1e-9);
+    SC_EXPECT_NEAR(largeFrame.elapsedSeconds, fixedFrame.elapsedSeconds, 1e-9);
+    SC_EXPECT_EQ(largeFrame.complete, fixedFrame.complete);
+    SC_EXPECT_EQ(largeFrame.evacuatedAgentCount, fixedFrame.evacuatedAgentCount);
+    SC_EXPECT_EQ(largeFrame.agents.size(), fixedFrame.agents.size());
+
+    for (std::size_t i = 0; i < largeFrame.agents.size(); ++i) {
+        const auto& largeAgent = largeFrame.agents[i];
+        const auto& fixedAgent = fixedFrame.agents[i];
+        SC_EXPECT_EQ(largeAgent.id, fixedAgent.id);
+        SC_EXPECT_NEAR(largeAgent.position.x, fixedAgent.position.x, 1e-9);
+        SC_EXPECT_NEAR(largeAgent.position.y, fixedAgent.position.y, 1e-9);
+        SC_EXPECT_NEAR(largeAgent.velocity.x, fixedAgent.velocity.x, 1e-9);
+        SC_EXPECT_NEAR(largeAgent.velocity.y, fixedAgent.velocity.y, 1e-9);
+        SC_EXPECT_EQ(largeAgent.floorId, fixedAgent.floorId);
+        SC_EXPECT_EQ(largeAgent.stalled, fixedAgent.stalled);
+    }
+}
+
 SC_TEST(ScenarioSimulationRunnerCompletesAtTimeLimit) {
     safecrowd::domain::ScenarioDraft scenario;
     scenario.execution.timeLimitSeconds = 1.0;
