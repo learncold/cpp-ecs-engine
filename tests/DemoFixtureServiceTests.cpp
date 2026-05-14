@@ -69,6 +69,38 @@ double spanLength(const safecrowd::domain::LineSegment2D& span) {
     return std::sqrt(dx * dx + dy * dy);
 }
 
+double distanceToSegment(
+    const safecrowd::domain::Point2D& point,
+    const safecrowd::domain::LineSegment2D& segment) {
+    const auto dx = segment.end.x - segment.start.x;
+    const auto dy = segment.end.y - segment.start.y;
+    const auto lengthSquared = dx * dx + dy * dy;
+    if (lengthSquared <= 1e-12) {
+        const auto px = point.x - segment.start.x;
+        const auto py = point.y - segment.start.y;
+        return std::sqrt(px * px + py * py);
+    }
+
+    const auto t = std::clamp(
+        ((point.x - segment.start.x) * dx + (point.y - segment.start.y) * dy) / lengthSquared,
+        0.0,
+        1.0);
+    const auto closestX = segment.start.x + dx * t;
+    const auto closestY = segment.start.y + dy * t;
+    const auto px = point.x - closestX;
+    const auto py = point.y - closestY;
+    return std::sqrt(px * px + py * py);
+}
+
+bool pointInRect(
+    const safecrowd::domain::Point2D& point,
+    double minX,
+    double minY,
+    double maxX,
+    double maxY) {
+    return point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY;
+}
+
 void translatePolygon(safecrowd::domain::Polygon2D& polygon, double dx, double dy) {
     auto translateRing = [&](std::vector<safecrowd::domain::Point2D>& ring) {
         for (auto& point : ring) {
@@ -156,6 +188,9 @@ SC_TEST(DemoFixtureServiceBuildsTwoFloorEvacuationFixture) {
     SC_EXPECT_EQ(layout.floors.at(1).id, std::string(Ids::UpperFloorId));
     SC_EXPECT_EQ(layout.zones.size(), std::size_t{13});
     SC_EXPECT_EQ(layout.connections.size(), std::size_t{13});
+    for (const auto& connection : layout.connections) {
+        SC_EXPECT_NEAR(connection.effectiveWidth, spanLength(connection.centerSpan), 1e-9);
+    }
     SC_EXPECT_TRUE(containsZoneId(layout.zones, Ids::UpperWestTrainingZoneId));
     SC_EXPECT_TRUE(containsZoneId(layout.zones, Ids::UpperCorridorZoneId));
     SC_EXPECT_TRUE(containsZoneId(layout.zones, Ids::LowerLobbyZoneId));
@@ -234,6 +269,73 @@ SC_TEST(TwoFloorEvacuationDemoCrowdCompletesAfterStairDescent) {
 
     SC_EXPECT_EQ(runner.frame().totalAgentCount, std::size_t{80});
     SC_EXPECT_EQ(runner.frame().evacuatedAgentCount, std::size_t{80});
+}
+
+SC_TEST(TwoFloorEvacuationDemoAlternativeCrowdCompletesAfterGuidedStairDescent) {
+    safecrowd::domain::DemoFixtureService service;
+    const auto fixture = service.createTwoFloorEvacuationDemoFixture();
+
+    safecrowd::domain::ScenarioSimulationRunner runner(fixture.layout, fixture.alternativeScenario);
+    for (int step = 0; step < 6000 && !runner.complete(); ++step) {
+        runner.step(0.1);
+    }
+
+    SC_EXPECT_EQ(runner.frame().totalAgentCount, std::size_t{80});
+    SC_EXPECT_EQ(runner.frame().evacuatedAgentCount, std::size_t{80});
+    SC_EXPECT_TRUE(runner.frame().agents.empty());
+}
+
+SC_TEST(TwoFloorEvacuationDemoCrowdMovesOffLowerStairPortalAfterLanding) {
+    safecrowd::domain::DemoFixtureService service;
+    auto fixture = service.createTwoFloorEvacuationDemoFixture();
+    auto scenario = fixture.baselineScenario;
+    using Ids = safecrowd::domain::DemoLayouts::TwoFloorEvacuationIds;
+
+    safecrowd::domain::InitialPlacement2D placement;
+    placement.id = "upper-west-stair-crowd";
+    placement.floorId = Ids::UpperFloorId;
+    placement.zoneId = Ids::UpperWestStairZoneId;
+    placement.initialVelocity = {.x = 1.2, .y = 0.0};
+    placement.explicitPositions = {
+        {.x = 4.45, .y = 12.45},
+        {.x = 4.05, .y = 12.45},
+        {.x = 4.45, .y = 12.05},
+        {.x = 4.05, .y = 12.05},
+        {.x = 4.45, .y = 11.65},
+        {.x = 4.05, .y = 11.65},
+    };
+    scenario.population.initialPlacements = {placement};
+    scenario.execution.timeLimitSeconds = 30.0;
+
+    safecrowd::domain::ScenarioSimulationRunner runner(fixture.layout, scenario);
+    const safecrowd::domain::LineSegment2D lowerWestPortal{{3.0, 11.6}, {3.0, 12.8}};
+    bool observedLowerFloor = false;
+    bool observedMovementOffPortal = false;
+    for (int step = 0; step < 300 && !runner.complete(); ++step) {
+        runner.step(0.1);
+        for (const auto& agent : runner.frame().agents) {
+            if (agent.floorId != Ids::LowerFloorId) {
+                continue;
+            }
+            observedLowerFloor = true;
+            if (distanceToSegment(agent.position, lowerWestPortal) > 0.45 || agent.position.y < 11.2) {
+                observedMovementOffPortal = true;
+            }
+        }
+    }
+
+    std::size_t stalledLowerStairAgents = 0;
+    for (const auto& agent : runner.frame().agents) {
+        if (agent.floorId == Ids::LowerFloorId
+            && pointInRect(agent.position, 1.0, 9.0, 3.0, 13.0)
+            && agent.stalled) {
+            ++stalledLowerStairAgents;
+        }
+    }
+
+    SC_EXPECT_TRUE(observedLowerFloor);
+    SC_EXPECT_TRUE(observedMovementOffPortal || runner.frame().agents.empty());
+    SC_EXPECT_EQ(stalledLowerStairAgents, std::size_t{0});
 }
 
 SC_TEST(DemoFixtureBlockedDoorResultFixturePreservesScenarioAndResultData) {

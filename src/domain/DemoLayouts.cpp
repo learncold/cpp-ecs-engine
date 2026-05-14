@@ -377,7 +377,7 @@ FacilityLayout2D twoFloorEvacuationFacility() {
         ConnectionKind::Opening,
         Ids::UpperCorridorZoneId,
         Ids::UpperWestStairZoneId,
-        2.0,
+        1.6,
         {{3.2, 9.0}, {4.8, 9.0}}));
     layout.connections.push_back(makeConnection(
         Ids::UpperCorridorEastStairConnectionId,
@@ -385,7 +385,7 @@ FacilityLayout2D twoFloorEvacuationFacility() {
         ConnectionKind::Opening,
         Ids::UpperCorridorZoneId,
         Ids::UpperEastStairZoneId,
-        2.0,
+        1.6,
         {{23.2, 9.0}, {24.8, 9.0}}));
     auto westVerticalStair = makeConnection(
         Ids::WestStairVerticalConnectionId,
@@ -393,7 +393,7 @@ FacilityLayout2D twoFloorEvacuationFacility() {
         ConnectionKind::Stair,
         Ids::UpperWestStairZoneId,
         Ids::LowerWestStairZoneId,
-        2.0,
+        1.2,
         {{3.0, 11.6}, {3.0, 12.8}},
         true);
     westVerticalStair.lowerEntryDirection = StairEntryDirection::South;
@@ -405,7 +405,7 @@ FacilityLayout2D twoFloorEvacuationFacility() {
         ConnectionKind::Stair,
         Ids::UpperEastStairZoneId,
         Ids::LowerEastStairZoneId,
-        2.0,
+        1.2,
         {{25.0, 11.6}, {25.0, 12.8}},
         true);
     eastVerticalStair.lowerEntryDirection = StairEntryDirection::South;
@@ -417,7 +417,7 @@ FacilityLayout2D twoFloorEvacuationFacility() {
         ConnectionKind::Opening,
         Ids::LowerWestStairZoneId,
         Ids::LowerWestVestibuleZoneId,
-        2.0,
+        1.6,
         {{1.2, 9.0}, {2.8, 9.0}}));
     layout.connections.push_back(makeConnection(
         Ids::LowerEastStairVestibuleConnectionId,
@@ -425,7 +425,7 @@ FacilityLayout2D twoFloorEvacuationFacility() {
         ConnectionKind::Opening,
         Ids::LowerEastStairZoneId,
         Ids::LowerEastVestibuleZoneId,
-        2.0,
+        1.6,
         {{25.2, 9.0}, {26.8, 9.0}}));
     layout.connections.push_back(makeConnection(
         Ids::LowerWestVestibuleLobbyConnectionId,
