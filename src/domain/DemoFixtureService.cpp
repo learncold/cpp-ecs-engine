@@ -22,6 +22,28 @@ ScenarioDraft makeSprint1BlockedDoorAlternative(const ScenarioDraft& baseline) {
     return alternative;
 }
 
+ScenarioDraft makeTwoFloorEastExitGuidanceAlternative(const ScenarioDraft& baseline) {
+    using Ids = DemoLayouts::TwoFloorEvacuationIds;
+
+    auto alternative = duplicateScenarioDraft(
+        baseline,
+        "two-floor-guidance",
+        "East exit guidance alternative");
+    alternative.control.routeGuidances.push_back({
+        .id = "guidance-east-exit",
+        .startSeconds = 0.0,
+        .endSeconds = 180.0,
+        .periods = {{.startSeconds = 0.0, .endSeconds = 180.0}},
+        .guidedExitZoneId = Ids::EastExitZoneId,
+        .installConnectionId = Ids::UpperCorridorEastStairConnectionId,
+        .baseComplianceRate = 0.85,
+        .guidanceStrength = 0.85,
+        .maxDetourMeters = 30.0,
+    });
+    alternative.variationDiffKeys = computeScenarioDiffKeys(baseline, alternative);
+    return alternative;
+}
+
 DensityCellMetric densityCell(
     double centerX,
     double centerY,
@@ -775,6 +797,70 @@ DemoFixture DemoFixtureService::createSprint1DemoFixture() const {
     fixture.baselineScenario.execution.repeatCount = 1;
     fixture.baselineScenario.execution.baseSeed = 1;
     fixture.baselineScenario.sourceTemplateId = "after-sprint-1-baseline";
+
+    return fixture;
+}
+
+DemoAuthoringFixture DemoFixtureService::createTwoFloorEvacuationDemoFixture() const {
+    using Ids = DemoLayouts::TwoFloorEvacuationIds;
+
+    DemoAuthoringFixture fixture;
+    fixture.layout = DemoLayouts::twoFloorEvacuationFacility();
+
+    fixture.population.initialPlacements.push_back({
+        .id = "two-floor-west-training-crowd",
+        .zoneId = Ids::UpperWestTrainingZoneId,
+        .floorId = Ids::UpperFloorId,
+        .area = {
+            .outline = {
+                {2.0, 2.0},
+                {8.5, 2.0},
+                {8.5, 5.0},
+                {2.0, 5.0},
+            },
+        },
+        .targetAgentCount = 30,
+    });
+    fixture.population.initialPlacements.push_back({
+        .id = "two-floor-briefing-crowd",
+        .zoneId = Ids::UpperBriefingZoneId,
+        .floorId = Ids::UpperFloorId,
+        .area = {
+            .outline = {
+                {11.0, 2.0},
+                {17.0, 2.0},
+                {17.0, 5.0},
+                {11.0, 5.0},
+            },
+        },
+        .targetAgentCount = 20,
+    });
+    fixture.population.initialPlacements.push_back({
+        .id = "two-floor-east-training-crowd",
+        .zoneId = Ids::UpperEastTrainingZoneId,
+        .floorId = Ids::UpperFloorId,
+        .area = {
+            .outline = {
+                {19.5, 2.0},
+                {26.0, 2.0},
+                {26.0, 5.0},
+                {19.5, 5.0},
+            },
+        },
+        .targetAgentCount = 30,
+    });
+
+    fixture.baselineScenario.scenarioId = "two-floor-baseline";
+    fixture.baselineScenario.name = "Two-floor evacuation baseline";
+    fixture.baselineScenario.role = ScenarioRole::Baseline;
+    fixture.baselineScenario.population = fixture.population;
+    fixture.baselineScenario.execution.timeLimitSeconds = 600.0;
+    fixture.baselineScenario.execution.sampleIntervalSeconds = 1.0;
+    fixture.baselineScenario.execution.repeatCount = 1;
+    fixture.baselineScenario.execution.baseSeed = 42;
+    fixture.baselineScenario.sourceTemplateId = "two-floor-evacuation-baseline";
+
+    fixture.alternativeScenario = makeTwoFloorEastExitGuidanceAlternative(fixture.baselineScenario);
 
     return fixture;
 }

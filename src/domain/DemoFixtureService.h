@@ -15,6 +15,13 @@ struct DemoFixture {
     ScenarioDraft baselineScenario{};
 };
 
+struct DemoAuthoringFixture {
+    FacilityLayout2D layout{};
+    PopulationSpec population{};
+    ScenarioDraft baselineScenario{};
+    ScenarioDraft alternativeScenario{};
+};
+
 struct DemoScenarioResultFixture {
     FacilityLayout2D layout{};
     PopulationSpec population{};
@@ -28,6 +35,7 @@ struct DemoScenarioResultFixture {
 class DemoFixtureService {
 public:
     DemoFixture createSprint1DemoFixture() const;
+    DemoAuthoringFixture createTwoFloorEvacuationDemoFixture() const;
     DemoScenarioResultFixture createSprint1BlockedDoorResultFixture() const;
 };
 

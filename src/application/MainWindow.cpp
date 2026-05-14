@@ -35,12 +35,9 @@ void applySavedReviewState(const ProjectMetadata& metadata, safecrowd::domain::I
     ProjectPersistence::loadProjectReview(metadata, importResult);
 }
 
-safecrowd::domain::ImportResult makeDemoImportResult() {
-    safecrowd::domain::DemoFixtureService fixtureService;
-    const auto fixture = fixtureService.createSprint1DemoFixture();
-
+safecrowd::domain::ImportResult makeImportResultForDemoLayout(safecrowd::domain::FacilityLayout2D layout) {
     safecrowd::domain::ImportResult result;
-    result.layout = fixture.layout;
+    result.layout = std::move(layout);
 
     safecrowd::domain::ImportValidationService validator;
     result.issues = validator.validate(*result.layout);
@@ -48,6 +45,18 @@ safecrowd::domain::ImportResult makeDemoImportResult() {
         ? safecrowd::domain::ImportReviewStatus::Pending
         : safecrowd::domain::ImportReviewStatus::NotRequired;
     return result;
+}
+
+safecrowd::domain::ImportResult makeSprint1DemoImportResult() {
+    safecrowd::domain::DemoFixtureService fixtureService;
+    const auto fixture = fixtureService.createSprint1DemoFixture();
+    return makeImportResultForDemoLayout(fixture.layout);
+}
+
+safecrowd::domain::ImportResult makeTwoFloorEvacuationDemoImportResult() {
+    safecrowd::domain::DemoFixtureService fixtureService;
+    const auto fixture = fixtureService.createTwoFloorEvacuationDemoFixture();
+    return makeImportResultForDemoLayout(fixture.layout);
 }
 
 ProjectWorkspaceState makeEvacuationScenarioDemoWorkspace() {
@@ -90,6 +99,35 @@ ProjectWorkspaceState makeEvacuationScenarioDemoWorkspace() {
     return workspace;
 }
 
+ProjectWorkspaceState makeTwoFloorEvacuationDemoWorkspace() {
+    using namespace safecrowd::domain;
+
+    safecrowd::domain::DemoFixtureService fixtureService;
+    auto fixture = fixtureService.createTwoFloorEvacuationDemoFixture();
+
+    SavedScenarioAuthoringState authoring;
+    authoring.scenarios.push_back({
+        .draft = fixture.baselineScenario,
+        .baseScenarioId = {},
+        .stagedForRun = true,
+    });
+    authoring.scenarios.push_back({
+        .draft = fixture.alternativeScenario,
+        .baseScenarioId = fixture.baselineScenario.scenarioId,
+        .stagedForRun = true,
+    });
+    authoring.currentScenarioIndex = 1;
+    authoring.navigationView = SavedNavigationView::Events;
+    authoring.rightPanelMode = SavedRightPanelMode::Scenario;
+
+    ProjectWorkspaceState workspace;
+    workspace.activeView = ProjectWorkspaceView::ScenarioRun;
+    workspace.authoring = std::move(authoring);
+    workspace.runningScenario = fixture.alternativeScenario;
+    workspace.runningScenarios = {fixture.baselineScenario, fixture.alternativeScenario};
+    return workspace;
+}
+
 safecrowd::domain::ImportResult makeBlankImportResult(const QString& projectName) {
     safecrowd::domain::ImportResult result;
     result.layout = safecrowd::domain::FacilityLayout2D{
@@ -111,8 +149,11 @@ safecrowd::domain::ImportResult makeBlankImportResult(const QString& projectName
 }
 
 safecrowd::domain::ImportResult importProjectLayout(const ProjectMetadata& metadata) {
-    if (metadata.isBuiltInDemo()) {
-        return makeDemoImportResult();
+    if (metadata.isBuiltInTwoFloorEvacuationDemo()) {
+        return makeTwoFloorEvacuationDemoImportResult();
+    }
+    if (metadata.layoutPath == builtInDemoLayoutPath() || metadata.isBuiltInEvacuationScenarioDemo()) {
+        return makeSprint1DemoImportResult();
     }
     if (metadata.isBlankLayoutProject()) {
         return makeBlankImportResult(metadata.name);
@@ -404,6 +445,8 @@ void MainWindow::openProject(const ProjectMetadata& metadata) {
     ProjectWorkspaceState workspace;
     if (metadata.isBuiltInEvacuationScenarioDemo()) {
         workspace = makeEvacuationScenarioDemoWorkspace();
+    } else if (metadata.isBuiltInTwoFloorEvacuationDemo()) {
+        workspace = makeTwoFloorEvacuationDemoWorkspace();
     } else if (!ProjectPersistence::loadProjectWorkspace(metadata, &workspace)) {
         showLayoutReview(metadata, std::move(importResult));
         return;
