@@ -46,12 +46,27 @@ void ScenarioSimulationRunner::step(double deltaSeconds) {
     const auto clampedDelta = std::min(deltaSeconds, remaining);
     auto& resources = runtime_->world().resources();
     auto& clock = resources.get<ScenarioSimulationClockResource>();
-    if (clampedDelta <= 0.0) {
+    if (clampedDelta <= 1e-9) {
         clock.complete = true;
+        clock.elapsedSeconds = timeLimitSeconds_;
+        runtime_->stepFrame(0.0);
     } else {
-        resources.set(ScenarioSimulationStepResource{.deltaSeconds = clampedDelta});
+        const auto fixedDelta = std::max(runtime_->config().fixedDeltaTime, 1e-9);
+        auto pendingDelta = clampedDelta;
+        while (pendingDelta > 1e-9 && !clock.complete) {
+            const auto stepDelta = pendingDelta <= fixedDelta + 1e-9
+                ? pendingDelta
+                : fixedDelta;
+            resources.set(ScenarioSimulationStepResource{.deltaSeconds = stepDelta});
+            runtime_->stepFrame(fixedDelta);
+            pendingDelta = std::max(0.0, pendingDelta - stepDelta);
+        }
+        if (!clock.complete && timeLimitSeconds_ - clock.elapsedSeconds <= 1e-9) {
+            clock.elapsedSeconds = timeLimitSeconds_;
+            clock.complete = true;
+            runtime_->stepFrame(0.0);
+        }
     }
-    runtime_->stepFrame(0.0);
     syncFrameFromRuntime();
 }
 
@@ -187,7 +202,7 @@ std::vector<ScenarioAgentSeed> ScenarioSimulationRunner::createAgentSeeds() cons
 
 void ScenarioSimulationRunner::initializeRuntime() {
     runtime_ = std::make_unique<engine::EngineRuntime>(engine::EngineConfig{
-        .fixedDeltaTime = 1.0 / 30.0,
+        .fixedDeltaTime = 0.1,
         .maxCatchUpSteps = 1,
         .baseSeed = scenario_.execution.baseSeed != 0 ? scenario_.execution.baseSeed : 1,
     });
@@ -202,28 +217,34 @@ void ScenarioSimulationRunner::initializeRuntime() {
          .triggerPolicy = engine::TriggerPolicy::EveryFrame});
     runtime_->addSystem(
         makeScenarioEnvironmentHazardSystem(layout_, scenario_.environment.hazards),
-        {.phase = engine::UpdatePhase::PostSimulation,
-         .order = -20,
-         .triggerPolicy = engine::TriggerPolicy::EveryFrame});
+        {.phase = engine::UpdatePhase::FixedSimulation,
+          .order = -20,
+          .triggerPolicy = engine::TriggerPolicy::FixedStep});
     runtime_->addSystem(
         makeScenarioPressureFeedbackSystem(layout_),
-        {.phase = engine::UpdatePhase::PostSimulation,
-         .order = -10,
-         .triggerPolicy = engine::TriggerPolicy::EveryFrame});
+        {.phase = engine::UpdatePhase::FixedSimulation,
+          .order = -10,
+          .triggerPolicy = engine::TriggerPolicy::FixedStep});
     runtime_->addSystem(
         makeScenarioSimulationMotionSystem(layout_, scenario_.control.routeGuidances),
-        {.phase = engine::UpdatePhase::PostSimulation,
-         .triggerPolicy = engine::TriggerPolicy::EveryFrame});
+        {.phase = engine::UpdatePhase::FixedSimulation,
+         .order = 0,
+         .triggerPolicy = engine::TriggerPolicy::FixedStep});
+    runtime_->addSystem(
+        std::make_unique<ScenarioSpatialIndexSystem>(1.0),
+        {.phase = engine::UpdatePhase::FixedSimulation,
+         .order = 5,
+         .triggerPolicy = engine::TriggerPolicy::FixedStep});
     runtime_->addSystem(
         makeScenarioRiskMetricsSystem(layout_),
-        {.phase = engine::UpdatePhase::PostSimulation,
+        {.phase = engine::UpdatePhase::FixedSimulation,
          .order = 10,
-         .triggerPolicy = engine::TriggerPolicy::EveryFrame});
+         .triggerPolicy = engine::TriggerPolicy::FixedStep});
     runtime_->addSystem(
         std::make_unique<ScenarioResultArtifactsSystem>(scenario_.execution.sampleIntervalSeconds),
-        {.phase = engine::UpdatePhase::PostSimulation,
+        {.phase = engine::UpdatePhase::FixedSimulation,
          .order = 20,
-         .triggerPolicy = engine::TriggerPolicy::EveryFrame});
+         .triggerPolicy = engine::TriggerPolicy::FixedStep});
     runtime_->addSystem(
         std::make_unique<ScenarioFrameSyncSystem>(),
         {.phase = engine::UpdatePhase::RenderSync,

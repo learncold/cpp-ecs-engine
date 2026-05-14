@@ -49,6 +49,8 @@ struct ScenarioLayoutCacheResource {
     std::unordered_map<std::string, FacilityLayout2D> floorLayouts{};
     std::unordered_map<std::string, std::size_t> zoneIndices{};
     std::unordered_map<std::string, std::string> zoneFloorIds{};
+    std::unordered_map<std::string, std::size_t> connectionIndices{};
+    std::unordered_map<std::string, double> floorElevations{};
     std::unordered_map<std::string, std::vector<ScenarioConnectionTraversal>> traversableConnectionsByZone{};
 };
 

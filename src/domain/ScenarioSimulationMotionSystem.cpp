@@ -10,6 +10,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -55,6 +56,7 @@ public:
         const std::uint64_t layoutRevision = resources.contains<ScenarioLayoutRevisionResource>()
             ? resources.get<ScenarioLayoutRevisionResource>().revision
             : 0U;
+        refreshPlanningCache(layoutRevision);
         const auto clampedDelta = std::max(0.0, resources.get<ScenarioSimulationStepResource>().deltaSeconds);
         if (clampedDelta <= 0.0) {
             return;
@@ -427,6 +429,91 @@ private:
         return lhs == rhs || lhs.empty() || rhs.empty();
     }
 
+    static long long quantizedPlanningCoordinate(double value) {
+        return static_cast<long long>(std::llround(value * 1000.0));
+    }
+
+    static std::string pointCachePart(const Point2D& point) {
+        return std::to_string(quantizedPlanningCoordinate(point.x))
+            + ","
+            + std::to_string(quantizedPlanningCoordinate(point.y));
+    }
+
+    static std::string zoneRouteCacheKey(
+        const Point2D& start,
+        const std::string& startZoneId,
+        const std::string& exitZoneId) {
+        return startZoneId + '\x1f' + pointCachePart(start) + '\x1f' + exitZoneId;
+    }
+
+    static std::string pathCacheKey(
+        const std::string& floorId,
+        const Point2D& start,
+        const Point2D& goal,
+        double clearance) {
+        return floorId
+            + '\x1f'
+            + pointCachePart(start)
+            + '\x1f'
+            + pointCachePart(goal)
+            + '\x1f'
+            + std::to_string(quantizedPlanningCoordinate(clearance));
+    }
+
+    void refreshPlanningCache(std::uint64_t layoutRevision) const {
+        if (planningCacheRevision_ == layoutRevision) {
+            return;
+        }
+        planningCacheRevision_ = layoutRevision;
+        nearestExitRouteCache_.clear();
+        exitRouteCache_.clear();
+        pathCache_.clear();
+    }
+
+    std::optional<ZoneRouteToExit> cachedZoneRouteToNearestExit(
+        const ScenarioLayoutCacheResource& layoutCache,
+        const Point2D& start,
+        const std::string& startZoneId) const {
+        const auto key = zoneRouteCacheKey(start, startZoneId, std::string{"nearest"});
+        const auto it = nearestExitRouteCache_.find(key);
+        if (it != nearestExitRouteCache_.end()) {
+            return it->second;
+        }
+        auto route = simulation_internal::zoneRouteToNearestExit(layoutCache, start, startZoneId);
+        nearestExitRouteCache_.emplace(key, route);
+        return route;
+    }
+
+    std::optional<ZoneRouteResult> cachedZoneRouteToExit(
+        const ScenarioLayoutCacheResource& layoutCache,
+        const Point2D& start,
+        const std::string& startZoneId,
+        const std::string& exitZoneId) const {
+        const auto key = zoneRouteCacheKey(start, startZoneId, exitZoneId);
+        const auto it = exitRouteCache_.find(key);
+        if (it != exitRouteCache_.end()) {
+            return it->second;
+        }
+        auto route = simulation_internal::zoneRouteToExit(layoutCache, start, startZoneId, exitZoneId);
+        exitRouteCache_.emplace(key, route);
+        return route;
+    }
+
+    const std::vector<Point2D>& cachedPath(
+        const std::string& floorId,
+        const FacilityLayout2D& layout,
+        const Point2D& start,
+        const Point2D& goal,
+        double clearance) const {
+        const auto key = pathCacheKey(floorId, start, goal, clearance);
+        const auto it = pathCache_.find(key);
+        if (it != pathCache_.end()) {
+            return it->second;
+        }
+        auto [insertedIt, _] = pathCache_.emplace(key, buildPath(layout, start, goal, clearance));
+        return insertedIt->second;
+    }
+
     static Point2D hazardAvoidanceVelocityFor(
         const ScenarioEnvironmentReactionAgentState& state,
         const Point2D& position,
@@ -451,13 +538,11 @@ private:
         if (connectionId.empty()) {
             return nullptr;
         }
-        const auto it = std::find_if(
-            layoutCache.layout.connections.begin(),
-            layoutCache.layout.connections.end(),
-            [&](const auto& connection) {
-                return connection.id == connectionId;
-            });
-        return it == layoutCache.layout.connections.end() ? nullptr : &(*it);
+        const auto it = layoutCache.connectionIndices.find(connectionId);
+        if (it == layoutCache.connectionIndices.end() || it->second >= layoutCache.layout.connections.size()) {
+            return nullptr;
+        }
+        return &layoutCache.layout.connections[it->second];
     }
 
     const Connection2D* nextBlockedConnection(
@@ -1124,7 +1209,7 @@ private:
         const Point2D& start,
         const std::string& startZoneId) const {
         RoutePlan plan;
-        auto zoneRoute = zoneRouteToNearestExit(layoutCache, start, startZoneId);
+        auto zoneRoute = cachedZoneRouteToNearestExit(layoutCache, start, startZoneId);
         if (!zoneRoute.has_value() || zoneRoute->empty()) {
             return plan;
         }
@@ -1162,7 +1247,7 @@ private:
                 const auto toFloorId = cachedFloorIdForZone(layoutCache, toZoneId);
                 const auto& segmentLayout = cachedLayoutForFloor(layoutCache, fromFloorId);
                 const auto target = closestPointOnSegment(segmentStart, passage.start, passage.end);
-                const auto segment = buildPath(segmentLayout, segmentStart, target, kCandidateClearance);
+                const auto& segment = cachedPath(fromFloorId, segmentLayout, segmentStart, target, kCandidateClearance);
                 appendSegment(
                     segment,
                     passage,
@@ -1180,7 +1265,7 @@ private:
             if (distanceBetween(segmentStart, exitCenter) > kArrivalEpsilon) {
                 const auto exitFloorId = exitZone->floorId;
                 const auto& segmentLayout = cachedLayoutForFloor(layoutCache, exitFloorId);
-                const auto segment = buildPath(segmentLayout, segmentStart, exitCenter, kCandidateClearance);
+                const auto& segment = cachedPath(exitFloorId, segmentLayout, segmentStart, exitCenter, kCandidateClearance);
                 appendSegment(segment, pointPassage(exitCenter), std::string{}, exitZone->id, exitFloorId, std::string{}, false);
             }
         }
@@ -1203,7 +1288,7 @@ private:
         const std::string& startZoneId,
         const std::string& exitZoneId) const {
         RoutePlan plan;
-        const auto zoneRouteResult = zoneRouteToExit(layoutCache, start, startZoneId, exitZoneId);
+        const auto zoneRouteResult = cachedZoneRouteToExit(layoutCache, start, startZoneId, exitZoneId);
         if (!zoneRouteResult.has_value() || zoneRouteResult->route.empty()) {
             return plan;
         }
@@ -1242,7 +1327,7 @@ private:
                 const auto toFloorId = cachedFloorIdForZone(layoutCache, toZoneId);
                 const auto& segmentLayout = cachedLayoutForFloor(layoutCache, fromFloorId);
                 const auto target = closestPointOnSegment(segmentStart, passage.start, passage.end);
-                const auto segment = buildPath(segmentLayout, segmentStart, target, kCandidateClearance);
+                const auto& segment = cachedPath(fromFloorId, segmentLayout, segmentStart, target, kCandidateClearance);
                 appendSegment(
                     segment,
                     passage,
@@ -1260,7 +1345,7 @@ private:
             if (distanceBetween(segmentStart, exitCenter) > kArrivalEpsilon) {
                 const auto exitFloorId = exitZone->floorId;
                 const auto& segmentLayout = cachedLayoutForFloor(layoutCache, exitFloorId);
-                const auto segment = buildPath(segmentLayout, segmentStart, exitCenter, kCandidateClearance);
+                const auto& segment = cachedPath(exitFloorId, segmentLayout, segmentStart, exitCenter, kCandidateClearance);
                 appendSegment(segment, pointPassage(exitCenter), std::string{}, exitZone->id, exitFloorId, std::string{}, false);
             }
         }
@@ -1353,8 +1438,12 @@ private:
                 continue;
             }
 
-            const auto result = zoneRouteToExit(layoutCache, start, startZoneId, zone.id);
+            const auto result = cachedZoneRouteToExit(layoutCache, start, startZoneId, zone.id);
             if (!result.has_value() || result->route.empty()) {
+                continue;
+            }
+
+            if (result->distance >= bestScore) {
                 continue;
             }
 
@@ -2007,7 +2096,7 @@ private:
                 continue;
             }
 
-            const auto replacement = buildPath(floorLayout, position.value, target, clearance);
+            const auto& replacement = cachedPath(route.currentFloorId, floorLayout, position.value, target, clearance);
             if (replacement.size() <= 1) {
                 route.nextSegmentReplanSeconds = elapsedSeconds + kFailedSegmentReplanCooldownSeconds;
                 continue;
@@ -2239,6 +2328,10 @@ private:
     std::uint64_t guidanceReplanSeed_{0U};
     std::uint64_t guidanceReplanIdHash_{0U};
     std::vector<engine::Entity> activeEntities_{};
+    mutable std::uint64_t planningCacheRevision_{std::numeric_limits<std::uint64_t>::max()};
+    mutable std::unordered_map<std::string, std::optional<ZoneRouteToExit>> nearestExitRouteCache_{};
+    mutable std::unordered_map<std::string, std::optional<ZoneRouteResult>> exitRouteCache_{};
+    mutable std::unordered_map<std::string, std::vector<Point2D>> pathCache_{};
 };
 
 

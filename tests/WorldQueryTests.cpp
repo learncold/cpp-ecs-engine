@@ -74,6 +74,27 @@ SC_TEST(WorldQuery_ViewExcludesDestroyedEntities) {
     SC_EXPECT_TRUE(result[0] == e2);
 }
 
+SC_TEST(WorldQuery_ViewKeepsEntityIndexOrderAfterPackedStorageSwaps) {
+    safecrowd::engine::EcsCore core;
+    safecrowd::engine::ResourceStore resources;
+    safecrowd::engine::CommandBuffer buffer;
+    auto world = safecrowd::engine::internal::EngineWorldFactory::create(core, resources, buffer);
+
+    const auto e1 = core.createEntity();
+    const auto e2 = core.createEntity();
+    const auto e3 = core.createEntity();
+
+    core.addComponent(e1, Position{});
+    core.addComponent(e2, Position{});
+    core.addComponent(e3, Position{});
+    core.removeComponent<Position>(e1);
+
+    const auto result = world.query().view<Position>();
+    SC_EXPECT_EQ(result.size(), std::size_t{2});
+    SC_EXPECT_TRUE(result[0] == e2);
+    SC_EXPECT_TRUE(result[1] == e3);
+}
+
 SC_TEST(WorldQuery_ContainsReflectsComponentPresence) {
     safecrowd::engine::EcsCore core;
     safecrowd::engine::ResourceStore resources;
@@ -99,4 +120,32 @@ SC_TEST(WorldQuery_GetReturnsComponentRef) {
     const auto& pos = world.query().get<Position>(e);
     SC_EXPECT_NEAR(pos.x, 3.0f, 1e-6);
     SC_EXPECT_NEAR(pos.y, 4.0f, 1e-6);
+}
+
+SC_TEST(WorldQuery_ForEachVisitsMatchedComponentsWithoutViewAllocation) {
+    safecrowd::engine::EcsCore core;
+    safecrowd::engine::ResourceStore resources;
+    safecrowd::engine::CommandBuffer buffer;
+    auto world = safecrowd::engine::internal::EngineWorldFactory::create(core, resources, buffer);
+
+    const auto e1 = core.createEntity();
+    const auto e2 = core.createEntity();
+
+    core.addComponent(e1, Position{1.0f, 2.0f});
+    core.addComponent(e1, Velocity{3.0f, 4.0f});
+    core.addComponent(e2, Position{5.0f, 6.0f});
+
+    std::size_t visited = 0;
+    world.query().forEach<Position, Velocity>(
+        [&](safecrowd::engine::Entity entity, Position& position, Velocity& velocity) {
+            SC_EXPECT_TRUE(entity == e1);
+            position.x += velocity.vx;
+            position.y += velocity.vy;
+            ++visited;
+        });
+
+    SC_EXPECT_EQ(visited, std::size_t{1});
+    const auto& updated = world.query().get<Position>(e1);
+    SC_EXPECT_NEAR(updated.x, 4.0f, 1e-6);
+    SC_EXPECT_NEAR(updated.y, 6.0f, 1e-6);
 }
