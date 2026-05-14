@@ -3134,6 +3134,43 @@ SC_TEST(ScenarioRoutePassageCrossed_UsesDoorPlaneNearEndpoint) {
         0.25));
 }
 
+SC_TEST(ScenarioRoutePassageCrossed_DoesNotAdvanceWhileCenterRemainsInSourceRoom) {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.zones.push_back({
+        .id = "upper-room",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Upper Room",
+        .area = {.outline = {{0.0, 0.0}, {1.0, 0.0}, {1.0, 1.0}, {0.0, 1.0}}},
+    });
+    layout.zones.push_back({
+        .id = "corridor",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Corridor",
+        .area = {.outline = {{0.0, 1.0}, {1.0, 1.0}, {1.0, 2.0}, {0.0, 2.0}}},
+    });
+
+    safecrowd::domain::EvacuationRoute route;
+    route.waypoints = {{.x = 0.5, .y = 1.0}};
+    route.waypointPassages = {{{.x = 0.2, .y = 1.0}, {.x = 0.8, .y = 1.0}}};
+    route.waypointFromZoneIds = {"upper-room"};
+    route.waypointZoneIds = {"corridor"};
+    route.nextWaypointIndex = 0;
+
+    const safecrowd::domain::Point2D stillInsideSource{.x = 0.5, .y = 0.93};
+    SC_EXPECT_TRUE(!safecrowd::domain::simulation_internal::routePassageCrossed(
+        layout,
+        route,
+        stillInsideSource,
+        0.25));
+
+    const safecrowd::domain::Point2D crossedIntoCorridor{.x = 0.5, .y = 1.03};
+    SC_EXPECT_TRUE(safecrowd::domain::simulation_internal::routePassageCrossed(
+        layout,
+        route,
+        crossedIntoCorridor,
+        0.25));
+}
+
 SC_TEST(ScenarioFrameSyncSystem_PublishesSimulationFrameResource) {
     safecrowd::engine::EngineRuntime runtime({
         .fixedDeltaTime = 1.0 / 30.0,

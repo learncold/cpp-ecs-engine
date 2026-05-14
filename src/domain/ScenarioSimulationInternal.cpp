@@ -780,7 +780,13 @@ bool routePassageCrossed(
         return false;
     }
 
-    return dot(position - midpoint(passage), normal) > -std::max(kPortalCrossingEpsilon, agentRadius * 0.35);
+    const auto signedDistance = dot(position - midpoint(passage), normal);
+    if (signedDistance > kPortalCrossingEpsilon) {
+        return true;
+    }
+
+    return pointInRing(toZone->area.outline, position)
+        && signedDistance > -std::max(kPortalCrossingEpsilon, static_cast<double>(agentRadius) * 0.10);
 }
 
 const Connection2D* findConnectionBetween(const FacilityLayout2D& layout, const std::string& from, const std::string& to) {
