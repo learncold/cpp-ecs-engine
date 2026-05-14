@@ -62,8 +62,9 @@ public:
 
         auto& query = world.query();
         const auto entities = simulationEntities(query);
+        refreshActiveEntities(query, entities);
         std::vector<MovementPlan> plans;
-        plans.reserve(entities.size());
+        plans.reserve(activeEntities_.size());
         if (!resources.contains<ScenarioEnvironmentReactionResource>()) {
             resources.set(ScenarioEnvironmentReactionResource{});
         }
@@ -76,15 +77,15 @@ public:
             : nullptr;
 
         applyRouteGuidance(query, entities, layoutCache, clock.elapsedSeconds, step.derivedSeed);
-        advanceRoutesForCurrentZones(query, entities, layoutCache);
-        replanBlockedExitRoutes(query, entities, layoutCache, clock.elapsedSeconds, layoutRevision, reactions);
-        advanceRoutesForWaypointProgress(query, 0.0, entities, layoutCache);
-        replanBlockedRouteSegments(query, entities, layoutCache, clock.elapsedSeconds, layoutRevision);
-        replanHazardAwareExitRoutes(query, entities, layoutCache, clock.elapsedSeconds, reactions, activeHazards);
-        updateAgentPhysicsFloorIds(query, layoutCache, entities);
+        advanceRoutesForCurrentZones(query, activeEntities_, layoutCache);
+        replanBlockedExitRoutes(query, activeEntities_, layoutCache, clock.elapsedSeconds, layoutRevision, reactions);
+        advanceRoutesForWaypointProgress(query, 0.0, activeEntities_, layoutCache);
+        replanBlockedRouteSegments(query, activeEntities_, layoutCache, clock.elapsedSeconds, layoutRevision);
+        replanHazardAwareExitRoutes(query, activeEntities_, layoutCache, clock.elapsedSeconds, reactions, activeHazards);
+        updateAgentPhysicsFloorIds(query, layoutCache, activeEntities_);
         std::optional<AgentSpatialIndex> localNeighborIndex;
         if (sharedSpatialIndex == nullptr) {
-            localNeighborIndex = buildAgentSpatialIndex(query, entities, 1.0);
+            localNeighborIndex = buildAgentSpatialIndex(query, activeEntities_, 1.0);
         }
         const auto* pressureFeedback = resources.contains<ScenarioPressureFeedbackResource>()
             ? &resources.get<ScenarioPressureFeedbackResource>()
@@ -100,15 +101,11 @@ public:
 
         std::size_t evacuatedAtStartCount = 0;
         std::size_t newlyEvacuatedCount = 0;
-        for (const auto entity : entities) {
+        for (const auto entity : activeEntities_) {
             auto& position = query.get<Position>(entity);
             auto& velocity = query.get<Velocity>(entity);
             auto& route = query.get<EvacuationRoute>(entity);
             auto& status = query.get<EvacuationStatus>(entity);
-            if (status.evacuated) {
-                ++evacuatedAtStartCount;
-                continue;
-            }
             if (route.destinationZoneId.empty()) {
                 continue;
             }
@@ -124,7 +121,11 @@ public:
             }
         }
 
+        evacuatedAtStartCount = totalAgentCount - activeEntities_.size();
         const auto evacuatedAfterCount = evacuatedAtStartCount + newlyEvacuatedCount;
+        if (newlyEvacuatedCount > 0) {
+            refreshActiveEntities(query, entities);
+        }
         const bool shouldCaptureT90 = t90TargetCount > 0
             && !timingKeyframes.t90Frame.has_value()
             && evacuatedAtStartCount < t90TargetCount
@@ -140,13 +141,8 @@ public:
             keyframe.evacuatedAgentCount = evacuatedAfterCount;
             keyframe.complete = totalAgentCount > 0 && evacuatedAfterCount >= totalAgentCount;
 
-            const auto view = query.view<Position, Agent, Velocity, EvacuationStatus>();
-            keyframe.agents.reserve(view.size());
-            for (const auto entity : view) {
-                const auto& status = query.get<EvacuationStatus>(entity);
-                if (status.evacuated) {
-                    continue;
-                }
+            keyframe.agents.reserve(activeEntities_.size());
+            for (const auto entity : activeEntities_) {
                 const auto& position = query.get<Position>(entity);
                 const auto& velocity = query.get<Velocity>(entity);
                 const auto& agent = query.get<Agent>(entity);
@@ -183,15 +179,11 @@ public:
             }
         }
 
-        for (const auto entity : entities) {
+        for (const auto entity : activeEntities_) {
             auto& position = query.get<Position>(entity);
             const auto& agent = query.get<Agent>(entity);
             auto& velocity = query.get<Velocity>(entity);
             auto& route = query.get<EvacuationRoute>(entity);
-            auto& status = query.get<EvacuationStatus>(entity);
-            if (status.evacuated) {
-                continue;
-            }
 
             if (route.nextWaypointIndex >= route.waypoints.size()) {
                 velocity.value = {};
@@ -330,13 +322,13 @@ public:
             updateDisplayFloor(route, nextPosition);
         }
 
-        advanceVerticalRoutesAtPortal(query, entities, layoutCache);
-        updateAgentPhysicsFloorIds(query, layoutCache, entities);
-        resolveAgentOverlaps(query, entities, layoutCache);
-        advanceRoutesForCurrentZones(query, entities, layoutCache);
-        advanceRoutesForWaypointProgress(query, clampedDelta, entities, layoutCache);
-        updateAgentPhysicsFloorIds(query, layoutCache, entities);
-        resolveAgentOverlaps(query, entities, layoutCache);
+        advanceVerticalRoutesAtPortal(query, activeEntities_, layoutCache);
+        updateAgentPhysicsFloorIds(query, layoutCache, activeEntities_);
+        resolveAgentOverlaps(query, activeEntities_, layoutCache);
+        advanceRoutesForCurrentZones(query, activeEntities_, layoutCache);
+        advanceRoutesForWaypointProgress(query, clampedDelta, activeEntities_, layoutCache);
+        updateAgentPhysicsFloorIds(query, layoutCache, activeEntities_);
+        resolveAgentOverlaps(query, activeEntities_, layoutCache);
         advanceClock(query, clock, entities, clampedDelta);
         resources.set(ScenarioSimulationStepResource{});
     }
@@ -363,6 +355,16 @@ private:
         Point2D position{};
         bool advanced{false};
     };
+
+    void refreshActiveEntities(engine::WorldQuery& query, const std::vector<engine::Entity>& entities) {
+        activeEntities_.clear();
+        activeEntities_.reserve(entities.size());
+        for (const auto entity : entities) {
+            if (!query.get<EvacuationStatus>(entity).evacuated) {
+                activeEntities_.push_back(entity);
+            }
+        }
+    }
 
     static const ScenarioEnvironmentReactionAgentState* activeHazardState(
         const ScenarioEnvironmentReactionResource* reactions,
@@ -2171,6 +2173,7 @@ private:
     std::optional<RouteGuidanceDraft> guidanceReplanGuidance_{};
     std::uint64_t guidanceReplanSeed_{0U};
     std::uint64_t guidanceReplanIdHash_{0U};
+    std::vector<engine::Entity> activeEntities_{};
 };
 
 
