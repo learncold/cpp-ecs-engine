@@ -53,13 +53,15 @@ EnvironmentHazardDraft makeSmokeHazard() {
 }  // namespace
 
 SC_TEST(duplicateScenarioDraft_setsAlternativeRoleAndIdentity) {
-    const auto baseline = makeBaselineDraft();
+    auto baseline = makeBaselineDraft();
+    baseline.sourceTemplateId = "recommendation:exit-usage-balancing:scenario-1";
 
     const auto variant = duplicateScenarioDraft(baseline, "scenario-2", "My Alternative");
 
     SC_EXPECT_TRUE(variant.role == ScenarioRole::Alternative);
     SC_EXPECT_EQ(variant.scenarioId, std::string("scenario-2"));
     SC_EXPECT_EQ(variant.name, std::string("My Alternative"));
+    SC_EXPECT_TRUE(variant.sourceTemplateId.empty());
     SC_EXPECT_TRUE(variant.variationDiffKeys.empty());
     SC_EXPECT_TRUE(variant.blockingIssues.empty());
     SC_EXPECT_EQ(variant.population.initialPlacements.size(), baseline.population.initialPlacements.size());

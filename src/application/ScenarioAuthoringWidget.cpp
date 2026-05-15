@@ -571,6 +571,23 @@ QLabel* createRoleBadge(const QString& text, bool alternative, QWidget* parent) 
     return badge;
 }
 
+QString scenarioRoleLabel(safecrowd::domain::ScenarioRole role) {
+    switch (role) {
+    case safecrowd::domain::ScenarioRole::Baseline:
+        return "Baseline";
+    case safecrowd::domain::ScenarioRole::Recommended:
+        return "Recommended";
+    case safecrowd::domain::ScenarioRole::Alternative:
+    default:
+        return "Alternative";
+    }
+}
+
+bool scenarioRoleHasBaselineDiff(safecrowd::domain::ScenarioRole role) {
+    return role == safecrowd::domain::ScenarioRole::Alternative
+        || role == safecrowd::domain::ScenarioRole::Recommended;
+}
+
 void addMetaRow(QVBoxLayout* layout, const QString& label, const QString& value, QWidget* parent) {
     auto* row = new QWidget(parent);
     auto* rowLayout = new QHBoxLayout(row);
@@ -1176,7 +1193,7 @@ void ScenarioAuthoringWidget::createScenarioWithName(const QString& name, int so
         scenario.crowdPlacements = source.crowdPlacements;
         scenario.startText = source.startText;
         scenario.destinationText = source.destinationText;
-        scenario.baseScenarioId = source.draft.role == safecrowd::domain::ScenarioRole::Alternative
+        scenario.baseScenarioId = scenarioRoleHasBaselineDiff(source.draft.role)
             ? source.baseScenarioId
             : QString::fromStdString(source.draft.scenarioId);
         scenario.stagedForRun = false;
@@ -1309,10 +1326,10 @@ void ScenarioAuthoringWidget::refreshInspector() {
             if (!hasScenario) {
                 addStatusMessage(panelLayout, "No scenario selected", scenarioOverviewPanel_);
             } else {
-                const bool alternative = scenario->draft.role == safecrowd::domain::ScenarioRole::Alternative;
+                const bool variation = scenarioRoleHasBaselineDiff(scenario->draft.role);
                 panelLayout->addWidget(createRoleBadge(
-                    alternative ? "Alternative" : "Baseline",
-                    alternative,
+                    scenarioRoleLabel(scenario->draft.role),
+                    variation,
                     scenarioOverviewPanel_));
 
                 auto* nameLabel = createLabel(
@@ -1330,7 +1347,7 @@ void ScenarioAuthoringWidget::refreshInspector() {
                 addMetaRow(panelLayout, "Blocked", QString::number(static_cast<int>(scenario->draft.control.connectionBlocks.size())), scenarioOverviewPanel_);
                 addMetaRow(panelLayout, "Start", scenario->startText, scenarioOverviewPanel_);
                 addMetaRow(panelLayout, "Destination", scenario->destinationText, scenarioOverviewPanel_);
-                if (alternative && !scenario->baseScenarioId.isEmpty()) {
+                if (variation && !scenario->baseScenarioId.isEmpty()) {
                     addMetaRow(panelLayout, "Based on", scenario->baseScenarioId, scenarioOverviewPanel_);
                 }
             }
@@ -1350,7 +1367,7 @@ void ScenarioAuthoringWidget::refreshInspector() {
             } else if (scenario->draft.role == safecrowd::domain::ScenarioRole::Baseline) {
                 addStatusMessage(panelLayout, "Baseline scenario", scenarioDiffPanel_);
             } else if (scenario->baseScenarioId.isEmpty()) {
-                addStatusMessage(panelLayout, "Alternative scenario / no baseline link", scenarioDiffPanel_);
+                addStatusMessage(panelLayout, "Variation scenario / no baseline link", scenarioDiffPanel_);
             } else {
                 const auto baseId = scenario->baseScenarioId.toStdString();
                 const auto baselineIt = std::find_if(scenarios_.begin(), scenarios_.end(), [&](const auto& candidate) {
@@ -1405,8 +1422,8 @@ void ScenarioAuthoringWidget::refreshInspector() {
                 if (!stagedScenario.stagedForRun || !scenarioHasOccupants(stagedScenario)) {
                     continue;
                 }
-                const auto role = stagedScenario.draft.role == safecrowd::domain::ScenarioRole::Baseline ? "Baseline" : "Alternative";
-                lines << QString("- %1 (%2)").arg(QString::fromStdString(stagedScenario.draft.name), role);
+                lines << QString("- %1 (%2)")
+                    .arg(QString::fromStdString(stagedScenario.draft.name), scenarioRoleLabel(stagedScenario.draft.role));
             }
         }
         stagedScenariosLabel_->setText(lines.join('\n'));
@@ -1651,8 +1668,8 @@ void ScenarioAuthoringWidget::refreshScenarioSwitcher() {
     scenarioSwitcher_->blockSignals(true);
     scenarioSwitcher_->clear();
     for (const auto& scenario : scenarios_) {
-        const auto role = scenario.draft.role == safecrowd::domain::ScenarioRole::Baseline ? "Baseline" : "Alternative";
-        scenarioSwitcher_->addItem(QString("%1  (%2)").arg(QString::fromStdString(scenario.draft.name), role));
+        scenarioSwitcher_->addItem(QString("%1  (%2)")
+            .arg(QString::fromStdString(scenario.draft.name), scenarioRoleLabel(scenario.draft.role)));
     }
     scenarioSwitcher_->setCurrentIndex(currentScenarioIndex_);
     scenarioSwitcher_->blockSignals(false);
@@ -1755,8 +1772,7 @@ void ScenarioAuthoringWidget::recomputeDependentVariationDiffKeys(const QString&
 }
 
 void ScenarioAuthoringWidget::recomputeVariationDiffKeysIfAlternative(ScenarioState& scenario) const {
-    if (scenario.draft.role != safecrowd::domain::ScenarioRole::Alternative
-        || scenario.baseScenarioId.isEmpty()) {
+    if (!scenarioRoleHasBaselineDiff(scenario.draft.role) || scenario.baseScenarioId.isEmpty()) {
         scenario.draft.variationDiffKeys.clear();
         return;
     }
@@ -1942,8 +1958,8 @@ QWidget* ScenarioAuthoringWidget::createScenarioPanel() {
             if (!scenario.stagedForRun || !scenarioHasOccupants(scenario)) {
                 continue;
             }
-            const auto role = scenario.draft.role == safecrowd::domain::ScenarioRole::Baseline ? "Baseline" : "Alternative";
-            lines << QString("- %1 (%2)").arg(QString::fromStdString(scenario.draft.name), role);
+            lines << QString("- %1 (%2)")
+                .arg(QString::fromStdString(scenario.draft.name), scenarioRoleLabel(scenario.draft.role));
         }
     }
     stagedScenariosLabel_->setText(lines.join('\n'));

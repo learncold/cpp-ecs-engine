@@ -163,6 +163,7 @@ ScenarioDraft duplicateScenarioDraft(const ScenarioDraft& source,
     copy.scenarioId = std::move(newScenarioId);
     copy.name = std::move(newName);
     copy.role = ScenarioRole::Alternative;
+    copy.sourceTemplateId.clear();
     copy.variationDiffKeys.clear();
     copy.blockingIssues.clear();
     return copy;

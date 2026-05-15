@@ -347,6 +347,9 @@ stage된 baseline 시나리오를 실제로 실행하고 진행 상태를 보는
 - 하단 graph panel에 Remaining, Exits, Compare 탭 제공
 - Exits 탭에 출구별 이용 인원, 비율, 마지막 통과 시각 표시
 - Compare 탭은 v1 placeholder이며 baseline/alternative 비교 계산은 후속 Analysis Workspace 범위
+- Batch Result 우측 패널에 완료 결과 아티팩트 기반 Recommendations v1 제공
+  - 차단 해제, 출구 분산 유도, 병목/압박 hotspot 완화 후보를 표시
+  - `Create Recommended Scenario`는 `Recommended` 시나리오 초안만 만들고 자동 재실행하지 않음
 - 상세 탭에 Zones, Groups, Criteria 표시
 - Zones 탭에 구역별 초기 인원, 대피 인원, 마지막 완료시각 표시
 - Groups 탭에 배치 그룹별 초기 인원, 대피 인원, 마지막 완료시각 표시
@@ -554,7 +557,7 @@ stage된 baseline 시나리오를 실제로 실행하고 진행 상태를 보는
 - [ ] Variation Summary 제공
 - [ ] Heatmap Selector 제공
 - [ ] Comparison View 제공
-- [ ] Recommendation Drawer 제공
+- [x] Recommendation Drawer v1 제공
 - [ ] Export Dialog 제공
 
 ## 7. 문서 유지 규칙
