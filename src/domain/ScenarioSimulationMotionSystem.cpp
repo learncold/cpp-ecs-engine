@@ -340,7 +340,10 @@ public:
         advanceRoutesForWaypointProgress(query, clampedDelta, activeEntities_, layoutCache);
         updateAgentPhysicsFloorIds(query, layoutCache, activeEntities_);
         resolveAgentOverlaps(query, activeEntities_, layoutCache);
-        advanceClock(query, clock, entities, clampedDelta);
+        const auto pendingScheduledSpawns = resources.contains<ScenarioScheduledSpawnResource>()
+            ? resources.get<ScenarioScheduledSpawnResource>().pendingCount
+            : std::size_t{0};
+        advanceClock(query, clock, entities, clampedDelta, pendingScheduledSpawns);
         resources.set(ScenarioSimulationStepResource{});
     }
 
@@ -2276,7 +2279,8 @@ private:
         engine::WorldQuery& query,
         ScenarioSimulationClockResource& clock,
         const std::vector<engine::Entity>& entities,
-        double deltaSeconds) const {
+        double deltaSeconds,
+        std::size_t pendingScheduledSpawns) const {
         clock.elapsedSeconds += deltaSeconds;
         clock.complete = clock.elapsedSeconds >= clock.timeLimitSeconds;
         if (clock.complete) {
@@ -2292,7 +2296,7 @@ private:
                 ++evacuatedAgentCount;
             }
         }
-        clock.complete = totalAgentCount > 0 && evacuatedAgentCount >= totalAgentCount;
+        clock.complete = pendingScheduledSpawns == 0 && totalAgentCount > 0 && evacuatedAgentCount >= totalAgentCount;
     }
 
     bool currentWaypointIsVertical(const EvacuationRoute& route) const {

@@ -30,6 +30,7 @@ namespace safecrowd::application {
 enum class ScenarioCrowdPlacementKind {
     Individual,
     Group,
+    Source,
 };
 
 struct ScenarioCrowdPlacement {
@@ -44,6 +45,10 @@ struct ScenarioCrowdPlacement {
     safecrowd::domain::InitialPlacementDistribution distribution{
         safecrowd::domain::InitialPlacementDistribution::Uniform};
     std::vector<safecrowd::domain::Point2D> generatedPositions{};
+    int sourceAgentsPerSpawn{1};
+    double sourceStartSeconds{0.0};
+    double sourceEndSeconds{180.0};
+    double sourceIntervalSeconds{5.0};
 };
 
 class ScenarioCanvasWidget : public QWidget {
@@ -91,6 +96,7 @@ private:
         Select,
         IndividualPlacement,
         GroupPlacement,
+        SourcePlacement,
         BlockDoor,
         FireHazard,
         SmokeHazard,
@@ -118,6 +124,7 @@ private:
     QString nextRouteGuidanceId() const;
     void addGroupPlacement(const QPointF& start, const QPointF& end);
     void addIndividualPlacement(const QPointF& position);
+    void addSourcePlacement(const QPointF& position);
     void addConnectionBlock(const QPointF& position);
     void addConnectionBlockForConnection(const safecrowd::domain::Connection2D& connection);
     void addEnvironmentHazard(const QPointF& position, safecrowd::domain::EnvironmentHazardKind kind);
@@ -134,6 +141,7 @@ private:
     void selectLayoutElementAt(const QPointF& position);
     void openCrowdPlacementContextMenu(const QString& crowdElementId, const QPoint& screenPosition);
     void openConnectionBlockScheduleEditor(const QString& blockId, const QPoint& screenPosition);
+    bool editOccupantSourceById(const QString& sourceId, const QPoint& screenPosition);
     bool deleteCrowdElement(const QString& crowdElementId);
     void drawFocusedLayoutElement(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawFocusedPlacement(QPainter& painter, const LayoutCanvasTransform& transform) const;
@@ -144,6 +152,7 @@ private:
     void emitConnectionBlocksChanged();
     void emitEnvironmentHazardsChanged();
     void emitRouteGuidancesChanged();
+    bool configureSourcePlacementTool(const QPoint& screenPosition);
     void repositionToolbars();
     void setToolMode(ToolMode mode);
     void setupToolbars();
@@ -171,6 +180,7 @@ private:
     QToolButton* selectToolButton_{nullptr};
     QToolButton* individualToolButton_{nullptr};
     QToolButton* groupToolButton_{nullptr};
+    QToolButton* sourceToolButton_{nullptr};
     QToolButton* blockDoorToolButton_{nullptr};
     QToolButton* fireHazardToolButton_{nullptr};
     QToolButton* smokeHazardToolButton_{nullptr};
@@ -179,6 +189,10 @@ private:
     QSpinBox* groupCountSpinBox_{nullptr};
     QLabel* groupDistributionLabel_{nullptr};
     QComboBox* groupDistributionComboBox_{nullptr};
+    int sourceAgentsPerSpawn_{1};
+    double sourceStartSeconds_{0.0};
+    double sourceDurationSeconds_{180.0};
+    double sourceIntervalSeconds_{5.0};
     QString hoveredConnectionBlockId_{};
     QString hoveredEnvironmentHazardId_{};
     QString hoveredRouteGuidanceId_{};

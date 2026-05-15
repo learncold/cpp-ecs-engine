@@ -703,6 +703,36 @@ safecrowd::domain::InitialPlacement2D initialPlacementFromJson(const QJsonObject
     return placement;
 }
 
+QJsonObject occupantSourceToJson(const safecrowd::domain::OccupantSource2D& source) {
+    QJsonObject object;
+    object["id"] = QString::fromStdString(source.id);
+    object["zoneId"] = QString::fromStdString(source.zoneId);
+    object["floorId"] = QString::fromStdString(source.floorId);
+    object["position"] = pointArray(source.position);
+    object["targetAgentCount"] = static_cast<qint64>(source.targetAgentCount);
+    object["agentsPerSpawn"] = static_cast<qint64>(source.agentsPerSpawn);
+    object["startSeconds"] = source.startSeconds;
+    object["endSeconds"] = source.endSeconds;
+    object["spawnIntervalSeconds"] = source.spawnIntervalSeconds;
+    object["initialVelocity"] = pointArray(source.initialVelocity);
+    return object;
+}
+
+safecrowd::domain::OccupantSource2D occupantSourceFromJson(const QJsonObject& object) {
+    safecrowd::domain::OccupantSource2D source;
+    source.id = object.value("id").toString().toStdString();
+    source.zoneId = object.value("zoneId").toString().toStdString();
+    source.floorId = object.value("floorId").toString().toStdString();
+    source.position = pointFromJson(object.value("position"));
+    source.targetAgentCount = static_cast<std::size_t>(object.value("targetAgentCount").toInteger());
+    source.agentsPerSpawn = static_cast<std::size_t>(std::max<qint64>(1, object.value("agentsPerSpawn").toInteger(1)));
+    source.startSeconds = object.value("startSeconds").toDouble(0.0);
+    source.endSeconds = object.value("endSeconds").toDouble(180.0);
+    source.spawnIntervalSeconds = object.value("spawnIntervalSeconds").toDouble(5.0);
+    source.initialVelocity = pointFromJson(object.value("initialVelocity"));
+    return source;
+}
+
 QJsonObject populationToJson(const safecrowd::domain::PopulationSpec& population) {
     QJsonObject object;
     QJsonArray placements;
@@ -710,6 +740,11 @@ QJsonObject populationToJson(const safecrowd::domain::PopulationSpec& population
         placements.append(initialPlacementToJson(placement));
     }
     object["initialPlacements"] = placements;
+    QJsonArray sources;
+    for (const auto& source : population.occupantSources) {
+        sources.append(occupantSourceToJson(source));
+    }
+    object["occupantSources"] = sources;
     return object;
 }
 
@@ -717,6 +752,9 @@ safecrowd::domain::PopulationSpec populationFromJson(const QJsonObject& object) 
     safecrowd::domain::PopulationSpec population;
     for (const auto& value : object.value("initialPlacements").toArray()) {
         population.initialPlacements.push_back(initialPlacementFromJson(value.toObject()));
+    }
+    for (const auto& value : object.value("occupantSources").toArray()) {
+        population.occupantSources.push_back(occupantSourceFromJson(value.toObject()));
     }
     return population;
 }

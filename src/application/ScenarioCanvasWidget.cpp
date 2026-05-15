@@ -14,6 +14,7 @@
 #include <random>
 
 #include <QCoreApplication>
+#include <QAction>
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -48,6 +49,11 @@ constexpr double kDefaultInitialSpeed = 1.3;
 constexpr double kOccupantMarkerRadius = 5.0;
 constexpr double kOccupantWorldRadius = 0.25;
 constexpr double kOccupantMinSpacing = kOccupantWorldRadius * 2.0;
+constexpr int kMaxSourceOccupantCount = 5000;
+constexpr int kDefaultSourceAgentsPerSpawn = 1;
+constexpr double kDefaultSourceStartSeconds = 0.0;
+constexpr double kDefaultSourceDurationSeconds = 180.0;
+constexpr double kDefaultSourceIntervalSeconds = 5.0;
 constexpr double kGeometryEpsilon = 1e-9;
 constexpr double kSelectionDragThresholdPixels = 4.0;
 const QColor kSelectionHighlightColor("#0b3d78");
@@ -66,8 +72,96 @@ struct PointBounds {
     double maxY{0.0};
 };
 
+struct OccupantSourceSettings {
+    int agentsPerSpawn{kDefaultSourceAgentsPerSpawn};
+    double startSeconds{kDefaultSourceStartSeconds};
+    double durationSeconds{kDefaultSourceDurationSeconds};
+    double intervalSeconds{kDefaultSourceIntervalSeconds};
+};
+
 bool matchesFloor(const std::string& elementFloorId, const QString& floorId) {
     return floorId.isEmpty() || elementFloorId.empty() || QString::fromStdString(elementFloorId) == floorId;
+}
+
+int sourceEmissionCount(int agentsPerSpawn, double durationSeconds, double intervalSeconds) {
+    if (agentsPerSpawn <= 0 || durationSeconds <= 0.0 || intervalSeconds <= 1e-9) {
+        return 0;
+    }
+    const auto ticks = static_cast<long long>(
+        std::floor(std::max(0.0, durationSeconds - 1e-9) / intervalSeconds)) + 1;
+    const auto count = std::max<long long>(0, ticks) * static_cast<long long>(agentsPerSpawn);
+    return static_cast<int>(std::min<long long>(kMaxSourceOccupantCount, count));
+}
+
+bool editOccupantSourceSettings(
+    QWidget* parent,
+    OccupantSourceSettings* settings,
+    const QPoint& screenPosition,
+    const QString& title) {
+    if (settings == nullptr) {
+        return false;
+    }
+
+    QDialog dialog(parent);
+    dialog.setWindowTitle(title);
+    auto* layout = new QGridLayout(&dialog);
+    layout->setContentsMargins(16, 16, 16, 16);
+    layout->setHorizontalSpacing(12);
+    layout->setVerticalSpacing(10);
+
+    auto* peopleSpin = new QSpinBox(&dialog);
+    peopleSpin->setRange(1, kMaxSourceOccupantCount);
+    peopleSpin->setSuffix(" people");
+    peopleSpin->setValue(std::max(1, settings->agentsPerSpawn));
+
+    auto* intervalSpin = new QDoubleSpinBox(&dialog);
+    intervalSpin->setRange(0.1, 3600.0);
+    intervalSpin->setDecimals(1);
+    intervalSpin->setSuffix(" sec");
+    intervalSpin->setValue(std::max(0.1, settings->intervalSeconds));
+
+    auto* durationSpin = new QDoubleSpinBox(&dialog);
+    durationSpin->setRange(0.1, 1440.0);
+    durationSpin->setDecimals(1);
+    durationSpin->setSuffix(" min");
+    durationSpin->setValue(std::max(0.1, settings->durationSeconds / 60.0));
+
+    auto* totalLabel = new QLabel(&dialog);
+    totalLabel->setStyleSheet("QLabel { color: #4f5d6b; }");
+    const auto refreshSummary = [=]() {
+        const auto total = sourceEmissionCount(
+            peopleSpin->value(),
+            durationSpin->value() * 60.0,
+            intervalSpin->value());
+        totalLabel->setText(QString("Total emitted: %1 people").arg(total));
+    };
+    refreshSummary();
+    QObject::connect(peopleSpin, qOverload<int>(&QSpinBox::valueChanged), &dialog, refreshSummary);
+    QObject::connect(intervalSpin, qOverload<double>(&QDoubleSpinBox::valueChanged), &dialog, refreshSummary);
+    QObject::connect(durationSpin, qOverload<double>(&QDoubleSpinBox::valueChanged), &dialog, refreshSummary);
+
+    layout->addWidget(new QLabel("People each time", &dialog), 0, 0);
+    layout->addWidget(peopleSpin, 0, 1);
+    layout->addWidget(new QLabel("Every", &dialog), 1, 0);
+    layout->addWidget(intervalSpin, 1, 1);
+    layout->addWidget(new QLabel("Duration", &dialog), 2, 0);
+    layout->addWidget(durationSpin, 2, 1);
+    layout->addWidget(totalLabel, 3, 0, 1, 2);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    layout->addWidget(buttons, 4, 0, 1, 2);
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+    dialog.move(screenPosition);
+    if (dialog.exec() != QDialog::Accepted) {
+        return false;
+    }
+
+    settings->agentsPerSpawn = peopleSpin->value();
+    settings->intervalSeconds = intervalSpin->value();
+    settings->durationSeconds = durationSpin->value() * 60.0;
+    return true;
 }
 
 safecrowd::domain::Point2D connectionMarkerCenter(const safecrowd::domain::Connection2D& connection) {
@@ -610,6 +704,17 @@ QRectF groupMarkerBounds(const ScenarioCrowdPlacement& placement, const LayoutCa
     return bounds.adjusted(-7.0, -7.0, 7.0, 7.0);
 }
 
+void drawOccupantSourceMarker(QPainter& painter, const QPointF& center, const QColor& color) {
+    painter.setPen(QPen(color, 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(QColor(color.red(), color.green(), color.blue(), 36));
+    painter.drawEllipse(center, 9.0, 9.0);
+    painter.setBrush(color);
+    painter.drawEllipse(center, 3.8, 3.8);
+    painter.drawLine(center + QPointF(11.0, 0.0), center + QPointF(18.0, 0.0));
+    painter.drawLine(center + QPointF(18.0, 0.0), center + QPointF(14.0, -4.0));
+    painter.drawLine(center + QPointF(18.0, 0.0), center + QPointF(14.0, 4.0));
+}
+
 QString placementIdFromCrowdElementId(const QString& crowdElementId) {
     return crowdElementId.section('/', 0, 0);
 }
@@ -671,6 +776,31 @@ QIcon makeToolIcon(const QString& type, const QColor& color) {
         painter.setPen(Qt::NoPen);
         painter.drawEllipse(QPointF(22, 15), 5.0, 5.0);
         painter.drawRoundedRect(QRectF(16, 23, 12, 12), 5, 5);
+        return QIcon(pixmap);
+    }
+
+    if (type == "source") {
+        painter.setPen(QPen(color, 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.setBrush(Qt::NoBrush);
+        QPainterPath platform;
+        platform.moveTo(9.0, 35.0);
+        platform.lineTo(30.0, 35.0);
+        platform.lineTo(35.0, 40.0);
+        platform.lineTo(4.0, 40.0);
+        platform.closeSubpath();
+        painter.drawPath(platform);
+
+        painter.drawEllipse(QPointF(18, 12), 6.0, 6.0);
+        QPainterPath body;
+        body.moveTo(10.0, 33.0);
+        body.lineTo(10.0, 25.0);
+        body.cubicTo(10.0, 19.5, 13.5, 17.0, 18.0, 17.0);
+        body.cubicTo(22.5, 17.0, 26.0, 19.5, 26.0, 25.0);
+        body.lineTo(26.0, 33.0);
+        painter.drawPath(body);
+
+        painter.drawLine(QPointF(32.0, 26.0), QPointF(41.0, 26.0));
+        painter.drawLine(QPointF(36.5, 21.5), QPointF(36.5, 30.5));
         return QIcon(pixmap);
     }
 
@@ -1727,6 +1857,12 @@ void ScenarioCanvasWidget::mousePressEvent(QMouseEvent* event) {
         return;
     }
 
+    if (toolMode_ == ToolMode::SourcePlacement) {
+        addSourcePlacement(event->position());
+        event->accept();
+        return;
+    }
+
     if (toolMode_ == ToolMode::GroupPlacement) {
         dragging_ = true;
         dragStart_ = event->position();
@@ -1843,6 +1979,14 @@ void ScenarioCanvasWidget::paintEvent(QPaintEvent* event) {
         if (!currentFloorId_.isEmpty() && !placement.floorId.isEmpty() && placement.floorId != currentFloorId_) {
             continue;
         }
+        if (placement.kind == ScenarioCrowdPlacementKind::Source) {
+            if (placement.area.empty()) {
+                continue;
+            }
+            drawOccupantSourceMarker(painter, transform.map(placement.area.front()), QColor("#1f5fae"));
+            continue;
+        }
+
         if (placement.kind == ScenarioCrowdPlacementKind::Individual) {
             if (placement.area.empty()) {
                 continue;
@@ -2442,7 +2586,12 @@ safecrowd::domain::Point2D ScenarioCanvasWidget::defaultVelocityFrom(const safec
 }
 
 QString ScenarioCanvasWidget::nextPlacementId(ScenarioCrowdPlacementKind kind) const {
-    const auto prefix = kind == ScenarioCrowdPlacementKind::Individual ? "individual" : "group";
+    const char* prefix = "group";
+    if (kind == ScenarioCrowdPlacementKind::Individual) {
+        prefix = "individual";
+    } else if (kind == ScenarioCrowdPlacementKind::Source) {
+        prefix = "source";
+    }
     return QString("%1-%2").arg(prefix).arg(static_cast<int>(placements_.size()) + 1);
 }
 
@@ -2558,6 +2707,43 @@ void ScenarioCanvasWidget::addIndividualPlacement(const QPointF& position) {
         .area = {point},
         .occupantCount = 1,
         .velocity = defaultVelocityFrom(point),
+    });
+    focusedCrowdElementId_ = id;
+    focusedPlacementId_ = id;
+    selectedPlacementIds_ = QStringList{id};
+    focusedLayoutElementId_.clear();
+    if (crowdSelectionChangedHandler_) {
+        crowdSelectionChangedHandler_(id);
+    }
+    emitPlacementsChanged();
+    update();
+}
+
+void ScenarioCanvasWidget::addSourcePlacement(const QPointF& position) {
+    const auto point = unmapPoint(position);
+    const auto zoneId = zoneAt(point);
+    if (zoneId.isEmpty() || placementPointBlocked(point)) {
+        return;
+    }
+
+    const auto id = nextPlacementId(ScenarioCrowdPlacementKind::Source);
+    const auto sourceCount = sourceEmissionCount(
+        sourceAgentsPerSpawn_,
+        sourceDurationSeconds_,
+        sourceIntervalSeconds_);
+    placements_.push_back({
+        .id = id,
+        .name = QString("Source %1").arg(id.section('-', -1)),
+        .kind = ScenarioCrowdPlacementKind::Source,
+        .zoneId = zoneId,
+        .floorId = currentFloorId_,
+        .area = {point},
+        .occupantCount = sourceCount,
+        .velocity = defaultVelocityFrom(point),
+        .sourceAgentsPerSpawn = sourceAgentsPerSpawn_,
+        .sourceStartSeconds = sourceStartSeconds_,
+        .sourceEndSeconds = sourceStartSeconds_ + sourceDurationSeconds_,
+        .sourceIntervalSeconds = sourceIntervalSeconds_,
     });
     focusedCrowdElementId_ = id;
     focusedPlacementId_ = id;
@@ -2947,11 +3133,53 @@ void ScenarioCanvasWidget::openRouteGuidanceEditor(const QString& guidanceId, co
     update();
 }
 
+bool ScenarioCanvasWidget::editOccupantSourceById(const QString& sourceId, const QPoint& screenPosition) {
+    auto placementIt = std::find_if(placements_.begin(), placements_.end(), [&](const auto& placement) {
+        return placement.id == sourceId && placement.kind == ScenarioCrowdPlacementKind::Source;
+    });
+    if (placementIt == placements_.end()) {
+        return false;
+    }
+
+    OccupantSourceSettings settings{
+        .agentsPerSpawn = std::max(1, placementIt->sourceAgentsPerSpawn),
+        .startSeconds = placementIt->sourceStartSeconds,
+        .durationSeconds = std::max(0.1, placementIt->sourceEndSeconds - placementIt->sourceStartSeconds),
+        .intervalSeconds = std::max(0.1, placementIt->sourceIntervalSeconds),
+    };
+    if (!editOccupantSourceSettings(this, &settings, screenPosition, "Edit occupant source")) {
+        return false;
+    }
+
+    placementIt->sourceAgentsPerSpawn = settings.agentsPerSpawn;
+    placementIt->sourceStartSeconds = settings.startSeconds;
+    placementIt->sourceEndSeconds = settings.startSeconds + settings.durationSeconds;
+    placementIt->sourceIntervalSeconds = settings.intervalSeconds;
+    placementIt->occupantCount = sourceEmissionCount(
+        placementIt->sourceAgentsPerSpawn,
+        settings.durationSeconds,
+        placementIt->sourceIntervalSeconds);
+    emitPlacementsChanged();
+    update();
+    return true;
+}
+
 void ScenarioCanvasWidget::openCrowdPlacementContextMenu(const QString& crowdElementId, const QPoint& screenPosition) {
+    const auto placementId = placementIdFromCrowdElementId(crowdElementId);
+    const auto placementIt = std::find_if(placements_.begin(), placements_.end(), [&](const auto& placement) {
+        return placement.id == placementId;
+    });
+
     QMenu menu(this);
+    QAction* settingsAction = nullptr;
+    if (placementIt != placements_.end() && placementIt->kind == ScenarioCrowdPlacementKind::Source) {
+        settingsAction = menu.addAction("Source settings...");
+    }
     auto* deleteAction = menu.addAction("Delete");
     const auto* selectedAction = menu.exec(screenPosition);
-    if (selectedAction == deleteAction) {
+    if (selectedAction == settingsAction && settingsAction != nullptr) {
+        editOccupantSourceById(placementId, screenPosition);
+    } else if (selectedAction == deleteAction) {
         deleteCrowdElement(crowdElementId);
     }
 }
@@ -3052,6 +3280,26 @@ void ScenarioCanvasWidget::emitRouteGuidancesChanged() {
     }
 }
 
+bool ScenarioCanvasWidget::configureSourcePlacementTool(const QPoint& screenPosition) {
+    OccupantSourceSettings settings{
+        .agentsPerSpawn = sourceAgentsPerSpawn_,
+        .startSeconds = sourceStartSeconds_,
+        .durationSeconds = sourceDurationSeconds_,
+        .intervalSeconds = sourceIntervalSeconds_,
+    };
+    if (!editOccupantSourceSettings(this, &settings, screenPosition, "Add occupant source")) {
+        setToolMode(ToolMode::Select);
+        return false;
+    }
+
+    sourceAgentsPerSpawn_ = settings.agentsPerSpawn;
+    sourceStartSeconds_ = settings.startSeconds;
+    sourceDurationSeconds_ = settings.durationSeconds;
+    sourceIntervalSeconds_ = settings.intervalSeconds;
+    setToolMode(ToolMode::SourcePlacement);
+    return true;
+}
+
 void ScenarioCanvasWidget::repositionToolbars() {
     if (topToolbar_ != nullptr) {
         topToolbar_->setGeometry(0, 0, width(), kTopToolbarHeight);
@@ -3073,6 +3321,9 @@ void ScenarioCanvasWidget::setToolMode(ToolMode mode) {
     }
     if (groupToolButton_ != nullptr) {
         groupToolButton_->setChecked(mode == ToolMode::GroupPlacement);
+    }
+    if (sourceToolButton_ != nullptr) {
+        sourceToolButton_->setChecked(mode == ToolMode::SourcePlacement);
     }
     if (blockDoorToolButton_ != nullptr) {
         blockDoorToolButton_->setChecked(mode == ToolMode::BlockDoor);
@@ -3136,6 +3387,7 @@ void ScenarioCanvasWidget::setupToolbars() {
     selectToolButton_ = makeButton(makeToolIcon("select", QColor("#16202b")), "Select");
     individualToolButton_ = makeButton(makeToolIcon("individual", QColor("#1f5fae")), "Add Individual Occupant");
     groupToolButton_ = makeButton(makeToolIcon("group", QColor("#1f5fae")), "Add Occupant Group");
+    sourceToolButton_ = makeButton(makeToolIcon("source", QColor("#1f5fae")), "Add Occupant Source");
     blockDoorToolButton_ = makeButton(makeToolIcon("block", QColor("#c0392b")), "block door");
     fireHazardToolButton_ = makeButton(makeToolIcon("fire", QColor("#c2410c")), "Add Fire Hazard");
     smokeHazardToolButton_ = makeButton(makeToolIcon("smoke", QColor("#64748b")), "Add Smoke Hazard");
@@ -3162,6 +3414,9 @@ void ScenarioCanvasWidget::setupToolbars() {
     connect(selectToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::Select); });
     connect(individualToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::IndividualPlacement); });
     connect(groupToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::GroupPlacement); });
+    connect(sourceToolButton_, &QToolButton::clicked, this, [this]() {
+        configureSourcePlacementTool(sourceToolButton_->mapToGlobal(QPoint(0, sourceToolButton_->height())));
+    });
     connect(blockDoorToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::BlockDoor); });
     connect(fireHazardToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::FireHazard); });
     connect(smokeHazardToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::SmokeHazard); });

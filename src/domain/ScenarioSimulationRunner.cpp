@@ -17,6 +17,63 @@
 #include "engine/UpdatePhase.h"
 
 namespace safecrowd::domain {
+namespace {
+
+std::uint64_t fnv1a64(const std::string& value) {
+    std::uint64_t hash = 1469598103934665603ULL;
+    for (const unsigned char ch : value) {
+        hash ^= static_cast<std::uint64_t>(ch);
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
+std::uint64_t mix64(std::uint64_t value) {
+    value += 0x9e3779b97f4a7c15ULL;
+    value = (value ^ (value >> 30U)) * 0xbf58476d1ce4e5b9ULL;
+    value = (value ^ (value >> 27U)) * 0x94d049bb133111ebULL;
+    return value ^ (value >> 31U);
+}
+
+double uniform01(std::uint64_t value) {
+    const auto mixed = mix64(value);
+    const auto mantissa = mixed >> 11U;
+    return static_cast<double>(mantissa) * (1.0 / 9007199254740992.0);
+}
+
+double beta22(std::uint64_t baseSeed, std::uint64_t salt) {
+    const auto u1 = std::max(1e-12, uniform01(baseSeed ^ salt ^ 0xA341316CULL));
+    const auto u2 = std::max(1e-12, uniform01(baseSeed ^ salt ^ 0xC8013EA4ULL));
+    const auto u3 = std::max(1e-12, uniform01(baseSeed ^ salt ^ 0xAD90777DULL));
+    const auto u4 = std::max(1e-12, uniform01(baseSeed ^ salt ^ 0x7E95761EULL));
+    const auto x = -std::log(u1 * u2);
+    const auto y = -std::log(u3 * u4);
+    if (!(x > 0.0) && !(y > 0.0)) {
+        return 0.5;
+    }
+    return x / (x + y);
+}
+
+std::size_t sourceTickCount(const OccupantSource2D& source) {
+    if (source.spawnIntervalSeconds <= 1e-9 || source.endSeconds <= source.startSeconds) {
+        return 0;
+    }
+
+    const auto duration = source.endSeconds - source.startSeconds;
+    return static_cast<std::size_t>(
+        std::floor(std::max(0.0, duration - 1e-9) / source.spawnIntervalSeconds)) + 1;
+}
+
+std::size_t sourceScheduleCount(const OccupantSource2D& source) {
+    if (source.targetAgentCount == 0) {
+        return 0;
+    }
+    const auto scheduled = sourceTickCount(source) * std::max<std::size_t>(1, source.agentsPerSpawn);
+    return std::min(source.targetAgentCount, scheduled);
+}
+
+}  // namespace
+
 using namespace simulation_internal;
 
 ScenarioSimulationRunner::ScenarioSimulationRunner(FacilityLayout2D layout, ScenarioDraft scenario) {
@@ -96,38 +153,6 @@ bool ScenarioSimulationRunner::complete() const noexcept {
 
 std::vector<ScenarioAgentSeed> ScenarioSimulationRunner::createAgentSeeds() const {
     std::vector<ScenarioAgentSeed> seeds;
-    const std::uint64_t baseSeed = scenario_.execution.baseSeed != 0 ? scenario_.execution.baseSeed : 1;
-    auto fnv1a64 = [](const std::string& value) {
-        std::uint64_t hash = 1469598103934665603ULL;
-        for (const unsigned char ch : value) {
-            hash ^= static_cast<std::uint64_t>(ch);
-            hash *= 1099511628211ULL;
-        }
-        return hash;
-    };
-    auto mix64 = [](std::uint64_t v) {
-        v += 0x9e3779b97f4a7c15ULL;
-        v = (v ^ (v >> 30U)) * 0xbf58476d1ce4e5b9ULL;
-        v = (v ^ (v >> 27U)) * 0x94d049bb133111ebULL;
-        return v ^ (v >> 31U);
-    };
-    auto uniform01 = [&](std::uint64_t v) {
-        const auto mixed = mix64(v);
-        const auto mantissa = mixed >> 11U;
-        return static_cast<double>(mantissa) * (1.0 / 9007199254740992.0);
-    };
-    auto beta22 = [&](std::uint64_t salt) {
-        const auto u1 = std::max(1e-12, uniform01(baseSeed ^ salt ^ 0xA341316CULL));
-        const auto u2 = std::max(1e-12, uniform01(baseSeed ^ salt ^ 0xC8013EA4ULL));
-        const auto u3 = std::max(1e-12, uniform01(baseSeed ^ salt ^ 0xAD90777DULL));
-        const auto u4 = std::max(1e-12, uniform01(baseSeed ^ salt ^ 0x7E95761EULL));
-        const auto x = -std::log(u1 * u2);
-        const auto y = -std::log(u3 * u4);
-        if (!(x > 0.0) && !(y > 0.0)) {
-            return 0.5;
-        }
-        return x / (x + y);
-    };
 
     std::uint64_t agentSerial = 0;
     for (const auto& placement : scenario_.population.initialPlacements) {
@@ -137,67 +162,123 @@ std::vector<ScenarioAgentSeed> ScenarioSimulationRunner::createAgentSeeds() cons
         seeds.reserve(seeds.size() + count);
         for (std::size_t index = 0; index < count; ++index) {
             const auto position = placementPoint(placement, index);
-            auto placementFloorId = placement.floorId;
-            if (placementFloorId.empty() && !placement.zoneId.empty()) {
-                placementFloorId = cachedFloorIdForZone(layoutCache_, placement.zoneId);
-            }
-            auto startZoneId = placement.zoneId;
-            if (!startZoneId.empty() && !placementFloorId.empty()) {
-                const auto zoneFloorId = cachedFloorIdForZone(layoutCache_, startZoneId);
-                if (!zoneFloorId.empty() && zoneFloorId != placementFloorId) {
-                    startZoneId.clear();
-                }
-            }
-            if (startZoneId.empty()) {
-                startZoneId = zoneAt(position, placementFloorId);
-            }
-            if (placementFloorId.empty()) {
-                placementFloorId = cachedFloorIdForZone(layoutCache_, startZoneId);
-            }
-            const auto route = routePlan(position, startZoneId);
-            const auto speed = speedOf(placement.initialVelocity);
-            auto evacuationRoute = EvacuationRoute{
-                .waypoints = route.waypoints,
-                .waypointPassages = route.waypointPassages,
-                .waypointFromZoneIds = route.waypointFromZoneIds,
-                .waypointZoneIds = route.waypointZoneIds,
-                .waypointFloorIds = route.waypointFloorIds,
-                .waypointConnectionIds = route.waypointConnectionIds,
-                .waypointVerticalTransitions = route.waypointVerticalTransitions,
-                .nextWaypointIndex = 0,
-                .currentSegmentStart = position,
-                .previousDistanceToWaypoint = 0.0,
-                .stalledSeconds = 0.0,
-                .destinationZoneId = route.destinationZoneId,
-                .currentFloorId = placementFloorId,
-            };
-            evacuationRoute.originalDestinationZoneId = evacuationRoute.destinationZoneId;
-            evacuationRoute.displayFloorId = evacuationRoute.currentFloorId;
-            evacuationRoute.previousDistanceToWaypoint = route.waypoints.empty()
-                ? 0.0
-                : distanceToRouteWaypoint(evacuationRoute, position);
-            const auto propensitySalt =
-                mix64(static_cast<std::uint64_t>(++agentSerial))
-                ^ mix64(fnv1a64(placement.id))
-                ^ mix64(fnv1a64(startZoneId))
-                ^ mix64(static_cast<std::uint64_t>(evacuationRoute.destinationZoneId.size()));
-            const auto guidancePropensity = beta22(propensitySalt);
-            seeds.push_back({
-                .position = {.value = position},
-                .agent = {
-                    .radius = static_cast<float>(kDefaultAgentRadius),
-                    .maxSpeed = static_cast<float>(speed),
-                    .sourcePlacementId = placement.id,
-                    .sourceZoneId = startZoneId,
-                    .guidancePropensity = guidancePropensity,
-                },
-                .velocity = {.value = {}},
-                .route = std::move(evacuationRoute),
-                .status = {},
-            });
+            seeds.push_back(createAgentSeed(
+                placement.id,
+                placement.zoneId,
+                placement.floorId,
+                position,
+                placement.initialVelocity,
+                ++agentSerial));
         }
     }
     return seeds;
+}
+
+std::vector<ScheduledScenarioAgentSeed> ScenarioSimulationRunner::createOccupantSourceSeeds() const {
+    std::vector<ScheduledScenarioAgentSeed> seeds;
+    std::size_t totalCount = 0;
+    for (const auto& source : scenario_.population.occupantSources) {
+        totalCount += sourceScheduleCount(source);
+    }
+    seeds.reserve(totalCount);
+
+    std::uint64_t agentSerial = 0;
+    for (const auto& placement : scenario_.population.initialPlacements) {
+        agentSerial += static_cast<std::uint64_t>(
+            placement.explicitPositions.empty() ? placement.targetAgentCount : placement.explicitPositions.size());
+    }
+    for (const auto& source : scenario_.population.occupantSources) {
+        const auto targetCount = sourceScheduleCount(source);
+        const auto tickCount = sourceTickCount(source);
+        const auto agentsPerSpawn = std::max<std::size_t>(1, source.agentsPerSpawn);
+        std::size_t emittedCount = 0;
+        for (std::size_t tickIndex = 0; tickIndex < tickCount && emittedCount < targetCount; ++tickIndex) {
+            const auto spawnSeconds = source.startSeconds + (source.spawnIntervalSeconds * static_cast<double>(tickIndex));
+            for (std::size_t agentIndex = 0; agentIndex < agentsPerSpawn && emittedCount < targetCount; ++agentIndex) {
+                seeds.push_back({
+                    .spawnSeconds = spawnSeconds,
+                    .seed = createAgentSeed(
+                        source.id,
+                        source.zoneId,
+                        source.floorId,
+                        source.position,
+                        source.initialVelocity,
+                        ++agentSerial),
+                });
+                ++emittedCount;
+            }
+        }
+    }
+    return seeds;
+}
+
+ScenarioAgentSeed ScenarioSimulationRunner::createAgentSeed(
+    const std::string& sourcePlacementId,
+    const std::string& sourceZoneId,
+    const std::string& sourceFloorId,
+    Point2D position,
+    Point2D initialVelocity,
+    std::uint64_t agentSerial) const {
+    auto placementFloorId = sourceFloorId;
+    if (placementFloorId.empty() && !sourceZoneId.empty()) {
+        placementFloorId = cachedFloorIdForZone(layoutCache_, sourceZoneId);
+    }
+    auto startZoneId = sourceZoneId;
+    if (!startZoneId.empty() && !placementFloorId.empty()) {
+        const auto zoneFloorId = cachedFloorIdForZone(layoutCache_, startZoneId);
+        if (!zoneFloorId.empty() && zoneFloorId != placementFloorId) {
+            startZoneId.clear();
+        }
+    }
+    if (startZoneId.empty()) {
+        startZoneId = zoneAt(position, placementFloorId);
+    }
+    if (placementFloorId.empty()) {
+        placementFloorId = cachedFloorIdForZone(layoutCache_, startZoneId);
+    }
+
+    const auto route = routePlan(position, startZoneId);
+    const auto speed = speedOf(initialVelocity);
+    auto evacuationRoute = EvacuationRoute{
+        .waypoints = route.waypoints,
+        .waypointPassages = route.waypointPassages,
+        .waypointFromZoneIds = route.waypointFromZoneIds,
+        .waypointZoneIds = route.waypointZoneIds,
+        .waypointFloorIds = route.waypointFloorIds,
+        .waypointConnectionIds = route.waypointConnectionIds,
+        .waypointVerticalTransitions = route.waypointVerticalTransitions,
+        .nextWaypointIndex = 0,
+        .currentSegmentStart = position,
+        .previousDistanceToWaypoint = 0.0,
+        .stalledSeconds = 0.0,
+        .destinationZoneId = route.destinationZoneId,
+        .currentFloorId = placementFloorId,
+    };
+    evacuationRoute.originalDestinationZoneId = evacuationRoute.destinationZoneId;
+    evacuationRoute.displayFloorId = evacuationRoute.currentFloorId;
+    evacuationRoute.previousDistanceToWaypoint = route.waypoints.empty()
+        ? 0.0
+        : distanceToRouteWaypoint(evacuationRoute, position);
+
+    const std::uint64_t baseSeed = scenario_.execution.baseSeed != 0 ? scenario_.execution.baseSeed : 1;
+    const auto propensitySalt =
+        mix64(agentSerial)
+        ^ mix64(fnv1a64(sourcePlacementId))
+        ^ mix64(fnv1a64(startZoneId))
+        ^ mix64(static_cast<std::uint64_t>(evacuationRoute.destinationZoneId.size()));
+    return {
+        .position = {.value = position},
+        .agent = {
+            .radius = static_cast<float>(kDefaultAgentRadius),
+            .maxSpeed = static_cast<float>(speed),
+            .sourcePlacementId = sourcePlacementId,
+            .sourceZoneId = startZoneId,
+            .guidancePropensity = beta22(baseSeed, propensitySalt),
+        },
+        .velocity = {.value = {}},
+        .route = std::move(evacuationRoute),
+        .status = {},
+    };
 }
 
 void ScenarioSimulationRunner::initializeRuntime() {
@@ -207,6 +288,11 @@ void ScenarioSimulationRunner::initializeRuntime() {
         .baseSeed = scenario_.execution.baseSeed != 0 ? scenario_.execution.baseSeed : 1,
     });
     runtime_->addSystem(std::make_unique<ScenarioAgentSpawnSystem>(createAgentSeeds(), timeLimitSeconds_));
+    runtime_->addSystem(
+        std::make_unique<ScenarioOccupantSourceSpawnSystem>(createOccupantSourceSeeds()),
+        {.phase = engine::UpdatePhase::FixedSimulation,
+         .order = -30,
+         .triggerPolicy = engine::TriggerPolicy::FixedStep});
     runtime_->addSystem(
         makeScenarioControlSystem(layout_, scenario_.control.connectionBlocks),
         {.phase = engine::UpdatePhase::PreSimulation,
