@@ -189,6 +189,23 @@ SC_TEST(AlternativeRecommendationService_removesBlockedConnectionInRecommendedDr
     SC_EXPECT_TRUE(containsDiffKey(candidate.recommendedScenario, "control.connectionBlocks"));
 }
 
+SC_TEST(AlternativeRecommendationService_skipsBlockedConnectionWithoutBottleneckEvidence) {
+    auto scenario = makeScenario();
+    scenario.control.connectionBlocks.push_back({
+        .id = "block-main",
+        .connectionId = "door-main",
+    });
+
+    const AlternativeRecommendationService service;
+    const auto result = service.recommend({
+        .layout = makeRecommendationLayout(),
+        .sourceScenario = scenario,
+        .artifacts = makeCompletedArtifacts(),
+    });
+
+    SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::BlockedConnectionRelief));
+}
+
 SC_TEST(AlternativeRecommendationService_addsRouteGuidanceForExitImbalance) {
     auto scenario = makeScenario();
     const auto artifacts = makeExitUsageArtifacts();

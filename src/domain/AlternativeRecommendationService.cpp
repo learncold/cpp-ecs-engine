@@ -230,13 +230,9 @@ std::optional<std::string> blockedConnectionToRelieve(const AlternativeRecommend
         return std::nullopt;
     }
     for (const auto& bottleneck : request.risk.bottlenecks) {
-        if (sourceHasConnectionBlock(request.sourceScenario, bottleneck.connectionId)) {
+        if (!bottleneck.connectionId.empty()
+            && sourceHasConnectionBlock(request.sourceScenario, bottleneck.connectionId)) {
             return bottleneck.connectionId;
-        }
-    }
-    for (const auto& block : request.sourceScenario.control.connectionBlocks) {
-        if (!block.connectionId.empty()) {
-            return block.connectionId;
         }
     }
     return std::nullopt;
