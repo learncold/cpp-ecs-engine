@@ -48,6 +48,7 @@ constexpr double kDefaultInitialSpeed = 1.3;
 constexpr double kOccupantMarkerRadius = 5.0;
 constexpr double kOccupantWorldRadius = 0.25;
 constexpr double kOccupantMinSpacing = kOccupantWorldRadius * 2.0;
+constexpr double kGuidancePlacementBarrierClearance = 0.35;
 constexpr double kGeometryEpsilon = 1e-9;
 constexpr double kSelectionDragThresholdPixels = 4.0;
 const QColor kSelectionHighlightColor("#0b3d78");
@@ -77,6 +78,43 @@ safecrowd::domain::Point2D connectionMarkerCenter(const safecrowd::domain::Conne
     };
 }
 
+bool hasExplicitGuidanceInstallPosition(const safecrowd::domain::RouteGuidanceDraft& guidance) {
+    return !guidance.installFloorId.empty() || !guidance.installZoneId.empty();
+}
+
+std::string pickNearestExitZoneIdForPoint(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const safecrowd::domain::Point2D& point,
+    const std::string& preferredFloorId) {
+    const auto pickNearest = [&](bool sameFloorOnly) -> std::string {
+        double bestDistanceSq = std::numeric_limits<double>::infinity();
+        const safecrowd::domain::Zone2D* bestZone = nullptr;
+        for (const auto& zone : layout.zones) {
+            if (zone.kind != safecrowd::domain::ZoneKind::Exit) {
+                continue;
+            }
+            if (sameFloorOnly && !preferredFloorId.empty() && !zone.floorId.empty() && zone.floorId != preferredFloorId) {
+                continue;
+            }
+
+            const auto exitCenter = polygonCenter(zone.area);
+            const auto dx = exitCenter.x - point.x;
+            const auto dy = exitCenter.y - point.y;
+            const auto distanceSq = (dx * dx) + (dy * dy);
+            if (distanceSq < bestDistanceSq) {
+                bestDistanceSq = distanceSq;
+                bestZone = &zone;
+            }
+        }
+        return bestZone == nullptr ? std::string{} : bestZone->id;
+    };
+
+    if (auto sameFloor = pickNearest(true); !sameFloor.empty()) {
+        return sameFloor;
+    }
+    return pickNearest(false);
+}
+
 std::string pickNearestExitZoneIdForConnection(
     const safecrowd::domain::FacilityLayout2D& layout,
     const safecrowd::domain::Connection2D& connection) {
@@ -97,35 +135,7 @@ std::string pickNearestExitZoneIdForConnection(
         return adjacent;
     }
 
-    const auto doorCenter = connectionMarkerCenter(connection);
-
-    const auto pickNearest = [&](bool sameFloorOnly) -> std::string {
-        double bestDistanceSq = std::numeric_limits<double>::infinity();
-        const safecrowd::domain::Zone2D* bestZone = nullptr;
-        for (const auto& zone : layout.zones) {
-            if (zone.kind != safecrowd::domain::ZoneKind::Exit) {
-                continue;
-            }
-            if (sameFloorOnly && !connection.floorId.empty() && !zone.floorId.empty() && zone.floorId != connection.floorId) {
-                continue;
-            }
-
-            const auto exitCenter = polygonCenter(zone.area);
-            const auto dx = exitCenter.x - doorCenter.x;
-            const auto dy = exitCenter.y - doorCenter.y;
-            const auto d2 = (dx * dx) + (dy * dy);
-            if (d2 < bestDistanceSq) {
-                bestDistanceSq = d2;
-                bestZone = &zone;
-            }
-        }
-        return bestZone == nullptr ? std::string{} : bestZone->id;
-    };
-
-    if (auto sameFloor = pickNearest(true); !sameFloor.empty()) {
-        return sameFloor;
-    }
-    return pickNearest(false);
+    return pickNearestExitZoneIdForPoint(layout, connectionMarkerCenter(connection), connection.floorId);
 }
 
 QString formatConnectionBlockTooltip(const safecrowd::domain::ConnectionBlockDraft& block) {
@@ -267,6 +277,11 @@ QString formatRouteGuidanceTooltip(
             text.append(QString("\n %1s~%2s").arg(start, 0, 'f', 1).arg(end, 0, 'f', 1));
         }
     }
+    if (hasExplicitGuidanceInstallPosition(guidance)) {
+        text.append(QString("\n Location: (%1, %2)")
+            .arg(guidance.installPosition.x, 0, 'f', 1)
+            .arg(guidance.installPosition.y, 0, 'f', 1));
+    }
     text.append(QString("\n Base compliance: %1").arg(std::clamp(guidance.baseComplianceRate, 0.0, 1.0), 0, 'f', 2));
     text.append(QString("\n Strength: %1").arg(std::clamp(guidance.guidanceStrength, 0.0, 1.0), 0, 'f', 2));
     text.append(QString("\n Max detour:%1m").arg(std::max(0.0, guidance.maxDetourMeters), 0, 'f', 1));
@@ -280,7 +295,12 @@ std::optional<QPointF> routeGuidanceMarkerCenter(
     const LayoutCanvasTransform& transform,
     const QString& currentFloorId) {
     std::optional<QPointF> center;
-    if (!guidance.installConnectionId.empty()) {
+    if (hasExplicitGuidanceInstallPosition(guidance)) {
+        if (!matchesFloor(guidance.installFloorId, currentFloorId)) {
+            return std::nullopt;
+        }
+        center = transform.map(guidance.installPosition);
+    } else if (!guidance.installConnectionId.empty()) {
         const auto it = std::find_if(layout.connections.begin(), layout.connections.end(), [&](const auto& connection) {
             return connection.id == guidance.installConnectionId;
         });
@@ -2685,16 +2705,19 @@ void ScenarioCanvasWidget::addEnvironmentHazardForZone(
 void ScenarioCanvasWidget::addRouteGuidance(const QPointF& position) {
     const auto point = unmapPoint(position);
     const auto zoneId = zoneAt(point);
+    const safecrowd::domain::Zone2D* clickedZone = nullptr;
     if (!zoneId.isEmpty()) {
         const auto zoneIdStd = zoneId.toStdString();
         const auto it = std::find_if(layout_.zones.begin(), layout_.zones.end(), [&](const auto& zone) {
             return zone.id == zoneIdStd;
         });
-        if (it != layout_.zones.end() && it->kind == safecrowd::domain::ZoneKind::Exit) {
-            addRouteGuidanceForExitZone(*it);
-            return;
+        if (it != layout_.zones.end()) {
+            clickedZone = &(*it);
+            if (it->kind == safecrowd::domain::ZoneKind::Exit) {
+                addRouteGuidanceForExitZone(*it);
+                return;
+            }
         }
-        // If the user clicked inside a non-exit zone, still allow installing guidance by selecting a nearby door.
     }
 
     constexpr double kPickRadiusPixels = 18.0;
@@ -2723,12 +2746,69 @@ void ScenarioCanvasWidget::addRouteGuidance(const QPointF& position) {
         }
     }
 
-    if (connection == nullptr) {
-        QMessageBox::information(this, "Route guidance", "Click an exit zone or a door to install guidance.");
+    if (connection != nullptr) {
+        addRouteGuidanceForConnection(*connection);
         return;
     }
 
-    addRouteGuidanceForConnection(*connection);
+    if (clickedZone != nullptr) {
+        addRouteGuidanceForZonePosition(*clickedZone, point);
+        return;
+    }
+
+    QMessageBox::information(this, "Route guidance", "Click a walkable room area, exit zone, or a door to install guidance.");
+}
+
+void ScenarioCanvasWidget::addRouteGuidanceForZonePosition(
+    const safecrowd::domain::Zone2D& zone,
+    safecrowd::domain::Point2D position) {
+    if (!matchesFloor(zone.floorId, currentFloorId_)) {
+        return;
+    }
+    if (zone.kind == safecrowd::domain::ZoneKind::Exit) {
+        addRouteGuidanceForExitZone(zone);
+        return;
+    }
+    if (!pointInPolygon(zone.area, position)) {
+        QMessageBox::information(this, "Route guidance", "Click inside a walkable room area to place guidance.");
+        return;
+    }
+
+    const auto floorId = zone.floorId.empty() ? currentFloorId_.toStdString() : zone.floorId;
+    if (!safecrowd::domain::pointInsideWalkableZoneWithClearance(
+            layout_,
+            position,
+            floorId,
+            kGuidancePlacementBarrierClearance)) {
+        QMessageBox::information(
+            this,
+            "Route guidance",
+            "Guidance must be placed inside walkable room space and not too close to walls.");
+        return;
+    }
+
+    const auto exitZoneId = pickNearestExitZoneIdForPoint(layout_, position, floorId);
+    if (exitZoneId.empty()) {
+        QMessageBox::information(this, "Route guidance", "Could not find a reachable exit target for this guidance.");
+        return;
+    }
+
+    safecrowd::domain::RouteGuidanceDraft draft;
+    draft.id = nextRouteGuidanceId().toStdString();
+    draft.startSeconds = 0.0;
+    draft.endSeconds = 0.0;
+    draft.periods.clear();
+    draft.guidedExitZoneId = exitZoneId;
+    draft.installConnectionId.clear();
+    draft.installFloorId = floorId;
+    draft.installZoneId = zone.id;
+    draft.installPosition = position;
+    draft.baseComplianceRate = 0.5;
+    draft.guidanceStrength = 0.55;
+    draft.maxDetourMeters = 20.0;
+    routeGuidances_.push_back(std::move(draft));
+    emitRouteGuidancesChanged();
+    update();
 }
 
 void ScenarioCanvasWidget::addRouteGuidanceForExitZone(const safecrowd::domain::Zone2D& zone) {
@@ -2738,7 +2818,9 @@ void ScenarioCanvasWidget::addRouteGuidanceForExitZone(const safecrowd::domain::
     }
 
     for (const auto& existing : routeGuidances_) {
-        if (existing.installConnectionId.empty() && existing.guidedExitZoneId == zone.id) {
+        if (existing.installConnectionId.empty()
+            && existing.guidedExitZoneId == zone.id
+            && (existing.installZoneId.empty() || existing.installZoneId == zone.id)) {
             QMessageBox::information(this, "Route guidance", "Guidance is already installed on this exit.");
             return;
         }
@@ -2751,6 +2833,9 @@ void ScenarioCanvasWidget::addRouteGuidanceForExitZone(const safecrowd::domain::
     draft.periods.clear();
     draft.guidedExitZoneId = zone.id;
     draft.installConnectionId.clear();
+    draft.installFloorId = zone.floorId.empty() ? currentFloorId_.toStdString() : zone.floorId;
+    draft.installZoneId = zone.id;
+    draft.installPosition = representativePointInPolygon(zone.area).value_or(polygonCenter(zone.area));
     draft.baseComplianceRate = 0.5;
     draft.guidanceStrength = 0.55;
     draft.maxDetourMeters = 20.0;
@@ -2782,6 +2867,9 @@ void ScenarioCanvasWidget::addRouteGuidanceForConnection(const safecrowd::domain
     draft.periods.clear();
     draft.guidedExitZoneId = exitZoneId;
     draft.installConnectionId = connection.id;
+    draft.installFloorId = connection.floorId.empty() ? currentFloorId_.toStdString() : connection.floorId;
+    draft.installZoneId.clear();
+    draft.installPosition = connectionMarkerCenter(connection);
     draft.baseComplianceRate = 0.5;
     draft.guidanceStrength = 0.55;
     draft.maxDetourMeters = 20.0;

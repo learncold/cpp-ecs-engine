@@ -126,6 +126,9 @@ private:
         safecrowd::domain::Point2D position,
         safecrowd::domain::EnvironmentHazardKind kind);
     void addRouteGuidance(const QPointF& position);
+    void addRouteGuidanceForZonePosition(
+        const safecrowd::domain::Zone2D& zone,
+        safecrowd::domain::Point2D position);
     void addRouteGuidanceForExitZone(const safecrowd::domain::Zone2D& zone);
     void addRouteGuidanceForConnection(const safecrowd::domain::Connection2D& connection);
     void openRouteGuidanceEditor(const QString& guidanceId, const QPoint& screenPosition);

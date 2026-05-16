@@ -340,3 +340,22 @@ SC_TEST(computeScenarioDiffKeys_detectsRouteGuidanceChange) {
     SC_EXPECT_EQ(keys.size(), std::size_t{1});
     SC_EXPECT_TRUE(containsKey(keys, "control.routeGuidances"));
 }
+
+SC_TEST(computeScenarioDiffKeys_detectsRouteGuidancePositionChange) {
+    auto baseline = makeBaselineDraft();
+    RouteGuidanceDraft guidance;
+    guidance.id = "guidance-1";
+    guidance.guidedExitZoneId = "exit-east";
+    guidance.installZoneId = "room-a";
+    guidance.installFloorId = "L1";
+    guidance.installPosition = {.x = 1.0, .y = 1.0};
+    baseline.control.routeGuidances.push_back(guidance);
+
+    auto variant = duplicateScenarioDraft(baseline, "scenario-2", "Variant");
+    variant.control.routeGuidances.front().installPosition = {.x = 1.5, .y = 1.0};
+
+    const auto keys = computeScenarioDiffKeys(baseline, variant);
+
+    SC_EXPECT_EQ(keys.size(), std::size_t{1});
+    SC_EXPECT_TRUE(containsKey(keys, "control.routeGuidances"));
+}

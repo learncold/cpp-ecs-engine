@@ -3,6 +3,7 @@
 #include <optional>
 #include <vector>
 
+#include "domain/FacilityLayout2D.h"
 #include "domain/Geometry2D.h"
 
 namespace safecrowd::domain {
@@ -12,5 +13,15 @@ bool pointInPolygon(const Polygon2D& polygon, const Point2D& point);
 double distancePointToSegment(const Point2D& point, const Point2D& start, const Point2D& end);
 double distanceToPolygonBoundary(const Polygon2D& polygon, const Point2D& point);
 std::optional<Point2D> representativePointInPolygon(const Polygon2D& polygon);
+bool pointHasBarrierClearance(
+    const FacilityLayout2D& layout,
+    const Point2D& point,
+    const std::string& floorId,
+    double clearance);
+bool pointInsideWalkableZoneWithClearance(
+    const FacilityLayout2D& layout,
+    const Point2D& point,
+    const std::string& floorId,
+    double clearance);
 
 }  // namespace safecrowd::domain

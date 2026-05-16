@@ -151,6 +151,10 @@ safecrowd::domain::Point2D polygonCenter(const safecrowd::domain::Polygon2D& pol
     return {.x = x / count, .y = y / count};
 }
 
+bool hasExplicitGuidanceInstallPosition(const safecrowd::domain::RouteGuidanceDraft& guidance) {
+    return !guidance.installFloorId.empty() || !guidance.installZoneId.empty();
+}
+
 QColor densityHeatmapColor(double ratio, int alpha) {
     const auto t = std::clamp(ratio, 0.0, 1.0);
     if (t < 0.22) {
@@ -244,6 +248,11 @@ QString formatRouteGuidanceTooltip(const safecrowd::domain::RouteGuidanceDraft& 
             text.append(QString("\n %1s~%2s").arg(start, 0, 'f', 1).arg(end, 0, 'f', 1));
         }
     }
+    if (hasExplicitGuidanceInstallPosition(guidance)) {
+        text.append(QString("\n Location: (%1, %2)")
+            .arg(guidance.installPosition.x, 0, 'f', 1)
+            .arg(guidance.installPosition.y, 0, 'f', 1));
+    }
     text.append(QString("\n Base compliance: %1").arg(std::clamp(guidance.baseComplianceRate, 0.0, 1.0), 0, 'f', 2));
     text.append(QString("\n Strength: %1").arg(std::clamp(guidance.guidanceStrength, 0.0, 1.0), 0, 'f', 2));
     text.append(QString("\n Max detour:%1m").arg(std::max(0.0, guidance.maxDetourMeters), 0, 'f', 1));
@@ -329,12 +338,10 @@ struct ActiveRouteGuidanceSelection {
     double endSeconds{0.0};
 };
 
-std::optional<ActiveRouteGuidanceSelection> activeRouteGuidanceSelection(
+std::vector<ActiveRouteGuidanceSelection> activeRouteGuidanceSelections(
     const std::vector<safecrowd::domain::RouteGuidanceDraft>& guidances,
     double elapsedSeconds) {
-    std::optional<ActiveRouteGuidanceSelection> best;
-    double bestStart = -1.0;
-
+    std::vector<ActiveRouteGuidanceSelection> active;
     for (std::size_t guidanceIndex = 0; guidanceIndex < guidances.size(); ++guidanceIndex) {
         const auto& guidance = guidances[guidanceIndex];
         if (guidance.periods.empty()) {
@@ -343,10 +350,12 @@ std::optional<ActiveRouteGuidanceSelection> activeRouteGuidanceSelection(
             if (elapsedSeconds + 1e-9 < start || elapsedSeconds > end + 1e-9) {
                 continue;
             }
-            if (!best.has_value() || start >= bestStart) {
-                bestStart = start;
-                best = ActiveRouteGuidanceSelection{.guidanceIndex = guidanceIndex, .periodIndex = 0, .startSeconds = start, .endSeconds = end};
-            }
+            active.push_back(ActiveRouteGuidanceSelection{
+                .guidanceIndex = guidanceIndex,
+                .periodIndex = 0,
+                .startSeconds = start,
+                .endSeconds = end,
+            });
             continue;
         }
 
@@ -360,14 +369,15 @@ std::optional<ActiveRouteGuidanceSelection> activeRouteGuidanceSelection(
             if (elapsedSeconds > end + 1e-9) {
                 continue;
             }
-            if (!best.has_value() || start >= bestStart) {
-                bestStart = start;
-                best = ActiveRouteGuidanceSelection{.guidanceIndex = guidanceIndex, .periodIndex = periodIndex, .startSeconds = start, .endSeconds = end};
-            }
+            active.push_back(ActiveRouteGuidanceSelection{
+                .guidanceIndex = guidanceIndex,
+                .periodIndex = periodIndex,
+                .startSeconds = start,
+                .endSeconds = end,
+            });
         }
     }
-
-    return best;
+    return active;
 }
 
 std::optional<QPointF> routeGuidanceMarkerCenter(
@@ -378,7 +388,12 @@ std::optional<QPointF> routeGuidanceMarkerCenter(
     const std::string& currentFloorId,
     double elapsedSeconds) {
     QPointF center;
-    if (!guidance.installConnectionId.empty()) {
+    if (hasExplicitGuidanceInstallPosition(guidance)) {
+        if (!matchesFloor(guidance.installFloorId, currentFloorId)) {
+            return std::nullopt;
+        }
+        center = transform.map(guidance.installPosition);
+    } else if (!guidance.installConnectionId.empty()) {
         const auto it = std::find_if(layout.connections.begin(), layout.connections.end(), [&](const auto& connection) {
             return connection.id == guidance.installConnectionId;
         });
@@ -458,29 +473,31 @@ std::optional<std::size_t> hoveredActiveRouteGuidanceIndex(
     const QPointF& screenPosition) {
     constexpr double kHoverRadiusPixels = 14.0;
 
-    const auto active = activeRouteGuidanceSelection(guidances, elapsedSeconds);
-    if (!active.has_value()) {
-        return std::nullopt;
-    }
-    const auto& guidance = guidances[active->guidanceIndex];
-    const auto center = routeGuidanceMarkerCenter(
-        layout,
-        guidance,
-        blocks,
-        transform,
-        currentFloorId,
-        elapsedSeconds);
-    if (!center.has_value()) {
-        return std::nullopt;
-    }
+    const auto activeSelections = activeRouteGuidanceSelections(guidances, elapsedSeconds);
+    std::optional<std::size_t> closestIndex;
+    double closestDistanceSq = kHoverRadiusPixels * kHoverRadiusPixels;
+    for (const auto& active : activeSelections) {
+        const auto& guidance = guidances[active.guidanceIndex];
+        const auto center = routeGuidanceMarkerCenter(
+            layout,
+            guidance,
+            blocks,
+            transform,
+            currentFloorId,
+            elapsedSeconds);
+        if (!center.has_value()) {
+            continue;
+        }
 
-    const auto dx = center->x() - screenPosition.x();
-    const auto dy = center->y() - screenPosition.y();
-    const auto distanceSq = (dx * dx) + (dy * dy);
-    if (distanceSq <= kHoverRadiusPixels * kHoverRadiusPixels) {
-        return active->guidanceIndex;
+        const auto dx = center->x() - screenPosition.x();
+        const auto dy = center->y() - screenPosition.y();
+        const auto distanceSq = (dx * dx) + (dy * dy);
+        if (distanceSq <= closestDistanceSq) {
+            closestDistanceSq = distanceSq;
+            closestIndex = active.guidanceIndex;
+        }
     }
-    return std::nullopt;
+    return closestIndex;
 }
 
 }  // namespace
@@ -1146,43 +1163,47 @@ void SimulationCanvasWidget::drawEnvironmentHazardOverlay(QPainter& painter, con
 
 void SimulationCanvasWidget::drawRouteGuidanceOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const {
     const auto elapsedSeconds = std::max(0.0, frame_.elapsedSeconds);
-    const auto active = activeRouteGuidanceSelection(routeGuidances_, elapsedSeconds);
-    if (!active.has_value()) {
-        return;
-    }
-
-    const auto& guidance = routeGuidances_[active->guidanceIndex];
-    const auto center = routeGuidanceMarkerCenter(
-        layout_,
-        guidance,
-        connectionBlocks_,
-        transform,
-        currentFloorId_,
-        elapsedSeconds);
-    if (!center.has_value()) {
+    const auto activeSelections = activeRouteGuidanceSelections(routeGuidances_, elapsedSeconds);
+    if (activeSelections.empty()) {
         return;
     }
 
     painter.save();
     painter.setPen(Qt::NoPen);
-    painter.setBrush(QColor("#1f5fae"));
 
-    const double r = 10.0;
-    painter.drawEllipse(*center, r, r);
+    for (const auto& active : activeSelections) {
+        const auto& guidance = routeGuidances_[active.guidanceIndex];
+        const auto center = routeGuidanceMarkerCenter(
+            layout_,
+            guidance,
+            connectionBlocks_,
+            transform,
+            currentFloorId_,
+            elapsedSeconds);
+        if (!center.has_value()) {
+            continue;
+        }
 
-    painter.save();
-    painter.translate(*center);
-    painter.rotate(-25.0);
-    painter.translate(-(*center));
-    painter.setBrush(Qt::white);
-    painter.drawRoundedRect(QRectF(center->x() - 1.8, center->y() - 7.0, 3.6, 10.5), 1.4, 1.4);
-    painter.drawRoundedRect(QRectF(center->x() - 1.5, center->y() + 2.2, 3.0, 5.2), 1.2, 1.2);
-    painter.restore();
+        painter.setBrush(QColor("#1f5fae"));
 
-    painter.setPen(QPen(Qt::white, 1.7, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    painter.drawLine(QPointF(center->x() + 5.3, center->y() - 5.0), QPointF(center->x() + 8.2, center->y() - 7.7));
-    painter.drawLine(QPointF(center->x() + 6.3, center->y() - 2.0), QPointF(center->x() + 9.2, center->y() - 2.8));
-    painter.drawLine(QPointF(center->x() + 3.7, center->y() - 7.2), QPointF(center->x() + 4.8, center->y() - 9.8));
+        const double r = 10.0;
+        painter.drawEllipse(*center, r, r);
+
+        painter.save();
+        painter.translate(*center);
+        painter.rotate(-25.0);
+        painter.translate(-(*center));
+        painter.setBrush(Qt::white);
+        painter.drawRoundedRect(QRectF(center->x() - 1.8, center->y() - 7.0, 3.6, 10.5), 1.4, 1.4);
+        painter.drawRoundedRect(QRectF(center->x() - 1.5, center->y() + 2.2, 3.0, 5.2), 1.2, 1.2);
+        painter.restore();
+
+        painter.setPen(QPen(Qt::white, 1.7, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.drawLine(QPointF(center->x() + 5.3, center->y() - 5.0), QPointF(center->x() + 8.2, center->y() - 7.7));
+        painter.drawLine(QPointF(center->x() + 6.3, center->y() - 2.0), QPointF(center->x() + 9.2, center->y() - 2.8));
+        painter.drawLine(QPointF(center->x() + 3.7, center->y() - 7.2), QPointF(center->x() + 4.8, center->y() - 9.8));
+        painter.setPen(Qt::NoPen);
+    }
 
     painter.restore();
 }
