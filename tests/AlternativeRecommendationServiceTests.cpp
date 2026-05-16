@@ -206,6 +206,44 @@ SC_TEST(AlternativeRecommendationService_skipsBlockedConnectionWithoutBottleneck
     SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::BlockedConnectionRelief));
 }
 
+SC_TEST(AlternativeRecommendationService_reopensWorstBlockedBottleneck) {
+    auto scenario = makeScenario();
+    scenario.control.connectionBlocks.push_back({
+        .id = "block-main",
+        .connectionId = "door-main",
+    });
+    scenario.control.connectionBlocks.push_back({
+        .id = "block-east",
+        .connectionId = "door-east",
+    });
+
+    ScenarioRiskSnapshot risk;
+    risk.bottlenecks.push_back({
+        .connectionId = "door-east",
+        .nearbyAgentCount = 4,
+        .stalledAgentCount = 1,
+    });
+    risk.bottlenecks.push_back({
+        .connectionId = "door-main",
+        .nearbyAgentCount = 8,
+        .stalledAgentCount = 5,
+    });
+
+    const AlternativeRecommendationService service;
+    const auto result = service.recommend({
+        .layout = makeRecommendationLayout(),
+        .sourceScenario = scenario,
+        .risk = risk,
+        .artifacts = makeCompletedArtifacts(),
+    });
+
+    SC_EXPECT_TRUE(!result.candidates.empty());
+    const auto& candidate = result.candidates.front();
+    SC_EXPECT_TRUE(candidate.kind == AlternativeRecommendationKind::BlockedConnectionRelief);
+    SC_EXPECT_EQ(candidate.recommendedScenario.control.connectionBlocks.size(), std::size_t{1});
+    SC_EXPECT_EQ(candidate.recommendedScenario.control.connectionBlocks.front().connectionId, std::string{"door-east"});
+}
+
 SC_TEST(AlternativeRecommendationService_addsRouteGuidanceForExitImbalance) {
     auto scenario = makeScenario();
     const auto artifacts = makeExitUsageArtifacts();

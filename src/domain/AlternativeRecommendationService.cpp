@@ -225,29 +225,35 @@ bool sourceHasConnectionBlock(const ScenarioDraft& scenario, const std::string& 
     });
 }
 
+bool bottleneckLessSevere(const ScenarioBottleneckMetric& lhs, const ScenarioBottleneckMetric& rhs) {
+    if (lhs.stalledAgentCount == rhs.stalledAgentCount) {
+        return lhs.nearbyAgentCount < rhs.nearbyAgentCount;
+    }
+    return lhs.stalledAgentCount < rhs.stalledAgentCount;
+}
+
 std::optional<std::string> blockedConnectionToRelieve(const AlternativeRecommendationRequest& request) {
     if (request.sourceScenario.control.connectionBlocks.empty()) {
         return std::nullopt;
     }
+
+    std::optional<ScenarioBottleneckMetric> best;
     for (const auto& bottleneck : request.risk.bottlenecks) {
         if (!bottleneck.connectionId.empty()
             && sourceHasConnectionBlock(request.sourceScenario, bottleneck.connectionId)) {
-            return bottleneck.connectionId;
+            if (!best.has_value() || bottleneckLessSevere(*best, bottleneck)) {
+                best = bottleneck;
+            }
         }
     }
-    return std::nullopt;
+    return best.has_value() ? std::optional<std::string>{best->connectionId} : std::nullopt;
 }
 
 std::optional<ScenarioBottleneckMetric> worstBottleneck(const ScenarioRiskSnapshot& risk) {
     if (risk.bottlenecks.empty()) {
         return std::nullopt;
     }
-    const auto it = std::max_element(risk.bottlenecks.begin(), risk.bottlenecks.end(), [](const auto& lhs, const auto& rhs) {
-        if (lhs.stalledAgentCount == rhs.stalledAgentCount) {
-            return lhs.nearbyAgentCount < rhs.nearbyAgentCount;
-        }
-        return lhs.stalledAgentCount < rhs.stalledAgentCount;
-    });
+    const auto it = std::max_element(risk.bottlenecks.begin(), risk.bottlenecks.end(), bottleneckLessSevere);
     return it == risk.bottlenecks.end() ? std::nullopt : std::optional<ScenarioBottleneckMetric>{*it};
 }
 
