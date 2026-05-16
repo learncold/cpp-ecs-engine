@@ -315,6 +315,11 @@ double floorElevation(const FacilityLayout2D& layout, const std::string& floorId
     return it == layout.floors.end() ? 0.0 : it->elevationMeters;
 }
 
+double floorElevation(const ScenarioLayoutCacheResource& cache, const std::string& floorId) {
+    const auto it = cache.floorElevations.find(floorId);
+    return it == cache.floorElevations.end() ? 0.0 : it->second;
+}
+
 StairEntryDirection stairEntryDirectionForFloor(
     const FacilityLayout2D& layout,
     const Connection2D& connection,
@@ -522,6 +527,7 @@ ScenarioLayoutCacheResource buildScenarioLayoutCache(FacilityLayout2D layout) {
     };
 
     for (const auto& floor : cache.layout.floors) {
+        cache.floorElevations[floor.id] = floor.elevationMeters;
         addFloorId(floor.id);
     }
     for (std::size_t index = 0; index < cache.layout.zones.size(); ++index) {
@@ -546,6 +552,9 @@ ScenarioLayoutCacheResource buildScenarioLayoutCache(FacilityLayout2D layout) {
 
     for (std::size_t index = 0; index < cache.layout.connections.size(); ++index) {
         const auto& connection = cache.layout.connections[index];
+        if (!connection.id.empty()) {
+            cache.connectionIndices[connection.id] = index;
+        }
         if (connection.directionality == TravelDirection::Closed || !canTraverseConnection(cache.layout, connection)) {
             continue;
         }
@@ -627,10 +636,11 @@ const Connection2D* findConnectionById(const ScenarioLayoutCacheResource& cache,
     if (connectionId.empty()) {
         return nullptr;
     }
-    const auto it = std::find_if(cache.layout.connections.begin(), cache.layout.connections.end(), [&](const auto& connection) {
-        return connection.id == connectionId;
-    });
-    return it == cache.layout.connections.end() ? nullptr : &(*it);
+    const auto it = cache.connectionIndices.find(connectionId);
+    if (it == cache.connectionIndices.end() || it->second >= cache.layout.connections.size()) {
+        return nullptr;
+    }
+    return &cache.layout.connections[it->second];
 }
 
 const Connection2D* currentVerticalConnection(const ScenarioLayoutCacheResource& cache, const EvacuationRoute& route) {
@@ -752,6 +762,7 @@ bool routePassageCrossed(
     const EvacuationRoute& route,
     const Point2D& position,
     double agentRadius) {
+    (void)agentRadius;
     if (route.nextWaypointIndex >= route.waypointPassages.size()
         || route.nextWaypointIndex >= route.waypointFromZoneIds.size()
         || route.nextWaypointIndex >= route.waypointZoneIds.size()) {
@@ -780,7 +791,8 @@ bool routePassageCrossed(
         return false;
     }
 
-    return dot(position - midpoint(passage), normal) > -std::max(kPortalCrossingEpsilon, agentRadius * 0.35);
+    const auto signedDistance = dot(position - midpoint(passage), normal);
+    return signedDistance > kPortalCrossingEpsilon;
 }
 
 const Connection2D* findConnectionBetween(const FacilityLayout2D& layout, const std::string& from, const std::string& to) {
@@ -844,7 +856,7 @@ std::optional<ZoneRouteToExit> zoneRouteToNearestExit(
             return kDefaultVerticalRouteCost;
         }
 
-        const auto elevationDelta = std::fabs(floorElevation(cache.layout, fromFloorId) - floorElevation(cache.layout, toFloorId));
+        const auto elevationDelta = std::fabs(floorElevation(cache, fromFloorId) - floorElevation(cache, toFloorId));
         return elevationDelta > kGeometryEpsilon ? elevationDelta : kDefaultVerticalRouteCost;
     };
 
@@ -992,7 +1004,7 @@ std::optional<ZoneRouteResult> zoneRouteToExit(
             return kDefaultVerticalRouteCost;
         }
 
-        const auto elevationDelta = std::fabs(floorElevation(cache.layout, fromFloorId) - floorElevation(cache.layout, toFloorId));
+        const auto elevationDelta = std::fabs(floorElevation(cache, fromFloorId) - floorElevation(cache, toFloorId));
         return elevationDelta > kGeometryEpsilon ? elevationDelta : kDefaultVerticalRouteCost;
     };
 

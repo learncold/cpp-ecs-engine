@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -22,6 +24,18 @@ constexpr std::size_t kMaxReportedPressureAgents = 5;
 constexpr std::size_t kMaxReportedCriticalPressureEvents = 5;
 constexpr std::size_t kMaxReportedBottlenecks = 5;
 
+template <typename T, typename Compare>
+void sortAndTrimTop(std::vector<T>& values, std::size_t maxCount, Compare compare) {
+    if (values.size() <= maxCount) {
+        std::sort(values.begin(), values.end(), compare);
+        return;
+    }
+
+    const auto trimEnd = values.begin() + static_cast<std::ptrdiff_t>(maxCount);
+    std::partial_sort(values.begin(), trimEnd, values.end(), compare);
+    values.resize(maxCount);
+}
+
 struct RiskCellAccumulator {
     Point2D positionSum{};
     Point2D cellMin{};
@@ -35,8 +49,10 @@ struct ActiveAgentContext {
     engine::Entity entity{};
     std::uint64_t agentId{0};
     Point2D position{};
+    Point2D velocity{};
     std::string floorId{};
     double radius{0.25};
+    bool stalled{false};
 };
 
 struct ActivePressureFeedbackContext {
@@ -717,7 +733,8 @@ public:
             const auto& position = query.get<Position>(entity);
             const auto& velocity = query.get<Velocity>(entity);
             const auto& route = query.get<EvacuationRoute>(entity);
-            if (isStalled(velocity, route)) {
+            const auto stalled = isStalled(velocity, route);
+            if (stalled) {
                 ++snapshot.stalledAgentCount;
             }
 
@@ -726,8 +743,10 @@ public:
                 .entity = entity,
                 .agentId = entity.index,
                 .position = position.value,
+                .velocity = velocity.value,
                 .floorId = floorId,
                 .radius = static_cast<double>(query.get<Agent>(entity).radius),
+                .stalled = stalled,
             });
             const auto address = riskCellAddress(position.value, floorId);
             auto& cell = cells[riskCellKey(address)];
@@ -766,7 +785,7 @@ public:
         collectHotspots(snapshot, cells);
         collectPressureHotspots(snapshot, query, cells);
         collectCriticalPressureEvents(snapshot, cells, clock.elapsedSeconds, deltaSeconds, pressureTracking);
-        collectBottlenecks(snapshot, query, entities, activeLayout);
+        collectBottlenecks(snapshot, activeAgents, *pressureIndex, activeLayout);
 
         snapshot.completionRisk = completionRiskLevel(
             clock,
@@ -970,7 +989,7 @@ private:
             it = tracking.agentStates.erase(it);
         }
 
-        std::sort(snapshot.pressureAgents.begin(), snapshot.pressureAgents.end(), [](const auto& lhs, const auto& rhs) {
+        sortAndTrimTop(snapshot.pressureAgents, kMaxReportedPressureAgents, [](const auto& lhs, const auto& rhs) {
             if (lhs.critical != rhs.critical) {
                 return lhs.critical;
             }
@@ -979,9 +998,6 @@ private:
             }
             return lhs.compressionForce > rhs.compressionForce;
         });
-        if (snapshot.pressureAgents.size() > kMaxReportedPressureAgents) {
-            snapshot.pressureAgents.resize(kMaxReportedPressureAgents);
-        }
 
         return deltaSeconds;
     }
@@ -1008,12 +1024,9 @@ private:
             });
         }
 
-        std::sort(snapshot.hotspots.begin(), snapshot.hotspots.end(), [](const auto& lhs, const auto& rhs) {
+        sortAndTrimTop(snapshot.hotspots, kMaxReportedHotspots, [](const auto& lhs, const auto& rhs) {
             return lhs.agentCount > rhs.agentCount;
         });
-        if (snapshot.hotspots.size() > kMaxReportedHotspots) {
-            snapshot.hotspots.resize(kMaxReportedHotspots);
-        }
     }
 
     void collectPressureHotspots(
@@ -1067,7 +1080,7 @@ private:
             });
         }
 
-        std::sort(snapshot.pressureHotspots.begin(), snapshot.pressureHotspots.end(), [](const auto& lhs, const auto& rhs) {
+        sortAndTrimTop(snapshot.pressureHotspots, kMaxReportedPressureHotspots, [](const auto& lhs, const auto& rhs) {
             if (std::fabs(lhs.pressureScore - rhs.pressureScore) > 1e-9) {
                 return lhs.pressureScore > rhs.pressureScore;
             }
@@ -1076,9 +1089,6 @@ private:
             }
             return lhs.agentCount > rhs.agentCount;
         });
-        if (snapshot.pressureHotspots.size() > kMaxReportedPressureHotspots) {
-            snapshot.pressureHotspots.resize(kMaxReportedPressureHotspots);
-        }
     }
 
     void collectCriticalPressureEvents(
@@ -1159,7 +1169,7 @@ private:
             it = tracking.activeEvents.erase(it);
         }
 
-        std::sort(snapshot.criticalPressureEvents.begin(), snapshot.criticalPressureEvents.end(), [](const auto& lhs, const auto& rhs) {
+        sortAndTrimTop(snapshot.criticalPressureEvents, kMaxReportedCriticalPressureEvents, [](const auto& lhs, const auto& rhs) {
             if (lhs.criticalAgentCount != rhs.criticalAgentCount) {
                 return lhs.criticalAgentCount > rhs.criticalAgentCount;
             }
@@ -1168,9 +1178,6 @@ private:
             }
             return lhs.pressureScore > rhs.pressureScore;
         });
-        if (snapshot.criticalPressureEvents.size() > kMaxReportedCriticalPressureEvents) {
-            snapshot.criticalPressureEvents.resize(kMaxReportedCriticalPressureEvents);
-        }
     }
 
     std::string zoneDisplayName(const FacilityLayout2D& layout, const std::string& zoneId) const {
@@ -1205,9 +1212,59 @@ private:
 
     void collectBottlenecks(
         ScenarioRiskSnapshot& snapshot,
-        engine::WorldQuery& query,
-        const std::vector<engine::Entity>& entities,
+        const std::vector<ActiveAgentContext>& activeAgents,
+        const ScenarioAgentSpatialIndexResource& spatialIndex,
         const FacilityLayout2D& layout) const {
+        std::unordered_map<std::uint64_t, std::size_t> activeAgentIndices;
+        activeAgentIndices.reserve(activeAgents.size());
+        for (std::size_t index = 0; index < activeAgents.size(); ++index) {
+            activeAgentIndices.emplace(activeAgents[index].agentId, index);
+        }
+
+        auto nearbyEntitiesForConnection = [&](const std::string& floorId, const LineSegment2D& passage) {
+            std::vector<engine::Entity> candidates;
+            std::unordered_set<std::uint64_t> seen;
+            const auto appendFloor = [&](const std::string& candidateFloorId) {
+                const auto floorIt = spatialIndex.displayCellsByFloor.find(candidateFloorId);
+                if (floorIt == spatialIndex.displayCellsByFloor.end()) {
+                    return;
+                }
+                const auto minCell = spatialCellFor(
+                    {
+                        .x = std::min(passage.start.x, passage.end.x) - kScenarioBottleneckRadius,
+                        .y = std::min(passage.start.y, passage.end.y) - kScenarioBottleneckRadius,
+                    },
+                    spatialIndex.cellSize);
+                const auto maxCell = spatialCellFor(
+                    {
+                        .x = std::max(passage.start.x, passage.end.x) + kScenarioBottleneckRadius,
+                        .y = std::max(passage.start.y, passage.end.y) + kScenarioBottleneckRadius,
+                    },
+                    spatialIndex.cellSize);
+                for (int y = minCell.y; y <= maxCell.y; ++y) {
+                    for (int x = minCell.x; x <= maxCell.x; ++x) {
+                        const auto cellIt = floorIt->second.find(spatialKey({.x = x, .y = y}));
+                        if (cellIt == floorIt->second.end()) {
+                            continue;
+                        }
+                        for (const auto entity : cellIt->second) {
+                            const auto packed =
+                                (static_cast<std::uint64_t>(entity.generation) << 32U) | entity.index;
+                            if (seen.insert(packed).second) {
+                                candidates.push_back(entity);
+                            }
+                        }
+                    }
+                }
+            };
+
+            appendFloor(floorId);
+            if (!floorId.empty()) {
+                appendFloor(std::string{});
+            }
+            return candidates;
+        };
+
         for (const auto& connection : layout.connections) {
             if (connection.directionality == TravelDirection::Closed) {
                 continue;
@@ -1220,27 +1277,25 @@ private:
             metric.passage = connection.centerSpan;
             double speedSum = 0.0;
 
-            for (const auto entity : entities) {
-                const auto& status = query.get<EvacuationStatus>(entity);
-                if (status.evacuated) {
+            for (const auto entity : nearbyEntitiesForConnection(metric.floorId, connection.centerSpan)) {
+                const auto activeIt = activeAgentIndices.find(entity.index);
+                if (activeIt == activeAgentIndices.end()) {
                     continue;
                 }
-                const auto& position = query.get<Position>(entity);
-                const auto& velocity = query.get<Velocity>(entity);
-                const auto& route = query.get<EvacuationRoute>(entity);
-                if (agentDisplayFloorId(route) != metric.floorId) {
+                const auto& agent = activeAgents[activeIt->second];
+                if (agent.floorId != metric.floorId) {
                     continue;
                 }
                 const auto distanceToConnection = distanceBetween(
-                    position.value,
-                    closestPointOnSegment(position.value, connection.centerSpan.start, connection.centerSpan.end));
+                    agent.position,
+                    closestPointOnSegment(agent.position, connection.centerSpan.start, connection.centerSpan.end));
                 if (distanceToConnection > kScenarioBottleneckRadius) {
                     continue;
                 }
 
                 ++metric.nearbyAgentCount;
-                speedSum += lengthOf(velocity.value);
-                if (isStalled(velocity, route)) {
+                speedSum += lengthOf(agent.velocity);
+                if (agent.stalled) {
                     ++metric.stalledAgentCount;
                 }
             }
@@ -1255,15 +1310,12 @@ private:
             }
         }
 
-        std::sort(snapshot.bottlenecks.begin(), snapshot.bottlenecks.end(), [](const auto& lhs, const auto& rhs) {
+        sortAndTrimTop(snapshot.bottlenecks, kMaxReportedBottlenecks, [](const auto& lhs, const auto& rhs) {
             if (lhs.stalledAgentCount != rhs.stalledAgentCount) {
                 return lhs.stalledAgentCount > rhs.stalledAgentCount;
             }
             return lhs.nearbyAgentCount > rhs.nearbyAgentCount;
         });
-        if (snapshot.bottlenecks.size() > kMaxReportedBottlenecks) {
-            snapshot.bottlenecks.resize(kMaxReportedBottlenecks);
-        }
     }
 
     FacilityLayout2D layout_{};

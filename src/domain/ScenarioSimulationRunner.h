@@ -44,6 +44,14 @@ private:
     };
 
     std::vector<ScenarioAgentSeed> createAgentSeeds() const;
+    std::vector<ScheduledScenarioAgentSeed> createOccupantSourceSeeds() const;
+    ScenarioAgentSeed createAgentSeed(
+        const std::string& sourcePlacementId,
+        const std::string& sourceZoneId,
+        const std::string& sourceFloorId,
+        Point2D position,
+        Point2D initialVelocity,
+        std::uint64_t agentSerial) const;
     void initializeRuntime();
     void syncFrameFromRuntime();
     RoutePlan routePlan(const Point2D& start, const std::string& startZoneId) const;

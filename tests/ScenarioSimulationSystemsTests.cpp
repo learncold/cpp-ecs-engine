@@ -1728,6 +1728,68 @@ SC_TEST(ScenarioSimulationMotionSystem_AppliesInstalledGuidanceOnlyNearInstallCo
     SC_EXPECT_EQ(visibleRoute.guidanceEventId, std::string{"installed-guidance"});
 }
 
+SC_TEST(ScenarioSimulationMotionSystem_RechecksInstalledGuidanceAsAgentApproachesInstallConnection) {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    seeds.push_back({
+        .position = {.value = {.x = 0.5, .y = 2.15}},
+        .agent = {.radius = 0.25f, .maxSpeed = 1.0f, .guidancePropensity = 1.0},
+        .velocity = {.value = {}},
+        .route = {
+            .waypoints = {{.x = 2.0, .y = 0.5}},
+            .waypointPassages = {{{.x = 2.0, .y = 0.3}, {.x = 2.0, .y = 0.7}}},
+            .waypointFromZoneIds = {"room"},
+            .waypointZoneIds = {"near-exit"},
+            .waypointConnectionIds = {"room-near-exit"},
+            .nextWaypointIndex = 0,
+            .currentSegmentStart = {.x = 0.5, .y = 2.15},
+            .previousDistanceToWaypoint = 2.27,
+            .destinationZoneId = "near-exit",
+            .originalDestinationZoneId = "near-exit",
+        },
+        .status = {},
+    });
+
+    safecrowd::domain::RouteGuidanceDraft guidance;
+    guidance.id = "installed-guidance";
+    guidance.guidedExitZoneId = "far-exit";
+    guidance.installConnectionId = "room-near-exit";
+    guidance.baseComplianceRate = 1.0;
+    guidance.guidanceStrength = 1.0;
+    guidance.maxDetourMeters = 100.0;
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 13,
+    });
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioSimulationMotionSystem(
+            twoExitGuidanceDetourLayout(),
+            std::vector<safecrowd::domain::RouteGuidanceDraft>{guidance}),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    for (int step = 0; step < 180; ++step) {
+        runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.1});
+        runtime.stepFrame(0.0);
+    }
+
+    const auto entities = runtime.world().query().view<
+        safecrowd::domain::Position,
+        safecrowd::domain::Agent,
+        safecrowd::domain::Velocity,
+        safecrowd::domain::AvoidanceState,
+        safecrowd::domain::EvacuationRoute,
+        safecrowd::domain::EvacuationStatus>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{1});
+    const auto& route = runtime.world().query().get<safecrowd::domain::EvacuationRoute>(entities.front());
+    SC_EXPECT_EQ(route.guidanceEventId, std::string{"installed-guidance"});
+    SC_EXPECT_TRUE(route.followsGuidance);
+    SC_EXPECT_EQ(route.destinationZoneId, std::string{"far-exit"});
+}
+
 SC_TEST(ScenarioSimulationMotionSystem_SkipsIntermediateWaypointWhenCrowdPushesAgentPastApproachArea) {
     std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
     seeds.push_back({
@@ -3200,6 +3262,50 @@ SC_TEST(ScenarioRoutePassageCrossed_UsesDoorPlaneNearEndpoint) {
         layout,
         route,
         crossedNearEndpoint,
+        0.25));
+}
+
+SC_TEST(ScenarioRoutePassageCrossed_DoesNotAdvanceWhileCenterRemainsInSourceRoom) {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.zones.push_back({
+        .id = "upper-room",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Upper Room",
+        .area = {.outline = {{0.0, 0.0}, {1.0, 0.0}, {1.0, 1.0}, {0.0, 1.0}}},
+    });
+    layout.zones.push_back({
+        .id = "corridor",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Corridor",
+        .area = {.outline = {{0.0, 1.0}, {1.0, 1.0}, {1.0, 2.0}, {0.0, 2.0}}},
+    });
+
+    safecrowd::domain::EvacuationRoute route;
+    route.waypoints = {{.x = 0.5, .y = 1.0}};
+    route.waypointPassages = {{{.x = 0.2, .y = 1.0}, {.x = 0.8, .y = 1.0}}};
+    route.waypointFromZoneIds = {"upper-room"};
+    route.waypointZoneIds = {"corridor"};
+    route.nextWaypointIndex = 0;
+
+    const safecrowd::domain::Point2D stillInsideSource{.x = 0.5, .y = 0.93};
+    SC_EXPECT_TRUE(!safecrowd::domain::simulation_internal::routePassageCrossed(
+        layout,
+        route,
+        stillInsideSource,
+        0.25));
+
+    const safecrowd::domain::Point2D onDoorPlane{.x = 0.5, .y = 1.0};
+    SC_EXPECT_TRUE(!safecrowd::domain::simulation_internal::routePassageCrossed(
+        layout,
+        route,
+        onDoorPlane,
+        0.25));
+
+    const safecrowd::domain::Point2D crossedIntoCorridor{.x = 0.5, .y = 1.03};
+    SC_EXPECT_TRUE(safecrowd::domain::simulation_internal::routePassageCrossed(
+        layout,
+        route,
+        crossedIntoCorridor,
         0.25));
 }
 

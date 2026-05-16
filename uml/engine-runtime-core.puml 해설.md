@@ -26,8 +26,9 @@
 - 개요: 엔티티와 컴포넌트 조회 및 값 접근 면이다.
 - 목적: 시스템이 필요한 컴포넌트 집합을 안전하게 순회하고 조회하거나 기존 컴포넌트 값을 갱신하게 한다.
 - 접근 경계: runtime과 시스템은 `EngineWorld`가 가진 query facade를 사용하고, raw ECS 기반 생성 경로는 엔진 내부 구현 세부로 남긴다.
-- 유의사항: 초기 구현은 전체 live entity 순회로 시작해도 되지만, query 중 entity 생성/삭제나 component 추가/제거 같은 구조 변경은 허용하면 안 된다.
-- 후속 개선 사항: query cache, signature index, iterator 최적화를 추가할 수 있다.
+- 현재 구현 포인트: `view<T...>()`는 가장 작은 packed component storage를 기준으로 필터링하고 entity index 순서를 유지한다. 할당 비용이 민감한 시스템은 `forEach<T...>()`로 entity와 component 참조를 직접 순회한다.
+- 유의사항: query 중 entity 생성/삭제나 component 추가/제거 같은 구조 변경은 허용하면 안 된다.
+- 후속 개선 사항: query cache, signature index를 추가할 수 있다.
 
 ## `WorldResources`
 - 개요: 전역 리소스를 읽고 쓰는 접근 면이다.
@@ -57,6 +58,7 @@
 ## `EngineConfig`
 - 개요: 고정 timestep, catch-up 제한, base seed 같은 런타임 설정 값 모음이다.
 - 목적: 엔진 실행 정책을 코드와 분리된 명시적 설정으로 제공한다.
+- 현재 구현 포인트: 도메인 시나리오 실행기는 입력 delta를 `fixedDeltaTime` 단위로 분할해 runtime에 전달하므로, fixed phase 시스템은 큰 외부 step에서도 동일한 sub-step 계약으로 실행된다.
 - 유의사항: 실행 중 자주 바뀌는 상태와 초기 설정 값을 섞지 않는 편이 좋다.
 - 후속 개선 사항: phase별 예산, profiling 옵션, deterministic strict mode를 추가할 수 있다.
 

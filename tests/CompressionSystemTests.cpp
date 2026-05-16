@@ -95,6 +95,23 @@ SC_TEST(CompressionSystem_TracksPressureFromNearbyAgentsWithinOneMeterWithoutOve
     SC_EXPECT_TRUE(!metrics.isCritical);
 }
 
+SC_TEST(CompressionSystem_UsesNearbyBarrierBucketsForCompressionForce) {
+    EcsCore core;
+    safecrowd::engine::ResourceStore resources;
+    CommandBuffer buffer;
+    auto world = safecrowd::engine::internal::EngineWorldFactory::create(core, resources, buffer);
+
+    const Entity agent = addAgent(core, 0.0, 0.0);
+    addBarrier(core, {Point2D{0.2, -1.0}, Point2D{0.2, 1.0}});
+    addBarrier(core, {Point2D{10.0, -1.0}, Point2D{10.0, 1.0}});
+
+    CompressionSystem system(0.5);
+    system.update(world, {});
+
+    const auto& metrics = world.query().get<CompressionData>(agent);
+    SC_EXPECT_NEAR(metrics.force, 0.8, 1e-6);
+}
+
 SC_TEST(CompressionSystem_CombinesExposureWithCurrentForceForCriticalState) {
     EcsCore core;
     safecrowd::engine::ResourceStore resources;
