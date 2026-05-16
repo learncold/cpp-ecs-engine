@@ -1659,6 +1659,137 @@ SC_TEST(ScenarioSimulationMotionSystem_TreatsZeroGuidanceDetourAsStrictTolerance
     SC_EXPECT_TRUE(!route.followsGuidance);
 }
 
+SC_TEST(ScenarioSimulationMotionSystem_AppliesInstalledGuidanceOnlyNearInstallConnection) {
+    auto runFromPosition = [](const safecrowd::domain::Point2D& start) {
+        std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+        seeds.push_back({
+            .position = {.value = start},
+            .agent = {.radius = 0.25f, .maxSpeed = 1.0f, .guidancePropensity = 1.0},
+            .velocity = {.value = {}},
+            .route = {
+                .waypoints = {{.x = 2.0, .y = 0.5}},
+                .waypointPassages = {{{.x = 2.0, .y = 0.3}, {.x = 2.0, .y = 0.7}}},
+                .waypointFromZoneIds = {"room"},
+                .waypointZoneIds = {"near-exit"},
+                .waypointConnectionIds = {"room-near-exit"},
+                .nextWaypointIndex = 0,
+                .currentSegmentStart = start,
+                .previousDistanceToWaypoint = 1.5,
+                .destinationZoneId = "near-exit",
+                .originalDestinationZoneId = "near-exit",
+            },
+            .status = {},
+        });
+
+        safecrowd::domain::RouteGuidanceDraft guidance;
+        guidance.id = "installed-guidance";
+        guidance.guidedExitZoneId = "far-exit";
+        guidance.installConnectionId = "room-near-exit";
+        guidance.baseComplianceRate = 1.0;
+        guidance.guidanceStrength = 1.0;
+        guidance.maxDetourMeters = 100.0;
+
+        safecrowd::engine::EngineRuntime runtime({
+            .fixedDeltaTime = 1.0 / 30.0,
+            .maxCatchUpSteps = 1,
+            .baseSeed = 13,
+        });
+        runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+        runtime.addSystem(
+            safecrowd::domain::makeScenarioSimulationMotionSystem(
+                twoExitGuidanceDetourLayout(),
+                std::vector<safecrowd::domain::RouteGuidanceDraft>{guidance}),
+            {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+             .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+        runtime.play();
+        runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.1});
+        runtime.stepFrame(0.0);
+
+        const auto entities = runtime.world().query().view<
+            safecrowd::domain::Position,
+            safecrowd::domain::Agent,
+            safecrowd::domain::Velocity,
+            safecrowd::domain::AvoidanceState,
+            safecrowd::domain::EvacuationRoute,
+            safecrowd::domain::EvacuationStatus>();
+        SC_EXPECT_EQ(entities.size(), std::size_t{1});
+        return runtime.world().query().get<safecrowd::domain::EvacuationRoute>(entities.front());
+    };
+
+    const auto unseenRoute = runFromPosition({.x = 0.5, .y = 3.5});
+    SC_EXPECT_EQ(unseenRoute.destinationZoneId, std::string{"near-exit"});
+    SC_EXPECT_TRUE(!unseenRoute.followsGuidance);
+    SC_EXPECT_TRUE(unseenRoute.guidanceEventId.empty());
+
+    const auto visibleRoute = runFromPosition({.x = 1.6, .y = 0.5});
+    SC_EXPECT_EQ(visibleRoute.destinationZoneId, std::string{"far-exit"});
+    SC_EXPECT_TRUE(visibleRoute.followsGuidance);
+    SC_EXPECT_EQ(visibleRoute.guidanceEventId, std::string{"installed-guidance"});
+}
+
+SC_TEST(ScenarioSimulationMotionSystem_RechecksInstalledGuidanceAsAgentApproachesInstallConnection) {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    seeds.push_back({
+        .position = {.value = {.x = 0.5, .y = 2.15}},
+        .agent = {.radius = 0.25f, .maxSpeed = 1.0f, .guidancePropensity = 1.0},
+        .velocity = {.value = {}},
+        .route = {
+            .waypoints = {{.x = 2.0, .y = 0.5}},
+            .waypointPassages = {{{.x = 2.0, .y = 0.3}, {.x = 2.0, .y = 0.7}}},
+            .waypointFromZoneIds = {"room"},
+            .waypointZoneIds = {"near-exit"},
+            .waypointConnectionIds = {"room-near-exit"},
+            .nextWaypointIndex = 0,
+            .currentSegmentStart = {.x = 0.5, .y = 2.15},
+            .previousDistanceToWaypoint = 2.27,
+            .destinationZoneId = "near-exit",
+            .originalDestinationZoneId = "near-exit",
+        },
+        .status = {},
+    });
+
+    safecrowd::domain::RouteGuidanceDraft guidance;
+    guidance.id = "installed-guidance";
+    guidance.guidedExitZoneId = "far-exit";
+    guidance.installConnectionId = "room-near-exit";
+    guidance.baseComplianceRate = 1.0;
+    guidance.guidanceStrength = 1.0;
+    guidance.maxDetourMeters = 100.0;
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 13,
+    });
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioSimulationMotionSystem(
+            twoExitGuidanceDetourLayout(),
+            std::vector<safecrowd::domain::RouteGuidanceDraft>{guidance}),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    for (int step = 0; step < 180; ++step) {
+        runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.1});
+        runtime.stepFrame(0.0);
+    }
+
+    const auto entities = runtime.world().query().view<
+        safecrowd::domain::Position,
+        safecrowd::domain::Agent,
+        safecrowd::domain::Velocity,
+        safecrowd::domain::AvoidanceState,
+        safecrowd::domain::EvacuationRoute,
+        safecrowd::domain::EvacuationStatus>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{1});
+    const auto& route = runtime.world().query().get<safecrowd::domain::EvacuationRoute>(entities.front());
+    SC_EXPECT_EQ(route.guidanceEventId, std::string{"installed-guidance"});
+    SC_EXPECT_TRUE(route.followsGuidance);
+    SC_EXPECT_EQ(route.destinationZoneId, std::string{"far-exit"});
+}
+
 SC_TEST(ScenarioSimulationMotionSystem_SkipsIntermediateWaypointWhenCrowdPushesAgentPastApproachArea) {
     std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
     seeds.push_back({

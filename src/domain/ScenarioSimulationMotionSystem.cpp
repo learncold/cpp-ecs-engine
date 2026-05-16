@@ -548,6 +548,50 @@ private:
         return &layoutCache.layout.connections[it->second];
     }
 
+    bool connectionTouchesFloor(
+        const ScenarioLayoutCacheResource& layoutCache,
+        const Connection2D& connection,
+        const std::string& floorId) const {
+        if (sameFloor(connection.floorId, floorId)) {
+            return true;
+        }
+        const auto fromFloorId = cachedFloorIdForZone(layoutCache, connection.fromZoneId);
+        const auto toFloorId = cachedFloorIdForZone(layoutCache, connection.toZoneId);
+        return sameFloor(fromFloorId, floorId) || sameFloor(toFloorId, floorId);
+    }
+
+    bool agentCanSeeGuidanceAtInstallConnection(
+        const ScenarioLayoutCacheResource& layoutCache,
+        const RouteGuidanceDraft& guidance,
+        const Position& position,
+        const Agent& agent,
+        const EvacuationRoute& route) const {
+        if (guidance.installConnectionId.empty()) {
+            return true;
+        }
+
+        const auto* connection = findConnectionById(layoutCache, guidance.installConnectionId);
+        if (connection == nullptr || !connectionTouchesFloor(layoutCache, *connection, route.currentFloorId)) {
+            return false;
+        }
+
+        const auto currentZoneId = zoneAt(layoutCache, position.value, route.currentFloorId);
+        if (!currentZoneId.empty()
+            && currentZoneId != connection->fromZoneId
+            && currentZoneId != connection->toZoneId) {
+            return false;
+        }
+
+        const auto closestOnInstall = closestPointOnSegment(
+            position.value,
+            connection->centerSpan.start,
+            connection->centerSpan.end);
+        const auto visibilityDistance = std::max(
+            2.0,
+            (connection->effectiveWidth * 0.5) + static_cast<double>(agent.radius) + 0.25);
+        return distanceBetween(position.value, closestOnInstall) <= visibilityDistance;
+    }
+
     const Connection2D* nextBlockedConnection(
         const ScenarioLayoutCacheResource& layoutCache,
         const EvacuationRoute& route) const {
@@ -978,6 +1022,7 @@ private:
 
     struct ActiveRouteGuidance {
         const RouteGuidanceDraft* guidance{nullptr};
+        std::size_t guidanceIndex{0};
         std::size_t periodIndex{0};
         double startSeconds{0.0};
         double endSeconds{0.0};
@@ -987,7 +1032,8 @@ private:
         std::optional<ActiveRouteGuidance> best;
         double bestStart = -1.0;
 
-        for (const auto& guidance : routeGuidances_) {
+        for (std::size_t guidanceIndex = 0; guidanceIndex < routeGuidances_.size(); ++guidanceIndex) {
+            const auto& guidance = routeGuidances_[guidanceIndex];
             if (guidance.periods.empty()) {
                 // No periods configured => always active (like connection blocks with no intervals).
                 const double start = 0.0;
@@ -997,7 +1043,13 @@ private:
                 }
                 if (!best.has_value() || start >= bestStart) {
                     bestStart = start;
-                    best = ActiveRouteGuidance{.guidance = &guidance, .periodIndex = 0, .startSeconds = start, .endSeconds = end};
+                    best = ActiveRouteGuidance{
+                        .guidance = &guidance,
+                        .guidanceIndex = guidanceIndex,
+                        .periodIndex = 0,
+                        .startSeconds = start,
+                        .endSeconds = end,
+                    };
                 }
                 continue;
             }
@@ -1014,7 +1066,13 @@ private:
                 }
                 if (!best.has_value() || start >= bestStart) {
                     bestStart = start;
-                    best = ActiveRouteGuidance{.guidance = &guidance, .periodIndex = index, .startSeconds = start, .endSeconds = end};
+                    best = ActiveRouteGuidance{
+                        .guidance = &guidance,
+                        .guidanceIndex = guidanceIndex,
+                        .periodIndex = index,
+                        .startSeconds = start,
+                        .endSeconds = end,
+                    };
                 }
             }
         }
@@ -1069,6 +1127,10 @@ private:
         std::string activeId;
         if (active.has_value() && active->guidance != nullptr) {
             activeId = active->guidance->id;
+            if (activeId.empty()) {
+                activeId = "route-guidance:";
+                activeId.append(std::to_string(active->guidanceIndex));
+            }
             if (!active->guidance->periods.empty()) {
                 activeId.append(":p");
                 activeId.append(std::to_string(active->periodIndex));
@@ -1085,6 +1147,12 @@ private:
                 guidanceReplanGuidance_.reset();
             }
             guidanceReplanIdHash_ = fnv1a64(activeId);
+            guidanceReplanPending_ = true;
+        } else if (active.has_value()
+                   && active->guidance != nullptr
+                   && !active->guidance->installConnectionId.empty()
+                   && !guidanceReplanPending_) {
+            guidanceReplanCursor_ = 0;
             guidanceReplanPending_ = true;
         }
 
@@ -1140,6 +1208,15 @@ private:
                 replaceRouteWithPlan(route, plan, position.value);
                 route.nextExitReplanSeconds = elapsedSeconds + 0.25;
                 continue;
+            }
+
+            if (!activeGuidance->installConnectionId.empty()) {
+                if (route.guidanceEventId == activeId) {
+                    continue;
+                }
+                if (!agentCanSeeGuidanceAtInstallConnection(layoutCache, *activeGuidance, position, agent, route)) {
+                    continue;
+                }
             }
 
             bool guidedExitValid = false;

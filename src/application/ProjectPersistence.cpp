@@ -1659,6 +1659,7 @@ QList<ProjectMetadata> ProjectPersistence::loadRecentProjects() {
     QList<ProjectMetadata> projects;
     projects.push_back(makeBuiltInDemoProject());
     projects.push_back(makeBuiltInEvacuationScenarioDemoProject());
+    projects.push_back(makeBuiltInTwoFloorEvacuationDemoProject());
 
     const auto document = readJsonDocument(recentProjectsPath());
     if (!document.isObject()) {

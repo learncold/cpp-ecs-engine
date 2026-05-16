@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <filesystem>
+#include <iterator>
 #include <string>
 #include <utility>
 
@@ -35,12 +36,9 @@ void applySavedReviewState(const ProjectMetadata& metadata, safecrowd::domain::I
     ProjectPersistence::loadProjectReview(metadata, importResult);
 }
 
-safecrowd::domain::ImportResult makeDemoImportResult() {
-    safecrowd::domain::DemoFixtureService fixtureService;
-    const auto fixture = fixtureService.createSprint1DemoFixture();
-
+safecrowd::domain::ImportResult makeImportResultForDemoLayout(safecrowd::domain::FacilityLayout2D layout) {
     safecrowd::domain::ImportResult result;
-    result.layout = fixture.layout;
+    result.layout = std::move(layout);
 
     safecrowd::domain::ImportValidationService validator;
     result.issues = validator.validate(*result.layout);
@@ -48,6 +46,18 @@ safecrowd::domain::ImportResult makeDemoImportResult() {
         ? safecrowd::domain::ImportReviewStatus::Pending
         : safecrowd::domain::ImportReviewStatus::NotRequired;
     return result;
+}
+
+safecrowd::domain::ImportResult makeSprint1DemoImportResult() {
+    safecrowd::domain::DemoFixtureService fixtureService;
+    const auto fixture = fixtureService.createSprint1DemoFixture();
+    return makeImportResultForDemoLayout(fixture.layout);
+}
+
+safecrowd::domain::ImportResult makeTwoFloorEvacuationDemoImportResult() {
+    safecrowd::domain::DemoFixtureService fixtureService;
+    const auto fixture = fixtureService.createTwoFloorEvacuationDemoFixture();
+    return makeImportResultForDemoLayout(fixture.layout);
 }
 
 ProjectWorkspaceState makeEvacuationScenarioDemoWorkspace() {
@@ -90,6 +100,33 @@ ProjectWorkspaceState makeEvacuationScenarioDemoWorkspace() {
     return workspace;
 }
 
+ProjectWorkspaceState makeTwoFloorEvacuationDemoWorkspace() {
+    using namespace safecrowd::domain;
+
+    safecrowd::domain::DemoFixtureService fixtureService;
+    auto fixture = fixtureService.createTwoFloorEvacuationDemoFixture();
+
+    SavedScenarioAuthoringState authoring;
+    authoring.scenarios.push_back({
+        .draft = fixture.baselineScenario,
+        .baseScenarioId = {},
+        .stagedForRun = true,
+    });
+    authoring.scenarios.push_back({
+        .draft = fixture.alternativeScenario,
+        .baseScenarioId = fixture.baselineScenario.scenarioId,
+        .stagedForRun = true,
+    });
+    authoring.currentScenarioIndex = 1;
+    authoring.navigationView = SavedNavigationView::Events;
+    authoring.rightPanelMode = SavedRightPanelMode::Scenario;
+
+    ProjectWorkspaceState workspace;
+    workspace.activeView = ProjectWorkspaceView::ScenarioAuthoring;
+    workspace.authoring = std::move(authoring);
+    return workspace;
+}
+
 safecrowd::domain::ImportResult makeBlankImportResult(const QString& projectName) {
     safecrowd::domain::ImportResult result;
     result.layout = safecrowd::domain::FacilityLayout2D{
@@ -111,8 +148,11 @@ safecrowd::domain::ImportResult makeBlankImportResult(const QString& projectName
 }
 
 safecrowd::domain::ImportResult importProjectLayout(const ProjectMetadata& metadata) {
-    if (metadata.isBuiltInDemo()) {
-        return makeDemoImportResult();
+    if (metadata.isBuiltInTwoFloorEvacuationDemo()) {
+        return makeTwoFloorEvacuationDemoImportResult();
+    }
+    if (metadata.layoutPath == builtInDemoLayoutPath() || metadata.isBuiltInEvacuationScenarioDemo()) {
+        return makeSprint1DemoImportResult();
     }
     if (metadata.isBlankLayoutProject()) {
         return makeBlankImportResult(metadata.name);
@@ -286,6 +326,29 @@ SavedScenarioAuthoringState savedStateFromInitial(const ScenarioAuthoringWidget:
     return saved;
 }
 
+int selectedRunIndexFor(
+    const std::vector<safecrowd::domain::ScenarioDraft>& scenarios,
+    const std::optional<safecrowd::domain::ScenarioDraft>& selectedScenario) {
+    if (!selectedScenario.has_value()) {
+        return 0;
+    }
+
+    if (!selectedScenario->scenarioId.empty()) {
+        const auto idIt = std::find_if(scenarios.begin(), scenarios.end(), [&](const auto& scenario) {
+            return scenario.scenarioId == selectedScenario->scenarioId;
+        });
+        if (idIt != scenarios.end()) {
+            return static_cast<int>(std::distance(scenarios.begin(), idIt));
+        }
+    }
+
+    const auto nameIt = std::find_if(scenarios.begin(), scenarios.end(), [&](const auto& scenario) {
+        return scenario.name == selectedScenario->name
+            && scenario.role == selectedScenario->role;
+    });
+    return nameIt == scenarios.end() ? 0 : static_cast<int>(std::distance(scenarios.begin(), nameIt));
+}
+
 template <typename Widget>
 Widget* visibleChild(QWidget* root) {
     if (root == nullptr) {
@@ -420,6 +483,8 @@ void MainWindow::openProject(const ProjectMetadata& metadata) {
     ProjectWorkspaceState workspace;
     if (metadata.isBuiltInEvacuationScenarioDemo()) {
         workspace = makeEvacuationScenarioDemoWorkspace();
+    } else if (metadata.isBuiltInTwoFloorEvacuationDemo()) {
+        workspace = makeTwoFloorEvacuationDemoWorkspace();
     } else if (!ProjectPersistence::loadProjectWorkspace(metadata, &workspace)) {
         showLayoutReview(metadata, std::move(importResult));
         return;
@@ -435,12 +500,17 @@ void MainWindow::openProject(const ProjectMetadata& metadata) {
         break;
     case ProjectWorkspaceView::ScenarioRun:
         if (!workspace.runningScenarios.empty()) {
+            auto returnAuthoringState = workspace.authoring.has_value()
+                ? std::make_optional(initialStateFromSaved(*workspace.authoring, *importResult.layout))
+                : std::optional<ScenarioAuthoringWidget::InitialState>{};
+            const auto initialSelectedRunIndex = selectedRunIndexFor(
+                workspace.runningScenarios,
+                workspace.runningScenario);
             showScenarioRun(
                 *importResult.layout,
                 std::move(workspace.runningScenarios),
-                workspace.authoring.has_value()
-                    ? std::make_optional(initialStateFromSaved(*workspace.authoring, *importResult.layout))
-                    : std::nullopt);
+                std::move(returnAuthoringState),
+                initialSelectedRunIndex);
             return;
         }
         if (workspace.runningScenario.has_value()) {
@@ -731,7 +801,8 @@ void MainWindow::showScenarioRun(
 void MainWindow::showScenarioRun(
     const safecrowd::domain::FacilityLayout2D& layout,
     std::vector<safecrowd::domain::ScenarioDraft> scenarios,
-    std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState) {
+    std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState,
+    int initialSelectedRunIndex) {
     setCentralWidget(new ScenarioRunWidget(
         currentProject_.name,
         layout,
@@ -752,7 +823,8 @@ void MainWindow::showScenarioRun(
             }
         },
         std::move(returnAuthoringState),
-        this));
+        this,
+        initialSelectedRunIndex));
 }
 
 void MainWindow::showScenarioBatchResult(
