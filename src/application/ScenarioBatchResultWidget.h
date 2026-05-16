@@ -55,6 +55,7 @@ private:
 
     QWidget* createCanvasPanel();
     QWidget* createSummaryPanel();
+    void createRecommendedScenario(safecrowd::domain::ScenarioDraft recommendedScenario);
     void advanceReplay();
     void applyReplayFrame(int frameIndex);
     void applyReplayFrameData(const safecrowd::domain::SimulationFrame& frame, int sliderIndex);
@@ -66,13 +67,16 @@ private:
     void pauseReplay();
     void refreshComparisonSelection();
     void refreshPressureComparisonTable();
+    void refreshRecommendationPanel();
     void refreshResultNavigationPanel();
     void refreshSelectedResult();
     void rerunBatch();
     void seekToTimingMarkerSeconds(double seconds);
     void setOverlayMode(OverlayMode mode);
+    void showAuthoring(ScenarioAuthoringWidget::InitialState initialState);
     void showClosestReplayFrameAtSeconds(double seconds);
     void showReplayFrame(const safecrowd::domain::SimulationFrame& frame);
+    int explicitBaselineResultIndex() const noexcept;
     int baselineResultIndex() const noexcept;
 
     QString projectName_{};
@@ -94,6 +98,7 @@ private:
     QSlider* replaySlider_{nullptr};
     QLabel* replayTimeLabel_{nullptr};
     QLabel* detailLabel_{nullptr};
+    QWidget* recommendationPanel_{nullptr};
     QTableWidget* pressureTable_{nullptr};
     std::vector<QCheckBox*> compareCheckBoxes_{};
     QWidget* remainingChart_{nullptr};

@@ -82,6 +82,8 @@ add_library(safecrowd_domain STATIC
     src/domain/GeometryQueries.h
     src/domain/GeometryQueries.cpp
     src/domain/PopulationSpec.h
+    src/domain/AlternativeRecommendationService.h
+    src/domain/AlternativeRecommendationService.cpp
     src/domain/ScenarioAuthoring.h
     src/domain/ScenarioAuthoring.cpp
     src/domain/ScenarioBatchRunner.h
@@ -158,6 +160,7 @@ if (BUILD_TESTING)
         tests/EngineIntegrationTests.cpp
         tests/ResourceStoreTests.cpp
         tests/DeterministicRngTests.cpp
+        tests/AlternativeRecommendationServiceTests.cpp
         tests/ScenarioSimulationRunnerTests.cpp
         tests/ScenarioAuthoringTests.cpp
         tests/ScenarioBatchRunnerTests.cpp
@@ -173,6 +176,19 @@ if (BUILD_TESTING)
         PRIVATE
             safecrowd_domain
     )
+
+    if (SAFECROWD_BUILD_APP)
+        target_sources(safecrowd_tests
+            PRIVATE
+                tests/ProjectPersistenceTests.cpp
+                src/application/ProjectPersistence.cpp
+        )
+
+        target_link_libraries(safecrowd_tests
+            PRIVATE
+                Qt6::Core
+        )
+    endif()
 
     configure_project_target(safecrowd_tests)
 

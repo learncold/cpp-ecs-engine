@@ -173,6 +173,10 @@ bool routeGuidancesEqual(const std::vector<RouteGuidanceDraft>& lhs,
     return true;
 }
 
+bool isRecommendationSourceTemplateId(const std::string& sourceTemplateId) {
+    return sourceTemplateId.rfind("recommendation:", 0) == 0;
+}
+
 }  // namespace
 
 ScenarioDraft duplicateScenarioDraft(const ScenarioDraft& source,
@@ -182,6 +186,9 @@ ScenarioDraft duplicateScenarioDraft(const ScenarioDraft& source,
     copy.scenarioId = std::move(newScenarioId);
     copy.name = std::move(newName);
     copy.role = ScenarioRole::Alternative;
+    if (isRecommendationSourceTemplateId(copy.sourceTemplateId)) {
+        copy.sourceTemplateId.clear();
+    }
     copy.variationDiffKeys.clear();
     copy.blockingIssues.clear();
     return copy;

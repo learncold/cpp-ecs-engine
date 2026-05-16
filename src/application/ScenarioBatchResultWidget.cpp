@@ -6,6 +6,7 @@
 #include <functional>
 #include <iterator>
 #include <optional>
+#include <string>
 #include <utility>
 
 #include <QCheckBox>
@@ -15,6 +16,7 @@
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLayout>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
@@ -35,6 +37,7 @@
 #include "application/SimulationCanvasWidget.h"
 #include "application/UiStyle.h"
 #include "application/WorkspaceShell.h"
+#include "domain/AlternativeRecommendationService.h"
 #include "domain/ScenarioAuthoring.h"
 
 namespace safecrowd::application {
@@ -115,9 +118,23 @@ QString scenarioRoleLabel(safecrowd::domain::ScenarioRole role) {
     switch (role) {
     case safecrowd::domain::ScenarioRole::Baseline:
         return "Baseline";
+    case safecrowd::domain::ScenarioRole::Recommended:
+        return "Recommended";
     case safecrowd::domain::ScenarioRole::Alternative:
     default:
         return "Alternative";
+    }
+}
+
+void clearLayout(QLayout* layout) {
+    if (layout == nullptr) {
+        return;
+    }
+    while (auto* item = layout->takeAt(0)) {
+        if (auto* widget = item->widget(); widget != nullptr) {
+            widget->deleteLater();
+        }
+        delete item;
     }
 }
 
@@ -600,6 +617,62 @@ ScenarioAuthoringWidget::ScenarioState scenarioStateFromDraft(
     return state;
 }
 
+bool scenarioIdExists(const ScenarioAuthoringWidget::InitialState& initial, const std::string& id) {
+    return std::any_of(initial.scenarios.begin(), initial.scenarios.end(), [&](const auto& scenario) {
+        return scenario.draft.scenarioId == id;
+    });
+}
+
+bool scenarioNameExists(const ScenarioAuthoringWidget::InitialState& initial, const std::string& name) {
+    return std::any_of(initial.scenarios.begin(), initial.scenarios.end(), [&](const auto& scenario) {
+        return scenario.draft.name == name;
+    });
+}
+
+std::string uniqueScenarioId(const ScenarioAuthoringWidget::InitialState& initial, const std::string& requestedId) {
+    const auto base = requestedId.empty() ? std::string{"recommended-scenario"} : requestedId;
+    if (!scenarioIdExists(initial, base)) {
+        return base;
+    }
+    for (int suffix = 2; suffix < 1000; ++suffix) {
+        auto candidate = base + "-" + std::to_string(suffix);
+        if (!scenarioIdExists(initial, candidate)) {
+            return candidate;
+        }
+    }
+    return base + "-copy";
+}
+
+std::string uniqueScenarioName(const ScenarioAuthoringWidget::InitialState& initial, const std::string& requestedName) {
+    const auto base = requestedName.empty() ? std::string{"Recommended scenario"} : requestedName;
+    if (!scenarioNameExists(initial, base)) {
+        return base;
+    }
+    for (int suffix = 2; suffix < 1000; ++suffix) {
+        auto candidate = base + " " + std::to_string(suffix);
+        if (!scenarioNameExists(initial, candidate)) {
+            return candidate;
+        }
+    }
+    return base + " copy";
+}
+
+std::optional<int> existingScenarioIndexBySourceTemplate(
+    const ScenarioAuthoringWidget::InitialState& initial,
+    const std::string& sourceTemplateId) {
+    if (sourceTemplateId.empty()) {
+        return std::nullopt;
+    }
+    const auto it = std::find_if(initial.scenarios.begin(), initial.scenarios.end(), [&](const auto& scenario) {
+        return scenario.draft.role == safecrowd::domain::ScenarioRole::Recommended
+            && scenario.draft.sourceTemplateId == sourceTemplateId;
+    });
+    if (it == initial.scenarios.end()) {
+        return std::nullopt;
+    }
+    return static_cast<int>(std::distance(initial.scenarios.begin(), it));
+}
+
 ScenarioResultNavigationView resultNavigationViewFromSaved(SavedResultNavigationView view) {
     switch (view) {
     case SavedResultNavigationView::Hotspot:
@@ -905,6 +978,14 @@ QWidget* ScenarioBatchResultWidget::createSummaryPanel() {
     detailLabel_->setStyleSheet(ui::mutedTextStyleSheet());
     detailLayout->addWidget(detailLabel_);
     layout->addWidget(detailCard);
+
+    recommendationPanel_ = new QFrame(content);
+    recommendationPanel_->setStyleSheet(ui::panelStyleSheet());
+    auto* recommendationLayout = new QVBoxLayout(recommendationPanel_);
+    recommendationLayout->setContentsMargins(12, 10, 12, 10);
+    recommendationLayout->setSpacing(8);
+    layout->addWidget(recommendationPanel_);
+
     layout->addStretch(1);
 
     scrollArea->setWidget(content);
@@ -929,10 +1010,6 @@ QWidget* ScenarioBatchResultWidget::createSummaryPanel() {
 }
 
 void ScenarioBatchResultWidget::navigateToAuthoring() {
-    auto* rootLayout = qobject_cast<QVBoxLayout*>(layout());
-    if (rootLayout == nullptr || shell_ == nullptr) {
-        return;
-    }
     pauseReplay();
 
     auto initial = returnAuthoringState_.value_or(ScenarioAuthoringWidget::InitialState{});
@@ -953,11 +1030,19 @@ void ScenarioBatchResultWidget::navigateToAuthoring() {
         }
     }
     initial.rightPanelMode = ScenarioAuthoringWidget::RightPanelMode::Scenario;
+    showAuthoring(std::move(initial));
+}
+
+void ScenarioBatchResultWidget::showAuthoring(ScenarioAuthoringWidget::InitialState initialState) {
+    auto* rootLayout = qobject_cast<QVBoxLayout*>(layout());
+    if (rootLayout == nullptr || shell_ == nullptr) {
+        return;
+    }
 
     auto* authoringWidget = new ScenarioAuthoringWidget(
         projectName_,
         layout_,
-        std::move(initial),
+        std::move(initialState),
         saveProjectHandler_,
         openProjectHandler_,
         backToLayoutReviewHandler_,
@@ -967,6 +1052,67 @@ void ScenarioBatchResultWidget::navigateToAuthoring() {
     shell_->deleteLater();
     shell_ = nullptr;
     canvas_ = nullptr;
+}
+
+void ScenarioBatchResultWidget::createRecommendedScenario(
+    safecrowd::domain::ScenarioDraft recommendedScenario) {
+    pauseReplay();
+
+    auto initial = returnAuthoringState_.value_or(ScenarioAuthoringWidget::InitialState{});
+    if (initial.scenarios.empty()) {
+        for (const auto& result : results_) {
+            initial.scenarios.push_back(scenarioStateFromDraft(result.scenario, layout_));
+        }
+    }
+
+    if (const auto existingIndex = existingScenarioIndexBySourceTemplate(initial, recommendedScenario.sourceTemplateId);
+        existingIndex.has_value()) {
+        initial.currentScenarioIndex = *existingIndex;
+        initial.rightPanelMode = ScenarioAuthoringWidget::RightPanelMode::Scenario;
+        showAuthoring(std::move(initial));
+        return;
+    }
+
+    recommendedScenario.scenarioId = uniqueScenarioId(initial, recommendedScenario.scenarioId);
+    recommendedScenario.name = uniqueScenarioName(initial, recommendedScenario.name);
+
+    QString baseScenarioId;
+    if (currentResultIndex_ >= 0 && currentResultIndex_ < static_cast<int>(results_.size())) {
+        const auto& source = results_[static_cast<std::size_t>(currentResultIndex_)].scenario;
+        const auto sourceIt = std::find_if(initial.scenarios.begin(), initial.scenarios.end(), [&](const auto& scenario) {
+            return scenario.draft.scenarioId == source.scenarioId;
+        });
+        if (sourceIt != initial.scenarios.end() && !sourceIt->baseScenarioId.isEmpty()) {
+            baseScenarioId = sourceIt->baseScenarioId;
+        } else if (source.role == safecrowd::domain::ScenarioRole::Baseline) {
+            baseScenarioId = QString::fromStdString(source.scenarioId);
+        }
+    }
+    if (baseScenarioId.isEmpty()) {
+        const auto baselineIndex = explicitBaselineResultIndex();
+        if (baselineIndex >= 0 && baselineIndex < static_cast<int>(results_.size())) {
+            baseScenarioId = QString::fromStdString(results_[static_cast<std::size_t>(baselineIndex)].scenario.scenarioId);
+        }
+    }
+
+    if (!baseScenarioId.isEmpty()) {
+        const auto baseId = baseScenarioId.toStdString();
+        const auto baselineIt = std::find_if(initial.scenarios.begin(), initial.scenarios.end(), [&](const auto& scenario) {
+            return scenario.draft.scenarioId == baseId;
+        });
+        if (baselineIt != initial.scenarios.end()) {
+            recommendedScenario.variationDiffKeys =
+                safecrowd::domain::computeScenarioDiffKeys(baselineIt->draft, recommendedScenario);
+        }
+    }
+
+    auto state = scenarioStateFromDraft(recommendedScenario, layout_);
+    state.baseScenarioId = baseScenarioId;
+    state.stagedForRun = false;
+    initial.scenarios.push_back(std::move(state));
+    initial.currentScenarioIndex = static_cast<int>(initial.scenarios.size()) - 1;
+    initial.rightPanelMode = ScenarioAuthoringWidget::RightPanelMode::Scenario;
+    showAuthoring(std::move(initial));
 }
 
 void ScenarioBatchResultWidget::pauseReplay() {
@@ -1231,6 +1377,100 @@ void ScenarioBatchResultWidget::refreshPressureComparisonTable() {
     pressureTable_->resizeRowsToContents();
 }
 
+void ScenarioBatchResultWidget::refreshRecommendationPanel() {
+    if (recommendationPanel_ == nullptr) {
+        return;
+    }
+    auto* panelLayout = qobject_cast<QVBoxLayout*>(recommendationPanel_->layout());
+    clearLayout(panelLayout);
+    if (panelLayout == nullptr) {
+        return;
+    }
+
+    panelLayout->addWidget(createLabel("Recommendations", recommendationPanel_, ui::FontRole::SectionTitle));
+    if (results_.empty() || currentResultIndex_ < 0 || currentResultIndex_ >= static_cast<int>(results_.size())) {
+        auto* empty = createLabel("No completed result selected.", recommendationPanel_, ui::FontRole::Caption);
+        empty->setStyleSheet(ui::mutedTextStyleSheet());
+        panelLayout->addWidget(empty);
+        return;
+    }
+
+    const auto& selected = results_[static_cast<std::size_t>(currentResultIndex_)];
+    safecrowd::domain::AlternativeRecommendationRequest request{
+        .layout = layout_,
+        .sourceScenario = selected.scenario,
+        .risk = selected.risk,
+        .artifacts = selected.artifacts,
+    };
+    const auto baselineIndex = explicitBaselineResultIndex();
+    if (baselineIndex >= 0 && baselineIndex < static_cast<int>(results_.size())) {
+        request.baselineScenario = results_[static_cast<std::size_t>(baselineIndex)].scenario;
+    }
+
+    const safecrowd::domain::AlternativeRecommendationService service;
+    const auto recommendation = service.recommend(request);
+    if (recommendation.candidates.empty()) {
+        const auto message = recommendation.blockingReasons.empty()
+            ? QString("No actionable recommendation for this result.")
+            : QString::fromStdString(recommendation.blockingReasons.front());
+        auto* empty = createLabel(message, recommendationPanel_, ui::FontRole::Caption);
+        empty->setStyleSheet(ui::mutedTextStyleSheet());
+        panelLayout->addWidget(empty);
+        return;
+    }
+
+    for (const auto& candidate : recommendation.candidates) {
+        auto* section = new QWidget(recommendationPanel_);
+        auto* sectionLayout = new QVBoxLayout(section);
+        sectionLayout->setContentsMargins(0, 0, 0, 0);
+        sectionLayout->setSpacing(5);
+
+        auto* title = createLabel(QString::fromStdString(candidate.title), section, ui::FontRole::Body);
+        title->setStyleSheet("QLabel { color: #16202b; font-weight: 600; }");
+        sectionLayout->addWidget(title);
+
+        auto* summary = createLabel(QString::fromStdString(candidate.summary), section, ui::FontRole::Caption);
+        summary->setStyleSheet(ui::mutedTextStyleSheet());
+        sectionLayout->addWidget(summary);
+
+        auto* source = createLabel(
+            QString("Result source: %1").arg(QString::fromStdString(candidate.artifactSource)),
+            section,
+            ui::FontRole::Caption);
+        source->setStyleSheet(ui::mutedTextStyleSheet());
+        sectionLayout->addWidget(source);
+
+        for (const auto& item : candidate.evidence) {
+            auto* evidenceLabel = createLabel(
+                QString("%1: %2 (%3)")
+                    .arg(QString::fromStdString(item.label),
+                         QString::fromStdString(item.value),
+                         QString::fromStdString(item.source)),
+                section,
+                ui::FontRole::Caption);
+            evidenceLabel->setStyleSheet(ui::mutedTextStyleSheet());
+            sectionLayout->addWidget(evidenceLabel);
+        }
+
+        auto* impact = createLabel(
+            QString("Expected direction: %1").arg(QString::fromStdString(candidate.expectedImprovement)),
+            section,
+            ui::FontRole::Caption);
+        impact->setStyleSheet(ui::mutedTextStyleSheet());
+        sectionLayout->addWidget(impact);
+
+        auto* button = new QPushButton("Create Recommended Scenario", section);
+        button->setFont(ui::font(ui::FontRole::Body));
+        button->setStyleSheet(ui::secondaryButtonStyleSheet());
+        sectionLayout->addWidget(button);
+        connect(button, &QPushButton::clicked, this, [this, scenario = candidate.recommendedScenario]() {
+            createRecommendedScenario(scenario);
+        });
+
+        panelLayout->addWidget(section);
+    }
+}
+
 void ScenarioBatchResultWidget::refreshResultNavigationPanel() {
     if (shell_ == nullptr || results_.empty() || currentResultIndex_ < 0 || currentResultIndex_ >= static_cast<int>(results_.size())) {
         return;
@@ -1312,6 +1552,7 @@ void ScenarioBatchResultWidget::refreshSelectedResult() {
         static_cast<ComparisonGraphWidget*>(exitsChart_)->setResults(results_, selectedCompareIndices_, currentResultIndex_);
     }
     refreshPressureComparisonTable();
+    refreshRecommendationPanel();
     refreshResultNavigationPanel();
     if (detailLabel_ != nullptr) {
         const auto selectedFinalSeconds = finalSeconds(result);
@@ -1341,11 +1582,19 @@ void ScenarioBatchResultWidget::refreshSelectedResult() {
     }
 }
 
-int ScenarioBatchResultWidget::baselineResultIndex() const noexcept {
+int ScenarioBatchResultWidget::explicitBaselineResultIndex() const noexcept {
     for (int index = 0; index < static_cast<int>(results_.size()); ++index) {
         if (results_[static_cast<std::size_t>(index)].scenario.role == safecrowd::domain::ScenarioRole::Baseline) {
             return index;
         }
+    }
+    return -1;
+}
+
+int ScenarioBatchResultWidget::baselineResultIndex() const noexcept {
+    const auto explicitIndex = explicitBaselineResultIndex();
+    if (explicitIndex >= 0) {
+        return explicitIndex;
     }
     return results_.empty() ? -1 : 0;
 }
