@@ -122,10 +122,8 @@ ProjectWorkspaceState makeTwoFloorEvacuationDemoWorkspace() {
     authoring.rightPanelMode = SavedRightPanelMode::Scenario;
 
     ProjectWorkspaceState workspace;
-    workspace.activeView = ProjectWorkspaceView::ScenarioRun;
+    workspace.activeView = ProjectWorkspaceView::ScenarioAuthoring;
     workspace.authoring = std::move(authoring);
-    workspace.runningScenario = fixture.alternativeScenario;
-    workspace.runningScenarios = {fixture.baselineScenario, fixture.alternativeScenario};
     return workspace;
 }
 
