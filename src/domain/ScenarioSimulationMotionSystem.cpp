@@ -592,50 +592,6 @@ private:
         return distanceBetween(position.value, closestOnInstall) <= visibilityDistance;
     }
 
-    bool connectionTouchesFloor(
-        const ScenarioLayoutCacheResource& layoutCache,
-        const Connection2D& connection,
-        const std::string& floorId) const {
-        if (sameFloor(connection.floorId, floorId)) {
-            return true;
-        }
-        const auto fromFloorId = cachedFloorIdForZone(layoutCache, connection.fromZoneId);
-        const auto toFloorId = cachedFloorIdForZone(layoutCache, connection.toZoneId);
-        return sameFloor(fromFloorId, floorId) || sameFloor(toFloorId, floorId);
-    }
-
-    bool agentCanSeeGuidanceAtInstallConnection(
-        const ScenarioLayoutCacheResource& layoutCache,
-        const RouteGuidanceDraft& guidance,
-        const Position& position,
-        const Agent& agent,
-        const EvacuationRoute& route) const {
-        if (guidance.installConnectionId.empty()) {
-            return true;
-        }
-
-        const auto* connection = findConnectionById(layoutCache, guidance.installConnectionId);
-        if (connection == nullptr || !connectionTouchesFloor(layoutCache, *connection, route.currentFloorId)) {
-            return false;
-        }
-
-        const auto currentZoneId = zoneAt(layoutCache, position.value, route.currentFloorId);
-        if (!currentZoneId.empty()
-            && currentZoneId != connection->fromZoneId
-            && currentZoneId != connection->toZoneId) {
-            return false;
-        }
-
-        const auto closestOnInstall = closestPointOnSegment(
-            position.value,
-            connection->centerSpan.start,
-            connection->centerSpan.end);
-        const auto visibilityDistance = std::max(
-            2.0,
-            (connection->effectiveWidth * 0.5) + static_cast<double>(agent.radius) + 0.25);
-        return distanceBetween(position.value, closestOnInstall) <= visibilityDistance;
-    }
-
     const Connection2D* nextBlockedConnection(
         const ScenarioLayoutCacheResource& layoutCache,
         const EvacuationRoute& route) const {

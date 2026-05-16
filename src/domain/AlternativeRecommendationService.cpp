@@ -113,15 +113,37 @@ bool exitUsageContainsZone(const ScenarioResultArtifacts& artifacts, const std::
     });
 }
 
+std::vector<ExitUsageMetric> exitUsageCandidates(const AlternativeRecommendationRequest& request) {
+    if (request.artifacts.exitUsage.empty()) {
+        return {};
+    }
+
+    auto candidates = request.artifacts.exitUsage;
+    for (const auto& zone : request.layout.zones) {
+        if (zone.kind != ZoneKind::Exit || exitUsageContainsZone(request.artifacts, zone.id)) {
+            continue;
+        }
+        candidates.push_back({
+            .exitZoneId = zone.id,
+            .exitLabel = zone.label.empty() ? zone.id : zone.label,
+            .floorId = zone.floorId,
+            .evacuatedCount = 0,
+            .usageRatio = 0.0,
+        });
+    }
+    return candidates;
+}
+
 std::optional<ExitUsageMetric> leastUsedExit(
     const AlternativeRecommendationRequest& request,
     const std::vector<std::string>& excludedExitZoneIds = {}) {
-    if (request.artifacts.exitUsage.empty()) {
+    const auto candidates = exitUsageCandidates(request);
+    if (candidates.empty()) {
         return std::nullopt;
     }
 
     std::optional<ExitUsageMetric> best;
-    for (const auto& usage : request.artifacts.exitUsage) {
+    for (const auto& usage : candidates) {
         if (containsString(excludedExitZoneIds, usage.exitZoneId)) {
             continue;
         }
@@ -134,17 +156,18 @@ std::optional<ExitUsageMetric> leastUsedExit(
     return best;
 }
 
-std::optional<ExitUsageMetric> mostUsedExit(const ScenarioResultArtifacts& artifacts) {
+std::optional<ExitUsageMetric> mostUsedExit(const AlternativeRecommendationRequest& request) {
+    const auto candidates = exitUsageCandidates(request);
     const auto it = std::max_element(
-        artifacts.exitUsage.begin(),
-        artifacts.exitUsage.end(),
+        candidates.begin(),
+        candidates.end(),
         [](const auto& lhs, const auto& rhs) {
             if (lhs.usageRatio == rhs.usageRatio) {
                 return lhs.evacuatedCount < rhs.evacuatedCount;
             }
             return lhs.usageRatio < rhs.usageRatio;
         });
-    return it == artifacts.exitUsage.end() ? std::nullopt : std::optional<ExitUsageMetric>{*it};
+    return it == candidates.end() ? std::nullopt : std::optional<ExitUsageMetric>{*it};
 }
 
 bool hasRouteGuidance(const ScenarioDraft& scenario,
@@ -340,7 +363,7 @@ std::optional<AlternativeRecommendationCandidate> makeBottleneckGuidanceCandidat
         + connectionName(request.layout, bottleneck->connectionId) + " toward "
         + zoneName(request.layout, targetExit->exitZoneId) + ".";
     candidate.expectedImprovement = "Shifts part of the crowd away from a stalled connector before rerunning the scenario.";
-    candidate.artifactSource = "ScenarioRiskSnapshot.bottlenecks + ScenarioResultArtifacts.exitUsage";
+    candidate.artifactSource = "ScenarioRiskSnapshot.bottlenecks + FacilityLayout2D.zones + ScenarioResultArtifacts.exitUsage";
     candidate.evidence.push_back(evidence(
         "Bottleneck signal",
         std::to_string(bottleneck->stalledAgentCount) + " stalled / "
@@ -356,19 +379,19 @@ std::optional<AlternativeRecommendationCandidate> makeBottleneckGuidanceCandidat
         "Guided exit",
         zoneName(request.layout, targetExit->exitZoneId),
         adjacentExitZoneIds.empty()
-            ? "least-used exit from ScenarioResultArtifacts.exitUsage"
-            : "least-used non-adjacent exit from ScenarioResultArtifacts.exitUsage"));
+            ? "least-used exit from FacilityLayout2D.zones + ScenarioResultArtifacts.exitUsage"
+            : "least-used non-adjacent exit from FacilityLayout2D.zones + ScenarioResultArtifacts.exitUsage"));
     candidate.recommendedScenario = std::move(draft);
     return candidate;
 }
 
 std::optional<AlternativeRecommendationCandidate> makeExitBalancingCandidate(
     const AlternativeRecommendationRequest& request) {
-    if (request.artifacts.exitUsage.size() < 2) {
+    if (exitUsageCandidates(request).size() < 2) {
         return std::nullopt;
     }
     const auto low = leastUsedExit(request);
-    const auto high = mostUsedExit(request.artifacts);
+    const auto high = mostUsedExit(request);
     if (!low.has_value() || !high.has_value() || low->exitZoneId.empty() || high->exitZoneId.empty()) {
         return std::nullopt;
     }
@@ -396,7 +419,7 @@ std::optional<AlternativeRecommendationCandidate> makeExitBalancingCandidate(
         + zoneName(request.layout, low->exitZoneId) + ".";
     candidate.expectedImprovement = "Reduces dependence on " + zoneName(request.layout, high->exitZoneId)
         + " and may lower final evacuation time.";
-    candidate.artifactSource = "ScenarioResultArtifacts.exitUsage";
+    candidate.artifactSource = "FacilityLayout2D.zones + ScenarioResultArtifacts.exitUsage";
     candidate.evidence.push_back(evidence(
         "Most used exit",
         zoneName(request.layout, high->exitZoneId) + " at " + percent(high->usageRatio),
@@ -404,7 +427,7 @@ std::optional<AlternativeRecommendationCandidate> makeExitBalancingCandidate(
     candidate.evidence.push_back(evidence(
         "Underused exit",
         zoneName(request.layout, low->exitZoneId) + " at " + percent(low->usageRatio),
-        "ScenarioResultArtifacts.exitUsage"));
+        "FacilityLayout2D.zones + ScenarioResultArtifacts.exitUsage"));
     candidate.recommendedScenario = std::move(draft);
     return candidate;
 }
@@ -428,7 +451,7 @@ std::optional<AlternativeRecommendationCandidate> makePressureHotspotCandidate(
         || hasRouteGuidance(request.sourceScenario, targetExit->exitZoneId, {})) {
         return std::nullopt;
     }
-    if (const auto high = mostUsedExit(request.artifacts);
+    if (const auto high = mostUsedExit(request);
         high.has_value()
         && high->exitZoneId != targetExit->exitZoneId
         && high->usageRatio - targetExit->usageRatio >= kExitImbalanceThreshold) {
@@ -452,7 +475,7 @@ std::optional<AlternativeRecommendationCandidate> makePressureHotspotCandidate(
     candidate.summary = "Create a review draft that guides part of the crowd toward "
         + zoneName(request.layout, targetExit->exitZoneId) + " to reduce local pressure.";
     candidate.expectedImprovement = "Moves some agents away from high pressure cells before validating by rerun.";
-    candidate.artifactSource = "ScenarioResultArtifacts.pressureSummary + ScenarioRiskSnapshot pressure signals + ScenarioResultArtifacts.exitUsage";
+    candidate.artifactSource = "ScenarioResultArtifacts.pressureSummary + ScenarioRiskSnapshot pressure signals + FacilityLayout2D.zones + ScenarioResultArtifacts.exitUsage";
     if (request.artifacts.pressureSummary.peakPressureScore > 0.0) {
         candidate.evidence.push_back(evidence(
             "Peak pressure",
@@ -498,7 +521,7 @@ std::optional<AlternativeRecommendationCandidate> makePressureHotspotCandidate(
     candidate.evidence.push_back(evidence(
         "Guided exit",
         zoneName(request.layout, targetExit->exitZoneId),
-        "least-used exit from ScenarioResultArtifacts.exitUsage"));
+        "least-used exit from FacilityLayout2D.zones + ScenarioResultArtifacts.exitUsage"));
     candidate.recommendedScenario = std::move(draft);
     return candidate;
 }

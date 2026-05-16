@@ -2,6 +2,7 @@
 #include "domain/AlternativeRecommendationService.h"
 
 #include <algorithm>
+#include <utility>
 
 using namespace safecrowd::domain;
 
@@ -78,6 +79,21 @@ ScenarioResultArtifacts makeExitUsageArtifacts(double mainRatio = 0.85, double e
         .exitLabel = "East Exit",
         .evacuatedCount = static_cast<std::size_t>(eastRatio * 20.0),
         .usageRatio = eastRatio,
+    });
+    return artifacts;
+}
+
+ScenarioResultArtifacts makeSingleExitUsageArtifacts(
+    std::string exitZoneId,
+    std::string exitLabel,
+    std::size_t evacuatedCount,
+    double usageRatio) {
+    ScenarioResultArtifacts artifacts = makeCompletedArtifacts();
+    artifacts.exitUsage.push_back({
+        .exitZoneId = std::move(exitZoneId),
+        .exitLabel = std::move(exitLabel),
+        .evacuatedCount = evacuatedCount,
+        .usageRatio = usageRatio,
     });
     return artifacts;
 }
@@ -268,6 +284,25 @@ SC_TEST(AlternativeRecommendationService_addsRouteGuidanceForExitImbalance) {
     SC_EXPECT_TRUE(containsDiffKey(it->recommendedScenario, "control.routeGuidances"));
 }
 
+SC_TEST(AlternativeRecommendationService_balancesExitUsageTowardUnusedLayoutExit) {
+    const auto artifacts = makeSingleExitUsageArtifacts("exit-main", "Main Exit", 20, 1.0);
+
+    const AlternativeRecommendationService service;
+    const auto result = service.recommend({
+        .layout = makeRecommendationLayout(),
+        .sourceScenario = makeScenario(),
+        .artifacts = artifacts,
+    });
+
+    const auto it = std::find_if(result.candidates.begin(), result.candidates.end(), [](const auto& candidate) {
+        return candidate.kind == AlternativeRecommendationKind::ExitUsageBalancing;
+    });
+    SC_EXPECT_TRUE(it != result.candidates.end());
+    SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.size(), std::size_t{1});
+    SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.front().guidedExitZoneId, std::string{"exit-east"});
+    SC_EXPECT_TRUE(containsEvidenceSource(*it, "FacilityLayout2D.zones + ScenarioResultArtifacts.exitUsage"));
+}
+
 SC_TEST(AlternativeRecommendationService_skipsExitBalancingBelowThreshold) {
     const AlternativeRecommendationService service;
     const auto result = service.recommend({
@@ -329,10 +364,10 @@ SC_TEST(AlternativeRecommendationService_guidesBottleneckAwayFromAdjacentLeastUs
     SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.front().guidedExitZoneId, std::string{"exit-main"});
     SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.front().installConnectionId, std::string{"door-east"});
     SC_EXPECT_TRUE(containsEvidenceLabel(*it, "Excluded adjacent exits"));
-    SC_EXPECT_TRUE(containsEvidenceSource(*it, "least-used non-adjacent exit from ScenarioResultArtifacts.exitUsage"));
+    SC_EXPECT_TRUE(containsEvidenceSource(*it, "least-used non-adjacent exit from FacilityLayout2D.zones + ScenarioResultArtifacts.exitUsage"));
 }
 
-SC_TEST(AlternativeRecommendationService_skipsBottleneckGuidanceWithoutNonAdjacentExitUsage) {
+SC_TEST(AlternativeRecommendationService_guidesBottleneckTowardUnusedNonAdjacentLayoutExit) {
     ScenarioRiskSnapshot risk;
     risk.bottlenecks.push_back({
         .connectionId = "door-east",
@@ -340,13 +375,7 @@ SC_TEST(AlternativeRecommendationService_skipsBottleneckGuidanceWithoutNonAdjace
         .stalledAgentCount = 5,
     });
 
-    auto artifacts = makeCompletedArtifacts();
-    artifacts.exitUsage.push_back({
-        .exitZoneId = "exit-east",
-        .exitLabel = "East Exit",
-        .evacuatedCount = 20,
-        .usageRatio = 1.0,
-    });
+    const auto artifacts = makeSingleExitUsageArtifacts("exit-east", "East Exit", 20, 1.0);
 
     const AlternativeRecommendationService service;
     const auto result = service.recommend({
@@ -356,7 +385,14 @@ SC_TEST(AlternativeRecommendationService_skipsBottleneckGuidanceWithoutNonAdjace
         .artifacts = artifacts,
     });
 
-    SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::BottleneckBypassGuidance));
+    const auto it = std::find_if(result.candidates.begin(), result.candidates.end(), [](const auto& candidate) {
+        return candidate.kind == AlternativeRecommendationKind::BottleneckBypassGuidance;
+    });
+    SC_EXPECT_TRUE(it != result.candidates.end());
+    SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.size(), std::size_t{1});
+    SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.front().guidedExitZoneId, std::string{"exit-main"});
+    SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.front().installConnectionId, std::string{"door-east"});
+    SC_EXPECT_TRUE(containsEvidenceSource(*it, "least-used non-adjacent exit from FacilityLayout2D.zones + ScenarioResultArtifacts.exitUsage"));
 }
 
 SC_TEST(AlternativeRecommendationService_requiresExitUsageForBottleneckGuidance) {
