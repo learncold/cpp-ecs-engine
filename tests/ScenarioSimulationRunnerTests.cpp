@@ -951,6 +951,14 @@ SC_TEST(ScenarioSimulationRunnerSpawnsOccupantSourcesOnSchedule) {
     runner.step(0.1);
     SC_EXPECT_NEAR(runner.frame().elapsedSeconds, 0.1, 1e-9);
     SC_EXPECT_EQ(runner.frame().totalAgentCount, static_cast<std::size_t>(4));
+    const auto agentsAtFirstScheduledSpawn = std::count_if(
+        runner.frame().agents.begin(),
+        runner.frame().agents.end(),
+        [](const auto& agent) {
+            return std::abs(agent.position.x - 1.0) <= 1e-9
+                && std::abs(agent.position.y - 2.0) <= 1e-9;
+        });
+    SC_EXPECT_EQ(agentsAtFirstScheduledSpawn, 2);
 
     runner.step(0.1);
     SC_EXPECT_NEAR(runner.frame().elapsedSeconds, 0.2, 1e-9);

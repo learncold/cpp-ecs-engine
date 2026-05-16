@@ -741,10 +741,7 @@ void ScenarioOccupantSourceSpawnSystem::update(engine::EngineWorld& world, const
         return;
     }
 
-    const auto deltaSeconds = resources.contains<ScenarioSimulationStepResource>()
-        ? std::max(0.0, resources.get<ScenarioSimulationStepResource>().deltaSeconds)
-        : 0.0;
-    spawnDueSeeds(world, clock.elapsedSeconds + deltaSeconds);
+    spawnDueSeeds(world, clock.elapsedSeconds);
 }
 
 void ScenarioOccupantSourceSpawnSystem::spawnDueSeeds(engine::EngineWorld& world, double elapsedSeconds) {

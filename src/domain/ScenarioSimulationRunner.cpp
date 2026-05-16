@@ -291,7 +291,7 @@ void ScenarioSimulationRunner::initializeRuntime() {
     runtime_->addSystem(
         std::make_unique<ScenarioOccupantSourceSpawnSystem>(createOccupantSourceSeeds()),
         {.phase = engine::UpdatePhase::FixedSimulation,
-         .order = -30,
+         .order = 1,
          .triggerPolicy = engine::TriggerPolicy::FixedStep});
     runtime_->addSystem(
         makeScenarioControlSystem(layout_, scenario_.control.connectionBlocks),
