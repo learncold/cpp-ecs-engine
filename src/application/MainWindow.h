@@ -46,7 +46,8 @@ private:
     void showScenarioRun(
         const safecrowd::domain::FacilityLayout2D& layout,
         std::vector<safecrowd::domain::ScenarioDraft> scenarios,
-        std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState = std::nullopt);
+        std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState = std::nullopt,
+        int initialSelectedRunIndex = 0);
     void showScenarioBatchResult(
         const safecrowd::domain::FacilityLayout2D& layout,
         std::vector<SavedScenarioResultState> results,

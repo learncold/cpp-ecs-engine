@@ -56,7 +56,8 @@ public:
         std::function<void()> openProjectHandler,
         std::function<void()> backToLayoutReviewHandler,
         std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState = std::nullopt,
-        QWidget* parent = nullptr);
+        QWidget* parent = nullptr,
+        int initialSelectedRunIndex = 0);
 
     explicit ScenarioRunWidget(
         const QString& projectName,
@@ -67,7 +68,8 @@ public:
         std::function<void()> openProjectHandler,
         std::function<void()> backToLayoutReviewHandler,
         std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState = std::nullopt,
-        QWidget* parent = nullptr);
+        QWidget* parent = nullptr,
+        int initialSelectedRunIndex = 0);
 
     const safecrowd::domain::ScenarioDraft& scenario() const noexcept;
     const std::vector<safecrowd::domain::ScenarioDraft>& scenarios() const noexcept;

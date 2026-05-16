@@ -34,6 +34,13 @@ namespace {
 constexpr double kSimulationDeltaSeconds = 1.0 / 30.0;
 constexpr int kPlaybackTimerIntervalMs = 33;
 
+int normalizedRunIndex(int index, std::size_t runCount) {
+    if (runCount == 0) {
+        return 0;
+    }
+    return std::clamp(index, 0, static_cast<int>(runCount) - 1);
+}
+
 enum class TransportIconKind {
     Play,
     Pause,
@@ -232,7 +239,8 @@ ScenarioRunWidget::ScenarioRunWidget(
           std::move(openProjectHandler),
           std::move(backToLayoutReviewHandler),
           std::move(returnAuthoringState),
-          parent) {}
+          parent,
+          0) {}
 
 ScenarioRunWidget::ScenarioRunWidget(
     const QString& projectName,
@@ -260,7 +268,8 @@ ScenarioRunWidget::ScenarioRunWidget(
           std::move(openProjectHandler),
           std::move(backToLayoutReviewHandler),
           std::move(returnAuthoringState),
-          parent) {}
+          parent,
+          0) {}
 
 ScenarioRunWidget::ScenarioRunWidget(
     const QString& projectName,
@@ -270,7 +279,8 @@ ScenarioRunWidget::ScenarioRunWidget(
     std::function<void()> openProjectHandler,
     std::function<void()> backToLayoutReviewHandler,
     std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState,
-    QWidget* parent)
+    QWidget* parent,
+    int initialSelectedRunIndex)
     : ScenarioRunWidget(
           projectName,
           layout,
@@ -280,7 +290,8 @@ ScenarioRunWidget::ScenarioRunWidget(
           std::move(openProjectHandler),
           std::move(backToLayoutReviewHandler),
           std::move(returnAuthoringState),
-          parent) {}
+          parent,
+          initialSelectedRunIndex) {}
 
 ScenarioRunWidget::ScenarioRunWidget(
     const QString& projectName,
@@ -291,11 +302,12 @@ ScenarioRunWidget::ScenarioRunWidget(
     std::function<void()> openProjectHandler,
     std::function<void()> backToLayoutReviewHandler,
     std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState,
-    QWidget* parent)
+    QWidget* parent,
+    int initialSelectedRunIndex)
     : QWidget(parent),
       projectName_(projectName),
       layout_(layout),
-      scenario_(scenarios.empty() ? safecrowd::domain::ScenarioDraft{} : scenarios.front()),
+      scenario_({}),
       scenarios_(std::move(scenarios)),
       cachedResults_(std::move(cachedResults)),
       batchRunner_(layout_, scenarios_),
@@ -303,6 +315,11 @@ ScenarioRunWidget::ScenarioRunWidget(
       saveProjectHandler_(std::move(saveProjectHandler)),
       openProjectHandler_(std::move(openProjectHandler)),
       backToLayoutReviewHandler_(std::move(backToLayoutReviewHandler)) {
+    selectedRunIndex_ = normalizedRunIndex(initialSelectedRunIndex, scenarios_.size());
+    if (!scenarios_.empty()) {
+        scenario_ = scenarios_[static_cast<std::size_t>(selectedRunIndex_)];
+    }
+
     auto* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
@@ -398,7 +415,8 @@ QWidget* ScenarioRunWidget::createRunCanvas() {
     canvas_ = new SimulationCanvasWidget(layout_, container);
     canvas_->setMinimumHeight(360);
     if (!batchRunner_.empty()) {
-        const auto& run = batchRunner_.run(0);
+        const auto& run = batchRunner_.run(static_cast<std::size_t>(
+            normalizedRunIndex(selectedRunIndex_, batchRunner_.size())));
         canvas_->setConnectionBlocks(run.scenario.control.connectionBlocks);
         canvas_->setEnvironmentHazards(run.scenario.environment.hazards);
         canvas_->setRouteGuidances(run.scenario.control.routeGuidances);
