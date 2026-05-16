@@ -379,7 +379,7 @@ SC_TEST(AlternativeRecommendationService_requiresExitUsageForBottleneckGuidance)
 }
 
 SC_TEST(AlternativeRecommendationService_addsPressureHotspotReliefWithExitUsage) {
-    auto artifacts = makeExitUsageArtifacts();
+    auto artifacts = makeExitUsageArtifacts(0.55, 0.45);
     artifacts.pressureSummary.hotspotScoreThreshold = 4.0;
     artifacts.pressureSummary.peakPressureScore = 5.5;
 
@@ -398,6 +398,22 @@ SC_TEST(AlternativeRecommendationService_addsPressureHotspotReliefWithExitUsage)
     SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.front().guidedExitZoneId, std::string{"exit-east"});
     SC_EXPECT_TRUE(it->recommendedScenario.control.routeGuidances.front().installConnectionId.empty());
     SC_EXPECT_TRUE(containsDiffKey(it->recommendedScenario, "control.routeGuidances"));
+}
+
+SC_TEST(AlternativeRecommendationService_prefersExitBalancingOverDuplicatePressureRelief) {
+    auto artifacts = makeExitUsageArtifacts();
+    artifacts.pressureSummary.hotspotScoreThreshold = 4.0;
+    artifacts.pressureSummary.peakPressureScore = 5.5;
+
+    const AlternativeRecommendationService service;
+    const auto result = service.recommend({
+        .layout = makeRecommendationLayout(),
+        .sourceScenario = makeScenario(),
+        .artifacts = artifacts,
+    });
+
+    SC_EXPECT_TRUE(hasCandidateKind(result, AlternativeRecommendationKind::ExitUsageBalancing));
+    SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::PressureHotspotRelief));
 }
 
 SC_TEST(AlternativeRecommendationService_requiresExitUsageForPressureHotspotRelief) {
@@ -424,7 +440,7 @@ SC_TEST(AlternativeRecommendationService_usesRiskPressureEvidenceWhenArtifactPea
         .layout = makeRecommendationLayout(),
         .sourceScenario = makeScenario(),
         .risk = risk,
-        .artifacts = makeExitUsageArtifacts(),
+        .artifacts = makeExitUsageArtifacts(0.55, 0.45),
     });
 
     const auto it = std::find_if(result.candidates.begin(), result.candidates.end(), [](const auto& candidate) {

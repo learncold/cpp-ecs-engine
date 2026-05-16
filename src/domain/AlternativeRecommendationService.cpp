@@ -428,6 +428,12 @@ std::optional<AlternativeRecommendationCandidate> makePressureHotspotCandidate(
         || hasRouteGuidance(request.sourceScenario, targetExit->exitZoneId, {})) {
         return std::nullopt;
     }
+    if (const auto high = mostUsedExit(request.artifacts);
+        high.has_value()
+        && high->exitZoneId != targetExit->exitZoneId
+        && high->usageRatio - targetExit->usageRatio >= kExitImbalanceThreshold) {
+        return std::nullopt;
+    }
 
     auto draft = makeRecommendedDraft(
         request,
