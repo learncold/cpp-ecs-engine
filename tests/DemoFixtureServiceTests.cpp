@@ -241,9 +241,7 @@ SC_TEST(DemoFixtureServiceBuildsTwoFloorEvacuationFixture) {
     SC_EXPECT_EQ(
         fixture.alternativeScenario.control.routeGuidances.front().guidedExitZoneId,
         std::string(Ids::EastExitZoneId));
-    SC_EXPECT_EQ(
-        fixture.alternativeScenario.control.routeGuidances.front().installConnectionId,
-        std::string(Ids::UpperWestTrainingToCorridorConnectionId));
+    SC_EXPECT_TRUE(fixture.alternativeScenario.control.routeGuidances.front().installConnectionId.empty());
     SC_EXPECT_TRUE(containsDiffKey(fixture.alternativeScenario, "control.routeGuidances"));
 
     safecrowd::domain::ImportValidationService validator;

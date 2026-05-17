@@ -74,6 +74,7 @@ struct PointBounds {
 
 struct OccupantSourceSettings {
     int agentsPerSpawn{kDefaultSourceAgentsPerSpawn};
+    int targetAgentCount{0};
     double startSeconds{kDefaultSourceStartSeconds};
     double durationSeconds{kDefaultSourceDurationSeconds};
     double intervalSeconds{kDefaultSourceIntervalSeconds};
@@ -83,14 +84,15 @@ bool matchesFloor(const std::string& elementFloorId, const QString& floorId) {
     return floorId.isEmpty() || elementFloorId.empty() || QString::fromStdString(elementFloorId) == floorId;
 }
 
-int sourceEmissionCount(int agentsPerSpawn, double durationSeconds, double intervalSeconds) {
+int sourceEmissionCount(int agentsPerSpawn, double durationSeconds, double intervalSeconds, int targetAgentCount = 0) {
     if (agentsPerSpawn <= 0 || durationSeconds <= 0.0 || intervalSeconds <= 1e-9) {
         return 0;
     }
     const auto ticks = static_cast<long long>(
         std::floor(std::max(0.0, durationSeconds - 1e-9) / intervalSeconds)) + 1;
     const auto count = std::max<long long>(0, ticks) * static_cast<long long>(agentsPerSpawn);
-    return static_cast<int>(std::min<long long>(kMaxSourceOccupantCount, count));
+    const auto cappedCount = targetAgentCount > 0 ? std::min<long long>(targetAgentCount, count) : count;
+    return static_cast<int>(std::min<long long>(kMaxSourceOccupantCount, cappedCount));
 }
 
 bool editOccupantSourceSettings(
@@ -120,36 +122,49 @@ bool editOccupantSourceSettings(
     intervalSpin->setSuffix(" sec");
     intervalSpin->setValue(std::max(0.1, settings->intervalSeconds));
 
+    auto* startSpin = new QDoubleSpinBox(&dialog);
+    startSpin->setRange(0.0, 86400.0);
+    startSpin->setDecimals(1);
+    startSpin->setSuffix(" sec");
+    startSpin->setValue(std::max(0.0, settings->startSeconds));
+
     auto* durationSpin = new QDoubleSpinBox(&dialog);
-    durationSpin->setRange(0.1, 1440.0);
+    durationSpin->setRange(0.1, 86400.0);
     durationSpin->setDecimals(1);
-    durationSpin->setSuffix(" min");
-    durationSpin->setValue(std::max(0.1, settings->durationSeconds / 60.0));
+    durationSpin->setSuffix(" sec");
+    durationSpin->setValue(std::max(0.1, settings->durationSeconds));
 
     auto* totalLabel = new QLabel(&dialog);
     totalLabel->setStyleSheet("QLabel { color: #4f5d6b; }");
     const auto refreshSummary = [=]() {
         const auto total = sourceEmissionCount(
             peopleSpin->value(),
-            durationSpin->value() * 60.0,
-            intervalSpin->value());
-        totalLabel->setText(QString("Total emitted: %1 people").arg(total));
+            durationSpin->value(),
+            intervalSpin->value(),
+            settings->targetAgentCount);
+        totalLabel->setText(QString("Total emitted: %1 people\nWindow: %2 - %3 sec")
+            .arg(total)
+            .arg(startSpin->value(), 0, 'f', 1)
+            .arg(startSpin->value() + durationSpin->value(), 0, 'f', 1));
     };
     refreshSummary();
     QObject::connect(peopleSpin, qOverload<int>(&QSpinBox::valueChanged), &dialog, refreshSummary);
     QObject::connect(intervalSpin, qOverload<double>(&QDoubleSpinBox::valueChanged), &dialog, refreshSummary);
+    QObject::connect(startSpin, qOverload<double>(&QDoubleSpinBox::valueChanged), &dialog, refreshSummary);
     QObject::connect(durationSpin, qOverload<double>(&QDoubleSpinBox::valueChanged), &dialog, refreshSummary);
 
     layout->addWidget(new QLabel("People each time", &dialog), 0, 0);
     layout->addWidget(peopleSpin, 0, 1);
     layout->addWidget(new QLabel("Every", &dialog), 1, 0);
     layout->addWidget(intervalSpin, 1, 1);
-    layout->addWidget(new QLabel("Duration", &dialog), 2, 0);
-    layout->addWidget(durationSpin, 2, 1);
-    layout->addWidget(totalLabel, 3, 0, 1, 2);
+    layout->addWidget(new QLabel("Start", &dialog), 2, 0);
+    layout->addWidget(startSpin, 2, 1);
+    layout->addWidget(new QLabel("Duration", &dialog), 3, 0);
+    layout->addWidget(durationSpin, 3, 1);
+    layout->addWidget(totalLabel, 4, 0, 1, 2);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-    layout->addWidget(buttons, 4, 0, 1, 2);
+    layout->addWidget(buttons, 5, 0, 1, 2);
     QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
 
@@ -159,8 +174,9 @@ bool editOccupantSourceSettings(
     }
 
     settings->agentsPerSpawn = peopleSpin->value();
+    settings->startSeconds = startSpin->value();
     settings->intervalSeconds = intervalSpin->value();
-    settings->durationSeconds = durationSpin->value() * 60.0;
+    settings->durationSeconds = durationSpin->value();
     return true;
 }
 
@@ -2880,7 +2896,8 @@ void ScenarioCanvasWidget::addRouteGuidance(const QPointF& position) {
             addRouteGuidanceForExitZone(*it);
             return;
         }
-        // If the user clicked inside a non-exit zone, still allow installing guidance by selecting a nearby door.
+        QMessageBox::information(this, "Route guidance", "Click an exit zone to install guidance.");
+        return;
     }
 
     constexpr double kPickRadiusPixels = 18.0;
@@ -2896,8 +2913,7 @@ void ScenarioCanvasWidget::addRouteGuidance(const QPointF& position) {
         if (!matchesFloor(candidate.floorId, currentFloorId_)) {
             continue;
         }
-        if (candidate.kind != safecrowd::domain::ConnectionKind::Doorway
-            && candidate.kind != safecrowd::domain::ConnectionKind::Exit) {
+        if (candidate.kind != safecrowd::domain::ConnectionKind::Exit) {
             continue;
         }
         const auto halfWidth = std::max(0.0, candidate.effectiveWidth * 0.5);
@@ -2910,7 +2926,7 @@ void ScenarioCanvasWidget::addRouteGuidance(const QPointF& position) {
     }
 
     if (connection == nullptr) {
-        QMessageBox::information(this, "Route guidance", "Click an exit zone or a door to install guidance.");
+        QMessageBox::information(this, "Route guidance", "Click an exit zone to install guidance.");
         return;
     }
 
@@ -2946,20 +2962,23 @@ void ScenarioCanvasWidget::addRouteGuidanceForExitZone(const safecrowd::domain::
 }
 
 void ScenarioCanvasWidget::addRouteGuidanceForConnection(const safecrowd::domain::Connection2D& connection) {
-    if (connection.kind != safecrowd::domain::ConnectionKind::Doorway
-        && connection.kind != safecrowd::domain::ConnectionKind::Exit) {
-        QMessageBox::information(this, "Route guidance", "This tool can only be used on exit zones or doors.");
+    if (connection.kind != safecrowd::domain::ConnectionKind::Exit) {
+        QMessageBox::information(this, "Route guidance", "This tool can only be used on exits.");
         return;
     }
 
-    for (const auto& existing : routeGuidances_) {
-        if (!existing.installConnectionId.empty() && existing.installConnectionId == connection.id) {
-            QMessageBox::information(this, "Route guidance", "Guidance is already installed on this door.");
-            return;
-        }
-    }
-
     const auto exitZoneId = pickNearestExitZoneIdForConnection(layout_, connection);
+    if (exitZoneId.empty()) {
+        QMessageBox::information(this, "Route guidance", "No exit zone is connected to this exit.");
+        return;
+    }
+    const auto zoneIt = std::find_if(layout_.zones.begin(), layout_.zones.end(), [&](const auto& zone) {
+        return zone.id == exitZoneId;
+    });
+    if (zoneIt != layout_.zones.end()) {
+        addRouteGuidanceForExitZone(*zoneIt);
+        return;
+    }
 
     safecrowd::domain::RouteGuidanceDraft draft;
     draft.id = nextRouteGuidanceId().toStdString();
@@ -2967,7 +2986,7 @@ void ScenarioCanvasWidget::addRouteGuidanceForConnection(const safecrowd::domain
     draft.endSeconds = 0.0;
     draft.periods.clear();
     draft.guidedExitZoneId = exitZoneId;
-    draft.installConnectionId = connection.id;
+    draft.installConnectionId.clear();
     draft.baseComplianceRate = 0.5;
     draft.guidanceStrength = 0.55;
     draft.maxDetourMeters = 20.0;
@@ -3143,6 +3162,7 @@ bool ScenarioCanvasWidget::editOccupantSourceById(const QString& sourceId, const
 
     OccupantSourceSettings settings{
         .agentsPerSpawn = std::max(1, placementIt->sourceAgentsPerSpawn),
+        .targetAgentCount = placementIt->occupantCount,
         .startSeconds = placementIt->sourceStartSeconds,
         .durationSeconds = std::max(0.1, placementIt->sourceEndSeconds - placementIt->sourceStartSeconds),
         .intervalSeconds = std::max(0.1, placementIt->sourceIntervalSeconds),
@@ -3158,7 +3178,8 @@ bool ScenarioCanvasWidget::editOccupantSourceById(const QString& sourceId, const
     placementIt->occupantCount = sourceEmissionCount(
         placementIt->sourceAgentsPerSpawn,
         settings.durationSeconds,
-        placementIt->sourceIntervalSeconds);
+        placementIt->sourceIntervalSeconds,
+        settings.targetAgentCount);
     emitPlacementsChanged();
     update();
     return true;

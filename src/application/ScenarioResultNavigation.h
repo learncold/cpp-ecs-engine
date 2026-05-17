@@ -8,6 +8,7 @@
 #include <QWidget>
 
 #include "application/WorkspaceShell.h"
+#include "domain/AlternativeRecommendationService.h"
 #include "domain/ScenarioResultArtifacts.h"
 #include "domain/ScenarioRiskMetrics.h"
 
@@ -18,6 +19,7 @@ enum class ScenarioResultNavigationView {
     Hotspot,
     Zone,
     Groups,
+    Recommendations,
 };
 
 std::vector<WorkspaceNavigationTab> scenarioResultNavigationTabs();
@@ -30,6 +32,11 @@ QWidget* createScenarioResultNavigationPanel(
     const safecrowd::domain::ScenarioResultArtifacts& artifacts,
     std::function<void(std::size_t)> bottleneckFocusHandler,
     std::function<void(std::size_t)> hotspotFocusHandler,
+    QWidget* parent);
+
+QWidget* createScenarioRecommendationNavigationPanel(
+    const safecrowd::domain::AlternativeRecommendationResult& recommendation,
+    std::function<void(safecrowd::domain::ScenarioDraft)> createScenarioHandler,
     QWidget* parent);
 
 }  // namespace safecrowd::application

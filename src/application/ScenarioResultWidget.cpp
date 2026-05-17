@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstddef>
 #include <functional>
+#include <string>
 #include <utility>
 
 #include <QAbstractItemView>
@@ -42,6 +43,7 @@
 #include "application/SimulationCanvasWidget.h"
 #include "application/UiStyle.h"
 #include "application/WorkspaceShell.h"
+#include "domain/AlternativeRecommendationService.h"
 
 namespace safecrowd::application {
 namespace {
@@ -1080,6 +1082,62 @@ ScenarioAuthoringWidget::ScenarioState scenarioStateFromDraft(
     return state;
 }
 
+bool scenarioIdExists(const ScenarioAuthoringWidget::InitialState& initial, const std::string& id) {
+    return std::any_of(initial.scenarios.begin(), initial.scenarios.end(), [&](const auto& scenario) {
+        return scenario.draft.scenarioId == id;
+    });
+}
+
+bool scenarioNameExists(const ScenarioAuthoringWidget::InitialState& initial, const std::string& name) {
+    return std::any_of(initial.scenarios.begin(), initial.scenarios.end(), [&](const auto& scenario) {
+        return scenario.draft.name == name;
+    });
+}
+
+std::string uniqueScenarioId(const ScenarioAuthoringWidget::InitialState& initial, const std::string& requestedId) {
+    const auto base = requestedId.empty() ? std::string{"recommended-scenario"} : requestedId;
+    if (!scenarioIdExists(initial, base)) {
+        return base;
+    }
+    for (int suffix = 2; suffix < 1000; ++suffix) {
+        auto candidate = base + "-" + std::to_string(suffix);
+        if (!scenarioIdExists(initial, candidate)) {
+            return candidate;
+        }
+    }
+    return base + "-copy";
+}
+
+std::string uniqueScenarioName(const ScenarioAuthoringWidget::InitialState& initial, const std::string& requestedName) {
+    const auto base = requestedName.empty() ? std::string{"Recommended scenario"} : requestedName;
+    if (!scenarioNameExists(initial, base)) {
+        return base;
+    }
+    for (int suffix = 2; suffix < 1000; ++suffix) {
+        auto candidate = base + " " + std::to_string(suffix);
+        if (!scenarioNameExists(initial, candidate)) {
+            return candidate;
+        }
+    }
+    return base + " copy";
+}
+
+std::optional<int> existingScenarioIndexBySourceTemplate(
+    const ScenarioAuthoringWidget::InitialState& initial,
+    const std::string& sourceTemplateId) {
+    if (sourceTemplateId.empty()) {
+        return std::nullopt;
+    }
+    const auto it = std::find_if(initial.scenarios.begin(), initial.scenarios.end(), [&](const auto& scenario) {
+        return scenario.draft.role == safecrowd::domain::ScenarioRole::Recommended
+            && scenario.draft.sourceTemplateId == sourceTemplateId;
+    });
+    if (it == initial.scenarios.end()) {
+        return std::nullopt;
+    }
+    return static_cast<int>(std::distance(initial.scenarios.begin(), it));
+}
+
 QWidget* createResultPanel(
     const safecrowd::domain::ScenarioDraft& scenario,
     const safecrowd::domain::SimulationFrame& frame,
@@ -1233,6 +1291,8 @@ ScenarioResultNavigationView resultNavigationViewFromSaved(SavedResultNavigation
         return ScenarioResultNavigationView::Zone;
     case SavedResultNavigationView::Groups:
         return ScenarioResultNavigationView::Groups;
+    case SavedResultNavigationView::Recommendations:
+        return ScenarioResultNavigationView::Recommendations;
     case SavedResultNavigationView::Bottleneck:
     default:
         return ScenarioResultNavigationView::Bottleneck;
@@ -1247,6 +1307,8 @@ SavedResultNavigationView savedResultNavigationView(ScenarioResultNavigationView
         return SavedResultNavigationView::Zone;
     case ScenarioResultNavigationView::Groups:
         return SavedResultNavigationView::Groups;
+    case ScenarioResultNavigationView::Recommendations:
+        return SavedResultNavigationView::Recommendations;
     case ScenarioResultNavigationView::Bottleneck:
     default:
         return SavedResultNavigationView::Bottleneck;
@@ -1375,6 +1437,24 @@ void ScenarioResultWidget::refreshResultNavigationPanel() {
             refreshResultNavigationPanel();
         });
 
+    if (resultNavigationView_ == ScenarioResultNavigationView::Recommendations) {
+        const safecrowd::domain::AlternativeRecommendationService service;
+        const auto recommendation = service.recommend({
+            .layout = layout_,
+            .sourceScenario = scenario_,
+            .risk = risk_,
+            .artifacts = artifacts_,
+            .finalFrame = frame_,
+        });
+        shell_->setNavigationPanel(createScenarioRecommendationNavigationPanel(
+            recommendation,
+            [this](safecrowd::domain::ScenarioDraft recommendedScenario) {
+                createRecommendedScenario(std::move(recommendedScenario));
+            },
+            shell_));
+        return;
+    }
+
     shell_->setNavigationPanel(createScenarioResultNavigationPanel(
         resultNavigationView_,
         risk_,
@@ -1428,6 +1508,53 @@ void ScenarioResultWidget::rerunScenario() {
         returnAuthoringState_);
 
     rootLayout->replaceWidget(shell_, runWidget);
+    shell_->hide();
+    shell_->deleteLater();
+    shell_ = nullptr;
+}
+
+void ScenarioResultWidget::createRecommendedScenario(
+    safecrowd::domain::ScenarioDraft recommendedScenario) {
+    auto* rootLayout = qobject_cast<QVBoxLayout*>(layout());
+    if (rootLayout == nullptr || shell_ == nullptr) {
+        return;
+    }
+
+    auto initial = returnAuthoringState_.value_or(ScenarioAuthoringWidget::InitialState{});
+    if (initial.scenarios.empty()) {
+        initial.scenarios.push_back(scenarioStateFromDraft(scenario_, layout_));
+        initial.currentScenarioIndex = 0;
+        initial.navigationView = ScenarioAuthoringWidget::NavigationView::Layout;
+    }
+
+    if (const auto existingIndex = existingScenarioIndexBySourceTemplate(initial, recommendedScenario.sourceTemplateId);
+        existingIndex.has_value()) {
+        initial.currentScenarioIndex = *existingIndex;
+        initial.rightPanelMode = ScenarioAuthoringWidget::RightPanelMode::Scenario;
+    } else {
+        recommendedScenario.scenarioId = uniqueScenarioId(initial, recommendedScenario.scenarioId);
+        recommendedScenario.name = uniqueScenarioName(initial, recommendedScenario.name);
+        recommendedScenario.variationDiffKeys =
+            safecrowd::domain::computeScenarioDiffKeys(scenario_, recommendedScenario);
+
+        auto state = scenarioStateFromDraft(recommendedScenario, layout_);
+        state.baseScenarioId = QString::fromStdString(scenario_.scenarioId);
+        state.stagedForRun = false;
+        initial.scenarios.push_back(std::move(state));
+        initial.currentScenarioIndex = static_cast<int>(initial.scenarios.size()) - 1;
+        initial.rightPanelMode = ScenarioAuthoringWidget::RightPanelMode::Scenario;
+    }
+
+    auto* authoringWidget = new ScenarioAuthoringWidget(
+        projectName_,
+        layout_,
+        std::move(initial),
+        saveProjectHandler_,
+        openProjectHandler_,
+        backToLayoutReviewHandler_,
+        this);
+
+    rootLayout->replaceWidget(shell_, authoringWidget);
     shell_->hide();
     shell_->deleteLater();
     shell_ = nullptr;

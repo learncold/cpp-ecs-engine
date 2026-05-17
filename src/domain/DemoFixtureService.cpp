@@ -35,7 +35,7 @@ ScenarioDraft makeTwoFloorEastExitGuidanceAlternative(const ScenarioDraft& basel
         .endSeconds = 180.0,
         .periods = {{.startSeconds = 0.0, .endSeconds = 180.0}},
         .guidedExitZoneId = Ids::EastExitZoneId,
-        .installConnectionId = Ids::UpperWestTrainingToCorridorConnectionId,
+        .installConnectionId = {},
         .baseComplianceRate = 0.95,
         .guidanceStrength = 0.95,
         .maxDetourMeters = 60.0,
