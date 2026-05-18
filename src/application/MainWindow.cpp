@@ -4,10 +4,12 @@
 #include <cstddef>
 #include <filesystem>
 #include <iterator>
+#include <map>
 #include <string>
 #include <utility>
 
 #include <QMessageBox>
+#include <QFileInfo>
 
 #include "application/LayoutReviewWidget.h"
 #include "application/NewProjectWidget.h"
@@ -368,6 +370,83 @@ Widget* visibleChild(QWidget* root) {
     return match;
 }
 
+void appendPointSignature(std::string& signature, const safecrowd::domain::Point2D& point) {
+    signature += std::to_string(point.x);
+    signature += ",";
+    signature += std::to_string(point.y);
+    signature += ";";
+}
+
+std::string polygonSignature(const safecrowd::domain::Polygon2D& polygon) {
+    std::string signature;
+    for (const auto& point : polygon.outline) {
+        appendPointSignature(signature, point);
+    }
+    signature += "|holes:";
+    signature += std::to_string(polygon.holes.size());
+    return signature;
+}
+
+std::string polylineSignature(const safecrowd::domain::Polyline2D& polyline) {
+    std::string signature = polyline.closed ? "closed:" : "open:";
+    for (const auto& point : polyline.vertices) {
+        appendPointSignature(signature, point);
+    }
+    return signature;
+}
+
+std::map<std::string, std::string> layoutElementSignatures(const safecrowd::domain::FacilityLayout2D& layout) {
+    std::map<std::string, std::string> signatures;
+
+    for (const auto& zone : layout.zones) {
+        signatures["zone:" + zone.id] = std::to_string(static_cast<int>(zone.kind)) + "|" + zone.floorId + "|" + polygonSignature(zone.area);
+    }
+    for (const auto& connection : layout.connections) {
+        signatures["connection:" + connection.id] =
+            std::to_string(static_cast<int>(connection.kind)) + "|" + connection.floorId + "|"
+            + connection.fromZoneId + "|" + connection.toZoneId + "|" + std::to_string(connection.effectiveWidth);
+    }
+    for (const auto& barrier : layout.barriers) {
+        signatures["barrier:" + barrier.id] = barrier.floorId + "|" + polylineSignature(barrier.geometry);
+    }
+    for (const auto& control : layout.controls) {
+        signatures["control:" + control.id] =
+            std::to_string(static_cast<int>(control.kind)) + "|" + control.floorId + "|" + control.targetId;
+    }
+
+    return signatures;
+}
+
+safecrowd::domain::ReimportChangeSummary compareLayoutsForReimport(
+    const std::optional<safecrowd::domain::FacilityLayout2D>& previous,
+    const std::optional<safecrowd::domain::FacilityLayout2D>& current) {
+    safecrowd::domain::ReimportChangeSummary summary;
+    summary.hasComparison = previous.has_value() && current.has_value();
+    if (!summary.hasComparison) {
+        return summary;
+    }
+
+    const auto previousSignatures = layoutElementSignatures(*previous);
+    const auto currentSignatures = layoutElementSignatures(*current);
+
+    for (const auto& [id, signature] : currentSignatures) {
+        const auto it = previousSignatures.find(id);
+        if (it == previousSignatures.end()) {
+            ++summary.addedElements;
+        } else if (it->second != signature) {
+            ++summary.changedElements;
+        }
+    }
+    for (const auto& [id, signature] : previousSignatures) {
+        (void)signature;
+        if (!currentSignatures.contains(id)) {
+            ++summary.removedElements;
+        }
+    }
+
+    return summary;
+}
+
 }  // namespace
 
 MainWindow::MainWindow(safecrowd::domain::SafeCrowdDomain& domain, QWidget* parent)
@@ -443,6 +522,10 @@ void MainWindow::showNewProject() {
 void MainWindow::createProject(const NewProjectRequest& request) {
     if (request.projectName.isEmpty() || request.folderPath.isEmpty()) {
         QMessageBox::warning(this, "New Project", "Project name and folder are required.");
+        return;
+    }
+    if (!request.layoutPath.isEmpty() && QFileInfo(request.layoutPath).suffix().compare("dxf", Qt::CaseInsensitive) != 0) {
+        QMessageBox::warning(this, "New Project", "Layout import currently supports .dxf files only.");
         return;
     }
 
@@ -723,6 +806,28 @@ void MainWindow::showLayoutReview(const ProjectMetadata& metadata, safecrowd::do
         [this](const safecrowd::domain::ImportResult& approvedImportResult) {
             lastApprovedImportResult_ = approvedImportResult;
             showScenarioAuthoring(approvedImportResult);
+        },
+        [this](const safecrowd::domain::ImportResult& currentImportResult) {
+            if (currentProject_.isBuiltInDemo() || currentProject_.isBlankLayoutProject()) {
+                QMessageBox::information(this, "Reimport Layout", "This project does not have a DXF file to reimport.");
+                return;
+            }
+
+            auto reimported = importProjectLayout(currentProject_);
+            reimported.artifacts.reimport = compareLayoutsForReimport(currentImportResult.layout, reimported.layout);
+            reimported.reviewStatus = safecrowd::domain::hasBlockingImportIssue(reimported.issues)
+                ? safecrowd::domain::ImportReviewStatus::Rejected
+                : safecrowd::domain::ImportReviewStatus::Pending;
+            reimported.statusMessage = "DXF reimported. Review changes before approving the layout.";
+            if (reimported.artifacts.reimport.hasComparison) {
+                reimported.issues.push_back({
+                    .severity = safecrowd::domain::ImportIssueSeverity::Info,
+                    .code = safecrowd::domain::ImportIssueCode::UnmappedElement,
+                    .message = "Reimport compared the previous reviewed layout with the latest DXF import.",
+                    .suggestion = "Review the reimport diff summary and re-apply any manual corrections that still matter.",
+                });
+            }
+            showLayoutReview(currentProject_, std::move(reimported));
         },
         this));
 }

@@ -27,6 +27,7 @@ public:
         std::function<void()> saveProjectHandler,
         std::function<void()> openProjectHandler,
         std::function<void(const safecrowd::domain::ImportResult&)> approvalHandler,
+        std::function<void(const safecrowd::domain::ImportResult&)> reimportHandler,
         QWidget* parent = nullptr);
 
     const safecrowd::domain::ImportResult& currentImportResult() const noexcept;
@@ -58,6 +59,7 @@ private:
     safecrowd::domain::ImportResult importResult_{};
     std::function<void()> openProjectHandler_{};
     std::function<void(const safecrowd::domain::ImportResult&)> approvalHandler_{};
+    std::function<void(const safecrowd::domain::ImportResult&)> reimportHandler_{};
     std::vector<safecrowd::domain::FacilityLayout2D> undoHistory_{};
     WorkspaceShell* shell_{nullptr};
     LayoutPreviewWidget* preview_{nullptr};
@@ -65,7 +67,9 @@ private:
     QLabel* inspectorDetailLabel_{nullptr};
     QWidget* inspectorEditorHost_{nullptr};
     QVBoxLayout* inspectorEditorLayout_{nullptr};
+    QLabel* importStatusLabel_{nullptr};
     QLabel* approvalStatusLabel_{nullptr};
+    QPushButton* reimportButton_{nullptr};
     QPushButton* approveButton_{nullptr};
     NavigationView navigationView_{NavigationView::Issues};
     QSet<QString> layoutExpandedNodeIds_{};

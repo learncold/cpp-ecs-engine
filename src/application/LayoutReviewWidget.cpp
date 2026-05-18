@@ -43,8 +43,40 @@ QString issueDetail(const safecrowd::domain::ImportIssue& issue) {
     if (!issue.targetId.empty()) {
         details.push_back(QString("Target: %1").arg(QString::fromStdString(issue.targetId)));
     }
+    if (issue.confidence < 0.999) {
+        details.push_back(QString("Confidence: %1%").arg(QString::number(issue.confidence * 100.0, 'f', 0)));
+    }
+    if (!issue.suggestion.empty()) {
+        details.push_back(QString("Suggestion: %1").arg(QString::fromStdString(issue.suggestion)));
+    }
 
     return details.join('\n');
+}
+
+QString importStatusText(const safecrowd::domain::ImportResult& importResult) {
+    QStringList lines;
+    if (!importResult.statusMessage.empty()) {
+        lines.push_back(QString::fromStdString(importResult.statusMessage));
+    }
+
+    const auto& summary = importResult.artifacts.summary;
+    if (summary.rawEntityCount > 0 || summary.layoutElementCount > 0 || summary.issueCount > 0) {
+        lines.push_back(QString("Raw %1  -  Canonical %2  -  Layout %3  -  Issues %4")
+            .arg(static_cast<qulonglong>(summary.rawEntityCount))
+            .arg(static_cast<qulonglong>(summary.canonicalElementCount))
+            .arg(static_cast<qulonglong>(summary.layoutElementCount))
+            .arg(static_cast<qulonglong>(summary.issueCount)));
+    }
+
+    const auto& reimport = importResult.artifacts.reimport;
+    if (reimport.hasComparison) {
+        lines.push_back(QString("Reimport diff: +%1 / -%2 / changed %3")
+            .arg(static_cast<qulonglong>(reimport.addedElements))
+            .arg(static_cast<qulonglong>(reimport.removedElements))
+            .arg(static_cast<qulonglong>(reimport.changedElements)));
+    }
+
+    return lines.isEmpty() ? QString("Review the imported layout before approval.") : lines.join('\n');
 }
 
 QString issueTarget(const safecrowd::domain::ImportIssue& issue) {
@@ -275,7 +307,9 @@ QWidget* createReviewPanel(
     QLabel** inspectorDetail,
     QWidget** inspectorEditorHost,
     QVBoxLayout** inspectorEditorLayout,
+    QLabel** importStatus,
     QLabel** approvalStatus,
+    QPushButton** reimportButton,
     QPushButton** approveButton,
     QWidget* parent) {
     auto* panel = new QWidget(parent);
@@ -306,11 +340,22 @@ QWidget* createReviewPanel(
 
     layout->addStretch(1);
 
+    *importStatus = new QLabel("Review the imported layout before approval.", panel);
+    (*importStatus)->setFont(ui::font(ui::FontRole::Caption));
+    (*importStatus)->setWordWrap(true);
+    (*importStatus)->setStyleSheet(ui::mutedTextStyleSheet());
+    layout->addWidget(*importStatus);
+
     *approvalStatus = new QLabel("Resolve blocking issues first", panel);
     (*approvalStatus)->setFont(ui::font(ui::FontRole::Body));
     (*approvalStatus)->setWordWrap(true);
     (*approvalStatus)->setStyleSheet(ui::mutedTextStyleSheet());
     layout->addWidget(*approvalStatus);
+
+    *reimportButton = new QPushButton("Reimport Layout", panel);
+    (*reimportButton)->setFont(ui::font(ui::FontRole::Body));
+    (*reimportButton)->setStyleSheet(ui::secondaryButtonStyleSheet());
+    layout->addWidget(*reimportButton);
 
     *approveButton = new QPushButton("Approve Layout", panel);
     (*approveButton)->setFont(ui::font(ui::FontRole::Body));
@@ -328,12 +373,14 @@ LayoutReviewWidget::LayoutReviewWidget(
     std::function<void()> saveProjectHandler,
     std::function<void()> openProjectHandler,
     std::function<void(const safecrowd::domain::ImportResult&)> approvalHandler,
+    std::function<void(const safecrowd::domain::ImportResult&)> reimportHandler,
     QWidget* parent)
     : QWidget(parent),
       projectName_(projectName),
       importResult_(importResult),
       openProjectHandler_(std::move(openProjectHandler)),
-      approvalHandler_(std::move(approvalHandler)) {
+      approvalHandler_(std::move(approvalHandler)),
+      reimportHandler_(std::move(reimportHandler)) {
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
@@ -352,7 +399,9 @@ LayoutReviewWidget::LayoutReviewWidget(
         &inspectorDetailLabel_,
         &inspectorEditorHost_,
         &inspectorEditorLayout_,
+        &importStatusLabel_,
         &approvalStatusLabel_,
+        &reimportButton_,
         &approveButton_,
         shell_);
 
@@ -371,6 +420,12 @@ LayoutReviewWidget::LayoutReviewWidget(
         refreshApprovalState();
         if (approvalHandler_) {
             approvalHandler_(importResult_);
+        }
+    });
+
+    connect(reimportButton_, &QPushButton::clicked, this, [this]() {
+        if (reimportHandler_) {
+            reimportHandler_(importResult_);
         }
     });
 
@@ -448,6 +503,10 @@ void LayoutReviewWidget::refreshApprovalState() {
         return issue.blocksSimulation();
     });
     const auto hasBlocking = blockingCount > 0;
+
+    if (importStatusLabel_ != nullptr) {
+        importStatusLabel_->setText(importStatusText(importResult_));
+    }
 
     if (approveButton_ != nullptr) {
         approveButton_->setEnabled(!hasBlocking);
