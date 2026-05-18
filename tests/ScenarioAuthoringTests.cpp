@@ -53,18 +53,29 @@ EnvironmentHazardDraft makeSmokeHazard() {
 }  // namespace
 
 SC_TEST(duplicateScenarioDraft_setsAlternativeRoleAndIdentity) {
-    const auto baseline = makeBaselineDraft();
+    auto baseline = makeBaselineDraft();
+    baseline.sourceTemplateId = "after-sprint-1-baseline";
 
     const auto variant = duplicateScenarioDraft(baseline, "scenario-2", "My Alternative");
 
     SC_EXPECT_TRUE(variant.role == ScenarioRole::Alternative);
     SC_EXPECT_EQ(variant.scenarioId, std::string("scenario-2"));
     SC_EXPECT_EQ(variant.name, std::string("My Alternative"));
+    SC_EXPECT_EQ(variant.sourceTemplateId, std::string("after-sprint-1-baseline"));
     SC_EXPECT_TRUE(variant.variationDiffKeys.empty());
     SC_EXPECT_TRUE(variant.blockingIssues.empty());
     SC_EXPECT_EQ(variant.population.initialPlacements.size(), baseline.population.initialPlacements.size());
     SC_EXPECT_EQ(variant.control.events.size(), baseline.control.events.size());
     SC_EXPECT_EQ(variant.execution.baseSeed, baseline.execution.baseSeed);
+}
+
+SC_TEST(duplicateScenarioDraft_clearsRecommendationProvenance) {
+    auto baseline = makeBaselineDraft();
+    baseline.sourceTemplateId = "recommendation:exit-usage-balancing:scenario-1";
+
+    const auto variant = duplicateScenarioDraft(baseline, "scenario-2", "My Alternative");
+
+    SC_EXPECT_TRUE(variant.sourceTemplateId.empty());
 }
 
 SC_TEST(duplicateScenarioDraft_doesNotMutateSource) {

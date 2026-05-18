@@ -714,6 +714,53 @@ void ScenarioAgentSpawnSystem::update(engine::EngineWorld& world, const engine::
     (void)step;
 }
 
+ScenarioOccupantSourceSpawnSystem::ScenarioOccupantSourceSpawnSystem(std::vector<ScheduledScenarioAgentSeed> seeds)
+    : seeds_(std::move(seeds)) {
+    std::stable_sort(seeds_.begin(), seeds_.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.spawnSeconds < rhs.spawnSeconds;
+    });
+}
+
+void ScenarioOccupantSourceSpawnSystem::configure(engine::EngineWorld& world) {
+    nextSeedIndex_ = 0;
+    spawnDueSeeds(world, 0.0);
+}
+
+void ScenarioOccupantSourceSpawnSystem::update(engine::EngineWorld& world, const engine::EngineStepContext& step) {
+    (void)step;
+
+    auto& resources = world.resources();
+    if (!resources.contains<ScenarioSimulationClockResource>()) {
+        resources.set(ScenarioScheduledSpawnResource{.pendingCount = seeds_.size() - nextSeedIndex_});
+        return;
+    }
+
+    const auto& clock = resources.get<ScenarioSimulationClockResource>();
+    if (clock.complete) {
+        resources.set(ScenarioScheduledSpawnResource{.pendingCount = seeds_.size() - nextSeedIndex_});
+        return;
+    }
+
+    spawnDueSeeds(world, clock.elapsedSeconds);
+}
+
+void ScenarioOccupantSourceSpawnSystem::spawnDueSeeds(engine::EngineWorld& world, double elapsedSeconds) {
+    while (nextSeedIndex_ < seeds_.size()
+           && seeds_[nextSeedIndex_].spawnSeconds <= elapsedSeconds + 1e-9) {
+        const auto& seed = seeds_[nextSeedIndex_].seed;
+        world.commands().spawnEntity(
+            seed.position,
+            seed.agent,
+            seed.velocity,
+            seed.avoidance,
+            seed.route,
+            seed.status);
+        ++nextSeedIndex_;
+    }
+
+    world.resources().set(ScenarioScheduledSpawnResource{.pendingCount = seeds_.size() - nextSeedIndex_});
+}
+
 std::vector<engine::Entity> scenarioNearbyAgents(
     engine::WorldQuery& query,
     const ScenarioAgentSpatialIndexResource& index,

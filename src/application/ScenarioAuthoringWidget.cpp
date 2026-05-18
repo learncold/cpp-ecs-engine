@@ -410,6 +410,9 @@ int draftOccupantCount(const safecrowd::domain::ScenarioDraft& scenario) {
     for (const auto& placement : scenario.population.initialPlacements) {
         total += static_cast<int>(placement.targetAgentCount);
     }
+    for (const auto& source : scenario.population.occupantSources) {
+        total += static_cast<int>(source.targetAgentCount);
+    }
     return total;
 }
 
@@ -434,8 +437,10 @@ QString buildChangeSummaryLine(
     const safecrowd::domain::ScenarioDraft& variant,
     const std::string& key) {
     if (key == "population.placements") {
-        const auto baselinePlacements = static_cast<int>(baseline.population.initialPlacements.size());
-        const auto variantPlacements = static_cast<int>(variant.population.initialPlacements.size());
+        const auto baselinePlacements = static_cast<int>(
+            baseline.population.initialPlacements.size() + baseline.population.occupantSources.size());
+        const auto variantPlacements = static_cast<int>(
+            variant.population.initialPlacements.size() + variant.population.occupantSources.size());
         QStringList parts;
         const int occupantDelta = draftOccupantCount(variant) - draftOccupantCount(baseline);
         if (occupantDelta != 0) {
@@ -594,6 +599,23 @@ QLabel* createRoleBadge(const QString& text, bool alternative, QWidget* parent) 
     return badge;
 }
 
+QString scenarioRoleLabel(safecrowd::domain::ScenarioRole role) {
+    switch (role) {
+    case safecrowd::domain::ScenarioRole::Baseline:
+        return "Baseline";
+    case safecrowd::domain::ScenarioRole::Recommended:
+        return "Recommended";
+    case safecrowd::domain::ScenarioRole::Alternative:
+    default:
+        return "Alternative";
+    }
+}
+
+bool scenarioRoleHasBaselineDiff(safecrowd::domain::ScenarioRole role) {
+    return role == safecrowd::domain::ScenarioRole::Alternative
+        || role == safecrowd::domain::ScenarioRole::Recommended;
+}
+
 void addMetaRow(QVBoxLayout* layout, const QString& label, const QString& value, QWidget* parent) {
     auto* row = new QWidget(parent);
     auto* rowLayout = new QHBoxLayout(row);
@@ -656,6 +678,9 @@ int totalOccupantCount(const ScenarioAuthoringWidget::ScenarioState& scenario) {
 
     for (const auto& placement : scenario.draft.population.initialPlacements) {
         total += static_cast<int>(placement.targetAgentCount);
+    }
+    for (const auto& source : scenario.draft.population.occupantSources) {
+        total += static_cast<int>(source.targetAgentCount);
     }
     return total;
 }
@@ -745,6 +770,36 @@ QIcon groupCrowdTreeIcon() {
         QColor("#1f5fae"));
 }
 
+QIcon sourceCrowdTreeIcon() {
+    QPixmap pixmap(44, 44);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    const QColor color("#1f5fae");
+    painter.setPen(QPen(color, 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(Qt::NoBrush);
+    QPainterPath platform;
+    platform.moveTo(9.0, 35.0);
+    platform.lineTo(30.0, 35.0);
+    platform.lineTo(35.0, 40.0);
+    platform.lineTo(4.0, 40.0);
+    platform.closeSubpath();
+    painter.drawPath(platform);
+
+    painter.drawEllipse(QPointF(18, 12), 6.0, 6.0);
+    QPainterPath body;
+    body.moveTo(10.0, 33.0);
+    body.lineTo(10.0, 25.0);
+    body.cubicTo(10.0, 19.5, 13.5, 17.0, 18.0, 17.0);
+    body.cubicTo(22.5, 17.0, 26.0, 19.5, 26.0, 25.0);
+    body.lineTo(26.0, 33.0);
+    painter.drawPath(body);
+
+    painter.drawLine(QPointF(32.0, 26.0), QPointF(41.0, 26.0));
+    painter.drawLine(QPointF(36.5, 21.5), QPointF(36.5, 30.5));
+    return QIcon(pixmap);
+}
+
 std::vector<NavigationTreeNode> buildCrowdTree(const ScenarioAuthoringWidget::ScenarioState* scenario) {
     if (scenario == nullptr || scenario->crowdPlacements.empty()) {
         return {};
@@ -753,8 +808,9 @@ std::vector<NavigationTreeNode> buildCrowdTree(const ScenarioAuthoringWidget::Sc
     std::vector<NavigationTreeNode> placements;
     for (const auto& placement : scenario->crowdPlacements) {
         const bool group = placement.kind == ScenarioCrowdPlacementKind::Group;
+        const bool source = placement.kind == ScenarioCrowdPlacementKind::Source;
         std::vector<NavigationTreeNode> occupants;
-        for (int index = 1; index <= placement.occupantCount; ++index) {
+        for (int index = 1; group && index <= placement.occupantCount; ++index) {
             occupants.push_back({
                 .label = QString("Occupant %1").arg(index),
                 .id = QString("%1/occupant-%2").arg(placement.id).arg(index),
@@ -767,6 +823,16 @@ std::vector<NavigationTreeNode> buildCrowdTree(const ScenarioAuthoringWidget::Sc
             });
         }
 
+        const auto detail = source
+            ? QString("Source schedule: %1 people every %2s for %3 min\nVelocity: (%4, %5)")
+                  .arg(placement.sourceAgentsPerSpawn)
+                  .arg(placement.sourceIntervalSeconds, 0, 'f', 1)
+                  .arg(std::max(0.0, placement.sourceEndSeconds - placement.sourceStartSeconds) / 60.0, 0, 'f', 1)
+                  .arg(placement.velocity.x, 0, 'f', 2)
+                  .arg(placement.velocity.y, 0, 'f', 2)
+            : QString("Velocity: (%1, %2)")
+                  .arg(placement.velocity.x, 0, 'f', 2)
+                  .arg(placement.velocity.y, 0, 'f', 2);
         placements.push_back({
             .label = QString("%1  -  %2  -  %3 %4")
                          .arg(
@@ -775,10 +841,8 @@ std::vector<NavigationTreeNode> buildCrowdTree(const ScenarioAuthoringWidget::Sc
                          .arg(placement.occupantCount)
                          .arg(placement.occupantCount == 1 ? "occupant" : "occupants"),
             .id = placement.id,
-            .detail = QString("Velocity: (%1, %2)")
-                          .arg(placement.velocity.x, 0, 'f', 2)
-                          .arg(placement.velocity.y, 0, 'f', 2),
-            .icon = group ? groupCrowdTreeIcon() : individualCrowdTreeIcon(),
+            .detail = detail,
+            .icon = source ? sourceCrowdTreeIcon() : (group ? groupCrowdTreeIcon() : individualCrowdTreeIcon()),
             .children = group ? std::move(occupants) : std::vector<NavigationTreeNode>{},
             .expanded = false,
         });
@@ -1200,7 +1264,7 @@ void ScenarioAuthoringWidget::createScenarioWithName(const QString& name, int so
         scenario.crowdPlacements = source.crowdPlacements;
         scenario.startText = source.startText;
         scenario.destinationText = source.destinationText;
-        scenario.baseScenarioId = source.draft.role == safecrowd::domain::ScenarioRole::Alternative
+        scenario.baseScenarioId = scenarioRoleHasBaselineDiff(source.draft.role)
             ? source.baseScenarioId
             : QString::fromStdString(source.draft.scenarioId);
         scenario.stagedForRun = false;
@@ -1333,10 +1397,10 @@ void ScenarioAuthoringWidget::refreshInspector() {
             if (!hasScenario) {
                 addStatusMessage(panelLayout, "No scenario selected", scenarioOverviewPanel_);
             } else {
-                const bool alternative = scenario->draft.role == safecrowd::domain::ScenarioRole::Alternative;
+                const bool variation = scenarioRoleHasBaselineDiff(scenario->draft.role);
                 panelLayout->addWidget(createRoleBadge(
-                    alternative ? "Alternative" : "Baseline",
-                    alternative,
+                    scenarioRoleLabel(scenario->draft.role),
+                    variation,
                     scenarioOverviewPanel_));
 
                 auto* nameLabel = createLabel(
@@ -1354,7 +1418,7 @@ void ScenarioAuthoringWidget::refreshInspector() {
                 addMetaRow(panelLayout, "Blocked", QString::number(static_cast<int>(scenario->draft.control.connectionBlocks.size())), scenarioOverviewPanel_);
                 addMetaRow(panelLayout, "Start", scenario->startText, scenarioOverviewPanel_);
                 addMetaRow(panelLayout, "Destination", scenario->destinationText, scenarioOverviewPanel_);
-                if (alternative && !scenario->baseScenarioId.isEmpty()) {
+                if (variation && !scenario->baseScenarioId.isEmpty()) {
                     addMetaRow(panelLayout, "Based on", scenario->baseScenarioId, scenarioOverviewPanel_);
                 }
             }
@@ -1374,7 +1438,7 @@ void ScenarioAuthoringWidget::refreshInspector() {
             } else if (scenario->draft.role == safecrowd::domain::ScenarioRole::Baseline) {
                 addStatusMessage(panelLayout, "Baseline scenario", scenarioDiffPanel_);
             } else if (scenario->baseScenarioId.isEmpty()) {
-                addStatusMessage(panelLayout, "Alternative scenario / no baseline link", scenarioDiffPanel_);
+                addStatusMessage(panelLayout, "Variation scenario / no baseline link", scenarioDiffPanel_);
             } else {
                 const auto baseId = scenario->baseScenarioId.toStdString();
                 const auto baselineIt = std::find_if(scenarios_.begin(), scenarios_.end(), [&](const auto& candidate) {
@@ -1429,8 +1493,8 @@ void ScenarioAuthoringWidget::refreshInspector() {
                 if (!stagedScenario.stagedForRun || !scenarioHasOccupants(stagedScenario)) {
                     continue;
                 }
-                const auto role = stagedScenario.draft.role == safecrowd::domain::ScenarioRole::Baseline ? "Baseline" : "Alternative";
-                lines << QString("- %1 (%2)").arg(QString::fromStdString(stagedScenario.draft.name), role);
+                lines << QString("- %1 (%2)")
+                    .arg(QString::fromStdString(stagedScenario.draft.name), scenarioRoleLabel(stagedScenario.draft.role));
             }
         }
         stagedScenariosLabel_->setText(lines.join('\n'));
@@ -1675,8 +1739,8 @@ void ScenarioAuthoringWidget::refreshScenarioSwitcher() {
     scenarioSwitcher_->blockSignals(true);
     scenarioSwitcher_->clear();
     for (const auto& scenario : scenarios_) {
-        const auto role = scenario.draft.role == safecrowd::domain::ScenarioRole::Baseline ? "Baseline" : "Alternative";
-        scenarioSwitcher_->addItem(QString("%1  (%2)").arg(QString::fromStdString(scenario.draft.name), role));
+        scenarioSwitcher_->addItem(QString("%1  (%2)")
+            .arg(QString::fromStdString(scenario.draft.name), scenarioRoleLabel(scenario.draft.role)));
     }
     scenarioSwitcher_->setCurrentIndex(currentScenarioIndex_);
     scenarioSwitcher_->blockSignals(false);
@@ -1739,7 +1803,27 @@ void ScenarioAuthoringWidget::updateCurrentScenarioPlacements(const std::vector<
 
     scenario->crowdPlacements = placements;
     scenario->draft.population.initialPlacements.clear();
+    scenario->draft.population.occupantSources.clear();
     for (const auto& placement : scenario->crowdPlacements) {
+        if (placement.kind == ScenarioCrowdPlacementKind::Source) {
+            if (placement.area.empty()) {
+                continue;
+            }
+            safecrowd::domain::OccupantSource2D source;
+            source.id = placement.id.toStdString();
+            source.zoneId = placement.zoneId.toStdString();
+            source.floorId = placement.floorId.toStdString();
+            source.position = placement.area.front();
+            source.targetAgentCount = static_cast<std::size_t>(std::max(0, placement.occupantCount));
+            source.agentsPerSpawn = static_cast<std::size_t>(std::max(1, placement.sourceAgentsPerSpawn));
+            source.startSeconds = std::max(0.0, placement.sourceStartSeconds);
+            source.endSeconds = std::max(source.startSeconds, placement.sourceEndSeconds);
+            source.spawnIntervalSeconds = std::max(0.1, placement.sourceIntervalSeconds);
+            source.initialVelocity = placement.velocity;
+            scenario->draft.population.occupantSources.push_back(std::move(source));
+            continue;
+        }
+
         safecrowd::domain::InitialPlacement2D initialPlacement;
         initialPlacement.id = placement.id.toStdString();
         initialPlacement.zoneId = placement.zoneId.toStdString();
@@ -1779,8 +1863,7 @@ void ScenarioAuthoringWidget::recomputeDependentVariationDiffKeys(const QString&
 }
 
 void ScenarioAuthoringWidget::recomputeVariationDiffKeysIfAlternative(ScenarioState& scenario) const {
-    if (scenario.draft.role != safecrowd::domain::ScenarioRole::Alternative
-        || scenario.baseScenarioId.isEmpty()) {
+    if (!scenarioRoleHasBaselineDiff(scenario.draft.role) || scenario.baseScenarioId.isEmpty()) {
         scenario.draft.variationDiffKeys.clear();
         return;
     }
@@ -1966,8 +2049,8 @@ QWidget* ScenarioAuthoringWidget::createScenarioPanel() {
             if (!scenario.stagedForRun || !scenarioHasOccupants(scenario)) {
                 continue;
             }
-            const auto role = scenario.draft.role == safecrowd::domain::ScenarioRole::Baseline ? "Baseline" : "Alternative";
-            lines << QString("- %1 (%2)").arg(QString::fromStdString(scenario.draft.name), role);
+            lines << QString("- %1 (%2)")
+                .arg(QString::fromStdString(scenario.draft.name), scenarioRoleLabel(scenario.draft.role));
         }
     }
     stagedScenariosLabel_->setText(lines.join('\n'));

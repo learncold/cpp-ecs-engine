@@ -32,6 +32,10 @@ struct ScenarioSimulationStepResource {
     double deltaSeconds{0.0};
 };
 
+struct ScenarioScheduledSpawnResource {
+    std::size_t pendingCount{0};
+};
+
 struct ScenarioAgentSpatialIndexResource {
     double cellSize{1.0};
     std::unordered_map<std::string, std::unordered_map<long long, std::vector<engine::Entity>>> cellsByFloor{};
@@ -159,6 +163,11 @@ struct ScenarioAgentSeed {
     EvacuationStatus status{};
 };
 
+struct ScheduledScenarioAgentSeed {
+    double spawnSeconds{0.0};
+    ScenarioAgentSeed seed{};
+};
+
 std::vector<engine::Entity> scenarioNearbyAgents(
     engine::WorldQuery& query,
     const ScenarioAgentSpatialIndexResource& index,
@@ -196,6 +205,20 @@ public:
 private:
     std::vector<ScenarioAgentSeed> seeds_{};
     double timeLimitSeconds_{60.0};
+};
+
+class ScenarioOccupantSourceSpawnSystem final : public engine::EngineSystem {
+public:
+    explicit ScenarioOccupantSourceSpawnSystem(std::vector<ScheduledScenarioAgentSeed> seeds);
+
+    void configure(engine::EngineWorld& world) override;
+    void update(engine::EngineWorld& world, const engine::EngineStepContext& step) override;
+
+private:
+    void spawnDueSeeds(engine::EngineWorld& world, double elapsedSeconds);
+
+    std::vector<ScheduledScenarioAgentSeed> seeds_{};
+    std::size_t nextSeedIndex_{0};
 };
 
 class ScenarioSpatialIndexSystem final : public engine::EngineSystem {

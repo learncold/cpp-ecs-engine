@@ -29,11 +29,14 @@ ScenarioDraft makeTwoFloorEastExitGuidanceAlternative(const ScenarioDraft& basel
         baseline,
         "two-floor-guidance",
         "East exit guidance alternative");
+    const auto guidanceEndSeconds = baseline.execution.timeLimitSeconds > 0.0
+        ? baseline.execution.timeLimitSeconds
+        : 180.0;
     alternative.control.routeGuidances.push_back({
         .id = "guidance-east-exit",
         .startSeconds = 0.0,
-        .endSeconds = 180.0,
-        .periods = {{.startSeconds = 0.0, .endSeconds = 180.0}},
+        .endSeconds = guidanceEndSeconds,
+        .periods = {{.startSeconds = 0.0, .endSeconds = guidanceEndSeconds}},
         .guidedExitZoneId = Ids::EastExitZoneId,
         .installConnectionId = Ids::UpperWestTrainingToCorridorConnectionId,
         .baseComplianceRate = 0.95,

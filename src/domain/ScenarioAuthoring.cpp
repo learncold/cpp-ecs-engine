@@ -48,12 +48,31 @@ bool placementsEqual(const InitialPlacement2D& lhs, const InitialPlacement2D& rh
     return true;
 }
 
+bool occupantSourcesEqual(const OccupantSource2D& lhs, const OccupantSource2D& rhs) {
+    return lhs.id == rhs.id
+        && lhs.zoneId == rhs.zoneId
+        && lhs.floorId == rhs.floorId
+        && pointsEqual(lhs.position, rhs.position)
+        && lhs.targetAgentCount == rhs.targetAgentCount
+        && lhs.agentsPerSpawn == rhs.agentsPerSpawn
+        && lhs.startSeconds == rhs.startSeconds
+        && lhs.endSeconds == rhs.endSeconds
+        && lhs.spawnIntervalSeconds == rhs.spawnIntervalSeconds
+        && pointsEqual(lhs.initialVelocity, rhs.initialVelocity);
+}
+
 bool populationsEqual(const PopulationSpec& lhs, const PopulationSpec& rhs) {
-    if (lhs.initialPlacements.size() != rhs.initialPlacements.size()) {
+    if (lhs.initialPlacements.size() != rhs.initialPlacements.size()
+        || lhs.occupantSources.size() != rhs.occupantSources.size()) {
         return false;
     }
     for (std::size_t i = 0; i < lhs.initialPlacements.size(); ++i) {
         if (!placementsEqual(lhs.initialPlacements[i], rhs.initialPlacements[i])) {
+            return false;
+        }
+    }
+    for (std::size_t i = 0; i < lhs.occupantSources.size(); ++i) {
+        if (!occupantSourcesEqual(lhs.occupantSources[i], rhs.occupantSources[i])) {
             return false;
         }
     }
@@ -157,6 +176,10 @@ bool routeGuidancesEqual(const std::vector<RouteGuidanceDraft>& lhs,
     return true;
 }
 
+bool isRecommendationSourceTemplateId(const std::string& sourceTemplateId) {
+    return sourceTemplateId.rfind("recommendation:", 0) == 0;
+}
+
 }  // namespace
 
 ScenarioDraft duplicateScenarioDraft(const ScenarioDraft& source,
@@ -166,6 +189,9 @@ ScenarioDraft duplicateScenarioDraft(const ScenarioDraft& source,
     copy.scenarioId = std::move(newScenarioId);
     copy.name = std::move(newName);
     copy.role = ScenarioRole::Alternative;
+    if (isRecommendationSourceTemplateId(copy.sourceTemplateId)) {
+        copy.sourceTemplateId.clear();
+    }
     copy.variationDiffKeys.clear();
     copy.blockingIssues.clear();
     return copy;

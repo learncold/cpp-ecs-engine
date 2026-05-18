@@ -271,6 +271,22 @@ ScenarioAuthoringWidget::ScenarioState scenarioStateFromSaved(
         uiPlacement.generatedPositions = placement.explicitPositions;
         state.crowdPlacements.push_back(std::move(uiPlacement));
     }
+    for (const auto& source : saved.draft.population.occupantSources) {
+        ScenarioCrowdPlacement uiPlacement;
+        uiPlacement.id = QString::fromStdString(source.id);
+        uiPlacement.name = uiPlacement.id;
+        uiPlacement.kind = ScenarioCrowdPlacementKind::Source;
+        uiPlacement.zoneId = QString::fromStdString(source.zoneId);
+        uiPlacement.floorId = QString::fromStdString(source.floorId);
+        uiPlacement.area = {source.position};
+        uiPlacement.occupantCount = static_cast<int>(source.targetAgentCount);
+        uiPlacement.velocity = source.initialVelocity;
+        uiPlacement.sourceAgentsPerSpawn = std::max(1, static_cast<int>(source.agentsPerSpawn));
+        uiPlacement.sourceStartSeconds = source.startSeconds;
+        uiPlacement.sourceEndSeconds = source.endSeconds;
+        uiPlacement.sourceIntervalSeconds = source.spawnIntervalSeconds;
+        state.crowdPlacements.push_back(std::move(uiPlacement));
+    }
 
     return state;
 }

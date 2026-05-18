@@ -301,6 +301,10 @@ bool pointInsideWalkableZoneWithClearance(
     if (zoneIt == layout.zones.end()) {
         return false;
     }
+    if (clearance > kGeometryEpsilon
+        && distanceToPolygonBoundary(zoneIt->area, point) < clearance) {
+        return false;
+    }
     return pointHasBarrierClearance(layout, point, floorId, clearance);
 }
 

@@ -340,7 +340,10 @@ public:
         advanceRoutesForWaypointProgress(query, clampedDelta, activeEntities_, layoutCache);
         updateAgentPhysicsFloorIds(query, layoutCache, activeEntities_);
         resolveAgentOverlaps(query, activeEntities_, layoutCache);
-        advanceClock(query, clock, entities, clampedDelta);
+        const auto pendingScheduledSpawns = resources.contains<ScenarioScheduledSpawnResource>()
+            ? resources.get<ScenarioScheduledSpawnResource>().pendingCount
+            : std::size_t{0};
+        advanceClock(query, clock, entities, clampedDelta, pendingScheduledSpawns);
         resources.set(ScenarioSimulationStepResource{});
     }
 
@@ -1330,16 +1333,25 @@ private:
             return;
         }
 
-        if (const auto* retained = matchingActiveGuidance(activeGuidances, route.guidanceEventId);
-            retained != nullptr
-            && retained->guidance != nullptr
-            && (!retained->guidance->installConnectionId.empty() || guidanceHasInstallPosition(*retained->guidance))) {
-            if (route.guidanceEventId == activeRouteGuidanceKey(*retained)) {
+        const auto* visibleGuidance = applicableActiveGuidance(activeGuidances, layoutCache, position, agent, route);
+        if (visibleGuidance != nullptr && visibleGuidance->guidance != nullptr
+            && (!visibleGuidance->guidance->installConnectionId.empty()
+                || guidanceHasInstallPosition(*visibleGuidance->guidance))) {
+            if (route.guidanceEventId == activeRouteGuidanceKey(*visibleGuidance)) {
                 return;
             }
         }
 
-        const auto* activeGuidance = applicableActiveGuidance(activeGuidances, layoutCache, position, agent, route);
+        const auto* activeGuidance = visibleGuidance;
+        if (activeGuidance == nullptr) {
+            if (const auto* retained = matchingActiveGuidance(activeGuidances, route.guidanceEventId);
+                retained != nullptr
+                && retained->guidance != nullptr
+                && (!retained->guidance->installConnectionId.empty() || guidanceHasInstallPosition(*retained->guidance))) {
+                return;
+            }
+        }
+
         if (activeGuidance == nullptr || activeGuidance->guidance == nullptr) {
             if (!route.guidanceEventId.empty() || route.followsGuidance) {
                 route.guidanceEventId.clear();
@@ -2560,7 +2572,8 @@ private:
         engine::WorldQuery& query,
         ScenarioSimulationClockResource& clock,
         const std::vector<engine::Entity>& entities,
-        double deltaSeconds) const {
+        double deltaSeconds,
+        std::size_t pendingScheduledSpawns) const {
         clock.elapsedSeconds += deltaSeconds;
         clock.complete = clock.elapsedSeconds >= clock.timeLimitSeconds;
         if (clock.complete) {
@@ -2576,7 +2589,7 @@ private:
                 ++evacuatedAgentCount;
             }
         }
-        clock.complete = totalAgentCount > 0 && evacuatedAgentCount >= totalAgentCount;
+        clock.complete = pendingScheduledSpawns == 0 && totalAgentCount > 0 && evacuatedAgentCount >= totalAgentCount;
     }
 
     bool currentWaypointIsVertical(const EvacuationRoute& route) const {
