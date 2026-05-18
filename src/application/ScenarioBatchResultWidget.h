@@ -67,15 +67,16 @@ private:
     void pauseReplay();
     void refreshComparisonSelection();
     void refreshPressureComparisonTable();
-    void refreshRecommendationPanel();
     void refreshResultNavigationPanel();
     void refreshSelectedResult();
     void rerunBatch();
     void seekToTimingMarkerSeconds(double seconds);
+    void setRecommendationScenarioSelected(int index, bool selected);
     void setOverlayMode(OverlayMode mode);
     void showAuthoring(ScenarioAuthoringWidget::InitialState initialState);
     void showClosestReplayFrameAtSeconds(double seconds);
     void showReplayFrame(const safecrowd::domain::SimulationFrame& frame);
+    QWidget* createBatchRecommendationNavigationPanel();
     int explicitBaselineResultIndex() const noexcept;
     int baselineResultIndex() const noexcept;
 
@@ -88,6 +89,7 @@ private:
     std::function<void()> backToLayoutReviewHandler_{};
     int currentResultIndex_{0};
     std::vector<int> selectedCompareIndices_{};
+    std::vector<int> selectedRecommendationIndices_{};
     std::vector<safecrowd::domain::SimulationFrame> replayFrames_{};
     int replayFrameIndex_{0};
     WorkspaceShell* shell_{nullptr};
@@ -98,7 +100,6 @@ private:
     QSlider* replaySlider_{nullptr};
     QLabel* replayTimeLabel_{nullptr};
     QLabel* detailLabel_{nullptr};
-    QWidget* recommendationPanel_{nullptr};
     QTableWidget* pressureTable_{nullptr};
     std::vector<QCheckBox*> compareCheckBoxes_{};
     QWidget* remainingChart_{nullptr};

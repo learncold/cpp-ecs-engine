@@ -45,6 +45,7 @@ public:
 private:
     void rerunScenario();
     void navigateToAuthoring(bool showRunPanel);
+    void createRecommendedScenario(safecrowd::domain::ScenarioDraft recommendedScenario);
     void refreshResultNavigationPanel();
 
     QString projectName_{};

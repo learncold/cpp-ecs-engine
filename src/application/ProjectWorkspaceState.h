@@ -35,6 +35,7 @@ enum class SavedResultNavigationView {
     Hotspot,
     Zone,
     Groups,
+    Recommendations,
 };
 
 struct SavedScenarioState {

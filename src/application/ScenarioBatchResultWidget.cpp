@@ -16,7 +16,6 @@
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QLabel>
-#include <QLayout>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
@@ -79,6 +78,11 @@ QString formatPercent(std::size_t numerator, std::size_t denominator) {
     return QString("%1%").arg(ratio * 100.0, 0, 'f', 0);
 }
 
+bool shouldShowRecommendationEvidence(const safecrowd::domain::AlternativeRecommendationEvidence& item) {
+    const auto label = QString::fromStdString(item.label);
+    return !label.startsWith("Risk ") && label != "Critical pressure events";
+}
+
 QString formatPressureScore(double score) {
     return QString::number(score, 'f', 1);
 }
@@ -123,18 +127,6 @@ QString scenarioRoleLabel(safecrowd::domain::ScenarioRole role) {
     case safecrowd::domain::ScenarioRole::Alternative:
     default:
         return "Alternative";
-    }
-}
-
-void clearLayout(QLayout* layout) {
-    if (layout == nullptr) {
-        return;
-    }
-    while (auto* item = layout->takeAt(0)) {
-        if (auto* widget = item->widget(); widget != nullptr) {
-            widget->deleteLater();
-        }
-        delete item;
     }
 }
 
@@ -681,6 +673,8 @@ ScenarioResultNavigationView resultNavigationViewFromSaved(SavedResultNavigation
         return ScenarioResultNavigationView::Zone;
     case SavedResultNavigationView::Groups:
         return ScenarioResultNavigationView::Groups;
+    case SavedResultNavigationView::Recommendations:
+        return ScenarioResultNavigationView::Recommendations;
     case SavedResultNavigationView::Bottleneck:
     default:
         return ScenarioResultNavigationView::Bottleneck;
@@ -695,6 +689,8 @@ SavedResultNavigationView savedResultNavigationView(ScenarioResultNavigationView
         return SavedResultNavigationView::Zone;
     case ScenarioResultNavigationView::Groups:
         return SavedResultNavigationView::Groups;
+    case ScenarioResultNavigationView::Recommendations:
+        return SavedResultNavigationView::Recommendations;
     case ScenarioResultNavigationView::Bottleneck:
     default:
         return SavedResultNavigationView::Bottleneck;
@@ -746,6 +742,9 @@ ScenarioBatchResultWidget::ScenarioBatchResultWidget(
                 selectedCompareIndices_.push_back(index);
             }
         }
+    }
+    for (int index = 0; index < static_cast<int>(results_.size()); ++index) {
+        selectedRecommendationIndices_.push_back(index);
     }
 
     auto* rootLayout = new QVBoxLayout(this);
@@ -978,13 +977,6 @@ QWidget* ScenarioBatchResultWidget::createSummaryPanel() {
     detailLabel_->setStyleSheet(ui::mutedTextStyleSheet());
     detailLayout->addWidget(detailLabel_);
     layout->addWidget(detailCard);
-
-    recommendationPanel_ = new QFrame(content);
-    recommendationPanel_->setStyleSheet(ui::panelStyleSheet());
-    auto* recommendationLayout = new QVBoxLayout(recommendationPanel_);
-    recommendationLayout->setContentsMargins(12, 10, 12, 10);
-    recommendationLayout->setSpacing(8);
-    layout->addWidget(recommendationPanel_);
 
     layout->addStretch(1);
 
@@ -1377,98 +1369,186 @@ void ScenarioBatchResultWidget::refreshPressureComparisonTable() {
     pressureTable_->resizeRowsToContents();
 }
 
-void ScenarioBatchResultWidget::refreshRecommendationPanel() {
-    if (recommendationPanel_ == nullptr) {
+void ScenarioBatchResultWidget::setRecommendationScenarioSelected(int index, bool selected) {
+    if (index < 0 || index >= static_cast<int>(results_.size())) {
         return;
     }
-    auto* panelLayout = qobject_cast<QVBoxLayout*>(recommendationPanel_->layout());
-    clearLayout(panelLayout);
-    if (panelLayout == nullptr) {
-        return;
+    const auto it = std::find(selectedRecommendationIndices_.begin(), selectedRecommendationIndices_.end(), index);
+    if (selected && it == selectedRecommendationIndices_.end()) {
+        selectedRecommendationIndices_.push_back(index);
+        std::sort(selectedRecommendationIndices_.begin(), selectedRecommendationIndices_.end());
+    } else if (!selected && it != selectedRecommendationIndices_.end()) {
+        selectedRecommendationIndices_.erase(it);
     }
+    QTimer::singleShot(0, this, [this]() {
+        refreshResultNavigationPanel();
+    });
+}
 
-    panelLayout->addWidget(createLabel("Recommendations", recommendationPanel_, ui::FontRole::SectionTitle));
-    if (results_.empty() || currentResultIndex_ < 0 || currentResultIndex_ >= static_cast<int>(results_.size())) {
-        auto* empty = createLabel("No completed result selected.", recommendationPanel_, ui::FontRole::Caption);
+QWidget* ScenarioBatchResultWidget::createBatchRecommendationNavigationPanel() {
+    auto* panel = new QWidget(shell_);
+    auto* layout = new QVBoxLayout(panel);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(12);
+
+    auto* header = createLabel("Recommendations", panel, ui::FontRole::SectionTitle);
+    header->setStyleSheet(ui::mutedTextStyleSheet());
+    layout->addWidget(header);
+    auto* caption = createLabel("Select scenarios to inspect their operational alternatives.", panel, ui::FontRole::Caption);
+    caption->setStyleSheet(ui::subtleTextStyleSheet());
+    layout->addWidget(caption);
+
+    auto* selector = new QFrame(panel);
+    selector->setStyleSheet(ui::panelStyleSheet());
+    auto* selectorLayout = new QVBoxLayout(selector);
+    selectorLayout->setContentsMargins(14, 12, 14, 12);
+    selectorLayout->setSpacing(8);
+    selectorLayout->addWidget(createLabel("Scenarios", selector, ui::FontRole::Body));
+    for (int index = 0; index < static_cast<int>(results_.size()); ++index) {
+        const auto& result = results_[static_cast<std::size_t>(index)];
+        auto* checkbox = new QCheckBox(
+            QString("%1\n%2  -  %3")
+                .arg(QString::fromStdString(result.scenario.name))
+                .arg(scenarioRoleLabel(result.scenario.role))
+                .arg(formatSeconds(finalSeconds(result))),
+            selector);
+        checkbox->setFont(ui::font(ui::FontRole::Caption));
+        checkbox->setChecked(std::find(
+            selectedRecommendationIndices_.begin(),
+            selectedRecommendationIndices_.end(),
+            index) != selectedRecommendationIndices_.end());
+        checkbox->setStyleSheet(
+            "QCheckBox { color: #344256; spacing: 8px; }"
+            "QCheckBox::indicator { width: 16px; height: 16px; }");
+        selectorLayout->addWidget(checkbox);
+        connect(checkbox, &QCheckBox::toggled, this, [this, index](bool checked) {
+            setRecommendationScenarioSelected(index, checked);
+        });
+    }
+    layout->addWidget(selector);
+
+    auto* scrollArea = new QScrollArea(panel);
+    scrollArea->setWidgetResizable(true);
+    scrollArea->setFrameShape(QFrame::NoFrame);
+    scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    ui::polishScrollArea(scrollArea);
+
+    auto* content = new QWidget(scrollArea);
+    content->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    auto* contentLayout = new QVBoxLayout(content);
+    contentLayout->setContentsMargins(0, 0, 10, 0);
+    contentLayout->setSpacing(12);
+
+    if (selectedRecommendationIndices_.empty()) {
+        auto* empty = createLabel("Select at least one scenario.", content, ui::FontRole::Caption);
         empty->setStyleSheet(ui::mutedTextStyleSheet());
-        panelLayout->addWidget(empty);
-        return;
+        contentLayout->addWidget(empty);
     }
 
-    const auto& selected = results_[static_cast<std::size_t>(currentResultIndex_)];
-    safecrowd::domain::AlternativeRecommendationRequest request{
-        .layout = layout_,
-        .sourceScenario = selected.scenario,
-        .risk = selected.risk,
-        .artifacts = selected.artifacts,
-    };
     const auto baselineIndex = explicitBaselineResultIndex();
-    if (baselineIndex >= 0 && baselineIndex < static_cast<int>(results_.size())) {
-        request.baselineScenario = results_[static_cast<std::size_t>(baselineIndex)].scenario;
-    }
-
+    const auto* baselineScenario =
+        baselineIndex >= 0 && baselineIndex < static_cast<int>(results_.size())
+            ? &results_[static_cast<std::size_t>(baselineIndex)].scenario
+            : nullptr;
     const safecrowd::domain::AlternativeRecommendationService service;
-    const auto recommendation = service.recommend(request);
-    if (recommendation.candidates.empty()) {
-        const auto message = recommendation.blockingReasons.empty()
-            ? QString("No actionable recommendation for this result.")
-            : QString::fromStdString(recommendation.blockingReasons.front());
-        auto* empty = createLabel(message, recommendationPanel_, ui::FontRole::Caption);
-        empty->setStyleSheet(ui::mutedTextStyleSheet());
-        panelLayout->addWidget(empty);
-        return;
-    }
+    for (const auto index : selectedRecommendationIndices_) {
+        if (index < 0 || index >= static_cast<int>(results_.size())) {
+            continue;
+        }
+        const auto& result = results_[static_cast<std::size_t>(index)];
+        const auto recommendation = service.recommend(
+            layout_,
+            result.scenario,
+            result.risk,
+            result.artifacts,
+            baselineScenario,
+            &result.frame);
 
-    for (const auto& candidate : recommendation.candidates) {
-        auto* section = new QWidget(recommendationPanel_);
-        auto* sectionLayout = new QVBoxLayout(section);
-        sectionLayout->setContentsMargins(0, 0, 0, 0);
-        sectionLayout->setSpacing(5);
-
-        auto* title = createLabel(QString::fromStdString(candidate.title), section, ui::FontRole::Body);
+        auto* scenarioHeader = new QWidget(content);
+        auto* scenarioHeaderLayout = new QVBoxLayout(scenarioHeader);
+        scenarioHeaderLayout->setContentsMargins(0, 0, 0, 0);
+        scenarioHeaderLayout->setSpacing(2);
+        auto* title = createLabel(QString::fromStdString(result.scenario.name), scenarioHeader, ui::FontRole::Body);
         title->setStyleSheet("QLabel { color: #16202b; font-weight: 600; }");
-        sectionLayout->addWidget(title);
-
-        auto* summary = createLabel(QString::fromStdString(candidate.summary), section, ui::FontRole::Caption);
-        summary->setStyleSheet(ui::mutedTextStyleSheet());
-        sectionLayout->addWidget(summary);
-
-        auto* source = createLabel(
-            QString("Result source: %1").arg(QString::fromStdString(candidate.artifactSource)),
-            section,
+        scenarioHeaderLayout->addWidget(title);
+        auto* meta = createLabel(
+            QString("%1  -  %2  -  %3 recommendation%4")
+                .arg(scenarioRoleLabel(result.scenario.role))
+                .arg(formatSeconds(finalSeconds(result)))
+                .arg(static_cast<int>(recommendation.candidates.size()))
+                .arg(recommendation.candidates.size() == 1 ? "" : "s"),
+            scenarioHeader,
             ui::FontRole::Caption);
-        source->setStyleSheet(ui::mutedTextStyleSheet());
-        sectionLayout->addWidget(source);
+        meta->setStyleSheet(ui::subtleTextStyleSheet());
+        scenarioHeaderLayout->addWidget(meta);
+        contentLayout->addWidget(scenarioHeader);
 
-        for (const auto& item : candidate.evidence) {
-            auto* evidenceLabel = createLabel(
-                QString("%1: %2 (%3)")
-                    .arg(QString::fromStdString(item.label),
-                         QString::fromStdString(item.value),
-                         QString::fromStdString(item.source)),
-                section,
-                ui::FontRole::Caption);
-            evidenceLabel->setStyleSheet(ui::mutedTextStyleSheet());
-            sectionLayout->addWidget(evidenceLabel);
+        if (recommendation.candidates.empty()) {
+            const auto message = recommendation.blockingReasons.empty()
+                ? QString("No actionable recommendation for this scenario.")
+                : QString::fromStdString(recommendation.blockingReasons.front());
+            auto* empty = createLabel(message, content, ui::FontRole::Caption);
+            empty->setStyleSheet(ui::mutedTextStyleSheet());
+            contentLayout->addWidget(empty);
+            continue;
         }
 
-        auto* impact = createLabel(
-            QString("Expected direction: %1").arg(QString::fromStdString(candidate.expectedImprovement)),
-            section,
-            ui::FontRole::Caption);
-        impact->setStyleSheet(ui::mutedTextStyleSheet());
-        sectionLayout->addWidget(impact);
+        for (const auto& candidate : recommendation.candidates) {
+            auto* section = new QFrame(content);
+            section->setStyleSheet(ui::panelStyleSheet());
+            section->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+            section->setMinimumWidth(0);
+            auto* sectionLayout = new QVBoxLayout(section);
+            sectionLayout->setContentsMargins(14, 12, 14, 12);
+            sectionLayout->setSpacing(6);
 
-        auto* button = new QPushButton("Create Recommended Scenario", section);
-        button->setFont(ui::font(ui::FontRole::Body));
-        button->setStyleSheet(ui::secondaryButtonStyleSheet());
-        sectionLayout->addWidget(button);
-        connect(button, &QPushButton::clicked, this, [this, scenario = candidate.recommendedScenario]() {
-            createRecommendedScenario(scenario);
-        });
+            auto* candidateTitle = createLabel(QString::fromStdString(candidate.title), section, ui::FontRole::Body);
+            candidateTitle->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+            candidateTitle->setStyleSheet("QLabel { color: #16202b; font-weight: 600; }");
+            sectionLayout->addWidget(candidateTitle);
 
-        panelLayout->addWidget(section);
+            auto* summary = createLabel(QString::fromStdString(candidate.summary), section, ui::FontRole::Caption);
+            summary->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+            summary->setStyleSheet(ui::mutedTextStyleSheet());
+            sectionLayout->addWidget(summary);
+
+            for (const auto& item : candidate.evidence) {
+                if (!shouldShowRecommendationEvidence(item)) {
+                    continue;
+                }
+                auto* evidenceLabel = createLabel(
+                    QString("%1: %2")
+                        .arg(QString::fromStdString(item.label),
+                             QString::fromStdString(item.value)),
+                    section,
+                    ui::FontRole::Caption);
+                evidenceLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+                evidenceLabel->setStyleSheet(ui::subtleTextStyleSheet());
+                evidenceLabel->setToolTip(QString::fromStdString(item.source));
+                sectionLayout->addWidget(evidenceLabel);
+            }
+
+            auto* button = new QPushButton("Create Scenario", section);
+            button->setFont(ui::font(ui::FontRole::Body));
+            button->setStyleSheet(ui::secondaryButtonStyleSheet());
+            button->setCursor(Qt::PointingHandCursor);
+            button->setMinimumWidth(0);
+            button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+            button->setToolTip("Create recommended scenario");
+            sectionLayout->addWidget(button);
+            connect(button, &QPushButton::clicked, section, [this, index, scenario = candidate.recommendedScenario]() {
+                currentResultIndex_ = index;
+                createRecommendedScenario(scenario);
+            });
+
+            contentLayout->addWidget(section);
+        }
     }
+
+    contentLayout->addStretch(1);
+    scrollArea->setWidget(content);
+    layout->addWidget(scrollArea, 1);
+    return panel;
 }
 
 void ScenarioBatchResultWidget::refreshResultNavigationPanel() {
@@ -1485,6 +1565,11 @@ void ScenarioBatchResultWidget::refreshResultNavigationPanel() {
         });
 
     const auto& result = results_[static_cast<std::size_t>(currentResultIndex_)];
+    if (resultNavigationView_ == ScenarioResultNavigationView::Recommendations) {
+        shell_->setNavigationPanel(createBatchRecommendationNavigationPanel());
+        return;
+    }
+
     auto bottleneckFocusHandler = [this](std::size_t index) {
         if (results_.empty() || currentResultIndex_ < 0 || currentResultIndex_ >= static_cast<int>(results_.size())) {
             return;
@@ -1552,7 +1637,6 @@ void ScenarioBatchResultWidget::refreshSelectedResult() {
         static_cast<ComparisonGraphWidget*>(exitsChart_)->setResults(results_, selectedCompareIndices_, currentResultIndex_);
     }
     refreshPressureComparisonTable();
-    refreshRecommendationPanel();
     refreshResultNavigationPanel();
     if (detailLabel_ != nullptr) {
         const auto selectedFinalSeconds = finalSeconds(result);

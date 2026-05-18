@@ -181,13 +181,21 @@ QIcon makeResultNavigationIcon(const QString& tabId, const QColor& color) {
         painter.drawRoundedRect(QRectF(11, 11, 22, 22), 4, 4);
         painter.drawLine(QPointF(22, 11), QPointF(22, 33));
         painter.drawLine(QPointF(11, 22), QPointF(33, 22));
-    } else {
+    } else if (tabId == "groups") {
         painter.drawEllipse(QPointF(22, 14), 5, 5);
         painter.drawEllipse(QPointF(14, 20), 4, 4);
         painter.drawEllipse(QPointF(30, 20), 4, 4);
         painter.drawArc(QRectF(12, 22, 20, 14), 20 * 16, 140 * 16);
         painter.drawArc(QRectF(5, 26, 18, 10), 30 * 16, 120 * 16);
         painter.drawArc(QRectF(21, 26, 18, 10), 30 * 16, 120 * 16);
+    } else {
+        painter.drawRoundedRect(QRectF(12, 12, 20, 20), 4, 4);
+        painter.drawLine(QPointF(16, 18), QPointF(24, 18));
+        painter.drawLine(QPointF(24, 18), QPointF(21, 15));
+        painter.drawLine(QPointF(24, 18), QPointF(21, 21));
+        painter.drawLine(QPointF(28, 26), QPointF(20, 26));
+        painter.drawLine(QPointF(20, 26), QPointF(23, 23));
+        painter.drawLine(QPointF(20, 26), QPointF(23, 29));
     }
 
     return QIcon(pixmap);
@@ -334,6 +342,11 @@ QWidget* createGroupsReportPanel(const safecrowd::domain::ScenarioResultArtifact
     return parts.panel;
 }
 
+bool shouldShowRecommendationEvidence(const safecrowd::domain::AlternativeRecommendationEvidence& item) {
+    const auto label = QString::fromStdString(item.label);
+    return !label.startsWith("Risk ") && label != "Critical pressure events";
+}
+
 }  // namespace
 
 std::vector<WorkspaceNavigationTab> scenarioResultNavigationTabs() {
@@ -358,6 +371,11 @@ std::vector<WorkspaceNavigationTab> scenarioResultNavigationTabs() {
             .label = "Groups",
             .icon = makeResultNavigationIcon("groups", QColor("#1f5fae")),
         },
+        {
+            .id = "recommendations",
+            .label = "Recommendations",
+            .icon = makeResultNavigationIcon("recommendations", QColor("#1f5fae")),
+        },
     };
 }
 
@@ -369,6 +387,8 @@ QString scenarioResultNavigationTabId(ScenarioResultNavigationView view) {
         return "zone";
     case ScenarioResultNavigationView::Groups:
         return "groups";
+    case ScenarioResultNavigationView::Recommendations:
+        return "recommendations";
     case ScenarioResultNavigationView::Bottleneck:
     default:
         return "bottleneck";
@@ -384,6 +404,9 @@ ScenarioResultNavigationView scenarioResultNavigationViewFromTabId(const QString
     }
     if (tabId == "groups") {
         return ScenarioResultNavigationView::Groups;
+    }
+    if (tabId == "recommendations") {
+        return ScenarioResultNavigationView::Recommendations;
     }
     return ScenarioResultNavigationView::Bottleneck;
 }
@@ -402,10 +425,83 @@ QWidget* createScenarioResultNavigationPanel(
         return createZoneReportPanel(artifacts, parent);
     case ScenarioResultNavigationView::Groups:
         return createGroupsReportPanel(artifacts, parent);
+    case ScenarioResultNavigationView::Recommendations:
+        return createResultReportPanel("Recommendations", "Recommended operational changes", parent).panel;
     case ScenarioResultNavigationView::Bottleneck:
     default:
         return createBottleneckReportPanel(risk, std::move(bottleneckFocusHandler), parent);
     }
+}
+
+QWidget* createScenarioRecommendationNavigationPanel(
+    const safecrowd::domain::AlternativeRecommendationResult& recommendation,
+    std::function<void(safecrowd::domain::ScenarioDraft)> createScenarioHandler,
+    QWidget* parent) {
+    auto parts = createResultReportPanel("Recommendations", "Operational alternatives for this result", parent);
+    if (recommendation.candidates.empty()) {
+        const auto message = recommendation.blockingReasons.empty()
+            ? QString("No actionable recommendation for this result.")
+            : QString::fromStdString(recommendation.blockingReasons.front());
+        auto* empty = createLabel(message, parts.content, ui::FontRole::Caption);
+        empty->setStyleSheet(ui::mutedTextStyleSheet());
+        parts.contentLayout->addWidget(empty);
+        parts.contentLayout->addStretch(1);
+        return parts.panel;
+    }
+
+    for (const auto& candidate : recommendation.candidates) {
+        auto* section = new QFrame(parts.content);
+        section->setStyleSheet(ui::panelStyleSheet());
+        section->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+        section->setMinimumWidth(0);
+        auto* sectionLayout = new QVBoxLayout(section);
+        sectionLayout->setContentsMargins(14, 12, 14, 12);
+        sectionLayout->setSpacing(6);
+
+        auto* title = createLabel(QString::fromStdString(candidate.title), section, ui::FontRole::Body);
+        title->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        title->setStyleSheet("QLabel { color: #16202b; font-weight: 600; }");
+        sectionLayout->addWidget(title);
+
+        auto* summary = createLabel(QString::fromStdString(candidate.summary), section, ui::FontRole::Caption);
+        summary->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        summary->setStyleSheet(ui::mutedTextStyleSheet());
+        sectionLayout->addWidget(summary);
+
+        for (const auto& item : candidate.evidence) {
+            if (!shouldShowRecommendationEvidence(item)) {
+                continue;
+            }
+            auto* evidenceLabel = createLabel(
+                QString("%1: %2")
+                    .arg(QString::fromStdString(item.label),
+                         QString::fromStdString(item.value)),
+                section,
+                ui::FontRole::Caption);
+            evidenceLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+            evidenceLabel->setStyleSheet(ui::subtleTextStyleSheet());
+            evidenceLabel->setToolTip(QString::fromStdString(item.source));
+            sectionLayout->addWidget(evidenceLabel);
+        }
+
+        auto* button = new QPushButton("Create Scenario", section);
+        button->setFont(ui::font(ui::FontRole::Body));
+        button->setStyleSheet(ui::secondaryButtonStyleSheet());
+        button->setCursor(Qt::PointingHandCursor);
+        button->setMinimumWidth(0);
+        button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        button->setToolTip("Create recommended scenario");
+        sectionLayout->addWidget(button);
+        QObject::connect(button, &QPushButton::clicked, section, [createScenarioHandler, scenario = candidate.recommendedScenario]() {
+            if (createScenarioHandler) {
+                createScenarioHandler(scenario);
+            }
+        });
+
+        parts.contentLayout->addWidget(section);
+    }
+    parts.contentLayout->addStretch(1);
+    return parts.panel;
 }
 
 }  // namespace safecrowd::application
