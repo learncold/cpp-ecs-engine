@@ -94,3 +94,36 @@ SC_TEST(GeometryQueries_RepresentativePointHandlesThinDiagonalPolygon) {
     SC_EXPECT_TRUE(point.has_value());
     SC_EXPECT_TRUE(safecrowd::domain::pointInPolygon(polygon, *point));
 }
+
+SC_TEST(GeometryQueries_PointInsideWalkableZoneWithClearanceRejectsWallsAndOutsideSpace) {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.zones.push_back({
+        .id = "room",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .area = rectangle(0.0, 0.0, 10.0, 10.0),
+    });
+    layout.zones.front().area.holes.push_back({
+        {.x = 7.0, .y = 7.0},
+        {.x = 8.0, .y = 7.0},
+        {.x = 8.0, .y = 8.0},
+        {.x = 7.0, .y = 8.0},
+    });
+    layout.barriers.push_back({
+        .id = "wall-1",
+        .floorId = "L1",
+        .geometry = {.vertices = {{5.0, 0.0}, {5.0, 10.0}}},
+        .blocksMovement = true,
+    });
+
+    SC_EXPECT_TRUE(safecrowd::domain::pointInsideWalkableZoneWithClearance(
+        layout, {.x = 2.0, .y = 2.0}, "L1", 0.35));
+    SC_EXPECT_TRUE(!safecrowd::domain::pointInsideWalkableZoneWithClearance(
+        layout, {.x = 5.1, .y = 5.0}, "L1", 0.35));
+    SC_EXPECT_TRUE(!safecrowd::domain::pointInsideWalkableZoneWithClearance(
+        layout, {.x = 0.1, .y = 2.0}, "L1", 0.35));
+    SC_EXPECT_TRUE(!safecrowd::domain::pointInsideWalkableZoneWithClearance(
+        layout, {.x = 6.8, .y = 7.5}, "L1", 0.35));
+    SC_EXPECT_TRUE(!safecrowd::domain::pointInsideWalkableZoneWithClearance(
+        layout, {.x = 11.0, .y = 2.0}, "L1", 0.35));
+}

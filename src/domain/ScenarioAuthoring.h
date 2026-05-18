@@ -72,6 +72,9 @@ struct RouteGuidanceDraft {
     std::vector<RouteGuidancePeriodDraft> periods{};
     std::string guidedExitZoneId{};
     std::string installConnectionId{};
+    std::string installFloorId{};
+    std::string installZoneId{};
+    Point2D installPosition{};
     double baseComplianceRate{0.5};
     double guidanceStrength{0.55};
     double maxDetourMeters{20.0};

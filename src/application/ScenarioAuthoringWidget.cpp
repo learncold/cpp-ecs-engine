@@ -193,6 +193,29 @@ QString hazardPositionSummary(const safecrowd::domain::EnvironmentHazardDraft& h
     return QString("(%1, %2)").arg(hazard.position.x, 0, 'f', 1).arg(hazard.position.y, 0, 'f', 1);
 }
 
+QString routeGuidancePositionSummary(const safecrowd::domain::RouteGuidanceDraft& guidance) {
+    if (guidance.installFloorId.empty() && guidance.installZoneId.empty()) {
+        return guidance.installConnectionId.empty()
+            ? QStringLiteral("Derived from target")
+            : QStringLiteral("Derived from install anchor");
+    }
+    return QString("(%1, %2)")
+        .arg(guidance.installPosition.x, 0, 'f', 1)
+        .arg(guidance.installPosition.y, 0, 'f', 1);
+}
+
+QString routeGuidanceInstallLabel(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const safecrowd::domain::RouteGuidanceDraft& guidance) {
+    if (!guidance.installConnectionId.empty()) {
+        return connectionLabelForId(layout, guidance.installConnectionId);
+    }
+    if (!guidance.installZoneId.empty()) {
+        return zoneName(layout, guidance.installZoneId);
+    }
+    return QStringLiteral("Unassigned");
+}
+
 bool hasSmokeHazard(const safecrowd::domain::EnvironmentState& environment) {
     return std::any_of(environment.hazards.begin(), environment.hazards.end(), [](const auto& hazard) {
         return hazard.kind == safecrowd::domain::EnvironmentHazardKind::Smoke;
@@ -958,12 +981,11 @@ std::vector<NavigationTreeNode> buildEventsTree(
         nodes.reserve(routeGuidances.size());
         for (const auto& guidance : routeGuidances) {
             const auto guidanceId = QString::fromStdString(guidance.id);
-            const auto doorLabel = guidance.installConnectionId.empty()
-                ? QString{}
-                : connectionLabelForId(layout, guidance.installConnectionId);
+            const auto installLabel = routeGuidanceInstallLabel(layout, guidance);
             const auto exitLabel = guidance.guidedExitZoneId.empty()
                 ? QStringLiteral("Nearest exit")
                 : zoneName(layout, guidance.guidedExitZoneId);
+            const auto locationLabel = routeGuidancePositionSummary(guidance);
             QString periodSummary = QStringLiteral("Always");
             if (!guidance.periods.empty()) {
                 periodSummary = blockScheduleSummary(safecrowd::domain::ConnectionBlockDraft{
@@ -982,26 +1004,28 @@ std::vector<NavigationTreeNode> buildEventsTree(
             }
 
             std::vector<NavigationTreeNode> children;
-            children.reserve(doorLabel.isEmpty() ? 2u : 3u);
+            children.reserve(4u);
             children.push_back({
                 .label = QString("Exit  -  %1").arg(exitLabel),
                 .id = QString("%1/exit").arg(guidanceId),
             });
-            if (!doorLabel.isEmpty()) {
-                children.push_back({
-                    .label = QString("Door  -  %1").arg(doorLabel),
-                    .id = QString("%1/door").arg(guidanceId),
-                });
-            }
+            children.push_back({
+                .label = QString("Install  -  %1").arg(installLabel),
+                .id = QString("%1/install").arg(guidanceId),
+            });
+            children.push_back({
+                .label = QString("Location  -  %1").arg(locationLabel),
+                .id = QString("%1/location").arg(guidanceId),
+            });
             children.push_back({
                 .label = QString("Period  -  %1").arg(periodSummary),
                 .id = QString("%1/period").arg(guidanceId),
             });
 
             nodes.push_back({
-                .label = QString("Guidance  -  %1").arg(doorLabel.isEmpty() ? exitLabel : doorLabel),
+                .label = QString("Guidance  -  %1").arg(installLabel),
                 .id = guidanceId,
-                .detail = QString("Period: %1").arg(periodSummary),
+                .detail = QString("Location: %1 / Period: %2").arg(locationLabel, periodSummary),
                 .children = std::move(children),
                 .expanded = true,
             });

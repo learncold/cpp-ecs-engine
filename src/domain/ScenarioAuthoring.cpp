@@ -163,6 +163,9 @@ bool routeGuidancesEqual(const std::vector<RouteGuidanceDraft>& lhs,
             || lhs[i].endSeconds != rhs[i].endSeconds
             || lhs[i].guidedExitZoneId != rhs[i].guidedExitZoneId
             || lhs[i].installConnectionId != rhs[i].installConnectionId
+            || lhs[i].installFloorId != rhs[i].installFloorId
+            || lhs[i].installZoneId != rhs[i].installZoneId
+            || !pointsEqual(lhs[i].installPosition, rhs[i].installPosition)
             || lhs[i].baseComplianceRate != rhs[i].baseComplianceRate
             || lhs[i].guidanceStrength != rhs[i].guidanceStrength
             || lhs[i].maxDetourMeters != rhs[i].maxDetourMeters

@@ -905,6 +905,10 @@ QJsonObject routeGuidanceToJson(const safecrowd::domain::RouteGuidanceDraft& gui
     object["periods"] = periods;
     object["guidedExitZoneId"] = QString::fromStdString(guidance.guidedExitZoneId);
     object["installConnectionId"] = QString::fromStdString(guidance.installConnectionId);
+    object["installFloorId"] = QString::fromStdString(guidance.installFloorId);
+    object["installZoneId"] = QString::fromStdString(guidance.installZoneId);
+    object["installPositionX"] = guidance.installPosition.x;
+    object["installPositionY"] = guidance.installPosition.y;
     object["baseComplianceRate"] = guidance.baseComplianceRate;
     object["guidanceStrength"] = guidance.guidanceStrength;
     object["maxDetourMeters"] = guidance.maxDetourMeters;
@@ -933,6 +937,12 @@ safecrowd::domain::RouteGuidanceDraft routeGuidanceFromJson(const QJsonObject& o
     }
     guidance.guidedExitZoneId = object.value("guidedExitZoneId").toString().toStdString();
     guidance.installConnectionId = object.value("installConnectionId").toString().toStdString();
+    guidance.installFloorId = object.value("installFloorId").toString().toStdString();
+    guidance.installZoneId = object.value("installZoneId").toString().toStdString();
+    guidance.installPosition = {
+        .x = object.value("installPositionX").toDouble(0.0),
+        .y = object.value("installPositionY").toDouble(0.0),
+    };
     guidance.baseComplianceRate = object.value("baseComplianceRate").toDouble(0.5);
     guidance.guidanceStrength = object.value("guidanceStrength").toDouble(0.55);
     guidance.maxDetourMeters = object.value("maxDetourMeters").toDouble(20.0);

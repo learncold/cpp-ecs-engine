@@ -50,6 +50,18 @@ Point2D polygonCenter(const Polygon2D& polygon) {
     return {.x = x / count, .y = y / count};
 }
 
+bool pointWithinSegmentBounds(
+    const Point2D& point,
+    const Point2D& start,
+    const Point2D& end,
+    double margin) {
+    const auto minX = std::min(start.x, end.x) - margin;
+    const auto maxX = std::max(start.x, end.x) + margin;
+    const auto minY = std::min(start.y, end.y) - margin;
+    const auto maxY = std::max(start.y, end.y) + margin;
+    return point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY;
+}
+
 void appendRingYValues(const std::vector<Point2D>& ring, std::vector<double>& values) {
     for (const auto& point : ring) {
         values.push_back(point.y);
@@ -240,6 +252,60 @@ std::optional<Point2D> representativePointInPolygon(const Polygon2D& polygon) {
         return point;
     }
     return gridRepresentativePoint(polygon);
+}
+
+bool pointHasBarrierClearance(
+    const FacilityLayout2D& layout,
+    const Point2D& point,
+    const std::string& floorId,
+    double clearance) {
+    if (clearance <= kGeometryEpsilon) {
+        return true;
+    }
+
+    for (const auto& barrier : layout.barriers) {
+        if (!floorId.empty() && !barrier.floorId.empty() && barrier.floorId != floorId) {
+            continue;
+        }
+        if (!barrier.blocksMovement || barrier.geometry.vertices.size() < 2) {
+            continue;
+        }
+
+        const auto& vertices = barrier.geometry.vertices;
+        for (std::size_t index = 0; index + 1 < vertices.size(); ++index) {
+            if (pointWithinSegmentBounds(point, vertices[index], vertices[index + 1], clearance)
+                && distancePointToSegment(point, vertices[index], vertices[index + 1]) < clearance) {
+                return false;
+            }
+        }
+        if (barrier.geometry.closed
+            && pointWithinSegmentBounds(point, vertices.back(), vertices.front(), clearance)
+            && distancePointToSegment(point, vertices.back(), vertices.front()) < clearance) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool pointInsideWalkableZoneWithClearance(
+    const FacilityLayout2D& layout,
+    const Point2D& point,
+    const std::string& floorId,
+    double clearance) {
+    const auto zoneIt = std::find_if(layout.zones.begin(), layout.zones.end(), [&](const auto& zone) {
+        if (!floorId.empty() && !zone.floorId.empty() && zone.floorId != floorId) {
+            return false;
+        }
+        return pointInPolygon(zone.area, point);
+    });
+    if (zoneIt == layout.zones.end()) {
+        return false;
+    }
+    if (clearance > kGeometryEpsilon
+        && distanceToPolygonBoundary(zoneIt->area, point) < clearance) {
+        return false;
+    }
+    return pointHasBarrierClearance(layout, point, floorId, clearance);
 }
 
 }  // namespace safecrowd::domain
