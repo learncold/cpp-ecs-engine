@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 
 #include <QDateTime>
@@ -24,12 +25,14 @@ namespace {
 constexpr auto kProjectFileName = "safecrowd-project.json";
 constexpr auto kLayoutFileName = "layout.dxf";
 constexpr auto kReviewFileName = "layout-review.json";
+constexpr auto kImportArtifactsFileName = "import-artifacts.json";
 constexpr auto kWorkspaceFileName = "workspace-state.json";
 
 bool isProjectManagedEntry(const QString& fileName) {
     return fileName.compare(kProjectFileName, Qt::CaseInsensitive) == 0
         || fileName.compare(kLayoutFileName, Qt::CaseInsensitive) == 0
         || fileName.compare(kReviewFileName, Qt::CaseInsensitive) == 0
+        || fileName.compare(kImportArtifactsFileName, Qt::CaseInsensitive) == 0
         || fileName.compare(kWorkspaceFileName, Qt::CaseInsensitive) == 0;
 }
 
@@ -53,6 +56,10 @@ QString projectFilePath(const QString& folderPath) {
 
 QString reviewFilePath(const QString& folderPath) {
     return QDir(folderPath).filePath(kReviewFileName);
+}
+
+QString importArtifactsFilePath(const QString& folderPath) {
+    return QDir(folderPath).filePath(kImportArtifactsFileName);
 }
 
 QString workspaceFilePath(const QString& folderPath) {
@@ -400,6 +407,171 @@ std::vector<std::string> stringVectorFromJson(const QJsonArray& array) {
         values.push_back(value.toString().toStdString());
     }
     return values;
+}
+
+QJsonObject importTraceRefToJson(const safecrowd::domain::ImportTraceRef& traceRef) {
+    QJsonObject object;
+    object["targetId"] = QString::fromStdString(traceRef.targetId);
+    object["sourceIds"] = stringArray(traceRef.sourceIds);
+    object["canonicalIds"] = stringArray(traceRef.canonicalIds);
+    return object;
+}
+
+safecrowd::domain::ImportTraceRef importTraceRefFromJson(const QJsonObject& object) {
+    return {
+        .targetId = object.value("targetId").toString().toStdString(),
+        .sourceIds = stringVectorFromJson(object.value("sourceIds").toArray()),
+        .canonicalIds = stringVectorFromJson(object.value("canonicalIds").toArray()),
+    };
+}
+
+QJsonArray importTraceRefsToJson(const std::vector<safecrowd::domain::ImportTraceRef>& traceRefs) {
+    QJsonArray array;
+    for (const auto& traceRef : traceRefs) {
+        array.append(importTraceRefToJson(traceRef));
+    }
+    return array;
+}
+
+std::vector<safecrowd::domain::ImportTraceRef> importTraceRefsFromJson(const QJsonArray& array) {
+    std::vector<safecrowd::domain::ImportTraceRef> traceRefs;
+    traceRefs.reserve(static_cast<std::size_t>(array.size()));
+    for (const auto& value : array) {
+        traceRefs.push_back(importTraceRefFromJson(value.toObject()));
+    }
+    return traceRefs;
+}
+
+QJsonObject sourceFingerprintToJson(const safecrowd::domain::ImportSourceFingerprint& fingerprint) {
+    QJsonObject object;
+    object["sourcePath"] = QString::fromStdString(fingerprint.sourcePath);
+    object["fileSizeBytes"] = static_cast<qint64>(fingerprint.fileSizeBytes);
+    object["modifiedTimeTicks"] = static_cast<qint64>(fingerprint.modifiedTimeTicks);
+    object["exists"] = fingerprint.exists;
+    return object;
+}
+
+safecrowd::domain::ImportSourceFingerprint sourceFingerprintFromJson(const QJsonObject& object) {
+    return {
+        .sourcePath = object.value("sourcePath").toString().toStdString(),
+        .fileSizeBytes = static_cast<std::uintmax_t>(object.value("fileSizeBytes").toInteger()),
+        .modifiedTimeTicks = object.value("modifiedTimeTicks").toInteger(),
+        .exists = object.value("exists").toBool(false),
+    };
+}
+
+QJsonObject semanticRuleToJson(const safecrowd::domain::ImportSemanticRule& rule) {
+    QJsonObject object;
+    object["semantic"] = static_cast<int>(rule.semantic);
+    object["tokens"] = stringArray(rule.tokens);
+    object["confidence"] = rule.confidence;
+    return object;
+}
+
+safecrowd::domain::ImportSemanticRule semanticRuleFromJson(const QJsonObject& object) {
+    return {
+        .semantic = static_cast<safecrowd::domain::ImportElementSemantic>(object.value("semantic").toInt()),
+        .tokens = stringVectorFromJson(object.value("tokens").toArray()),
+        .confidence = object.value("confidence").toDouble(1.0),
+    };
+}
+
+QJsonObject semanticRuleSetToJson(const safecrowd::domain::ImportSemanticRuleSet& ruleSet) {
+    QJsonObject object;
+    QJsonArray rules;
+    for (const auto& rule : ruleSet.rules) {
+        rules.append(semanticRuleToJson(rule));
+    }
+    object["rules"] = rules;
+    return object;
+}
+
+safecrowd::domain::ImportSemanticRuleSet semanticRuleSetFromJson(const QJsonObject& object) {
+    safecrowd::domain::ImportSemanticRuleSet ruleSet;
+    if (!object.value("rules").isArray()) {
+        return safecrowd::domain::ImportSemanticRuleSet::defaultRules();
+    }
+
+    for (const auto& value : object.value("rules").toArray()) {
+        ruleSet.rules.push_back(semanticRuleFromJson(value.toObject()));
+    }
+    return ruleSet;
+}
+
+safecrowd::domain::ImportFallbackPolicy fallbackPolicyFromJson(const QJsonValue& value) {
+    return static_cast<safecrowd::domain::ImportFallbackPolicy>(value.toInt(
+        static_cast<int>(safecrowd::domain::ImportFallbackPolicy::ReviewableGeometry)));
+}
+
+QJsonObject importSummaryToJson(const safecrowd::domain::ImportSummary& summary) {
+    QJsonObject object;
+    object["rawEntityCount"] = static_cast<qint64>(summary.rawEntityCount);
+    object["canonicalElementCount"] = static_cast<qint64>(summary.canonicalElementCount);
+    object["layoutElementCount"] = static_cast<qint64>(summary.layoutElementCount);
+    object["issueCount"] = static_cast<qint64>(summary.issueCount);
+    object["blockingIssueCount"] = static_cast<qint64>(summary.blockingIssueCount);
+    object["warningIssueCount"] = static_cast<qint64>(summary.warningIssueCount);
+    return object;
+}
+
+safecrowd::domain::ImportSummary importSummaryFromJson(const QJsonObject& object) {
+    return {
+        .rawEntityCount = static_cast<std::size_t>(object.value("rawEntityCount").toInteger()),
+        .canonicalElementCount = static_cast<std::size_t>(object.value("canonicalElementCount").toInteger()),
+        .layoutElementCount = static_cast<std::size_t>(object.value("layoutElementCount").toInteger()),
+        .issueCount = static_cast<std::size_t>(object.value("issueCount").toInteger()),
+        .blockingIssueCount = static_cast<std::size_t>(object.value("blockingIssueCount").toInteger()),
+        .warningIssueCount = static_cast<std::size_t>(object.value("warningIssueCount").toInteger()),
+    };
+}
+
+QJsonObject reimportSummaryToJson(const safecrowd::domain::ReimportChangeSummary& summary) {
+    QJsonObject object;
+    object["hasComparison"] = summary.hasComparison;
+    object["addedElements"] = static_cast<qint64>(summary.addedElements);
+    object["removedElements"] = static_cast<qint64>(summary.removedElements);
+    object["changedElements"] = static_cast<qint64>(summary.changedElements);
+    return object;
+}
+
+safecrowd::domain::ReimportChangeSummary reimportSummaryFromJson(const QJsonObject& object) {
+    return {
+        .hasComparison = object.value("hasComparison").toBool(false),
+        .addedElements = static_cast<std::size_t>(object.value("addedElements").toInteger()),
+        .removedElements = static_cast<std::size_t>(object.value("removedElements").toInteger()),
+        .changedElements = static_cast<std::size_t>(object.value("changedElements").toInteger()),
+    };
+}
+
+QJsonObject importArtifactsToJson(
+    const safecrowd::domain::ImportArtifactMetadata& artifacts,
+    const std::vector<safecrowd::domain::ImportTraceRef>& traceRefs) {
+    QJsonObject object;
+    object["version"] = 1;
+    object["source"] = sourceFingerprintToJson(artifacts.source);
+    object["selectedRules"] = semanticRuleSetToJson(artifacts.selectedRules);
+    object["fallbackPolicy"] = static_cast<int>(artifacts.fallbackPolicy);
+    object["summary"] = importSummaryToJson(artifacts.summary);
+    object["reimport"] = reimportSummaryToJson(artifacts.reimport);
+    object["userOverrideTargetIds"] = stringArray(artifacts.userOverrideTargetIds);
+    object["traceRefs"] = importTraceRefsToJson(traceRefs);
+    return object;
+}
+
+void importArtifactsFromJson(
+    const QJsonObject& object,
+    safecrowd::domain::ImportResult* importResult) {
+    if (importResult == nullptr) {
+        return;
+    }
+
+    importResult->artifacts.source = sourceFingerprintFromJson(object.value("source").toObject());
+    importResult->artifacts.selectedRules = semanticRuleSetFromJson(object.value("selectedRules").toObject());
+    importResult->artifacts.fallbackPolicy = fallbackPolicyFromJson(object.value("fallbackPolicy"));
+    importResult->artifacts.summary = importSummaryFromJson(object.value("summary").toObject());
+    importResult->artifacts.reimport = reimportSummaryFromJson(object.value("reimport").toObject());
+    importResult->artifacts.userOverrideTargetIds = stringVectorFromJson(object.value("userOverrideTargetIds").toArray());
+    importResult->traceRefs = importTraceRefsFromJson(object.value("traceRefs").toArray());
 }
 
 QJsonObject provenanceToJson(const safecrowd::domain::ElementProvenance& provenance) {
@@ -1768,6 +1940,12 @@ bool ProjectPersistence::loadProjectReview(const ProjectMetadata& metadata, safe
 
     importResult->layout = layoutFromJson(root.value("layout").toObject());
     importResult->reviewStatus = static_cast<safecrowd::domain::ImportReviewStatus>(root.value("reviewStatus").toInt());
+
+    const auto artifactsDocument = readJsonDocument(importArtifactsFilePath(metadata.folderPath));
+    if (artifactsDocument.isObject()) {
+        importArtifactsFromJson(artifactsDocument.object(), importResult);
+    }
+
     updateLiveValidationIssues(importResult);
 
     if (safecrowd::domain::hasBlockingImportIssue(importResult->issues)
@@ -1853,7 +2031,14 @@ bool ProjectPersistence::saveProjectReview(
     QJsonObject root;
     root["reviewStatus"] = static_cast<int>(importResult.reviewStatus);
     root["layout"] = layoutToJson(*importResult.layout);
-    return writeJsonDocument(reviewFilePath(metadata.folderPath), QJsonDocument(root), errorMessage);
+    if (!writeJsonDocument(reviewFilePath(metadata.folderPath), QJsonDocument(root), errorMessage)) {
+        return false;
+    }
+
+    return writeJsonDocument(
+        importArtifactsFilePath(metadata.folderPath),
+        QJsonDocument(importArtifactsToJson(importResult.artifacts, importResult.traceRefs)),
+        errorMessage);
 }
 
 bool ProjectPersistence::saveProjectWorkspace(
