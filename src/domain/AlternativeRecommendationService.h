@@ -74,6 +74,13 @@ struct AlternativeRecommendationResult {
 class AlternativeRecommendationService {
 public:
     AlternativeRecommendationResult recommend(const AlternativeRecommendationRequest& request) const;
+    AlternativeRecommendationResult recommend(
+        const FacilityLayout2D& layout,
+        const ScenarioDraft& sourceScenario,
+        const ScenarioRiskSnapshot& risk,
+        const ScenarioResultArtifacts& artifacts,
+        const ScenarioDraft* baselineScenario = nullptr,
+        const SimulationFrame* finalFrame = nullptr) const;
 };
 
 const char* alternativeRecommendationKindId(AlternativeRecommendationKind kind) noexcept;

@@ -154,6 +154,58 @@ ScenarioResultArtifacts makeCounterflowArtifacts(double endSeconds = 10.0) {
     return artifacts;
 }
 
+ScenarioResultArtifacts makeSeparatedOpposingFlowArtifacts(double endSeconds = 10.0) {
+    ScenarioResultArtifacts artifacts = makeCompletedArtifacts();
+    for (int second = 0; second <= static_cast<int>(endSeconds); ++second) {
+        SimulationFrame frame;
+        frame.elapsedSeconds = static_cast<double>(second);
+        frame.totalAgentCount = 6;
+        frame.evacuatedAgentCount = 0;
+        for (std::uint64_t index = 0; index < 3; ++index) {
+            frame.agents.push_back({
+                .id = index + 1,
+                .position = {static_cast<double>(index), 0.0},
+                .velocity = {0.3, 0.0},
+                .floorId = "L1",
+            });
+            frame.agents.push_back({
+                .id = index + 10,
+                .position = {100.0 + static_cast<double>(index), 0.0},
+                .velocity = {-0.3, 0.0},
+                .floorId = "L1",
+            });
+        }
+        artifacts.replayFrames.push_back(std::move(frame));
+    }
+    return artifacts;
+}
+
+ScenarioResultArtifacts makeCrossFloorOpposingFlowArtifacts(double endSeconds = 10.0) {
+    ScenarioResultArtifacts artifacts = makeCompletedArtifacts();
+    for (int second = 0; second <= static_cast<int>(endSeconds); ++second) {
+        SimulationFrame frame;
+        frame.elapsedSeconds = static_cast<double>(second);
+        frame.totalAgentCount = 6;
+        frame.evacuatedAgentCount = 0;
+        for (std::uint64_t index = 0; index < 3; ++index) {
+            frame.agents.push_back({
+                .id = index + 1,
+                .position = {static_cast<double>(index), 0.0},
+                .velocity = {0.3, 0.0},
+                .floorId = "L1",
+            });
+            frame.agents.push_back({
+                .id = index + 10,
+                .position = {static_cast<double>(index), 0.0},
+                .velocity = {-0.3, 0.0},
+                .floorId = "L2",
+            });
+        }
+        artifacts.replayFrames.push_back(std::move(frame));
+    }
+    return artifacts;
+}
+
 ScenarioResultArtifacts makeSingleExitUsageArtifacts(
     std::string exitZoneId,
     std::string exitLabel,
@@ -707,6 +759,30 @@ SC_TEST(AlternativeRecommendationService_detectsSustainedCounterflowConflict) {
     SC_EXPECT_TRUE(it->riskKind.has_value() && *it->riskKind == AlternativeRecommendationRiskKind::CounterflowConflict);
     SC_EXPECT_EQ(it->recommendedScenario.control.events.size(), std::size_t{1});
     SC_EXPECT_TRUE(containsDiffKey(it->recommendedScenario, "control.events"));
+}
+
+SC_TEST(AlternativeRecommendationService_ignoresSeparatedOpposingFlows) {
+    const AlternativeRecommendationService service;
+    const auto result = service.recommend({
+        .layout = makeRecommendationLayout(),
+        .sourceScenario = makeScenario(),
+        .artifacts = makeSeparatedOpposingFlowArtifacts(),
+    });
+
+    SC_EXPECT_TRUE(!hasRiskSignalKind(result, AlternativeRecommendationRiskKind::CounterflowConflict));
+    SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::CounterflowSeparation));
+}
+
+SC_TEST(AlternativeRecommendationService_ignoresCrossFloorOpposingFlows) {
+    const AlternativeRecommendationService service;
+    const auto result = service.recommend({
+        .layout = makeRecommendationLayout(),
+        .sourceScenario = makeScenario(),
+        .artifacts = makeCrossFloorOpposingFlowArtifacts(),
+    });
+
+    SC_EXPECT_TRUE(!hasRiskSignalKind(result, AlternativeRecommendationRiskKind::CounterflowConflict));
+    SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::CounterflowSeparation));
 }
 
 SC_TEST(AlternativeRecommendationService_ignoresTransientCounterflowConflict) {

@@ -1439,13 +1439,13 @@ void ScenarioResultWidget::refreshResultNavigationPanel() {
 
     if (resultNavigationView_ == ScenarioResultNavigationView::Recommendations) {
         const safecrowd::domain::AlternativeRecommendationService service;
-        const auto recommendation = service.recommend({
-            .layout = layout_,
-            .sourceScenario = scenario_,
-            .risk = risk_,
-            .artifacts = artifacts_,
-            .finalFrame = frame_,
-        });
+        const auto recommendation = service.recommend(
+            layout_,
+            scenario_,
+            risk_,
+            artifacts_,
+            nullptr,
+            &frame_);
         shell_->setNavigationPanel(createScenarioRecommendationNavigationPanel(
             recommendation,
             [this](safecrowd::domain::ScenarioDraft recommendedScenario) {

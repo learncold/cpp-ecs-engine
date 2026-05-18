@@ -1,13 +1,16 @@
 #include "domain/AlternativeRecommendationService.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstddef>
+#include <functional>
 #include <iomanip>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -21,11 +24,23 @@ constexpr double kCounterflowCosineThreshold = -0.5;
 constexpr double kCounterflowSideRatioThreshold = 0.30;
 constexpr double kCounterflowAverageSpeedThreshold = 0.7;
 constexpr double kCounterflowSustainedSecondsThreshold = 10.0;
+constexpr double kCounterflowCellSizeMeters = 4.0;
+constexpr std::size_t kCounterflowDirectionBinCount = 16;
+constexpr double kPi = 3.14159265358979323846;
 constexpr std::size_t kStagedEvacuationAgentsPerSpawn = 10;
 constexpr double kStagedEvacuationIntervalSeconds = 5.0;
 constexpr double kDefaultGuidanceCompliance = 0.5;
 constexpr double kDefaultGuidanceStrength = 0.55;
 constexpr double kDefaultGuidanceMaxDetourMeters = 20.0;
+
+struct AlternativeRecommendationInput {
+    const FacilityLayout2D& layout;
+    const ScenarioDraft& sourceScenario;
+    const ScenarioDraft* baselineScenario{nullptr};
+    const ScenarioRiskSnapshot& risk;
+    const ScenarioResultArtifacts& artifacts;
+    const SimulationFrame* finalFrame{nullptr};
+};
 
 std::string sanitizeId(std::string value) {
     for (auto& ch : value) {
@@ -158,7 +173,7 @@ std::string zoneNameList(const FacilityLayout2D& layout, const std::vector<std::
     return value.empty() ? "none" : value;
 }
 
-bool hasCompletedResultArtifactEvidence(const AlternativeRecommendationRequest& request) {
+bool hasCompletedResultArtifactEvidence(const AlternativeRecommendationInput& request) {
     const auto& artifacts = request.artifacts;
     return artifacts.timingSummary.finalEvacuationTimeSeconds.has_value()
         || !artifacts.evacuationProgress.empty()
@@ -171,7 +186,7 @@ bool hasCompletedResultArtifactEvidence(const AlternativeRecommendationRequest& 
         || !artifacts.pressureSummary.peakHotspots.empty()
         || !artifacts.pressureSummary.criticalEvents.empty()
         || !artifacts.hazardExposureSummary.hazards.empty()
-        || request.finalFrame.has_value();
+        || request.finalFrame != nullptr;
 }
 
 bool containsString(const std::vector<std::string>& values, const std::string& value) {
@@ -184,7 +199,7 @@ bool exitUsageContainsZone(const ScenarioResultArtifacts& artifacts, const std::
     });
 }
 
-std::vector<ExitUsageMetric> exitUsageCandidates(const AlternativeRecommendationRequest& request) {
+std::vector<ExitUsageMetric> exitUsageCandidates(const AlternativeRecommendationInput& request) {
     if (request.artifacts.exitUsage.empty()) {
         return {};
     }
@@ -206,7 +221,7 @@ std::vector<ExitUsageMetric> exitUsageCandidates(const AlternativeRecommendation
 }
 
 std::optional<ExitUsageMetric> leastUsedExit(
-    const AlternativeRecommendationRequest& request,
+    const AlternativeRecommendationInput& request,
     const std::vector<std::string>& excludedExitZoneIds = {}) {
     const auto candidates = exitUsageCandidates(request);
     if (candidates.empty()) {
@@ -227,7 +242,7 @@ std::optional<ExitUsageMetric> leastUsedExit(
     return best;
 }
 
-std::optional<ExitUsageMetric> mostUsedExit(const AlternativeRecommendationRequest& request) {
+std::optional<ExitUsageMetric> mostUsedExit(const AlternativeRecommendationInput& request) {
     const auto candidates = exitUsageCandidates(request);
     const auto it = std::max_element(
         candidates.begin(),
@@ -251,7 +266,7 @@ bool hasRouteGuidance(const ScenarioDraft& scenario,
 }
 
 bool exitHasBottleneck(
-    const AlternativeRecommendationRequest& request,
+    const AlternativeRecommendationInput& request,
     const std::string& exitZoneId) {
     return std::any_of(request.risk.bottlenecks.begin(), request.risk.bottlenecks.end(), [&](const auto& bottleneck) {
         const auto* connection = findConnection(request.layout, bottleneck.connectionId);
@@ -287,7 +302,7 @@ std::size_t stagedEvacuationTickCount(std::size_t targetAgentCount) {
 }
 
 OccupantSource2D makeStagedEvacuationSource(
-    const AlternativeRecommendationRequest& request,
+    const AlternativeRecommendationInput& request,
     const InitialPlacement2D& placement,
     std::size_t targetAgentCount,
     Point2D sourcePosition,
@@ -313,7 +328,7 @@ OccupantSource2D makeStagedEvacuationSource(
 }
 
 std::vector<OccupantSource2D> makeSequentialStagedEvacuationSources(
-    const AlternativeRecommendationRequest& request) {
+    const AlternativeRecommendationInput& request) {
     std::vector<OccupantSource2D> sources;
     sources.reserve(request.sourceScenario.population.initialPlacements.size());
 
@@ -351,7 +366,7 @@ std::size_t totalSourceTicks(const std::vector<OccupantSource2D>& sources) {
 }
 
 std::vector<std::string> adjacentExitZoneIdsForConnection(
-    const AlternativeRecommendationRequest& request,
+    const AlternativeRecommendationInput& request,
     const std::string& connectionId) {
     const auto* connection = findConnection(request.layout, connectionId);
     if (connection == nullptr) {
@@ -404,7 +419,7 @@ std::string recommendedScenarioId(const ScenarioDraft& source, AlternativeRecomm
     return sourceId + "-recommended-" + alternativeRecommendationKindId(kind);
 }
 
-ScenarioDraft makeRecommendedDraft(const AlternativeRecommendationRequest& request,
+ScenarioDraft makeRecommendedDraft(const AlternativeRecommendationInput& request,
                                    AlternativeRecommendationKind kind,
                                    const std::string& name) {
     ScenarioDraft draft = request.sourceScenario;
@@ -417,8 +432,8 @@ ScenarioDraft makeRecommendedDraft(const AlternativeRecommendationRequest& reque
     return draft;
 }
 
-void finalizeDiffKeys(const AlternativeRecommendationRequest& request, ScenarioDraft& draft) {
-    if (request.baselineScenario.has_value()) {
+void finalizeDiffKeys(const AlternativeRecommendationInput& request, ScenarioDraft& draft) {
+    if (request.baselineScenario != nullptr) {
         draft.variationDiffKeys = computeScenarioDiffKeys(*request.baselineScenario, draft);
     } else {
         draft.variationDiffKeys = computeScenarioDiffKeys(request.sourceScenario, draft);
@@ -438,7 +453,7 @@ bool bottleneckLessSevere(const ScenarioBottleneckMetric& lhs, const ScenarioBot
     return lhs.stalledAgentCount < rhs.stalledAgentCount;
 }
 
-std::optional<std::string> blockedConnectionToRelieve(const AlternativeRecommendationRequest& request) {
+std::optional<std::string> blockedConnectionToRelieve(const AlternativeRecommendationInput& request) {
     if (request.sourceScenario.control.connectionBlocks.empty()) {
         return std::nullopt;
     }
@@ -464,7 +479,7 @@ std::optional<ScenarioBottleneckMetric> worstBottleneck(const ScenarioRiskSnapsh
 }
 
 AlternativeRecommendationRiskKind bottleneckRiskKind(
-    const AlternativeRecommendationRequest& request,
+    const AlternativeRecommendationInput& request,
     const ScenarioBottleneckMetric& bottleneck) {
     const auto* connection = findConnection(request.layout, bottleneck.connectionId);
     if (connection != nullptr && connectionTouchesExit(request.layout, *connection)) {
@@ -474,7 +489,7 @@ AlternativeRecommendationRiskKind bottleneckRiskKind(
 }
 
 std::optional<ScenarioBottleneckMetric> worstBottleneckForKind(
-    const AlternativeRecommendationRequest& request,
+    const AlternativeRecommendationInput& request,
     AlternativeRecommendationRiskKind kind) {
     std::optional<ScenarioBottleneckMetric> best;
     for (const auto& bottleneck : request.risk.bottlenecks) {
@@ -489,7 +504,7 @@ std::optional<ScenarioBottleneckMetric> worstBottleneckForKind(
 }
 
 AlternativeRecommendationRiskSignal makeBottleneckRiskSignal(
-    const AlternativeRecommendationRequest& request,
+    const AlternativeRecommendationInput& request,
     const ScenarioBottleneckMetric& bottleneck,
     AlternativeRecommendationRiskKind kind) {
     AlternativeRecommendationRiskSignal signal;
@@ -521,7 +536,7 @@ AlternativeRecommendationRiskSignal makeBottleneckRiskSignal(
     return signal;
 }
 
-bool hasPressureSignal(const AlternativeRecommendationRequest& request) {
+bool hasPressureSignal(const AlternativeRecommendationInput& request) {
     return (request.artifacts.pressureSummary.hotspotScoreThreshold > 0.0
             && request.artifacts.pressureSummary.peakPressureScore >= request.artifacts.pressureSummary.hotspotScoreThreshold)
         || !request.artifacts.pressureSummary.peakHotspots.empty()
@@ -532,7 +547,7 @@ bool hasPressureSignal(const AlternativeRecommendationRequest& request) {
 }
 
 std::optional<AlternativeRecommendationRiskSignal> makePressureRiskSignal(
-    const AlternativeRecommendationRequest& request) {
+    const AlternativeRecommendationInput& request) {
     if (!hasPressureSignal(request)) {
         return std::nullopt;
     }
@@ -569,14 +584,14 @@ std::optional<AlternativeRecommendationRiskSignal> makePressureRiskSignal(
     return signal;
 }
 
-std::optional<SimulationFrame> finalFrameForRequest(const AlternativeRecommendationRequest& request) {
-    if (request.finalFrame.has_value()) {
+const SimulationFrame* finalFrameForRequest(const AlternativeRecommendationInput& request) {
+    if (request.finalFrame != nullptr) {
         return request.finalFrame;
     }
     if (!request.artifacts.replayFrames.empty()) {
-        return request.artifacts.replayFrames.back();
+        return &request.artifacts.replayFrames.back();
     }
-    return std::nullopt;
+    return nullptr;
 }
 
 double speedOf(Point2D velocity) {
@@ -594,51 +609,179 @@ struct FrameCounterflowObservation {
     double averageSpeed{0.0};
 };
 
-std::optional<FrameCounterflowObservation> counterflowAtFrame(const SimulationFrame& frame) {
-    std::vector<SimulationAgentFrame> movingAgents;
-    movingAgents.reserve(frame.agents.size());
-    double speedSum = 0.0;
-    for (const auto& agent : frame.agents) {
-        const auto speed = speedOf(agent.velocity);
-        if (speed <= 0.05) {
-            continue;
-        }
-        movingAgents.push_back(agent);
-        speedSum += speed;
+struct CounterflowCellKey {
+    std::string floorId{};
+    int x{0};
+    int y{0};
+
+    bool operator==(const CounterflowCellKey& other) const noexcept {
+        return floorId == other.floorId && x == other.x && y == other.y;
     }
-    if (movingAgents.size() < 2) {
+};
+
+struct CounterflowCellKeyHash {
+    std::size_t operator()(const CounterflowCellKey& key) const noexcept {
+        auto seed = std::hash<std::string>{}(key.floorId);
+        const auto combine = [&](std::size_t value) {
+            seed ^= value + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
+        };
+        combine(std::hash<int>{}(key.x));
+        combine(std::hash<int>{}(key.y));
+        return seed;
+    }
+};
+
+struct CounterflowCellBucket {
+    std::array<std::size_t, kCounterflowDirectionBinCount> directionCounts{};
+    std::size_t movingCount{0};
+    double speedSum{0.0};
+};
+
+CounterflowCellKey counterflowCellKey(const SimulationAgentFrame& agent) {
+    return {
+        .floorId = agent.floorId,
+        .x = static_cast<int>(std::floor(agent.position.x / kCounterflowCellSizeMeters)),
+        .y = static_cast<int>(std::floor(agent.position.y / kCounterflowCellSizeMeters)),
+    };
+}
+
+std::size_t directionBinForVelocity(Point2D velocity) {
+    auto angle = std::atan2(velocity.y, velocity.x);
+    if (angle < 0.0) {
+        angle += kPi * 2.0;
+    }
+    const auto bin = static_cast<std::size_t>(
+        std::floor(angle / ((kPi * 2.0) / static_cast<double>(kCounterflowDirectionBinCount))));
+    return std::min(kCounterflowDirectionBinCount - 1, bin);
+}
+
+std::array<Point2D, kCounterflowDirectionBinCount> makeDirectionBinVectors() {
+    std::array<Point2D, kCounterflowDirectionBinCount> vectors{};
+    for (std::size_t index = 0; index < vectors.size(); ++index) {
+        const auto angle = ((static_cast<double>(index) + 0.5)
+            / static_cast<double>(kCounterflowDirectionBinCount)) * kPi * 2.0;
+        vectors[index] = {
+            .x = std::cos(angle),
+            .y = std::sin(angle),
+        };
+    }
+    return vectors;
+}
+
+double directionBinCosine(std::size_t lhs, std::size_t rhs) {
+    static const auto directions = makeDirectionBinVectors();
+    return dot(directions[lhs], directions[rhs]);
+}
+
+CounterflowCellBucket aggregateCounterflowNeighborhood(
+    const std::unordered_map<CounterflowCellKey, CounterflowCellBucket, CounterflowCellKeyHash>& cells,
+    const CounterflowCellKey& center) {
+    CounterflowCellBucket aggregate;
+    for (int dx = -1; dx <= 1; ++dx) {
+        for (int dy = -1; dy <= 1; ++dy) {
+            const CounterflowCellKey key{
+                .floorId = center.floorId,
+                .x = center.x + dx,
+                .y = center.y + dy,
+            };
+            const auto it = cells.find(key);
+            if (it == cells.end()) {
+                continue;
+            }
+            const auto& bucket = it->second;
+            aggregate.movingCount += bucket.movingCount;
+            aggregate.speedSum += bucket.speedSum;
+            for (std::size_t bin = 0; bin < kCounterflowDirectionBinCount; ++bin) {
+                aggregate.directionCounts[bin] += bucket.directionCounts[bin];
+            }
+        }
+    }
+    return aggregate;
+}
+
+std::optional<FrameCounterflowObservation> counterflowInBucket(const CounterflowCellBucket& bucket) {
+    if (bucket.movingCount < 2) {
+        return std::nullopt;
+    }
+
+    const auto averageSpeed = bucket.speedSum / static_cast<double>(bucket.movingCount);
+    if (averageSpeed > kCounterflowAverageSpeedThreshold) {
         return std::nullopt;
     }
 
     FrameCounterflowObservation best;
-    for (const auto& anchor : movingAgents) {
-        const auto anchorSpeed = speedOf(anchor.velocity);
-        if (anchorSpeed <= 0.0) {
+    for (std::size_t anchorBin = 0; anchorBin < kCounterflowDirectionBinCount; ++anchorBin) {
+        if (bucket.directionCounts[anchorBin] == 0) {
             continue;
         }
+
         FrameCounterflowObservation candidate;
-        candidate.movingCount = movingAgents.size();
-        candidate.averageSpeed = speedSum / static_cast<double>(movingAgents.size());
-        for (const auto& agent : movingAgents) {
-            const auto agentSpeed = speedOf(agent.velocity);
-            const auto cosine = dot(anchor.velocity, agent.velocity) / (anchorSpeed * agentSpeed);
+        candidate.movingCount = bucket.movingCount;
+        candidate.averageSpeed = averageSpeed;
+        for (std::size_t bin = 0; bin < kCounterflowDirectionBinCount; ++bin) {
+            if (bucket.directionCounts[bin] == 0) {
+                continue;
+            }
+            const auto cosine = directionBinCosine(anchorBin, bin);
             if (cosine >= 0.5) {
-                ++candidate.forwardCount;
+                candidate.forwardCount += bucket.directionCounts[bin];
             } else if (cosine <= kCounterflowCosineThreshold) {
-                ++candidate.oppositeCount;
+                candidate.oppositeCount += bucket.directionCounts[bin];
             }
         }
+
         const auto forwardRatio = static_cast<double>(candidate.forwardCount) / static_cast<double>(candidate.movingCount);
         const auto oppositeRatio = static_cast<double>(candidate.oppositeCount) / static_cast<double>(candidate.movingCount);
         if (forwardRatio >= kCounterflowSideRatioThreshold
             && oppositeRatio >= kCounterflowSideRatioThreshold
-            && candidate.averageSpeed <= kCounterflowAverageSpeedThreshold
             && candidate.forwardCount + candidate.oppositeCount > best.forwardCount + best.oppositeCount) {
             best = candidate;
         }
     }
 
     return best.movingCount == 0 ? std::nullopt : std::optional<FrameCounterflowObservation>{best};
+}
+
+std::optional<FrameCounterflowObservation> counterflowAtFrame(const SimulationFrame& frame) {
+    std::unordered_map<CounterflowCellKey, CounterflowCellBucket, CounterflowCellKeyHash> cells;
+    cells.reserve(frame.agents.size());
+    std::vector<CounterflowCellKey> cellKeys;
+    cellKeys.reserve(frame.agents.size());
+
+    for (const auto& agent : frame.agents) {
+        const auto speed = speedOf(agent.velocity);
+        if (speed <= 0.05) {
+            continue;
+        }
+
+        const auto key = counterflowCellKey(agent);
+        auto [it, inserted] = cells.try_emplace(key);
+        if (inserted) {
+            cellKeys.push_back(key);
+        }
+        auto& bucket = it->second;
+        ++bucket.movingCount;
+        bucket.speedSum += speed;
+        ++bucket.directionCounts[directionBinForVelocity(agent.velocity)];
+    }
+
+    std::optional<FrameCounterflowObservation> best;
+    for (const auto& key : cellKeys) {
+        const auto observation = counterflowInBucket(aggregateCounterflowNeighborhood(cells, key));
+        if (!observation.has_value()) {
+            continue;
+        }
+        if (!best.has_value()
+            || observation->forwardCount + observation->oppositeCount > best->forwardCount + best->oppositeCount) {
+            best = observation;
+        }
+    }
+
+    if (best.has_value()) {
+        return best;
+    }
+
+    return std::nullopt;
 }
 
 struct SustainedCounterflowObservation {
@@ -694,7 +837,7 @@ std::optional<SustainedCounterflowObservation> sustainedCounterflowConflict(
 }
 
 std::optional<AlternativeRecommendationRiskSignal> makeCounterflowRiskSignal(
-    const AlternativeRecommendationRequest& request) {
+    const AlternativeRecommendationInput& request) {
     const auto observation = sustainedCounterflowConflict(request.artifacts.replayFrames);
     if (!observation.has_value()) {
         return std::nullopt;
@@ -722,7 +865,7 @@ std::optional<AlternativeRecommendationRiskSignal> makeCounterflowRiskSignal(
 }
 
 std::optional<AlternativeRecommendationRiskSignal> makeTimeLimitRiskSignal(
-    const AlternativeRecommendationRequest& request) {
+    const AlternativeRecommendationInput& request) {
     const auto targetSeconds = request.artifacts.timingSummary.targetTimeSeconds > 0.0
         ? request.artifacts.timingSummary.targetTimeSeconds
         : request.sourceScenario.execution.timeLimitSeconds;
@@ -743,7 +886,7 @@ std::optional<AlternativeRecommendationRiskSignal> makeTimeLimitRiskSignal(
         missed = true;
         overrunSeconds = std::max(overrunSeconds, *request.artifacts.timingSummary.finalEvacuationTimeSeconds - targetSeconds);
     }
-    if (finalFrame.has_value() && finalFrame->totalAgentCount > finalFrame->evacuatedAgentCount
+    if (finalFrame != nullptr && finalFrame->totalAgentCount > finalFrame->evacuatedAgentCount
         && finalFrame->elapsedSeconds + 1e-9 >= targetSeconds) {
         missed = true;
         remainingAgents = finalFrame->totalAgentCount - finalFrame->evacuatedAgentCount;
@@ -772,13 +915,13 @@ std::optional<AlternativeRecommendationRiskSignal> makeTimeLimitRiskSignal(
         signal.evidence.push_back(evidence(
             "Remaining agents",
             std::to_string(remainingAgents),
-            request.finalFrame.has_value() ? "AlternativeRecommendationRequest.finalFrame" : "ScenarioResultArtifacts.replayFrames"));
+            request.finalFrame != nullptr ? "AlternativeRecommendationRequest.finalFrame" : "ScenarioResultArtifacts.replayFrames"));
     }
     return signal;
 }
 
 std::vector<AlternativeRecommendationRiskSignal> detectRiskSignals(
-    const AlternativeRecommendationRequest& request) {
+    const AlternativeRecommendationInput& request) {
     std::vector<AlternativeRecommendationRiskSignal> signals;
     if (const auto bottleneck = worstBottleneckForKind(request, AlternativeRecommendationRiskKind::ExitBottleneck);
         bottleneck.has_value()) {
@@ -810,7 +953,7 @@ const AlternativeRecommendationRiskSignal* findRiskSignal(
 }
 
 std::optional<AlternativeRecommendationCandidate> makeBlockedConnectionCandidate(
-    const AlternativeRecommendationRequest& request) {
+    const AlternativeRecommendationInput& request) {
     const auto connectionId = blockedConnectionToRelieve(request);
     if (!connectionId.has_value()) {
         return std::nullopt;
@@ -854,7 +997,7 @@ std::optional<AlternativeRecommendationCandidate> makeBlockedConnectionCandidate
 }
 
 std::optional<AlternativeRecommendationCandidate> makeBottleneckGuidanceCandidate(
-    const AlternativeRecommendationRequest& request) {
+    const AlternativeRecommendationInput& request) {
     const auto bottleneck = worstBottleneck(request.risk);
     if (!bottleneck.has_value() || bottleneck->connectionId.empty()) {
         return std::nullopt;
@@ -913,7 +1056,7 @@ std::optional<AlternativeRecommendationCandidate> makeBottleneckGuidanceCandidat
 }
 
 std::optional<AlternativeRecommendationCandidate> makeExitBalancingCandidate(
-    const AlternativeRecommendationRequest& request) {
+    const AlternativeRecommendationInput& request) {
     if (exitUsageCandidates(request).size() < 2) {
         return std::nullopt;
     }
@@ -960,7 +1103,7 @@ std::optional<AlternativeRecommendationCandidate> makeExitBalancingCandidate(
 }
 
 std::optional<AlternativeRecommendationCandidate> makePressureHotspotCandidate(
-    const AlternativeRecommendationRequest& request) {
+    const AlternativeRecommendationInput& request) {
     if (!hasPressureSignal(request)) {
         return std::nullopt;
     }
@@ -1051,7 +1194,7 @@ std::optional<AlternativeRecommendationCandidate> makePressureHotspotCandidate(
 }
 
 std::optional<AlternativeRecommendationCandidate> makeCounterflowCandidate(
-    const AlternativeRecommendationRequest& request,
+    const AlternativeRecommendationInput& request,
     const std::vector<AlternativeRecommendationRiskSignal>& riskSignals) {
     const auto* signal = findRiskSignal(riskSignals, AlternativeRecommendationRiskKind::CounterflowConflict);
     if (signal == nullptr) {
@@ -1089,7 +1232,7 @@ std::optional<AlternativeRecommendationCandidate> makeCounterflowCandidate(
 }
 
 std::optional<AlternativeRecommendationCandidate> makeStagedEvacuationCandidate(
-    const AlternativeRecommendationRequest& request,
+    const AlternativeRecommendationInput& request,
     const std::vector<AlternativeRecommendationRiskSignal>& riskSignals) {
     const auto* signal = findRiskSignal(riskSignals, AlternativeRecommendationRiskKind::PressureHotspot);
     if (signal == nullptr) {
@@ -1193,8 +1336,9 @@ const char* alternativeRecommendationRiskKindId(AlternativeRecommendationRiskKin
     return "risk";
 }
 
-AlternativeRecommendationResult AlternativeRecommendationService::recommend(
-    const AlternativeRecommendationRequest& request) const {
+namespace {
+
+AlternativeRecommendationResult recommendFromInput(const AlternativeRecommendationInput& request) {
     AlternativeRecommendationResult result;
     if (!hasCompletedResultArtifactEvidence(request)) {
         result.blockingReasons.push_back(
@@ -1233,6 +1377,36 @@ AlternativeRecommendationResult AlternativeRecommendationService::recommend(
     }
 
     return result;
+}
+
+}  // namespace
+
+AlternativeRecommendationResult AlternativeRecommendationService::recommend(
+    const AlternativeRecommendationRequest& request) const {
+    return recommend(
+        request.layout,
+        request.sourceScenario,
+        request.risk,
+        request.artifacts,
+        request.baselineScenario.has_value() ? &*request.baselineScenario : nullptr,
+        request.finalFrame.has_value() ? &*request.finalFrame : nullptr);
+}
+
+AlternativeRecommendationResult AlternativeRecommendationService::recommend(
+    const FacilityLayout2D& layout,
+    const ScenarioDraft& sourceScenario,
+    const ScenarioRiskSnapshot& risk,
+    const ScenarioResultArtifacts& artifacts,
+    const ScenarioDraft* baselineScenario,
+    const SimulationFrame* finalFrame) const {
+    return recommendFromInput({
+        .layout = layout,
+        .sourceScenario = sourceScenario,
+        .baselineScenario = baselineScenario,
+        .risk = risk,
+        .artifacts = artifacts,
+        .finalFrame = finalFrame,
+    });
 }
 
 }  // namespace safecrowd::domain

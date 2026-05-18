@@ -1446,23 +1446,23 @@ QWidget* ScenarioBatchResultWidget::createBatchRecommendationNavigationPanel() {
     }
 
     const auto baselineIndex = explicitBaselineResultIndex();
+    const auto* baselineScenario =
+        baselineIndex >= 0 && baselineIndex < static_cast<int>(results_.size())
+            ? &results_[static_cast<std::size_t>(baselineIndex)].scenario
+            : nullptr;
     const safecrowd::domain::AlternativeRecommendationService service;
     for (const auto index : selectedRecommendationIndices_) {
         if (index < 0 || index >= static_cast<int>(results_.size())) {
             continue;
         }
         const auto& result = results_[static_cast<std::size_t>(index)];
-        safecrowd::domain::AlternativeRecommendationRequest request{
-            .layout = layout_,
-            .sourceScenario = result.scenario,
-            .risk = result.risk,
-            .artifacts = result.artifacts,
-            .finalFrame = result.frame,
-        };
-        if (baselineIndex >= 0 && baselineIndex < static_cast<int>(results_.size())) {
-            request.baselineScenario = results_[static_cast<std::size_t>(baselineIndex)].scenario;
-        }
-        const auto recommendation = service.recommend(request);
+        const auto recommendation = service.recommend(
+            layout_,
+            result.scenario,
+            result.risk,
+            result.artifacts,
+            baselineScenario,
+            &result.frame);
 
         auto* scenarioHeader = new QWidget(content);
         auto* scenarioHeaderLayout = new QVBoxLayout(scenarioHeader);
