@@ -771,3 +771,294 @@ SC_TEST(DxfImportServiceReportsBlockingIssuesForReviewDemoFixture) {
     SC_EXPECT_TRUE(containsIssueCode(result.issues, safecrowd::domain::ImportIssueCode::DisconnectedWalkableArea));
     SC_EXPECT_EQ(result.reviewStatus, safecrowd::domain::ImportReviewStatus::Rejected);
 }
+
+SC_TEST(DxfImportServiceUsesSemanticRuleOverrides) {
+    const auto sourcePath = writeTempFile("safecrowd-rule-override.dxf", R"(0
+SECTION
+2
+ENTITIES
+0
+LWPOLYLINE
+8
+PUBLIC_AREA
+90
+4
+70
+1
+10
+0
+20
+0
+10
+8
+20
+0
+10
+8
+20
+6
+10
+0
+20
+6
+0
+LINE
+8
+WAYOUT
+10
+8
+20
+2
+11
+8
+21
+4
+0
+ENDSEC
+0
+EOF
+)");
+
+    safecrowd::domain::DxfImportService importer;
+    safecrowd::domain::ImportRequest request;
+    request.sourcePath = sourcePath;
+    request.requestedFormat = safecrowd::domain::ImportedFileFormat::Dxf;
+    request.semanticRules = {
+        .rules = {
+            {
+                .semantic = safecrowd::domain::ImportElementSemantic::Exit,
+                .tokens = {"WAYOUT"},
+            },
+            {
+                .semantic = safecrowd::domain::ImportElementSemantic::Walkable,
+                .tokens = {"PUBLIC_AREA"},
+            },
+        },
+    };
+
+    const auto result = importer.importFile(request);
+
+    SC_EXPECT_TRUE(result.layout.has_value());
+    SC_EXPECT_TRUE(result.canonicalGeometry.has_value());
+    SC_EXPECT_EQ(result.canonicalGeometry->walkableAreas.size(), std::size_t{1});
+    SC_EXPECT_EQ(result.canonicalGeometry->openings.size(), std::size_t{1});
+    SC_EXPECT_TRUE(!safecrowd::domain::hasBlockingImportIssue(result.issues));
+    SC_EXPECT_TRUE(result.artifacts.summary.rawEntityCount >= std::size_t{2});
+    SC_EXPECT_TRUE(result.artifacts.source.exists);
+
+    std::filesystem::remove(sourcePath);
+}
+
+SC_TEST(DxfImportServicePreservesArcCircleTextAndHatchEntities) {
+    const auto sourcePath = writeTempFile("safecrowd-extended-entities.dxf", R"(0
+SECTION
+2
+ENTITIES
+0
+LWPOLYLINE
+8
+WALKABLE
+90
+4
+70
+1
+10
+0
+20
+0
+10
+10
+20
+0
+10
+10
+20
+8
+10
+0
+20
+8
+0
+LINE
+8
+EXIT
+10
+10
+20
+2
+11
+10
+21
+4
+0
+ARC
+8
+DOORS
+10
+3
+20
+3
+40
+1
+50
+0
+51
+90
+0
+CIRCLE
+8
+OBSTACLE
+10
+5
+20
+5
+40
+0.5
+0
+MTEXT
+8
+TEXT
+10
+1
+20
+1
+1
+Exit lobby
+0
+HATCH
+8
+OBSTACLE
+10
+7
+20
+1
+10
+8
+20
+1
+10
+8
+20
+2
+10
+7
+20
+2
+0
+ENDSEC
+0
+EOF
+)");
+
+    safecrowd::domain::DxfImportService importer;
+    safecrowd::domain::ImportRequest request;
+    request.sourcePath = sourcePath;
+    request.requestedFormat = safecrowd::domain::ImportedFileFormat::Dxf;
+
+    const auto result = importer.importFile(request);
+
+    SC_EXPECT_TRUE(result.rawModel.has_value());
+    SC_EXPECT_TRUE(result.canonicalGeometry.has_value());
+
+    const auto hasRawKind = [&](safecrowd::domain::RawEntityKind kind) {
+        return std::any_of(result.rawModel->entities.begin(), result.rawModel->entities.end(), [&](const auto& entity) {
+            return entity.kind == kind;
+        });
+    };
+
+    SC_EXPECT_TRUE(hasRawKind(safecrowd::domain::RawEntityKind::Arc));
+    SC_EXPECT_TRUE(hasRawKind(safecrowd::domain::RawEntityKind::Circle));
+    SC_EXPECT_TRUE(hasRawKind(safecrowd::domain::RawEntityKind::Annotation));
+    SC_EXPECT_TRUE(hasRawKind(safecrowd::domain::RawEntityKind::Hatch));
+    SC_EXPECT_TRUE(result.canonicalGeometry->openings.size() >= std::size_t{2});
+    SC_EXPECT_TRUE(result.canonicalGeometry->obstacles.size() >= std::size_t{2});
+    SC_EXPECT_TRUE(!safecrowd::domain::hasBlockingImportIssue(result.issues));
+
+    std::filesystem::remove(sourcePath);
+}
+
+SC_TEST(DxfImportServiceCreatesLowConfidenceFallbackCandidates) {
+    const auto sourcePath = writeTempFile("safecrowd-fallback-region.dxf", R"(0
+SECTION
+2
+ENTITIES
+0
+LWPOLYLINE
+8
+GEOMETRY
+90
+4
+70
+1
+10
+0
+20
+0
+10
+8
+20
+0
+10
+8
+20
+6
+10
+0
+20
+6
+0
+LINE
+8
+EXIT
+10
+8
+20
+2
+11
+8
+21
+4
+0
+ENDSEC
+0
+EOF
+)");
+
+    safecrowd::domain::DxfImportService importer;
+    safecrowd::domain::ImportRequest request;
+    request.sourcePath = sourcePath;
+    request.requestedFormat = safecrowd::domain::ImportedFileFormat::Dxf;
+
+    const auto result = importer.importFile(request);
+
+    SC_EXPECT_TRUE(result.layout.has_value());
+    SC_EXPECT_TRUE(result.canonicalGeometry.has_value());
+    SC_EXPECT_EQ(result.canonicalGeometry->walkableAreas.size(), std::size_t{1});
+    SC_EXPECT_TRUE(containsIssueCode(result.issues, safecrowd::domain::ImportIssueCode::UnmappedElement));
+    SC_EXPECT_TRUE(std::any_of(result.issues.begin(), result.issues.end(), [](const auto& issue) {
+        return issue.code == safecrowd::domain::ImportIssueCode::UnmappedElement && issue.confidence < 1.0;
+    }));
+    SC_EXPECT_TRUE(!safecrowd::domain::hasBlockingImportIssue(result.issues));
+
+    std::filesystem::remove(sourcePath);
+}
+
+SC_TEST(DxfImportServiceImportsWallOnlyApartmentAsReviewableNonReadyLayout) {
+    const auto sourcePath = std::filesystem::path(__FILE__).parent_path() / "dxf" / "apartment_floor_plan.dxf";
+
+    safecrowd::domain::DxfImportService importer;
+    safecrowd::domain::ImportRequest request;
+    request.sourcePath = sourcePath;
+    request.requestedFormat = safecrowd::domain::ImportedFileFormat::Dxf;
+
+    const auto result = importer.importFile(request);
+
+    SC_EXPECT_TRUE(result.rawModel.has_value());
+    SC_EXPECT_TRUE(result.canonicalGeometry.has_value());
+    SC_EXPECT_TRUE(result.layout.has_value());
+    SC_EXPECT_TRUE(result.canonicalGeometry->walls.size() >= std::size_t{1});
+    SC_EXPECT_TRUE(result.layout->barriers.size() >= std::size_t{1});
+    SC_EXPECT_TRUE(containsIssueCode(result.issues, safecrowd::domain::ImportIssueCode::MissingRoom));
+    SC_EXPECT_TRUE(containsIssueCode(result.issues, safecrowd::domain::ImportIssueCode::MissingExit));
+    SC_EXPECT_TRUE(!result.readyForSimulation());
+}

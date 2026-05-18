@@ -1,6 +1,7 @@
 #include "TestSupport.h"
 #include "application/ProjectPersistence.h"
 
+#include <QFileInfo>
 #include <QTemporaryDir>
 
 using namespace safecrowd::application;
@@ -62,4 +63,71 @@ SC_TEST(ProjectPersistence_preservesRecommendedScenarioDraftState) {
     SC_EXPECT_NEAR(loadedScenario.draft.control.routeGuidances.front().baseComplianceRate, 0.5, 1e-9);
     SC_EXPECT_NEAR(loadedScenario.draft.control.routeGuidances.front().guidanceStrength, 0.55, 1e-9);
     SC_EXPECT_NEAR(loadedScenario.draft.control.routeGuidances.front().maxDetourMeters, 20.0, 1e-9);
+}
+
+SC_TEST(ProjectPersistence_preservesImportArtifactsBesideLayoutReview) {
+    QTemporaryDir projectDir;
+    SC_EXPECT_TRUE(projectDir.isValid());
+
+    const ProjectMetadata metadata{
+        .name = "Import Artifact Test",
+        .folderPath = projectDir.path(),
+    };
+
+    ImportResult importResult;
+    importResult.layout = FacilityLayout2D{
+        .id = "layout-L1",
+        .name = "Imported Layout L1",
+        .levelId = "L1",
+        .floors = {{
+            .id = "L1",
+            .label = "Floor 1",
+        }},
+    };
+    importResult.reviewStatus = ImportReviewStatus::Pending;
+    importResult.traceRefs.push_back({
+        .targetId = "barrier-1",
+        .sourceIds = {"line-1"},
+        .canonicalIds = {"wall-1"},
+    });
+    importResult.artifacts.source = {
+        .sourcePath = "source.dxf",
+        .fileSizeBytes = 42,
+        .modifiedTimeTicks = 1234,
+        .exists = true,
+    };
+    importResult.artifacts.selectedRules = {
+        .rules = {{
+            .semantic = ImportElementSemantic::Wall,
+            .tokens = {"A-WALL"},
+            .confidence = 0.9,
+        }},
+    };
+    importResult.artifacts.summary = {
+        .rawEntityCount = 3,
+        .canonicalElementCount = 2,
+        .layoutElementCount = 1,
+        .issueCount = 1,
+    };
+    importResult.artifacts.reimport = {
+        .hasComparison = true,
+        .addedElements = 1,
+        .removedElements = 2,
+        .changedElements = 3,
+    };
+
+    QString errorMessage;
+    SC_EXPECT_TRUE(ProjectPersistence::saveProjectReview(metadata, importResult, &errorMessage));
+    SC_EXPECT_TRUE(QFileInfo::exists(projectDir.filePath("import-artifacts.json")));
+
+    ImportResult loaded;
+    SC_EXPECT_TRUE(ProjectPersistence::loadProjectReview(metadata, &loaded));
+    SC_EXPECT_EQ(loaded.traceRefs.size(), std::size_t{1});
+    SC_EXPECT_EQ(loaded.traceRefs.front().sourceIds.front(), std::string{"line-1"});
+    SC_EXPECT_EQ(loaded.artifacts.source.sourcePath, std::string{"source.dxf"});
+    SC_EXPECT_EQ(loaded.artifacts.summary.rawEntityCount, std::size_t{3});
+    SC_EXPECT_TRUE(loaded.artifacts.reimport.hasComparison);
+    SC_EXPECT_EQ(loaded.artifacts.reimport.changedElements, std::size_t{3});
+    SC_EXPECT_EQ(loaded.artifacts.selectedRules.rules.size(), std::size_t{1});
+    SC_EXPECT_EQ(loaded.artifacts.selectedRules.rules.front().tokens.front(), std::string{"A-WALL"});
 }
