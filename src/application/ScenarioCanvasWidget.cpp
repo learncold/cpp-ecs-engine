@@ -176,6 +176,29 @@ bool hasExplicitGuidanceInstallPosition(const safecrowd::domain::RouteGuidanceDr
     return !guidance.installFloorId.empty() || !guidance.installZoneId.empty();
 }
 
+bool pointsEqual(const safecrowd::domain::Point2D& lhs, const safecrowd::domain::Point2D& rhs) {
+    return std::abs(lhs.x - rhs.x) <= kGeometryEpsilon
+        && std::abs(lhs.y - rhs.y) <= kGeometryEpsilon;
+}
+
+bool hazardLocationEqual(
+    const safecrowd::domain::EnvironmentHazardDraft& lhs,
+    const safecrowd::domain::EnvironmentHazardDraft& rhs) {
+    return lhs.affectedZoneId == rhs.affectedZoneId
+        && lhs.floorId == rhs.floorId
+        && pointsEqual(lhs.position, rhs.position);
+}
+
+bool routeGuidanceLocationEqual(
+    const safecrowd::domain::RouteGuidanceDraft& lhs,
+    const safecrowd::domain::RouteGuidanceDraft& rhs) {
+    return lhs.guidedExitZoneId == rhs.guidedExitZoneId
+        && lhs.installConnectionId == rhs.installConnectionId
+        && lhs.installFloorId == rhs.installFloorId
+        && lhs.installZoneId == rhs.installZoneId
+        && pointsEqual(lhs.installPosition, rhs.installPosition);
+}
+
 std::string pickNearestExitZoneIdForPoint(
     const safecrowd::domain::FacilityLayout2D& layout,
     const safecrowd::domain::Point2D& point,
@@ -1700,6 +1723,18 @@ void ScenarioCanvasWidget::mouseMoveEvent(QMouseEvent* event) {
         return;
     }
 
+    if (eventDragging_) {
+        if (!hoveredConnectionBlockId_.isEmpty() || !hoveredEnvironmentHazardId_.isEmpty() || !hoveredRouteGuidanceId_.isEmpty()) {
+            hoveredConnectionBlockId_.clear();
+            hoveredEnvironmentHazardId_.clear();
+            hoveredRouteGuidanceId_.clear();
+            QToolTip::hideText();
+        }
+        updateEventDragPreview(event->position());
+        event->accept();
+        return;
+    }
+
     if (dragging_) {
         if (!hoveredConnectionBlockId_.isEmpty() || !hoveredEnvironmentHazardId_.isEmpty() || !hoveredRouteGuidanceId_.isEmpty()) {
             hoveredConnectionBlockId_.clear();
@@ -1915,6 +1950,13 @@ void ScenarioCanvasWidget::mousePressEvent(QMouseEvent* event) {
     }
 
     if (toolMode_ == ToolMode::Select) {
+        if (const auto bounds = collectBounds(); bounds.has_value()) {
+            const auto transform = currentTransform(*bounds);
+            if (beginEventDrag(event->position(), transform)) {
+                event->accept();
+                return;
+            }
+        }
         selectionDragging_ = true;
         selectionDragStart_ = event->position();
         selectionDragCurrent_ = selectionDragStart_;
@@ -1954,6 +1996,12 @@ void ScenarioCanvasWidget::mouseReleaseEvent(QMouseEvent* event) {
             }
         }
         update();
+        event->accept();
+        return;
+    }
+
+    if (eventDragging_) {
+        finishEventDrag();
         event->accept();
         return;
     }
@@ -2034,6 +2082,7 @@ void ScenarioCanvasWidget::paintEvent(QPaintEvent* event) {
     drawConnectionBlocks(painter, transform);
     drawEnvironmentHazards(painter, transform);
     drawRouteGuidances(painter, transform);
+    drawDraggedEventPreview(painter, transform);
 
     if (dragging_ || selectionDragging_) {
         const auto start = dragging_ ? dragStart_ : selectionDragStart_;
@@ -2184,7 +2233,14 @@ void ScenarioCanvasWidget::drawConnectionBlocks(QPainter& painter, const LayoutC
     painter.setBrush(Qt::NoBrush);
     painter.setPen(QPen(QColor("#c0392b"), 2.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
 
-    for (const auto& block : connectionBlocks_) {
+    for (std::size_t index = 0; index < connectionBlocks_.size(); ++index) {
+        if (eventDragging_ && eventDragState_.has_value()
+            && eventDragState_->kind == DraggableEventKind::ConnectionBlock
+            && eventDragState_->index == index) {
+            continue;
+        }
+
+        const auto& block = connectionBlocks_[index];
         if (block.connectionId.empty()) {
             continue;
         }
@@ -2206,7 +2262,14 @@ void ScenarioCanvasWidget::drawConnectionBlocks(QPainter& painter, const LayoutC
 }
 
 void ScenarioCanvasWidget::drawEnvironmentHazards(QPainter& painter, const LayoutCanvasTransform& transform) const {
-    for (const auto& hazard : environmentHazards_) {
+    for (std::size_t index = 0; index < environmentHazards_.size(); ++index) {
+        if (eventDragging_ && eventDragState_.has_value()
+            && eventDragState_->kind == DraggableEventKind::EnvironmentHazard
+            && eventDragState_->index == index) {
+            continue;
+        }
+
+        const auto& hazard = environmentHazards_[index];
         if (!matchesFloor(safecrowd::domain::environmentHazardFloorId(layout_, hazard), currentFloorId_)) {
             continue;
         }
@@ -2239,7 +2302,14 @@ void ScenarioCanvasWidget::drawRouteGuidances(QPainter& painter, const LayoutCan
     painter.setPen(Qt::NoPen);
     painter.setBrush(QColor("#1f5fae"));
 
-    for (const auto& guidance : routeGuidances_) {
+    for (std::size_t index = 0; index < routeGuidances_.size(); ++index) {
+        if (eventDragging_ && eventDragState_.has_value()
+            && eventDragState_->kind == DraggableEventKind::RouteGuidance
+            && eventDragState_->index == index) {
+            continue;
+        }
+
+        const auto& guidance = routeGuidances_[index];
         const auto center = routeGuidanceMarkerCenter(
             layout_,
             guidance,
@@ -2270,6 +2340,115 @@ void ScenarioCanvasWidget::drawRouteGuidances(QPainter& painter, const LayoutCan
         painter.drawLine(QPointF(markerCenter.x() + 6.3, markerCenter.y() - 2.0), QPointF(markerCenter.x() + 9.2, markerCenter.y() - 2.8));
         painter.drawLine(QPointF(markerCenter.x() + 3.7, markerCenter.y() - 7.2), QPointF(markerCenter.x() + 4.8, markerCenter.y() - 9.8));
         painter.setPen(Qt::NoPen);
+    }
+}
+
+void ScenarioCanvasWidget::drawDraggedEventPreview(QPainter& painter, const LayoutCanvasTransform& transform) const {
+    if (!eventDragging_ || !eventDragState_.has_value()) {
+        return;
+    }
+
+    const auto& state = *eventDragState_;
+    const bool valid = state.hasValidPreview;
+    const auto alphaColor = [valid](const QColor& color, int invalidAlpha) {
+        QColor adjusted(color);
+        if (!valid) {
+            adjusted.setAlpha(invalidAlpha);
+        }
+        return adjusted;
+    };
+
+    switch (state.kind) {
+    case DraggableEventKind::ConnectionBlock: {
+        QPointF center = state.previewScreenPosition;
+        if (valid && state.index < connectionBlocks_.size()) {
+            const auto& block = connectionBlocks_[state.index];
+            const auto it = std::find_if(layout_.connections.begin(), layout_.connections.end(), [&](const auto& connection) {
+                return connection.id == block.connectionId;
+            });
+            if (it != layout_.connections.end() && matchesFloor(it->floorId, currentFloorId_)) {
+                center = transform.map(connectionCenter(*it));
+            }
+        }
+
+        const QColor outlineColor = valid ? QColor("#c0392b") : QColor(192, 57, 43, 230);
+        const QColor fillColor = valid ? QColor(0, 0, 0, 0) : QColor(255, 244, 244, 220);
+        painter.setPen(QPen(outlineColor, 2.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.setBrush(fillColor);
+        painter.drawEllipse(center, 10.0, 10.0);
+        painter.setPen(QPen(outlineColor, 2.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.drawLine(QPointF(center.x() - 6.5, center.y() + 6.5), QPointF(center.x() + 6.5, center.y() - 6.5));
+        break;
+    }
+    case DraggableEventKind::EnvironmentHazard: {
+        if (state.index >= environmentHazards_.size()) {
+            break;
+        }
+
+        const auto& hazard = environmentHazards_[state.index];
+        QPointF center = state.previewScreenPosition;
+        if (valid) {
+            center = transform.map(hazard.position);
+        }
+        const QColor fill = hazard.kind == safecrowd::domain::EnvironmentHazardKind::Fire
+            ? alphaColor(QColor("#c2410c"), 150)
+            : alphaColor(QColor("#64748b"), 150);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(fill);
+        painter.drawEllipse(center, 11.0, 11.0);
+
+        painter.setPen(QPen(alphaColor(Qt::white, 180), 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.setBrush(Qt::NoBrush);
+        if (hazard.kind == safecrowd::domain::EnvironmentHazardKind::Fire) {
+            QPainterPath flame;
+            flame.moveTo(center + QPointF(0.0, 6.0));
+            flame.cubicTo(center + QPointF(-5.0, 2.0), center + QPointF(-3.5, -4.0), center + QPointF(-0.5, -7.0));
+            flame.cubicTo(center + QPointF(4.0, -3.0), center + QPointF(4.0, 3.0), center + QPointF(0.0, 6.0));
+            painter.drawPath(flame);
+        } else {
+            painter.drawArc(QRectF(center.x() - 7.0, center.y() - 1.0, 9.0, 7.0), 20 * 16, 220 * 16);
+            painter.drawArc(QRectF(center.x() - 1.0, center.y() - 3.0, 10.0, 7.0), 20 * 16, 220 * 16);
+            painter.drawArc(QRectF(center.x() - 5.0, center.y() - 8.0, 8.0, 6.0), 20 * 16, 220 * 16);
+        }
+        break;
+    }
+    case DraggableEventKind::RouteGuidance: {
+        if (state.index >= routeGuidances_.size()) {
+            break;
+        }
+
+        QPointF center = state.previewScreenPosition;
+        if (valid) {
+            const auto previewCenter = routeGuidanceMarkerCenter(
+                layout_,
+                routeGuidances_[state.index],
+                connectionBlocks_,
+                transform,
+                currentFloorId_);
+            if (previewCenter.has_value()) {
+                center = *previewCenter;
+            }
+        }
+
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(alphaColor(QColor("#1f5fae"), 150));
+        painter.drawEllipse(center, 10.0, 10.0);
+
+        painter.save();
+        painter.translate(center);
+        painter.rotate(-25.0);
+        painter.translate(-center);
+        painter.setBrush(alphaColor(Qt::white, 180));
+        painter.drawRoundedRect(QRectF(center.x() - 1.8, center.y() - 7.0, 3.6, 10.5), 1.4, 1.4);
+        painter.drawRoundedRect(QRectF(center.x() - 1.5, center.y() + 2.2, 3.0, 5.2), 1.2, 1.2);
+        painter.restore();
+
+        painter.setPen(QPen(alphaColor(Qt::white, 180), 1.7, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.drawLine(QPointF(center.x() + 5.3, center.y() - 5.0), QPointF(center.x() + 8.2, center.y() - 7.7));
+        painter.drawLine(QPointF(center.x() + 6.3, center.y() - 2.0), QPointF(center.x() + 9.2, center.y() - 2.8));
+        painter.drawLine(QPointF(center.x() + 3.7, center.y() - 7.2), QPointF(center.x() + 4.8, center.y() - 9.8));
+        break;
+    }
     }
 }
 
@@ -2313,6 +2492,9 @@ bool ScenarioCanvasWidget::switchFloorByWheel(QWheelEvent* event) {
         focusedCrowdElementId_.clear();
         focusedPlacementId_.clear();
         selectedPlacementIds_.clear();
+        restoreDraggedEventOriginal();
+        eventDragState_.reset();
+        eventDragging_ = false;
         dragging_ = false;
         selectionDragging_ = false;
         dragStart_ = {};
@@ -2404,6 +2586,30 @@ const safecrowd::domain::Connection2D* ScenarioCanvasWidget::connectionAt(
             continue;
         }
         const auto distance = distancePointToSegment(point, connection.centerSpan.start, connection.centerSpan.end);
+        if (distance <= bestDistance) {
+            bestDistance = distance;
+            best = &connection;
+        }
+    }
+    return best;
+}
+
+const safecrowd::domain::Connection2D* ScenarioCanvasWidget::controlConnectionAt(
+    const safecrowd::domain::Point2D& point,
+    double toleranceWorldUnits) const {
+    const safecrowd::domain::Connection2D* best = nullptr;
+    double bestDistance = std::max(0.0, toleranceWorldUnits);
+    for (const auto& connection : layout_.connections) {
+        if (!matchesFloor(connection.floorId, currentFloorId_)) {
+            continue;
+        }
+        if (connection.kind != safecrowd::domain::ConnectionKind::Doorway
+            && connection.kind != safecrowd::domain::ConnectionKind::Exit) {
+            continue;
+        }
+        const auto halfWidth = std::max(0.0, connection.effectiveWidth * 0.5);
+        const auto distance =
+            std::max(0.0, distancePointToSegment(point, connection.centerSpan.start, connection.centerSpan.end) - halfWidth);
         if (distance <= bestDistance) {
             bestDistance = distance;
             best = &connection;
@@ -2785,24 +2991,7 @@ void ScenarioCanvasWidget::addConnectionBlock(const QPointF& position) {
     const auto pixelToleranceWorldUnits = std::hypot(dx, dy);
 
     const auto toleranceWorldUnits = std::max(1.2, pixelToleranceWorldUnits);
-    const safecrowd::domain::Connection2D* connection = nullptr;
-    double bestDistance = toleranceWorldUnits;
-    for (const auto& candidate : layout_.connections) {
-        if (!matchesFloor(candidate.floorId, currentFloorId_)) {
-            continue;
-        }
-        if (candidate.kind != safecrowd::domain::ConnectionKind::Doorway
-            && candidate.kind != safecrowd::domain::ConnectionKind::Exit) {
-            continue;
-        }
-        const auto halfWidth = std::max(0.0, candidate.effectiveWidth * 0.5);
-        const auto distance =
-            std::max(0.0, distancePointToSegment(point, candidate.centerSpan.start, candidate.centerSpan.end) - halfWidth);
-        if (distance <= bestDistance) {
-            bestDistance = distance;
-            connection = &candidate;
-        }
-    }
+    const auto* connection = controlConnectionAt(point, toleranceWorldUnits);
     if (connection == nullptr) {
         QMessageBox::information(this, "Block door", "This tool can only be used on exits or doors.");
         return;
@@ -2912,25 +3101,7 @@ void ScenarioCanvasWidget::addRouteGuidance(const QPointF& position) {
     const auto dy = offsetPoint.y - point.y;
     const auto pixelToleranceWorldUnits = std::hypot(dx, dy);
     const auto toleranceWorldUnits = std::max(1.2, pixelToleranceWorldUnits);
-
-    const safecrowd::domain::Connection2D* connection = nullptr;
-    double bestDistance = toleranceWorldUnits;
-    for (const auto& candidate : layout_.connections) {
-        if (!matchesFloor(candidate.floorId, currentFloorId_)) {
-            continue;
-        }
-        if (candidate.kind != safecrowd::domain::ConnectionKind::Doorway
-            && candidate.kind != safecrowd::domain::ConnectionKind::Exit) {
-            continue;
-        }
-        const auto halfWidth = std::max(0.0, candidate.effectiveWidth * 0.5);
-        const auto distance =
-            std::max(0.0, distancePointToSegment(point, candidate.centerSpan.start, candidate.centerSpan.end) - halfWidth);
-        if (distance <= bestDistance) {
-            bestDistance = distance;
-            connection = &candidate;
-        }
-    }
+    const auto* connection = controlConnectionAt(point, toleranceWorldUnits);
 
     if (connection != nullptr) {
         addRouteGuidanceForConnection(*connection);
@@ -3062,6 +3233,365 @@ void ScenarioCanvasWidget::addRouteGuidanceForConnection(const safecrowd::domain
     routeGuidances_.push_back(std::move(draft));
     emitRouteGuidancesChanged();
     update();
+}
+
+bool ScenarioCanvasWidget::beginEventDrag(const QPointF& position, const LayoutCanvasTransform& transform) {
+    const auto hoveredGuidance = hoveredRouteGuidanceIndex(
+        layout_,
+        routeGuidances_,
+        connectionBlocks_,
+        transform,
+        currentFloorId_,
+        position);
+    if (hoveredGuidance.has_value()) {
+        eventDragState_ = EventDragState{
+            .kind = DraggableEventKind::RouteGuidance,
+            .index = *hoveredGuidance,
+            .originalGuidance = routeGuidances_[*hoveredGuidance],
+            .previewScreenPosition = position,
+            .hasValidPreview = true,
+        };
+        eventDragging_ = true;
+        return true;
+    }
+
+    const auto hoveredHazard = hoveredEnvironmentHazardIndex(
+        layout_,
+        environmentHazards_,
+        transform,
+        currentFloorId_,
+        position);
+    if (hoveredHazard.has_value()) {
+        eventDragState_ = EventDragState{
+            .kind = DraggableEventKind::EnvironmentHazard,
+            .index = *hoveredHazard,
+            .originalHazard = environmentHazards_[*hoveredHazard],
+            .previewScreenPosition = position,
+            .hasValidPreview = true,
+        };
+        eventDragging_ = true;
+        return true;
+    }
+
+    const auto hoveredBlock = hoveredConnectionBlockIndex(layout_, connectionBlocks_, transform, currentFloorId_, position);
+    if (hoveredBlock.has_value()) {
+        eventDragState_ = EventDragState{
+            .kind = DraggableEventKind::ConnectionBlock,
+            .index = *hoveredBlock,
+            .originalBlock = connectionBlocks_[*hoveredBlock],
+            .previewScreenPosition = position,
+            .hasValidPreview = true,
+        };
+        eventDragging_ = true;
+        return true;
+    }
+
+    return false;
+}
+
+void ScenarioCanvasWidget::restoreDraggedEventOriginal() {
+    if (!eventDragState_.has_value()) {
+        return;
+    }
+
+    const auto& state = *eventDragState_;
+    switch (state.kind) {
+    case DraggableEventKind::ConnectionBlock:
+        if (state.originalBlock.has_value() && state.index < connectionBlocks_.size()) {
+            connectionBlocks_[state.index] = *state.originalBlock;
+        }
+        break;
+    case DraggableEventKind::EnvironmentHazard:
+        if (state.originalHazard.has_value() && state.index < environmentHazards_.size()) {
+            environmentHazards_[state.index] = *state.originalHazard;
+        }
+        break;
+    case DraggableEventKind::RouteGuidance:
+        if (state.originalGuidance.has_value() && state.index < routeGuidances_.size()) {
+            routeGuidances_[state.index] = *state.originalGuidance;
+        }
+        break;
+    }
+}
+
+void ScenarioCanvasWidget::updateEventDragPreview(const QPointF& position) {
+    if (!eventDragState_.has_value()) {
+        return;
+    }
+
+    QString errorMessage;
+    bool valid = false;
+    auto& state = *eventDragState_;
+    state.previewScreenPosition = position;
+    switch (state.kind) {
+    case DraggableEventKind::ConnectionBlock:
+        valid = tryMoveConnectionBlock(state.index, position, &errorMessage);
+        break;
+    case DraggableEventKind::EnvironmentHazard:
+        valid = tryMoveEnvironmentHazard(state.index, position, &errorMessage);
+        break;
+    case DraggableEventKind::RouteGuidance:
+        valid = tryMoveRouteGuidance(state.index, position, &errorMessage);
+        break;
+    }
+
+    if (valid) {
+        state.hasValidPreview = true;
+        state.invalidReason.clear();
+    } else {
+        restoreDraggedEventOriginal();
+        state.hasValidPreview = false;
+        state.invalidReason = errorMessage;
+    }
+
+    update();
+}
+
+void ScenarioCanvasWidget::finishEventDrag() {
+    if (!eventDragState_.has_value()) {
+        return;
+    }
+
+    const auto state = *eventDragState_;
+    eventDragging_ = false;
+
+    if (!state.hasValidPreview) {
+        restoreDraggedEventOriginal();
+        eventDragState_.reset();
+        update();
+        if (!state.invalidReason.isEmpty()) {
+            QString title = "Move event";
+            if (state.kind == DraggableEventKind::ConnectionBlock) {
+                title = "Move block";
+            } else if (state.kind == DraggableEventKind::EnvironmentHazard) {
+                title = "Move hazard";
+            } else if (state.kind == DraggableEventKind::RouteGuidance) {
+                title = "Move route guidance";
+            }
+            QMessageBox::warning(this, title, state.invalidReason);
+        }
+        return;
+    }
+
+    bool changed = false;
+    switch (state.kind) {
+    case DraggableEventKind::ConnectionBlock:
+        if (state.originalBlock.has_value() && state.index < connectionBlocks_.size()) {
+            changed = connectionBlocks_[state.index].connectionId != state.originalBlock->connectionId;
+            if (changed) {
+                emitConnectionBlocksChanged();
+            }
+        }
+        break;
+    case DraggableEventKind::EnvironmentHazard:
+        if (state.originalHazard.has_value() && state.index < environmentHazards_.size()) {
+            changed = !hazardLocationEqual(environmentHazards_[state.index], *state.originalHazard);
+            if (changed) {
+                emitEnvironmentHazardsChanged();
+            }
+        }
+        break;
+    case DraggableEventKind::RouteGuidance:
+        if (state.originalGuidance.has_value() && state.index < routeGuidances_.size()) {
+            changed = !routeGuidanceLocationEqual(routeGuidances_[state.index], *state.originalGuidance);
+            if (changed) {
+                emitRouteGuidancesChanged();
+            }
+        }
+        break;
+    }
+
+    eventDragState_.reset();
+    update();
+}
+
+bool ScenarioCanvasWidget::tryMoveConnectionBlock(std::size_t index, const QPointF& position, QString* errorMessage) {
+    if (index >= connectionBlocks_.size()) {
+        return false;
+    }
+
+    constexpr double kPickRadiusPixels = 18.0;
+    const auto point = unmapPoint(position);
+    const auto offsetPoint = unmapPoint(position + QPointF(kPickRadiusPixels, 0.0));
+    const auto toleranceWorldUnits = std::max(1.2, std::hypot(offsetPoint.x - point.x, offsetPoint.y - point.y));
+    const auto* connection = controlConnectionAt(point, toleranceWorldUnits);
+    if (connection == nullptr) {
+        if (errorMessage != nullptr) {
+            *errorMessage = "Blocked doors/exits can only be attached to exit zones or doors.";
+        }
+        return false;
+    }
+
+    for (std::size_t otherIndex = 0; otherIndex < connectionBlocks_.size(); ++otherIndex) {
+        if (otherIndex == index) {
+            continue;
+        }
+        if (connectionBlocks_[otherIndex].connectionId == connection->id) {
+            if (errorMessage != nullptr) {
+                *errorMessage = "This door or exit is already blocked.";
+            }
+            return false;
+        }
+    }
+
+    connectionBlocks_[index].connectionId = connection->id;
+    return true;
+}
+
+bool ScenarioCanvasWidget::tryMoveEnvironmentHazard(
+    std::size_t index,
+    const QPointF& position,
+    QString* errorMessage) {
+    if (index >= environmentHazards_.size()) {
+        return false;
+    }
+
+    const auto point = unmapPoint(position);
+    const auto zoneId = zoneAt(point);
+    if (zoneId.isEmpty()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = "Hazards must stay inside walkable room space and not too close to walls.";
+        }
+        return false;
+    }
+
+    const auto zoneIdStd = zoneId.toStdString();
+    const auto zoneIt = std::find_if(layout_.zones.begin(), layout_.zones.end(), [&](const auto& zone) {
+        return zone.id == zoneIdStd;
+    });
+    if (zoneIt == layout_.zones.end() || !matchesFloor(zoneIt->floorId, currentFloorId_) || !pointInPolygon(zoneIt->area, point)) {
+        if (errorMessage != nullptr) {
+            *errorMessage = "Hazards must stay inside walkable room space and not too close to walls.";
+        }
+        return false;
+    }
+
+    const auto floorId = zoneIt->floorId.empty() ? currentFloorId_.toStdString() : zoneIt->floorId;
+    if (!safecrowd::domain::pointInsideWalkableZoneWithClearance(
+            layout_,
+            point,
+            floorId,
+            kGuidancePlacementBarrierClearance)) {
+        if (errorMessage != nullptr) {
+            *errorMessage = "Hazards must stay inside walkable room space and not too close to walls.";
+        }
+        return false;
+    }
+
+    auto& hazard = environmentHazards_[index];
+    hazard.affectedZoneId = zoneIt->id;
+    hazard.floorId = floorId;
+    hazard.position = point;
+    return true;
+}
+
+bool ScenarioCanvasWidget::tryMoveRouteGuidance(
+    std::size_t index,
+    const QPointF& position,
+    QString* errorMessage) {
+    if (index >= routeGuidances_.size()) {
+        return false;
+    }
+
+    constexpr double kPickRadiusPixels = 18.0;
+    const auto point = unmapPoint(position);
+    const auto zoneId = zoneAt(point);
+    const safecrowd::domain::Zone2D* zone = nullptr;
+    if (!zoneId.isEmpty()) {
+        const auto zoneIdStd = zoneId.toStdString();
+        const auto zoneIt = std::find_if(layout_.zones.begin(), layout_.zones.end(), [&](const auto& candidate) {
+            return candidate.id == zoneIdStd;
+        });
+        if (zoneIt != layout_.zones.end()) {
+            zone = &(*zoneIt);
+        }
+    }
+
+    const auto offsetPoint = unmapPoint(position + QPointF(kPickRadiusPixels, 0.0));
+    const auto toleranceWorldUnits = std::max(1.2, std::hypot(offsetPoint.x - point.x, offsetPoint.y - point.y));
+    const auto* connection = controlConnectionAt(point, toleranceWorldUnits);
+    if (connection != nullptr) {
+        for (std::size_t otherIndex = 0; otherIndex < routeGuidances_.size(); ++otherIndex) {
+            if (otherIndex == index) {
+                continue;
+            }
+            if (!routeGuidances_[otherIndex].installConnectionId.empty()
+                && routeGuidances_[otherIndex].installConnectionId == connection->id) {
+                if (errorMessage != nullptr) {
+                    *errorMessage = "Guidance is already installed on this door.";
+                }
+                return false;
+            }
+        }
+
+        auto& guidance = routeGuidances_[index];
+        guidance.guidedExitZoneId = pickNearestExitZoneIdForConnection(layout_, *connection);
+        guidance.installConnectionId = connection->id;
+        guidance.installFloorId = connection->floorId.empty() ? currentFloorId_.toStdString() : connection->floorId;
+        guidance.installZoneId.clear();
+        guidance.installPosition = connectionMarkerCenter(*connection);
+        return true;
+    }
+
+    if (zone != nullptr && zone->kind == safecrowd::domain::ZoneKind::Exit) {
+        for (std::size_t otherIndex = 0; otherIndex < routeGuidances_.size(); ++otherIndex) {
+            if (otherIndex == index) {
+                continue;
+            }
+            const auto& existing = routeGuidances_[otherIndex];
+            if (existing.installConnectionId.empty()
+                && existing.guidedExitZoneId == zone->id
+                && (existing.installZoneId.empty() || existing.installZoneId == zone->id)) {
+                if (errorMessage != nullptr) {
+                    *errorMessage = "Guidance is already installed on this exit.";
+                }
+                return false;
+            }
+        }
+
+        auto& guidance = routeGuidances_[index];
+        guidance.guidedExitZoneId = zone->id;
+        guidance.installConnectionId.clear();
+        guidance.installFloorId = zone->floorId.empty() ? currentFloorId_.toStdString() : zone->floorId;
+        guidance.installZoneId = zone->id;
+        guidance.installPosition = representativePointInPolygon(zone->area).value_or(polygonCenter(zone->area));
+        return true;
+    }
+
+    if (zone == nullptr || !matchesFloor(zone->floorId, currentFloorId_) || !pointInPolygon(zone->area, point)) {
+        if (errorMessage != nullptr) {
+            *errorMessage = "Guidance must be placed on a walkable room area, exit zone, or a door.";
+        }
+        return false;
+    }
+
+    const auto floorId = zone->floorId.empty() ? currentFloorId_.toStdString() : zone->floorId;
+    if (!safecrowd::domain::pointInsideWalkableZoneWithClearance(
+            layout_,
+            point,
+            floorId,
+            kGuidancePlacementBarrierClearance)) {
+        if (errorMessage != nullptr) {
+            *errorMessage = "Guidance must stay inside walkable room space and not too close to walls.";
+        }
+        return false;
+    }
+
+    const auto exitZoneId = pickNearestExitZoneIdForPoint(layout_, point, floorId);
+    if (exitZoneId.empty()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = "Could not find a reachable exit target for this guidance.";
+        }
+        return false;
+    }
+
+    auto& guidance = routeGuidances_[index];
+    guidance.guidedExitZoneId = exitZoneId;
+    guidance.installConnectionId.clear();
+    guidance.installFloorId = floorId;
+    guidance.installZoneId = zone->id;
+    guidance.installPosition = point;
+    return true;
 }
 
 void ScenarioCanvasWidget::selectSingleAt(const QPointF& position, const LayoutCanvasTransform& transform) {

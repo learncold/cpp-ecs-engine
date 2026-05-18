@@ -103,6 +103,23 @@ private:
         RouteGuidance,
     };
 
+    enum class DraggableEventKind {
+        ConnectionBlock,
+        EnvironmentHazard,
+        RouteGuidance,
+    };
+
+    struct EventDragState {
+        DraggableEventKind kind{DraggableEventKind::EnvironmentHazard};
+        std::size_t index{0};
+        std::optional<safecrowd::domain::ConnectionBlockDraft> originalBlock{};
+        std::optional<safecrowd::domain::EnvironmentHazardDraft> originalHazard{};
+        std::optional<safecrowd::domain::RouteGuidanceDraft> originalGuidance{};
+        QPointF previewScreenPosition{};
+        bool hasValidPreview{true};
+        QString invalidReason{};
+    };
+
     std::optional<LayoutCanvasBounds> collectBounds() const;
     LayoutCanvasTransform currentTransform(const LayoutCanvasBounds& bounds) const;
     QRectF previewViewport() const;
@@ -111,6 +128,7 @@ private:
     safecrowd::domain::Point2D unmapPoint(const QPointF& point) const;
     QString zoneAt(const safecrowd::domain::Point2D& point) const;
     const safecrowd::domain::Connection2D* connectionAt(const safecrowd::domain::Point2D& point, double toleranceWorldUnits) const;
+    const safecrowd::domain::Connection2D* controlConnectionAt(const safecrowd::domain::Point2D& point, double toleranceWorldUnits) const;
     const safecrowd::domain::Barrier2D* barrierAt(const safecrowd::domain::Point2D& point, double toleranceWorldUnits) const;
     safecrowd::domain::Point2D connectionCenter(const safecrowd::domain::Connection2D& connection) const;
     QString placementAt(const QPointF& position, const LayoutCanvasTransform& transform, double pickPadding = 0.0) const;
@@ -138,6 +156,13 @@ private:
         safecrowd::domain::Point2D position);
     void addRouteGuidanceForExitZone(const safecrowd::domain::Zone2D& zone);
     void addRouteGuidanceForConnection(const safecrowd::domain::Connection2D& connection);
+    bool beginEventDrag(const QPointF& position, const LayoutCanvasTransform& transform);
+    void restoreDraggedEventOriginal();
+    void updateEventDragPreview(const QPointF& position);
+    void finishEventDrag();
+    bool tryMoveConnectionBlock(std::size_t index, const QPointF& position, QString* errorMessage);
+    bool tryMoveEnvironmentHazard(std::size_t index, const QPointF& position, QString* errorMessage);
+    bool tryMoveRouteGuidance(std::size_t index, const QPointF& position, QString* errorMessage);
     void openRouteGuidanceEditor(const QString& guidanceId, const QPoint& screenPosition);
     void selectSingleAt(const QPointF& position, const LayoutCanvasTransform& transform);
     void selectPlacementsInRect(const QRectF& screenRect, const LayoutCanvasTransform& transform);
@@ -151,6 +176,7 @@ private:
     void drawConnectionBlocks(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawEnvironmentHazards(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawRouteGuidances(QPainter& painter, const LayoutCanvasTransform& transform) const;
+    void drawDraggedEventPreview(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void emitPlacementsChanged();
     void emitConnectionBlocksChanged();
     void emitEnvironmentHazardsChanged();
@@ -178,6 +204,8 @@ private:
     QPointF selectionDragCurrent_{};
     bool dragging_{false};
     bool selectionDragging_{false};
+    bool eventDragging_{false};
+    std::optional<EventDragState> eventDragState_{};
     QFrame* topToolbar_{nullptr};
     QFrame* propertyPanel_{nullptr};
     QToolButton* selectToolButton_{nullptr};
