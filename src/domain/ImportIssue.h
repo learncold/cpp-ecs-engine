@@ -35,6 +35,8 @@ struct ImportIssue {
     std::string sourceId{};
     std::string targetId{};
     bool isBlocking{false};
+    std::string suggestion{};
+    double confidence{1.0};
 
     bool blocksSimulation() const noexcept;
 };

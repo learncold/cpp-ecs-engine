@@ -27,6 +27,9 @@ enum class RawEntityKind {
     Line,
     Polyline,
     Polygon,
+    Arc,
+    Circle,
+    Hatch,
     BlockReference,
     IfcElement,
     Annotation,
@@ -74,11 +77,32 @@ struct RawAnnotation2D {
     std::string text{};
 };
 
+struct RawArc2D {
+    Point2D center{};
+    double radius{0.0};
+    double startAngleRadians{0.0};
+    double endAngleRadians{0.0};
+    Polyline2D approximation{};
+};
+
+struct RawCircle2D {
+    Point2D center{};
+    double radius{0.0};
+    Polyline2D approximation{};
+};
+
+struct RawHatchBoundary2D {
+    Polygon2D boundary{};
+};
+
 using RawEntityPayload = std::variant<
     std::monostate,
     LineSegment2D,
     Polyline2D,
     Polygon2D,
+    RawArc2D,
+    RawCircle2D,
+    RawHatchBoundary2D,
     RawBlockReference2D,
     RawIfcElement2D,
     RawAnnotation2D>;

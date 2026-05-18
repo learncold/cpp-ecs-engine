@@ -104,6 +104,8 @@ add_library(safecrowd_domain STATIC
     src/domain/ScenarioTemplateCatalog.h
     src/domain/RawImportModel.h
     src/domain/CanonicalGeometry.h
+    src/domain/GeometryNormalizer.h
+    src/domain/GeometryNormalizer.cpp
     src/domain/DemoFixtureService.h
     src/domain/DemoFixtureService.cpp
     src/domain/DxfImportService.h
@@ -114,6 +116,8 @@ add_library(safecrowd_domain STATIC
     src/domain/ImportIssue.h
     src/domain/ImportIssue.cpp
     src/domain/ImportResult.h
+    src/domain/ImportSemanticRules.h
+    src/domain/ImportSemanticRules.cpp
     src/domain/ImportOrchestrator.h
     src/domain/ImportValidationService.h
     src/domain/ImportValidationService.cpp

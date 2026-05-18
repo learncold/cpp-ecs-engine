@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "domain/FacilityLayoutBuilder.h"
+#include "domain/GeometryNormalizer.h"
 #include "domain/ImportValidationService.h"
 
 namespace safecrowd::domain {
@@ -132,6 +133,38 @@ ImportUnit parseUnits(const std::vector<DxfGroup>& groups) {
     }
 
     return ImportUnit::Unknown;
+}
+
+Polyline2D approximateArc(Point2D center, double radius, double startAngleRadians, double endAngleRadians, bool closed) {
+    Polyline2D polyline{.closed = closed};
+    if (radius <= 0.0) {
+        return polyline;
+    }
+
+    double sweep = endAngleRadians - startAngleRadians;
+    while (sweep < 0.0) {
+        sweep += kPi * 2.0;
+    }
+    if (closed) {
+        sweep = kPi * 2.0;
+    }
+
+    const auto segmentCount = std::max<std::size_t>(12, static_cast<std::size_t>(std::ceil(std::abs(sweep) / (kPi / 18.0))));
+    polyline.vertices.reserve(segmentCount + (closed ? 0 : 1));
+
+    for (std::size_t index = 0; index <= segmentCount; ++index) {
+        if (closed && index == segmentCount) {
+            break;
+        }
+        const double t = static_cast<double>(index) / static_cast<double>(segmentCount);
+        const double angle = startAngleRadians + (sweep * t);
+        polyline.vertices.push_back({
+            .x = center.x + (std::cos(angle) * radius),
+            .y = center.y + (std::sin(angle) * radius),
+        });
+    }
+
+    return polyline;
 }
 
 bool hasMinimumVertices(const std::vector<Point2D>& vertices, std::size_t minimum) {
@@ -277,6 +310,69 @@ void appendLayoutTraceRefs(const FacilityLayout2D& layout, std::vector<ImportTra
     }
 }
 
+ImportSourceFingerprint makeSourceFingerprint(const std::filesystem::path& sourcePath, bool compute) {
+    ImportSourceFingerprint fingerprint;
+    fingerprint.sourcePath = sourcePath.generic_string();
+
+    if (!compute) {
+        return fingerprint;
+    }
+
+    std::error_code error;
+    fingerprint.exists = std::filesystem::exists(sourcePath, error);
+    if (!fingerprint.exists || error) {
+        return fingerprint;
+    }
+
+    fingerprint.fileSizeBytes = std::filesystem::file_size(sourcePath, error);
+    if (error) {
+        fingerprint.fileSizeBytes = 0;
+        error.clear();
+    }
+
+    const auto writeTime = std::filesystem::last_write_time(sourcePath, error);
+    if (!error) {
+        fingerprint.modifiedTimeTicks = writeTime.time_since_epoch().count();
+    }
+
+    return fingerprint;
+}
+
+std::size_t canonicalElementCount(const CanonicalGeometry& geometry) {
+    return geometry.walkableAreas.size()
+        + geometry.walls.size()
+        + geometry.openings.size()
+        + geometry.obstacles.size()
+        + geometry.verticalLinks.size();
+}
+
+std::size_t layoutElementCount(const FacilityLayout2D& layout) {
+    return layout.floors.size()
+        + layout.zones.size()
+        + layout.connections.size()
+        + layout.barriers.size()
+        + layout.controls.size();
+}
+
+ImportSummary summarizeImportResult(const ImportResult& result) {
+    ImportSummary summary;
+    summary.rawEntityCount = result.rawModel.has_value() ? result.rawModel->entities.size() : 0;
+    summary.canonicalElementCount = result.canonicalGeometry.has_value() ? canonicalElementCount(*result.canonicalGeometry) : 0;
+    summary.layoutElementCount = result.layout.has_value() ? layoutElementCount(*result.layout) : 0;
+    summary.issueCount = result.issues.size();
+
+    for (const auto& issue : result.issues) {
+        if (issue.blocksSimulation()) {
+            ++summary.blockingIssueCount;
+        }
+        if (!issue.blocksSimulation() && issue.severity == ImportIssueSeverity::Warning) {
+            ++summary.warningIssueCount;
+        }
+    }
+
+    return summary;
+}
+
 class DxfAsciiParser {
 public:
     DxfAsciiParser(std::filesystem::path sourcePath, std::vector<DxfGroup> groups)
@@ -302,27 +398,21 @@ public:
         rawModel_.unit = parseUnits(groups_);
         rawModel_.sourceDocumentId = sourcePath_.filename().generic_string();
         rawModel_.levelId = sourcePath_.stem().generic_string();
-        canonicalGeometry_.levelId = rawModel_.levelId;
 
         parseSections();
-        buildCanonicalGeometry();
 
-        if (canonicalGeometry_.walkableAreas.empty()
-            && canonicalGeometry_.walls.empty()
-            && canonicalGeometry_.openings.empty()
-            && canonicalGeometry_.obstacles.empty()) {
+        if (rawModel_.entities.empty()) {
             issues_.push_back({
                 .severity = ImportIssueSeverity::Error,
                 .code = ImportIssueCode::MissingSourceGeometry,
                 .message = "No importable geometry was extracted from the DXF file.",
                 .sourceId = rawModel_.sourceDocumentId,
+                .suggestion = "Export a 2D model-space DXF with wall, door, exit, and room/space layers.",
             });
         }
 
         result.rawModel = rawModel_;
-        result.canonicalGeometry = canonicalGeometry_;
         result.issues = issues_;
-        result.traceRefs = traceRefs_;
         result.reviewStatus = hasBlockingImportIssue(result.issues) ? ImportReviewStatus::Rejected : ImportReviewStatus::Pending;
         return result;
     }
@@ -504,12 +594,33 @@ private:
                 continue;
             }
 
+            if (at(0, "ARC")) {
+                rawModel_.entities.push_back(parseArcEntity());
+                continue;
+            }
+
+            if (at(0, "CIRCLE")) {
+                rawModel_.entities.push_back(parseCircleEntity());
+                continue;
+            }
+
+            if (at(0, "TEXT") || at(0, "MTEXT")) {
+                rawModel_.entities.push_back(parseTextEntity(current().value));
+                continue;
+            }
+
+            if (at(0, "HATCH")) {
+                rawModel_.entities.push_back(parseHatchEntity());
+                continue;
+            }
+
             if (current().code == 0) {
                 issues_.push_back({
                     .severity = ImportIssueSeverity::Warning,
                     .code = ImportIssueCode::UnsupportedEntity,
                     .message = "Unsupported DXF entity type: " + current().value,
                     .sourceId = rawModel_.sourceDocumentId,
+                    .suggestion = "The entity is preserved as an import warning. Convert it to line/polyline/hatch geometry if it should affect evacuation topology.",
                 });
             }
 
@@ -690,6 +801,170 @@ private:
             entity.payload = polyline;
         }
 
+        return entity;
+    }
+
+    RawEntity2D parseArcEntity() {
+        RawEntity2D entity;
+        entity.kind = RawEntityKind::Arc;
+
+        advance();
+
+        RawArc2D arc;
+        double startDegrees = 0.0;
+        double endDegrees = 0.0;
+
+        while (hasMore() && current().code != 0) {
+            const auto group = advance();
+
+            switch (group.code) {
+            case 8:
+                entity.trace.layerName = group.value;
+                break;
+            case 10:
+                arc.center.x = parseDouble(group.value).value_or(arc.center.x);
+                break;
+            case 20:
+                arc.center.y = parseDouble(group.value).value_or(arc.center.y);
+                break;
+            case 40:
+                arc.radius = parseDouble(group.value).value_or(arc.radius);
+                break;
+            case 50:
+                startDegrees = parseDouble(group.value).value_or(startDegrees);
+                break;
+            case 51:
+                endDegrees = parseDouble(group.value).value_or(endDegrees);
+                break;
+            default:
+                break;
+            }
+        }
+
+        arc.startAngleRadians = startDegrees * (kPi / 180.0);
+        arc.endAngleRadians = endDegrees * (kPi / 180.0);
+        arc.approximation = approximateArc(arc.center, arc.radius, arc.startAngleRadians, arc.endAngleRadians, false);
+
+        entity.trace.sourceId = nextSourceId("arc");
+        entity.metadata["entityType"] = "ARC";
+        entity.payload = std::move(arc);
+        return entity;
+    }
+
+    RawEntity2D parseCircleEntity() {
+        RawEntity2D entity;
+        entity.kind = RawEntityKind::Circle;
+
+        advance();
+
+        RawCircle2D circle;
+
+        while (hasMore() && current().code != 0) {
+            const auto group = advance();
+
+            switch (group.code) {
+            case 8:
+                entity.trace.layerName = group.value;
+                break;
+            case 10:
+                circle.center.x = parseDouble(group.value).value_or(circle.center.x);
+                break;
+            case 20:
+                circle.center.y = parseDouble(group.value).value_or(circle.center.y);
+                break;
+            case 40:
+                circle.radius = parseDouble(group.value).value_or(circle.radius);
+                break;
+            default:
+                break;
+            }
+        }
+
+        circle.approximation = approximateArc(circle.center, circle.radius, 0.0, kPi * 2.0, true);
+
+        entity.trace.sourceId = nextSourceId("circle");
+        entity.metadata["entityType"] = "CIRCLE";
+        entity.payload = std::move(circle);
+        return entity;
+    }
+
+    RawEntity2D parseTextEntity(const std::string& entityType) {
+        RawEntity2D entity;
+        entity.kind = RawEntityKind::Annotation;
+
+        advance();
+
+        RawAnnotation2D annotation;
+
+        while (hasMore() && current().code != 0) {
+            const auto group = advance();
+
+            switch (group.code) {
+            case 1:
+            case 3:
+                if (!annotation.text.empty()) {
+                    annotation.text += " ";
+                }
+                annotation.text += group.value;
+                break;
+            case 8:
+                entity.trace.layerName = group.value;
+                break;
+            case 10:
+                annotation.anchor.x = parseDouble(group.value).value_or(annotation.anchor.x);
+                break;
+            case 20:
+                annotation.anchor.y = parseDouble(group.value).value_or(annotation.anchor.y);
+                break;
+            default:
+                break;
+            }
+        }
+
+        entity.trace.sourceId = nextSourceId("text");
+        entity.trace.objectName = annotation.text;
+        entity.metadata["entityType"] = entityType;
+        entity.metadata["text"] = annotation.text;
+        entity.payload = std::move(annotation);
+        return entity;
+    }
+
+    RawEntity2D parseHatchEntity() {
+        RawEntity2D entity;
+        entity.kind = RawEntityKind::Hatch;
+
+        advance();
+
+        RawHatchBoundary2D hatch;
+        std::optional<double> pendingX;
+
+        while (hasMore() && current().code != 0) {
+            const auto group = advance();
+
+            switch (group.code) {
+            case 8:
+                entity.trace.layerName = group.value;
+                break;
+            case 10:
+                pendingX = parseDouble(group.value);
+                break;
+            case 20:
+                if (pendingX.has_value()) {
+                    hatch.boundary.outline.push_back({
+                        .x = *pendingX,
+                        .y = parseDouble(group.value).value_or(0.0),
+                    });
+                    pendingX.reset();
+                }
+                break;
+            default:
+                break;
+            }
+        }
+
+        entity.trace.sourceId = nextSourceId("hatch");
+        entity.metadata["entityType"] = "HATCH";
+        entity.payload = std::move(hatch);
         return entity;
     }
 
@@ -970,6 +1245,9 @@ private:
 
 ImportResult DxfImportService::importFile(const ImportRequest& request) const {
     ImportResult result;
+    result.artifacts.source = makeSourceFingerprint(request.sourcePath, request.computeSourceFingerprint);
+    result.artifacts.selectedRules = request.semanticRules;
+    result.artifacts.fallbackPolicy = request.fallbackPolicy;
 
     const auto extension = toUpper(request.sourcePath.extension().generic_string());
     if (request.requestedFormat == ImportedFileFormat::Ifc || (!extension.empty() && extension != ".DXF")) {
@@ -979,14 +1257,31 @@ ImportResult DxfImportService::importFile(const ImportRequest& request) const {
             .message = "DxfImportService only supports DXF files.",
             .sourceId = request.sourcePath.generic_string(),
             .isBlocking = true,
+            .suggestion = "Choose a .dxf file exported from the CAD/BIM tool.",
         });
         result.reviewStatus = ImportReviewStatus::Rejected;
+        result.statusMessage = "Import failed: unsupported file format.";
+        result.artifacts.summary = summarizeImportResult(result);
         return result;
     }
 
     auto groups = loadGroups(request.sourcePath);
     DxfAsciiParser parser(request.sourcePath, std::move(groups));
     result = parser.parse();
+    result.artifacts.source = makeSourceFingerprint(request.sourcePath, request.computeSourceFingerprint);
+    result.artifacts.selectedRules = request.semanticRules;
+    result.artifacts.fallbackPolicy = request.fallbackPolicy;
+
+    if (result.rawModel.has_value()) {
+        GeometryNormalizer normalizer;
+        auto normalized = normalizer.normalize(*result.rawModel, {
+            .semanticRules = request.semanticRules,
+            .fallbackPolicy = request.fallbackPolicy,
+        });
+        result.canonicalGeometry = std::move(normalized.geometry);
+        result.issues.insert(result.issues.end(), normalized.issues.begin(), normalized.issues.end());
+        result.traceRefs.insert(result.traceRefs.end(), normalized.traceRefs.begin(), normalized.traceRefs.end());
+    }
 
     if (result.canonicalGeometry.has_value()) {
         FacilityLayoutBuilder builder;
@@ -1007,6 +1302,10 @@ ImportResult DxfImportService::importFile(const ImportRequest& request) const {
     }
 
     result.reviewStatus = hasBlockingImportIssue(result.issues) ? ImportReviewStatus::Rejected : ImportReviewStatus::Pending;
+    result.statusMessage = result.layout.has_value()
+        ? "DXF imported. Review the generated layout before scenario authoring."
+        : "DXF import did not produce layout geometry.";
+    result.artifacts.summary = summarizeImportResult(result);
     return result;
 }
 

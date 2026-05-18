@@ -8,5 +8,7 @@
 #include "domain/ImportIssue.h"
 #include "domain/ImportOrchestrator.h"
 #include "domain/ImportResult.h"
+#include "domain/ImportSemanticRules.h"
 #include "domain/ImportValidationService.h"
+#include "domain/GeometryNormalizer.h"
 #include "domain/RawImportModel.h"
