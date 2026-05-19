@@ -9,6 +9,7 @@
 
 #include "application/LayoutCanvasRendering.h"
 #include "application/LayoutCanvasSnapping.h"
+#include "application/LayoutPreviewEditing.h"
 #include "application/ToolIconResources.h"
 
 #include <QCoreApplication>
@@ -2742,194 +2743,6 @@ std::optional<QString> hitTestCanonicalWallBarrier(
     return bestBarrierId;
 }
 
-struct DoorSpanCorrectionResult {
-    safecrowd::domain::LineSegment2D span{};
-    QString barrierId{};
-};
-
-constexpr double kDoorSpanSupportSnapToleranceMeters = 0.35;
-
-std::optional<DoorSpanCorrectionResult> correctedDoorSpanOnAxisAlignedSupport(
-    const safecrowd::domain::Point2D& supportStart,
-    const safecrowd::domain::Point2D& supportEnd,
-    const QString& barrierId,
-    const safecrowd::domain::LineSegment2D& rawSpan) {
-    const bool supportVertical = nearlyEqual(supportStart.x, supportEnd.x);
-    const bool supportHorizontal = nearlyEqual(supportStart.y, supportEnd.y);
-    if (!supportVertical && !supportHorizontal) {
-        return std::nullopt;
-    }
-
-    const QPointF startPoint(rawSpan.start.x, rawSpan.start.y);
-    const QPointF endPoint(rawSpan.end.x, rawSpan.end.y);
-    const auto projectedStart = projectOntoSegment(startPoint, supportStart, supportEnd);
-    const auto projectedEnd = projectOntoSegment(endPoint, supportStart, supportEnd);
-    if (!projectedStart.has_value() || !projectedEnd.has_value()) {
-        return std::nullopt;
-    }
-
-    safecrowd::domain::LineSegment2D corrected{
-        .start = {.x = projectedStart->x(), .y = projectedStart->y()},
-        .end = {.x = projectedEnd->x(), .y = projectedEnd->y()},
-    };
-    if (supportVertical) {
-        corrected.start.x = supportStart.x;
-        corrected.end.x = supportStart.x;
-        if (corrected.end.y < corrected.start.y) {
-            std::swap(corrected.start, corrected.end);
-        }
-    } else {
-        corrected.start.y = supportStart.y;
-        corrected.end.y = supportStart.y;
-        if (corrected.end.x < corrected.start.x) {
-            std::swap(corrected.start, corrected.end);
-        }
-    }
-
-    const auto length = std::hypot(corrected.end.x - corrected.start.x, corrected.end.y - corrected.start.y);
-    if (length < kMinimumDoorWidth) {
-        return std::nullopt;
-    }
-
-    return DoorSpanCorrectionResult{
-        .span = corrected,
-        .barrierId = barrierId,
-    };
-}
-
-std::optional<DoorSpanCorrectionResult> correctedDoorSpanForPlacement(
-    const safecrowd::domain::FacilityLayout2D& layout,
-    const QString& floorId,
-    const safecrowd::domain::LineSegment2D& rawSpan) {
-    const QPointF midpoint(
-        (rawSpan.start.x + rawSpan.end.x) * 0.5,
-        (rawSpan.start.y + rawSpan.end.y) * 0.5);
-
-    double bestDistance = std::numeric_limits<double>::max();
-    std::optional<DoorSpanCorrectionResult> best;
-
-    const auto considerSupport = [&](const safecrowd::domain::Point2D& a, const safecrowd::domain::Point2D& b, const QString& barrierId) {
-        const auto distance = distanceToLineSegmentWorld(midpoint, a, b);
-        if (distance > kDoorSpanSupportSnapToleranceMeters || distance >= bestDistance) {
-            return;
-        }
-
-        const auto candidate = correctedDoorSpanOnAxisAlignedSupport(a, b, barrierId, rawSpan);
-        if (!candidate.has_value()) {
-            return;
-        }
-
-        bestDistance = distance;
-        best = *candidate;
-    };
-
-    const auto considerExitBoundarySupport = [&](const safecrowd::domain::Point2D& a, const safecrowd::domain::Point2D& b) {
-        const auto distance = distanceToLineSegmentWorld(midpoint, a, b);
-        if (distance > kDoorSpanSupportSnapToleranceMeters || distance >= bestDistance) {
-            return;
-        }
-
-        const auto candidate = correctedDoorSpanOnAxisAlignedSupport(a, b, {}, rawSpan);
-        if (!candidate.has_value()) {
-            return;
-        }
-
-        const auto neighbors = doorNeighborsAcrossSegment(layout, candidate->span.start, candidate->span.end, floorId);
-        if (neighbors.firstSide.empty() || neighbors.secondSide.empty()) {
-            return;
-        }
-
-        const auto sideHasExit = [&](const std::vector<std::size_t>& indices) {
-            return std::any_of(indices.begin(), indices.end(), [&](std::size_t index) {
-                return layout.zones[index].kind == safecrowd::domain::ZoneKind::Exit;
-            });
-        };
-        const auto sideHasNonExit = [&](const std::vector<std::size_t>& indices) {
-            return std::any_of(indices.begin(), indices.end(), [&](std::size_t index) {
-                return layout.zones[index].kind != safecrowd::domain::ZoneKind::Exit;
-            });
-        };
-
-        const bool hasExit = sideHasExit(neighbors.firstSide) || sideHasExit(neighbors.secondSide);
-        const bool hasNonExit = sideHasNonExit(neighbors.firstSide) || sideHasNonExit(neighbors.secondSide);
-        if (!hasExit || !hasNonExit) {
-            return;
-        }
-
-        bestDistance = distance;
-        best = *candidate;
-    };
-
-    // Prefer aligning to existing Exit zone boundaries when present.
-    for (const auto& zone : layout.zones) {
-        if (!matchesFloor(zone.floorId, floorId) || zone.kind != safecrowd::domain::ZoneKind::Exit) {
-            continue;
-        }
-        const auto& outline = zone.area.outline;
-        if (outline.size() < 2) {
-            continue;
-        }
-        for (std::size_t i = 0; i < outline.size(); ++i) {
-            const auto& a = outline[i];
-            const auto& b = outline[(i + 1) % outline.size()];
-            if (std::hypot(b.x - a.x, b.y - a.y) <= kGeometryEpsilon) {
-                continue;
-            }
-            considerExitBoundarySupport(a, b);
-        }
-    }
-
-    // Fallback: align to nearest axis-aligned wall barrier segment.
-    for (const auto& barrier : layout.barriers) {
-        if (!matchesFloor(barrier.floorId, floorId)
-            || barrier.geometry.closed
-            || barrier.geometry.vertices.size() != 2) {
-            continue;
-        }
-        const auto& a = barrier.geometry.vertices[0];
-        const auto& b = barrier.geometry.vertices[1];
-        considerSupport(a, b, QString::fromStdString(barrier.id));
-    }
-
-    if (best.has_value()) {
-        return best;
-    }
-
-    // Last resort: if the user drew a slightly tilted span, coerce it to the dominant axis.
-    const auto dx = rawSpan.end.x - rawSpan.start.x;
-    const auto dy = rawSpan.end.y - rawSpan.start.y;
-    if (std::hypot(dx, dy) < kMinimumDoorWidth) {
-        return std::nullopt;
-    }
-
-    const bool preferHorizontal = std::abs(dx) >= std::abs(dy);
-    safecrowd::domain::LineSegment2D corrected = rawSpan;
-    if (preferHorizontal) {
-        const auto y = (rawSpan.start.y + rawSpan.end.y) * 0.5;
-        corrected.start.y = y;
-        corrected.end.y = y;
-        if (corrected.end.x < corrected.start.x) {
-            std::swap(corrected.start, corrected.end);
-        }
-    } else {
-        const auto x = (rawSpan.start.x + rawSpan.end.x) * 0.5;
-        corrected.start.x = x;
-        corrected.end.x = x;
-        if (corrected.end.y < corrected.start.y) {
-            std::swap(corrected.start, corrected.end);
-        }
-    }
-
-    if (std::hypot(corrected.end.x - corrected.start.x, corrected.end.y - corrected.start.y) < kMinimumDoorWidth) {
-        return std::nullopt;
-    }
-
-    return DoorSpanCorrectionResult{
-        .span = corrected,
-        .barrierId = {},
-    };
-}
-
 }  // namespace
 
 LayoutPreviewWidget::LayoutPreviewWidget(safecrowd::domain::ImportResult importResult, QWidget* parent)
@@ -3755,705 +3568,156 @@ void LayoutPreviewWidget::clearSelection() {
     update();
 }
 
-void LayoutPreviewWidget::createRoomPolygon(const std::vector<QPointF>& points) {
-    if (!importResult_.layout.has_value() || points.size() < 3) {
+LayoutPreviewEditOptions LayoutPreviewWidget::editOptions() const {
+    return {
+        .currentFloorId = currentFloorId(),
+        .targetFloorId = verticalTargetFloorId(),
+        .roomAutoWallsEnabled = roomAutoWallsEnabled_,
+        .doorCreatesLeaf = doorCreatesLeaf_,
+        .verticalLinkCreatesRamp = verticalLinkCreatesRamp_,
+        .stairEntryDirection = stairEntryDirection_,
+        .doorWidth = doorWidth_,
+    };
+}
+
+LayoutPreviewSelectionState LayoutPreviewWidget::editSelectionState() const {
+    LayoutPreviewSelectionState selection;
+    selection.selectedBarrierId = selectedBarrierId_;
+    selection.selectedBarrierIds = selectedBarrierIds_;
+    selection.selectedConnectionId = selectedConnectionId_;
+    selection.selectedConnectionIds = selectedConnectionIds_;
+    selection.selectedZoneId = selectedZoneId_;
+    selection.selectedZoneIds = selectedZoneIds_;
+    selection.focusedTargetId = focusedTargetId_;
+    return selection;
+}
+
+void LayoutPreviewWidget::applyEditResult(const LayoutPreviewEditResult& result) {
+    if (!result.layoutChanged && !result.selectionChanged && !result.floorChanged && !result.floorSelectorChanged) {
         return;
     }
 
-    safecrowd::domain::Polygon2D roomPolygon;
-    roomPolygon.outline.reserve(points.size());
-    for (const auto& point : points) {
-        roomPolygon.outline.push_back({.x = point.x(), .y = point.y()});
+    if (result.selectionChanged) {
+        selectedBarrierId_ = result.selection.selectedBarrierId;
+        selectedBarrierIds_ = result.selection.selectedBarrierIds;
+        selectedConnectionId_ = result.selection.selectedConnectionId;
+        selectedConnectionIds_ = result.selection.selectedConnectionIds;
+        selectedZoneId_ = result.selection.selectedZoneId;
+        selectedZoneIds_ = result.selection.selectedZoneIds;
+        focusedTargetId_ = result.selection.focusedTargetId;
+        selectionDragging_ = false;
+        selectionMoveDragging_ = false;
+        selectionMoveAttachedBarrierIds_.clear();
+        selectionMoveAnchors_.clear();
     }
 
-    QPolygonF polygonForArea;
-    for (const auto& point : points) {
-        polygonForArea.append(point);
+    if (result.floorChanged) {
+        currentFloorId_ = result.currentFloorId;
     }
-    if (polygonArea(polygonForArea) < kDraftMinimumSize) {
-        return;
+    if (result.floorSelectorChanged) {
+        refreshFloorSelector();
     }
-
-    auto& layout = *importResult_.layout;
-    const auto currentFloor = currentFloorId();
-    QPainterPath candidatePath = worldPolygonPath(roomPolygon);
-    QPainterPath occupiedRooms;
-    for (const auto& zone : layout.zones) {
-        if (!matchesFloor(zone.floorId, currentFloor)) {
-            continue;
-        }
-        if (zone.kind != safecrowd::domain::ZoneKind::Room) {
-            continue;
-        }
-        occupiedRooms = occupiedRooms.united(worldPolygonPath(zone.area));
+    if (result.layoutChanged) {
+        notifyLayoutEdited();
     }
 
-    auto polygonsToCreate = polygonsFromFillPath(candidatePath.subtracted(occupiedRooms).simplified());
-    if (polygonsToCreate.empty()) {
-        return;
-    }
-
-    QString lastZoneId;
-    for (const auto& polygon : polygonsToCreate) {
-        const auto floorId = currentFloorId().toStdString();
-        const auto zoneId = nextZoneId(layout);
-        const auto zoneNumber = static_cast<int>(layout.zones.size()) + 1;
-        layout.zones.push_back({
-            .id = zoneId.toStdString(),
-            .floorId = floorId,
-            .kind = safecrowd::domain::ZoneKind::Room,
-            .label = QString("Room %1").arg(zoneNumber).toStdString(),
-            .area = polygon,
-            .defaultCapacity = 0u,
-        });
-
-        if (roomAutoWallsEnabled_) {
-            appendAutoWallsForPolygon(layout, polygon, floorId);
-        }
-        autoConnectRoomToStairEntries(layout, zoneId, QString::fromStdString(floorId));
-
-        lastZoneId = zoneId;
-    }
-
-    selectedZoneId_ = lastZoneId;
-    selectedZoneIds_ = QStringList{lastZoneId};
-    selectedConnectionId_.clear();
-    selectedConnectionIds_.clear();
-    selectedBarrierId_.clear();
-    selectedBarrierIds_.clear();
-    focusedTargetId_ = lastZoneId;
-    notifyLayoutEdited();
     emitCurrentSelection();
     update();
 }
+
+
+void LayoutPreviewWidget::createRoomPolygon(const std::vector<QPointF>& points) {
+    if (!importResult_.layout.has_value()) {
+        return;
+    }
+
+    applyEditResult(createLayoutPreviewRoomPolygon(*importResult_.layout, points, editOptions()));
+}
+
 
 void LayoutPreviewWidget::createZone(const QPointF& startWorld, const QPointF& endWorld, safecrowd::domain::ZoneKind kind) {
     if (!importResult_.layout.has_value()) {
         return;
     }
 
-    auto& layout = *importResult_.layout;
-    const auto rectangle = rectFromWorldPoints(startWorld, endWorld);
-    if (rectangle.width() < kDraftMinimumSize || rectangle.height() < kDraftMinimumSize) {
-        return;
-    }
-
-    QString zoneLabel = "Room";
-    if (kind == safecrowd::domain::ZoneKind::Exit) {
-        zoneLabel = "Exit";
-    }
-
-    std::vector<safecrowd::domain::Polygon2D> polygonsToCreate;
-    const safecrowd::domain::Polygon2D rectanglePolygon{
-        .outline = {
-            {.x = rectangle.left(), .y = rectangle.top()},
-            {.x = rectangle.right(), .y = rectangle.top()},
-            {.x = rectangle.right(), .y = rectangle.bottom()},
-            {.x = rectangle.left(), .y = rectangle.bottom()},
-        },
-    };
-
-    if (kind == safecrowd::domain::ZoneKind::Room) {
-        const auto currentFloor = currentFloorId();
-        QPainterPath candidatePath = worldPolygonPath(rectanglePolygon);
-        QPainterPath occupiedRooms;
-        for (const auto& zone : layout.zones) {
-            if (!matchesFloor(zone.floorId, currentFloor)) {
-                continue;
-            }
-            if (zone.kind != safecrowd::domain::ZoneKind::Room) {
-                continue;
-            }
-            occupiedRooms = occupiedRooms.united(worldPolygonPath(zone.area));
-        }
-        polygonsToCreate = polygonsFromFillPath(candidatePath.subtracted(occupiedRooms).simplified());
-    } else {
-        polygonsToCreate.push_back(rectanglePolygon);
-    }
-
-    if (polygonsToCreate.empty()) {
-        return;
-    }
-
-    QString lastZoneId;
-    for (const auto& polygon : polygonsToCreate) {
-        const auto floorId = currentFloorId().toStdString();
-        if (kind == safecrowd::domain::ZoneKind::Exit) {
-            if (const auto mergedZoneId = mergeExitZonePolygon(layout, polygon, worldPolygonPath(polygon), floorId)) {
-                lastZoneId = *mergedZoneId;
-                continue;
-            }
-        }
-
-        const auto zoneId = nextZoneId(layout);
-        const auto zoneNumber = static_cast<int>(layout.zones.size()) + 1;
-        layout.zones.push_back({
-            .id = zoneId.toStdString(),
-            .floorId = floorId,
-            .kind = kind,
-            .label = QString("%1 %2").arg(zoneLabel).arg(zoneNumber).toStdString(),
-            .area = polygon,
-            .defaultCapacity = kind == safecrowd::domain::ZoneKind::Exit ? 20u : 0u,
-        });
-
-        if (kind == safecrowd::domain::ZoneKind::Room && roomAutoWallsEnabled_) {
-            appendAutoWallsForPolygon(layout, polygon, floorId);
-        }
-        if (kind == safecrowd::domain::ZoneKind::Room) {
-            autoConnectRoomToStairEntries(layout, zoneId, QString::fromStdString(floorId));
-        }
-
-        lastZoneId = zoneId;
-    }
-
-    selectedZoneId_ = lastZoneId;
-    selectedZoneIds_ = QStringList{lastZoneId};
-    selectedConnectionId_.clear();
-    selectedConnectionIds_.clear();
-    selectedBarrierId_.clear();
-    selectedBarrierIds_.clear();
-    focusedTargetId_ = lastZoneId;
-    notifyLayoutEdited();
-    emitCurrentSelection();
-    update();
+    applyEditResult(createLayoutPreviewZone(*importResult_.layout, startWorld, endWorld, kind, editOptions()));
 }
+
 
 void LayoutPreviewWidget::createWallSegment(const QPointF& startWorld, const QPointF& endWorld) {
     if (!importResult_.layout.has_value()) {
         return;
     }
 
-    if (std::hypot(endWorld.x() - startWorld.x(), endWorld.y() - startWorld.y()) < kDraftMinimumSize) {
-        return;
-    }
-
-    auto& layout = *importResult_.layout;
-    const auto barrierId = nextWallId(layout);
-    layout.barriers.push_back({
-        .id = barrierId.toStdString(),
-        .floorId = currentFloorId().toStdString(),
-        .geometry = safecrowd::domain::Polyline2D{
-            .vertices = {
-                {.x = startWorld.x(), .y = startWorld.y()},
-                {.x = endWorld.x(), .y = endWorld.y()},
-            },
-            .closed = false,
-        },
-        .blocksMovement = true,
-    });
-    normalizeOpenWallBarriers(layout, QStringList{barrierId});
-
-    selectedBarrierId_ = barrierId;
-    selectedBarrierIds_ = QStringList{barrierId};
-    selectedZoneId_.clear();
-    selectedZoneIds_.clear();
-    selectedConnectionId_.clear();
-    selectedConnectionIds_.clear();
-    focusedTargetId_ = barrierId;
-    notifyLayoutEdited();
-    emitCurrentSelection();
-    update();
+    applyEditResult(createLayoutPreviewWallSegment(*importResult_.layout, startWorld, endWorld, editOptions()));
 }
+
 
 void LayoutPreviewWidget::createObstructionPolygon(const std::vector<QPointF>& points) {
-    if (!importResult_.layout.has_value() || points.size() < 3) {
+    if (!importResult_.layout.has_value()) {
         return;
     }
 
-    QPolygonF polygonForArea;
-    for (const auto& point : points) {
-        polygonForArea.append(point);
-    }
-    if (polygonArea(polygonForArea) < kDraftMinimumSize) {
-        return;
-    }
-
-    auto& layout = *importResult_.layout;
-    const auto barrierId = nextObstructionId(layout);
-    std::vector<safecrowd::domain::Point2D> vertices;
-    vertices.reserve(points.size());
-    for (const auto& point : points) {
-        vertices.push_back({.x = point.x(), .y = point.y()});
-    }
-
-    layout.barriers.push_back({
-        .id = barrierId.toStdString(),
-        .floorId = currentFloorId().toStdString(),
-        .geometry = safecrowd::domain::Polyline2D{
-            .vertices = std::move(vertices),
-            .closed = true,
-        },
-        .blocksMovement = true,
-    });
-
-    selectedBarrierId_ = barrierId;
-    selectedBarrierIds_ = QStringList{barrierId};
-    selectedZoneId_.clear();
-    selectedZoneIds_.clear();
-    selectedConnectionId_.clear();
-    selectedConnectionIds_.clear();
-    focusedTargetId_ = barrierId;
-    notifyLayoutEdited();
-    emitCurrentSelection();
-    update();
+    applyEditResult(createLayoutPreviewObstructionPolygon(*importResult_.layout, points, editOptions()));
 }
+
 
 void LayoutPreviewWidget::createObstructionRectangle(const QPointF& startWorld, const QPointF& endWorld) {
     if (!importResult_.layout.has_value()) {
         return;
     }
 
-    const auto rectangle = rectFromWorldPoints(startWorld, endWorld);
-    if (rectangle.width() < kDraftMinimumSize || rectangle.height() < kDraftMinimumSize) {
-        return;
-    }
-
-    auto& layout = *importResult_.layout;
-    const auto barrierId = nextObstructionId(layout);
-    layout.barriers.push_back({
-        .id = barrierId.toStdString(),
-        .floorId = currentFloorId().toStdString(),
-        .geometry = safecrowd::domain::Polyline2D{
-            .vertices = {
-                {.x = rectangle.left(), .y = rectangle.top()},
-                {.x = rectangle.right(), .y = rectangle.top()},
-                {.x = rectangle.right(), .y = rectangle.bottom()},
-                {.x = rectangle.left(), .y = rectangle.bottom()},
-            },
-            .closed = true,
-        },
-        .blocksMovement = true,
-    });
-
-    selectedBarrierId_ = barrierId;
-    selectedBarrierIds_ = QStringList{barrierId};
-    selectedZoneId_.clear();
-    selectedZoneIds_.clear();
-    selectedConnectionId_.clear();
-    selectedConnectionIds_.clear();
-    focusedTargetId_ = barrierId;
-    notifyLayoutEdited();
-    emitCurrentSelection();
-    update();
+    applyEditResult(createLayoutPreviewObstructionRectangle(*importResult_.layout, startWorld, endWorld, editOptions()));
 }
+
 
 void LayoutPreviewWidget::createConnection(const QPointF& startWorld, const QPointF& endWorld) {
     if (!importResult_.layout.has_value()) {
         return;
     }
 
-    const auto length = std::hypot(endWorld.x() - startWorld.x(), endWorld.y() - startWorld.y());
-    if (length < kDraftMinimumSize) {
-        return;
-    }
-
-    auto& layout = *importResult_.layout;
-    const auto floorId = currentFloorId();
-    const auto startCandidates = zonesNearPoint(layout, startWorld, floorId);
-    const auto endCandidates = zonesNearPoint(layout, endWorld, floorId);
-
-    std::vector<std::size_t> candidates = startCandidates;
-    for (const auto index : endCandidates) {
-        if (std::find(candidates.begin(), candidates.end(), index) == candidates.end()) {
-            candidates.push_back(index);
-        }
-    }
-
-    if (candidates.size() < 2) {
-        return;
-    }
-
-    const auto fromZoneId = QString::fromStdString(layout.zones[candidates[0]].id);
-    const auto toZoneId = QString::fromStdString(layout.zones[candidates[1]].id);
-    if (fromZoneId == toZoneId || hasConnectionPair(layout, fromZoneId, toZoneId)) {
-        return;
-    }
-
-    const auto connectionId = nextConnectionId(layout);
-    layout.connections.push_back({
-        .id = connectionId.toStdString(),
-        .floorId = currentFloorId().toStdString(),
-        .kind = (layout.zones[candidates[0]].kind == safecrowd::domain::ZoneKind::Exit
-                || layout.zones[candidates[1]].kind == safecrowd::domain::ZoneKind::Exit)
-            ? safecrowd::domain::ConnectionKind::Exit
-            : safecrowd::domain::ConnectionKind::Opening,
-        .fromZoneId = fromZoneId.toStdString(),
-        .toZoneId = toZoneId.toStdString(),
-        .effectiveWidth = kConnectionWidth,
-        .directionality = safecrowd::domain::TravelDirection::Bidirectional,
-        .centerSpan = {
-            .start = {.x = startWorld.x(), .y = startWorld.y()},
-            .end = {.x = endWorld.x(), .y = endWorld.y()},
-        },
-    });
-
-    selectedConnectionId_ = connectionId;
-    selectedConnectionIds_ = QStringList{connectionId};
-    selectedZoneId_.clear();
-    selectedZoneIds_.clear();
-    selectedBarrierId_.clear();
-    selectedBarrierIds_.clear();
-    focusedTargetId_ = connectionId;
-    notifyLayoutEdited();
-    emitCurrentSelection();
-    update();
+    applyEditResult(createLayoutPreviewConnection(*importResult_.layout, startWorld, endWorld, editOptions()));
 }
+
 
 void LayoutPreviewWidget::createVerticalLink(const QPointF& startWorld, const QPointF& endWorld) {
     if (!importResult_.layout.has_value()) {
         return;
     }
 
-    auto& layout = *importResult_.layout;
-    const auto sourceFloorId = currentFloorId();
-    const auto targetFloorId = verticalTargetFloorId();
-    if (sourceFloorId.isEmpty() || targetFloorId.isEmpty() || sourceFloorId == targetFloorId) {
-        return;
-    }
-
-    const auto rectangle = rectFromWorldPoints(startWorld, endWorld);
-    if (rectangle.width() < kDraftMinimumSize || rectangle.height() < kDraftMinimumSize) {
-        return;
-    }
-
-    const safecrowd::domain::Polygon2D footprint{
-        .outline = {
-            {.x = rectangle.left(), .y = rectangle.top()},
-            {.x = rectangle.right(), .y = rectangle.top()},
-            {.x = rectangle.right(), .y = rectangle.bottom()},
-            {.x = rectangle.left(), .y = rectangle.bottom()},
-        },
-    };
-    const QPointF center = rectangle.center();
-    auto floorElevation = [&](const QString& floorId) {
-        const auto it = std::find_if(layout.floors.begin(), layout.floors.end(), [&](const auto& floor) {
-            return QString::fromStdString(floor.id) == floorId;
-        });
-        return it == layout.floors.end() ? 0.0 : it->elevationMeters;
-    };
-    const bool sourceIsLower = floorElevation(sourceFloorId) <= floorElevation(targetFloorId);
-    const auto sourceEntryDirection = stairEntryDirection_;
-    const auto targetEntryDirection = oppositeStairEntryDirection(sourceEntryDirection);
-    const auto lowerEntryDirection = sourceIsLower ? sourceEntryDirection : targetEntryDirection;
-    const auto upperEntryDirection = sourceIsLower ? targetEntryDirection : sourceEntryDirection;
-    const auto sourceEntrySpan = entrySpanForRectangle(rectangle, sourceEntryDirection);
-    const auto targetEntrySpan = entrySpanForRectangle(rectangle, targetEntryDirection);
-    const auto sourceOutsideSample = entryOutsideSample(rectangle, sourceEntryDirection);
-    const auto targetOutsideSample = entryOutsideSample(rectangle, targetEntryDirection);
-    const auto sourceZoneCandidates = zonesContainingPoint(layout, sourceOutsideSample, sourceFloorId, 0.35);
-    const auto targetZoneCandidates = zonesContainingPoint(layout, targetOutsideSample, targetFloorId, 0.35);
-    const auto sourceZone = choosePrimaryZone(layout, sourceZoneCandidates);
-    const auto targetZone = choosePrimaryZone(layout, targetZoneCandidates);
-
-    const auto sourceStairZoneId = nextZoneId(layout);
-    const auto sourceZoneNumber = static_cast<int>(layout.zones.size()) + 1;
-    const auto linkKind = verticalLinkCreatesRamp_
-        ? safecrowd::domain::ConnectionKind::Ramp
-        : safecrowd::domain::ConnectionKind::Stair;
-    const auto zoneLabel = verticalLinkCreatesRamp_ ? QString("Ramp") : QString("Stair");
-    const auto effectiveWidth = std::max(0.9, std::min(rectangle.width(), rectangle.height()));
-    const auto span = verticalConnectionSpanForRectangle(rectangle, sourceEntryDirection, effectiveWidth);
-
-    layout.zones.push_back({
-        .id = sourceStairZoneId.toStdString(),
-        .floorId = sourceFloorId.toStdString(),
-        .kind = safecrowd::domain::ZoneKind::Stair,
-        .label = QString("%1 %2").arg(zoneLabel).arg(sourceZoneNumber).toStdString(),
-        .area = footprint,
-        .defaultCapacity = 8,
-        .isStair = !verticalLinkCreatesRamp_,
-        .isRamp = verticalLinkCreatesRamp_,
-    });
-    appendStairWallsExceptEntry(layout, rectangle, sourceEntryDirection, sourceFloorId.toStdString());
-
-    const auto targetStairZoneId = nextZoneId(layout);
-    const auto targetZoneNumber = static_cast<int>(layout.zones.size()) + 1;
-    layout.zones.push_back({
-        .id = targetStairZoneId.toStdString(),
-        .floorId = targetFloorId.toStdString(),
-        .kind = safecrowd::domain::ZoneKind::Stair,
-        .label = QString("%1 %2").arg(zoneLabel).arg(targetZoneNumber).toStdString(),
-        .area = footprint,
-        .defaultCapacity = 8,
-        .isStair = !verticalLinkCreatesRamp_,
-        .isRamp = verticalLinkCreatesRamp_,
-    });
-    appendStairWallsExceptEntry(layout, rectangle, targetEntryDirection, targetFloorId.toStdString());
-
-    if (sourceZone.has_value()) {
-        cutBarriersAtSpan(layout, sourceEntrySpan, sourceFloorId.toStdString());
-        layout.connections.push_back({
-            .id = nextConnectionId(layout).toStdString(),
-            .floorId = sourceFloorId.toStdString(),
-            .kind = safecrowd::domain::ConnectionKind::Opening,
-            .fromZoneId = layout.zones[*sourceZone].id,
-            .toZoneId = sourceStairZoneId.toStdString(),
-            .effectiveWidth = effectiveWidth,
-            .directionality = safecrowd::domain::TravelDirection::Bidirectional,
-            .centerSpan = sourceEntrySpan,
-        });
-    }
-
-    const auto verticalConnectionId = nextVerticalConnectionId(layout);
-    layout.connections.push_back({
-        .id = verticalConnectionId.toStdString(),
-        .floorId = sourceFloorId.toStdString(),
-        .kind = linkKind,
-        .fromZoneId = sourceStairZoneId.toStdString(),
-        .toZoneId = targetStairZoneId.toStdString(),
-        .effectiveWidth = effectiveWidth,
-        .directionality = safecrowd::domain::TravelDirection::Bidirectional,
-        .isStair = !verticalLinkCreatesRamp_,
-        .isRamp = verticalLinkCreatesRamp_,
-        .lowerEntryDirection = lowerEntryDirection,
-        .upperEntryDirection = upperEntryDirection,
-        .centerSpan = span,
-    });
-
-    if (targetZone.has_value()) {
-        cutBarriersAtSpan(layout, targetEntrySpan, targetFloorId.toStdString());
-        layout.connections.push_back({
-            .id = nextConnectionId(layout).toStdString(),
-            .floorId = targetFloorId.toStdString(),
-            .kind = safecrowd::domain::ConnectionKind::Opening,
-            .fromZoneId = targetStairZoneId.toStdString(),
-            .toZoneId = layout.zones[*targetZone].id,
-            .effectiveWidth = effectiveWidth,
-            .directionality = safecrowd::domain::TravelDirection::Bidirectional,
-            .centerSpan = targetEntrySpan,
-        });
-    }
-
-    selectedConnectionId_ = verticalConnectionId;
-    selectedConnectionIds_ = QStringList{verticalConnectionId};
-    selectedZoneId_.clear();
-    selectedZoneIds_.clear();
-    selectedBarrierId_.clear();
-    selectedBarrierIds_.clear();
-    focusedTargetId_ = verticalConnectionId;
-    notifyLayoutEdited();
-    emitCurrentSelection();
-    update();
+    applyEditResult(createLayoutPreviewVerticalLink(*importResult_.layout, startWorld, endWorld, editOptions()));
 }
+
 
 void LayoutPreviewWidget::createUShapedStairLink(const QPointF& startWorld, const QPointF& endWorld) {
     if (!importResult_.layout.has_value()) {
         return;
     }
 
-    auto& layout = *importResult_.layout;
-    const auto sourceFloorId = currentFloorId();
-    const auto targetFloorId = verticalTargetFloorId();
-    if (sourceFloorId.isEmpty() || targetFloorId.isEmpty() || sourceFloorId == targetFloorId) {
-        return;
-    }
-
-    const auto rectangle = rectFromWorldPoints(startWorld, endWorld);
-    if (rectangle.width() < kDraftMinimumSize || rectangle.height() < kDraftMinimumSize) {
-        return;
-    }
-
-    const auto geometry = uShapedStairGeometryForRectangle(rectangle, stairEntryDirection_);
-    if (geometry.laneWidth <= kGeometryEpsilon) {
-        return;
-    }
-
-    const bool sourceIsLower = floorElevation(layout, sourceFloorId.toStdString())
-        <= floorElevation(layout, targetFloorId.toStdString());
-    const auto sourceEntryDirection = stairEntryDirection_;
-    const auto targetEntryDirection = stairEntryDirection_;
-    const auto lowerEntryDirection = sourceIsLower ? sourceEntryDirection : targetEntryDirection;
-    const auto upperEntryDirection = sourceIsLower ? targetEntryDirection : sourceEntryDirection;
-
-    const auto sourceZoneCandidates = zonesContainingPoint(
-        layout,
-        QPointF(geometry.sourceOutsideSample.x, geometry.sourceOutsideSample.y),
-        sourceFloorId,
-        0.35);
-    const auto targetZoneCandidates = zonesContainingPoint(
-        layout,
-        QPointF(geometry.targetOutsideSample.x, geometry.targetOutsideSample.y),
-        targetFloorId,
-        0.35);
-    const auto sourceZone = choosePrimaryZone(layout, sourceZoneCandidates);
-    const auto targetZone = choosePrimaryZone(layout, targetZoneCandidates);
-
-    const auto sourceStairZoneId = nextZoneId(layout);
-    const auto sourceZoneNumber = static_cast<int>(layout.zones.size()) + 1;
-    layout.zones.push_back({
-        .id = sourceStairZoneId.toStdString(),
-        .floorId = sourceFloorId.toStdString(),
-        .kind = safecrowd::domain::ZoneKind::Stair,
-        .label = QString("U Stair %1").arg(sourceZoneNumber).toStdString(),
-        .area = geometry.sourceFootprint,
-        .defaultCapacity = 8,
-        .isStair = true,
-    });
-
-    const auto targetStairZoneId = nextZoneId(layout);
-    const auto targetZoneNumber = static_cast<int>(layout.zones.size()) + 1;
-    layout.zones.push_back({
-        .id = targetStairZoneId.toStdString(),
-        .floorId = targetFloorId.toStdString(),
-        .kind = safecrowd::domain::ZoneKind::Stair,
-        .label = QString("U Stair %1").arg(targetZoneNumber).toStdString(),
-        .area = geometry.targetFootprint,
-        .defaultCapacity = 8,
-        .isStair = true,
-    });
-
-    QStringList preferredWallIds;
-    preferredWallIds.append(appendWallsForPolygonExceptGaps(
-        layout,
-        geometry.sourceFootprint,
-        {geometry.sourceEntrySpan, geometry.verticalSpan},
-        sourceFloorId.toStdString()));
-    preferredWallIds.append(appendWallsForPolygonExceptGaps(
-        layout,
-        geometry.targetFootprint,
-        {geometry.targetEntrySpan, geometry.verticalSpan},
-        targetFloorId.toStdString()));
-
-    if (sourceZone.has_value()) {
-        cutBarriersAtSpan(layout, geometry.sourceEntrySpan, sourceFloorId.toStdString());
-        layout.connections.push_back({
-            .id = nextConnectionId(layout).toStdString(),
-            .floorId = sourceFloorId.toStdString(),
-            .kind = safecrowd::domain::ConnectionKind::Opening,
-            .fromZoneId = layout.zones[*sourceZone].id,
-            .toZoneId = sourceStairZoneId.toStdString(),
-            .effectiveWidth = geometry.laneWidth,
-            .directionality = safecrowd::domain::TravelDirection::Bidirectional,
-            .centerSpan = geometry.sourceEntrySpan,
-        });
-    }
-
-    const auto verticalConnectionId = nextVerticalConnectionId(layout);
-    layout.connections.push_back({
-        .id = verticalConnectionId.toStdString(),
-        .floorId = sourceFloorId.toStdString(),
-        .kind = safecrowd::domain::ConnectionKind::Stair,
-        .fromZoneId = sourceStairZoneId.toStdString(),
-        .toZoneId = targetStairZoneId.toStdString(),
-        .effectiveWidth = geometry.laneWidth,
-        .directionality = safecrowd::domain::TravelDirection::Bidirectional,
-        .isStair = true,
-        .lowerEntryDirection = lowerEntryDirection,
-        .upperEntryDirection = upperEntryDirection,
-        .centerSpan = geometry.verticalSpan,
-    });
-
-    if (targetZone.has_value()) {
-        cutBarriersAtSpan(layout, geometry.targetEntrySpan, targetFloorId.toStdString());
-        layout.connections.push_back({
-            .id = nextConnectionId(layout).toStdString(),
-            .floorId = targetFloorId.toStdString(),
-            .kind = safecrowd::domain::ConnectionKind::Opening,
-            .fromZoneId = targetStairZoneId.toStdString(),
-            .toZoneId = layout.zones[*targetZone].id,
-            .effectiveWidth = geometry.laneWidth,
-            .directionality = safecrowd::domain::TravelDirection::Bidirectional,
-            .centerSpan = geometry.targetEntrySpan,
-        });
-    }
-
-    normalizeOpenWallBarriers(layout, preferredWallIds);
-
-    selectedConnectionId_ = verticalConnectionId;
-    selectedConnectionIds_ = QStringList{verticalConnectionId};
-    selectedZoneId_.clear();
-    selectedZoneIds_.clear();
-    selectedBarrierId_.clear();
-    selectedBarrierIds_.clear();
-    focusedTargetId_ = verticalConnectionId;
-    notifyLayoutEdited();
-    emitCurrentSelection();
-    update();
+    applyEditResult(createLayoutPreviewUShapedStairLink(*importResult_.layout, startWorld, endWorld, editOptions()));
 }
+
 
 void LayoutPreviewWidget::createDoorAt(const QString& barrierId, const QPointF& position) {
-    if (!importResult_.layout.has_value() || barrierId.isEmpty()) {
+    if (!importResult_.layout.has_value()) {
         return;
     }
 
-    auto& layout = *importResult_.layout;
-    const auto barrierIt = std::find_if(layout.barriers.begin(), layout.barriers.end(), [&](const auto& barrier) {
-        return QString::fromStdString(barrier.id) == barrierId && barrier.geometry.vertices.size() == 2;
-    });
-    if (barrierIt == layout.barriers.end()) {
-        return;
-    }
-
-    const auto& barrierStart = barrierIt->geometry.vertices[0];
-    const auto& barrierEnd = barrierIt->geometry.vertices[1];
-    const auto projected = projectOntoSegment(position, barrierStart, barrierEnd);
-    if (!projected.has_value()) {
-        return;
-    }
-
-    const auto segmentLength = std::hypot(barrierEnd.x - barrierStart.x, barrierEnd.y - barrierStart.y);
-    const auto openingWidth = std::clamp(doorWidth_, kMinimumDoorWidth, segmentLength - kGeometryEpsilon);
-    if (segmentLength <= openingWidth + kGeometryEpsilon) {
-        return;
-    }
-
-    const bool vertical = nearlyEqual(barrierStart.x, barrierEnd.x);
-    const bool horizontal = nearlyEqual(barrierStart.y, barrierEnd.y);
-    if (!vertical && !horizontal) {
-        return;
-    }
-
-    safecrowd::domain::Point2D gapStart{};
-    safecrowd::domain::Point2D gapEnd{};
-    if (vertical) {
-        const auto minY = std::min(barrierStart.y, barrierEnd.y);
-        const auto maxY = std::max(barrierStart.y, barrierEnd.y);
-        const auto centerY = std::clamp(projected->y(), minY + openingWidth * 0.5, maxY - openingWidth * 0.5);
-        gapStart = {.x = barrierStart.x, .y = centerY - openingWidth * 0.5};
-        gapEnd = {.x = barrierStart.x, .y = centerY + openingWidth * 0.5};
-    } else {
-        const auto minX = std::min(barrierStart.x, barrierEnd.x);
-        const auto maxX = std::max(barrierStart.x, barrierEnd.x);
-        const auto centerX = std::clamp(projected->x(), minX + openingWidth * 0.5, maxX - openingWidth * 0.5);
-        gapStart = {.x = centerX - openingWidth * 0.5, .y = barrierStart.y};
-        gapEnd = {.x = centerX + openingWidth * 0.5, .y = barrierStart.y};
-    }
-
-    createDoorSpan(barrierId, gapStart, gapEnd);
+    applyEditResult(createLayoutPreviewDoorAt(*importResult_.layout, barrierId, position, editOptions()));
 }
+
 
 bool LayoutPreviewWidget::createDoorSegment(const QPointF& startWorld, const QPointF& endWorld) {
     if (!importResult_.layout.has_value()) {
         return false;
     }
 
-    const safecrowd::domain::LineSegment2D rawSpan{
-        .start = {.x = startWorld.x(), .y = startWorld.y()},
-        .end = {.x = endWorld.x(), .y = endWorld.y()},
-    };
-    if (std::hypot(rawSpan.end.x - rawSpan.start.x, rawSpan.end.y - rawSpan.start.y) < kMinimumDoorWidth) {
-        return false;
-    }
-
-    auto& layout = *importResult_.layout;
-    const auto corrected = correctedDoorSpanForPlacement(layout, currentFloorId(), rawSpan);
-    if (!corrected.has_value()) {
-        return false;
-    }
-
-    const auto& span = corrected->span;
-    if (!corrected->barrierId.isEmpty()) {
-        return createDoorSpan(corrected->barrierId, span.start, span.end);
-    }
-
-    const auto barrierIndex = barrierIndexCoveringSpan(layout, span, currentFloorId());
-    if (barrierIndex.has_value()) {
-        const auto barrierId = QString::fromStdString(layout.barriers[*barrierIndex].id);
-        return createDoorSpan(barrierId, span.start, span.end);
-    }
-
-    return createDoorSpan({}, span.start, span.end);
+    const auto result = createLayoutPreviewDoorSegment(*importResult_.layout, startWorld, endWorld, editOptions());
+    const bool changed = result.layoutChanged;
+    applyEditResult(result);
+    return changed;
 }
+
 
 bool LayoutPreviewWidget::createDoorSpan(
     const QString& barrierId,
@@ -4463,291 +3727,37 @@ bool LayoutPreviewWidget::createDoorSpan(
         return false;
     }
 
-    auto& layout = *importResult_.layout;
-    const auto openingWidth = std::hypot(gapEnd.x - gapStart.x, gapEnd.y - gapStart.y);
-    if (openingWidth < kMinimumDoorWidth) {
-        return false;
-    }
-
-    const bool vertical = nearlyEqual(gapStart.x, gapEnd.x);
-    const bool horizontal = nearlyEqual(gapStart.y, gapEnd.y);
-    if (!vertical && !horizontal) {
-        return false;
-    }
-
-    std::optional<std::size_t> barrierIndex;
-    std::optional<safecrowd::domain::Point2D> barrierStart;
-    std::optional<safecrowd::domain::Point2D> barrierEnd;
-    if (!barrierId.isEmpty()) {
-        const auto barrierIt = std::find_if(layout.barriers.begin(), layout.barriers.end(), [&](const auto& barrier) {
-            return QString::fromStdString(barrier.id) == barrierId && barrier.geometry.vertices.size() == 2;
-        });
-        if (barrierIt == layout.barriers.end()) {
-            return false;
-        }
-
-        barrierIndex = static_cast<std::size_t>(std::distance(layout.barriers.begin(), barrierIt));
-        barrierStart = barrierIt->geometry.vertices[0];
-        barrierEnd = barrierIt->geometry.vertices[1];
-        const bool barrierVertical = nearlyEqual(barrierStart->x, barrierEnd->x);
-        const bool barrierHorizontal = nearlyEqual(barrierStart->y, barrierEnd->y);
-        if (barrierVertical != vertical || barrierHorizontal != horizontal) {
-            return false;
-        }
-
-        if (vertical) {
-            if (!nearlyEqual(barrierStart->x, gapStart.x)
-                || !intervalContainsSpan(barrierStart->y, barrierEnd->y, gapStart.y, gapEnd.y)) {
-                return false;
-            }
-        } else if (!nearlyEqual(barrierStart->y, gapStart.y)
-            || !intervalContainsSpan(barrierStart->x, barrierEnd->x, gapStart.x, gapEnd.x)) {
-            return false;
-        }
-
-        const auto segmentLength = std::hypot(barrierEnd->x - barrierStart->x, barrierEnd->y - barrierStart->y);
-        if (segmentLength <= openingWidth + kGeometryEpsilon) {
-            return false;
-        }
-    }
-
-    const auto neighbors = doorNeighborsAcrossSegment(layout, gapStart, gapEnd, currentFloorId());
-    const auto firstZone = choosePrimaryZone(layout, neighbors.firstSide);
-    const auto secondZone = choosePrimaryZone(layout, neighbors.secondSide, firstZone);
-
-    QString fromZoneId;
-    QString toZoneId;
-    safecrowd::domain::ConnectionKind connectionKind =
-        doorCreatesLeaf_ ? safecrowd::domain::ConnectionKind::Doorway : safecrowd::domain::ConnectionKind::Opening;
-
-    if (firstZone.has_value() && secondZone.has_value()) {
-        fromZoneId = QString::fromStdString(layout.zones[*firstZone].id);
-        toZoneId = QString::fromStdString(layout.zones[*secondZone].id);
-        if (layout.zones[*firstZone].kind == safecrowd::domain::ZoneKind::Exit
-            || layout.zones[*secondZone].kind == safecrowd::domain::ZoneKind::Exit) {
-            connectionKind = safecrowd::domain::ConnectionKind::Exit;
-        }
-    } else {
-        const auto interiorZone = firstZone.has_value() ? firstZone : secondZone;
-        if (!interiorZone.has_value()) {
-            return false;
-        }
-
-        const bool useFirstOutside = !firstZone.has_value();
-        const QPointF outsideSample = useFirstOutside ? neighbors.firstSample : neighbors.secondSample;
-        const QPointF insideSample = useFirstOutside ? neighbors.secondSample : neighbors.firstSample;
-        QPointF outsideDirection = outsideSample - insideSample;
-        const auto directionLength = std::hypot(outsideDirection.x(), outsideDirection.y());
-        if (directionLength <= kGeometryEpsilon) {
-            return false;
-        }
-        outsideDirection /= directionLength;
-
-        fromZoneId = QString::fromStdString(layout.zones[*interiorZone].id);
-        toZoneId = createExitZoneAtDoor(layout, gapStart, gapEnd, outsideDirection, currentFloorId().toStdString());
-        connectionKind = safecrowd::domain::ConnectionKind::Exit;
-    }
-
-    const safecrowd::domain::LineSegment2D gapSpan{
-        .start = gapStart,
-        .end = gapEnd,
-    };
-    const bool canMergeWithExistingDoor = !mergeableDoorConnectionIndices(
-        layout,
-        currentFloorId(),
-        connectionKind,
-        fromZoneId,
-        toZoneId,
-        gapSpan).empty();
-
-    if (fromZoneId.isEmpty()
-        || toZoneId.isEmpty()
-        || fromZoneId == toZoneId
-        || (!canMergeWithExistingDoor && hasConnectionPairAtSpan(layout, fromZoneId, toZoneId, gapStart, gapEnd))) {
-        return false;
-    }
-
-    if (barrierIndex.has_value() && barrierStart.has_value() && barrierEnd.has_value()) {
-        std::vector<std::pair<safecrowd::domain::Point2D, safecrowd::domain::Point2D>> remainingSegments;
-        if (vertical) {
-            const auto lowerStart = std::min(barrierStart->y, barrierEnd->y);
-            const auto lowerEnd = std::max(barrierStart->y, barrierEnd->y);
-            if (gapStart.y - lowerStart > kGeometryEpsilon) {
-                remainingSegments.push_back({
-                    {.x = barrierStart->x, .y = lowerStart},
-                    {.x = barrierStart->x, .y = gapStart.y},
-                });
-            }
-            if (lowerEnd - gapEnd.y > kGeometryEpsilon) {
-                remainingSegments.push_back({
-                    {.x = barrierStart->x, .y = gapEnd.y},
-                    {.x = barrierStart->x, .y = lowerEnd},
-                });
-            }
-        } else {
-            const auto lowerStart = std::min(barrierStart->x, barrierEnd->x);
-            const auto lowerEnd = std::max(barrierStart->x, barrierEnd->x);
-            if (gapStart.x - lowerStart > kGeometryEpsilon) {
-                remainingSegments.push_back({
-                    {.x = lowerStart, .y = barrierStart->y},
-                    {.x = gapStart.x, .y = barrierStart->y},
-                });
-            }
-            if (lowerEnd - gapEnd.x > kGeometryEpsilon) {
-                remainingSegments.push_back({
-                    {.x = gapEnd.x, .y = barrierStart->y},
-                    {.x = lowerEnd, .y = barrierStart->y},
-                });
-            }
-        }
-
-        replaceBarrierWithSegments(layout, *barrierIndex, remainingSegments, currentFloorId().toStdString());
-    }
-
-    if (canMergeWithExistingDoor) {
-        const auto mergedConnectionId = mergeDoorConnectionSpan(
-            layout,
-            currentFloorId(),
-            connectionKind,
-            fromZoneId,
-            toZoneId,
-            gapSpan);
-        if (!mergedConnectionId.has_value()) {
-            return false;
-        }
-
-        selectedConnectionId_ = *mergedConnectionId;
-        selectedConnectionIds_ = QStringList{*mergedConnectionId};
-        selectedZoneId_.clear();
-        selectedZoneIds_.clear();
-        selectedBarrierId_.clear();
-        selectedBarrierIds_.clear();
-        focusedTargetId_ = *mergedConnectionId;
-        notifyLayoutEdited();
-        emitCurrentSelection();
-        update();
-        return true;
-    }
-
-    const auto connectionId = nextConnectionId(layout);
-    layout.connections.push_back({
-        .id = connectionId.toStdString(),
-        .floorId = currentFloorId().toStdString(),
-        .kind = connectionKind,
-        .fromZoneId = fromZoneId.toStdString(),
-        .toZoneId = toZoneId.toStdString(),
-        .effectiveWidth = openingWidth,
-        .directionality = safecrowd::domain::TravelDirection::Bidirectional,
-        .centerSpan = {.start = gapStart, .end = gapEnd},
-    });
-
-    selectedConnectionId_ = connectionId;
-    selectedConnectionIds_ = QStringList{connectionId};
-    selectedZoneId_.clear();
-    selectedZoneIds_.clear();
-    selectedBarrierId_.clear();
-    selectedBarrierIds_.clear();
-    focusedTargetId_ = connectionId;
-    notifyLayoutEdited();
-    emitCurrentSelection();
-    update();
-    return true;
+    const auto result = createLayoutPreviewDoorSpan(*importResult_.layout, barrierId, gapStart, gapEnd, editOptions());
+    const bool changed = result.layoutChanged;
+    applyEditResult(result);
+    return changed;
 }
+
 
 void LayoutPreviewWidget::deleteConnection(const QString& connectionId) {
-    if (!importResult_.layout.has_value() || connectionId.isEmpty()) {
+    if (!importResult_.layout.has_value()) {
         return;
     }
 
-    auto& connections = importResult_.layout->connections;
-    const auto it = std::remove_if(connections.begin(), connections.end(), [&](const auto& connection) {
-        return QString::fromStdString(connection.id) == connectionId;
-    });
-    if (it == connections.end()) {
-        return;
-    }
-
-    connections.erase(it, connections.end());
-    selectedConnectionId_.clear();
-    selectedConnectionIds_.removeAll(connectionId);
-    selectPrimaryFromLists();
-    focusedTargetId_.clear();
-    notifyLayoutEdited();
-    emitCurrentSelection();
-    update();
+    applyEditResult(deleteLayoutPreviewConnection(*importResult_.layout, connectionId, editSelectionState()));
 }
+
 
 void LayoutPreviewWidget::deleteBarrier(const QString& barrierId) {
-    if (!importResult_.layout.has_value() || barrierId.isEmpty()) {
+    if (!importResult_.layout.has_value()) {
         return;
     }
 
-    auto& barriers = importResult_.layout->barriers;
-    const auto it = std::remove_if(barriers.begin(), barriers.end(), [&](const auto& barrier) {
-        return QString::fromStdString(barrier.id) == barrierId;
-    });
-    if (it == barriers.end()) {
-        return;
-    }
-
-    barriers.erase(it, barriers.end());
-    selectedBarrierId_.clear();
-    selectedBarrierIds_.removeAll(barrierId);
-    selectPrimaryFromLists();
-    focusedTargetId_.clear();
-    notifyLayoutEdited();
-    emitCurrentSelection();
-    update();
+    applyEditResult(deleteLayoutPreviewBarrier(*importResult_.layout, barrierId, editSelectionState()));
 }
+
 
 void LayoutPreviewWidget::deleteSelectedElements() {
     if (!importResult_.layout.has_value() || !hasSelection()) {
         return;
     }
 
-    auto& layout = *importResult_.layout;
-    bool changed = false;
-
-    const auto selectedZoneId = [&](const std::string& id) {
-        return selectedZoneIds_.contains(QString::fromStdString(id));
-    };
-
-    auto& connections = layout.connections;
-    const auto connectionIt = std::remove_if(connections.begin(), connections.end(), [&](const auto& connection) {
-        return selectedConnectionIds_.contains(QString::fromStdString(connection.id))
-            || selectedZoneId(connection.fromZoneId)
-            || selectedZoneId(connection.toZoneId);
-    });
-    if (connectionIt != connections.end()) {
-        connections.erase(connectionIt, connections.end());
-        changed = true;
-    }
-
-    auto& barriers = layout.barriers;
-    const auto barrierIt = std::remove_if(barriers.begin(), barriers.end(), [&](const auto& barrier) {
-        return selectedBarrierIds_.contains(QString::fromStdString(barrier.id));
-    });
-    if (barrierIt != barriers.end()) {
-        barriers.erase(barrierIt, barriers.end());
-        changed = true;
-    }
-
-    auto& zones = layout.zones;
-    const auto zoneIt = std::remove_if(zones.begin(), zones.end(), [&](const auto& zone) {
-        return selectedZoneIds_.contains(QString::fromStdString(zone.id));
-    });
-    if (zoneIt != zones.end()) {
-        zones.erase(zoneIt, zones.end());
-        changed = true;
-    }
-
-    if (!changed) {
-        clearSelection();
-        return;
-    }
-
-    clearSelection();
-    notifyLayoutEdited();
+    applyEditResult(deleteSelectedLayoutPreviewElements(*importResult_.layout, editSelectionState()));
 }
 
 void LayoutPreviewWidget::emitCurrentSelection() {
@@ -5396,23 +4406,13 @@ void LayoutPreviewWidget::selectZone(const QString& zoneId) {
     update();
 }
 
+
 void LayoutPreviewWidget::addFloor() {
     if (!importResult_.layout.has_value()) {
         return;
     }
 
-    auto& layout = *importResult_.layout;
-    ensureLayoutFloors(layout);
-    const auto floorId = nextFloorId(layout);
-    layout.floors.push_back({
-        .id = floorId.toStdString(),
-        .label = QString("Floor %1").arg(layout.floors.size() + 1).toStdString(),
-    });
-    currentFloorId_ = floorId;
-    clearSelection();
-    refreshFloorSelector();
-    notifyLayoutEdited();
-    update();
+    applyEditResult(addLayoutPreviewFloor(*importResult_.layout));
 }
 
 QString LayoutPreviewWidget::currentFloorId() const {

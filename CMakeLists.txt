@@ -205,6 +205,7 @@ if (SAFECROWD_BUILD_APP)
         src/application/LayoutCanvasRendering.h
         src/application/LayoutCanvasSnapping.h
         src/application/LayoutNavigationPanelWidget.h
+        src/application/LayoutPreviewEditing.h
         src/application/LayoutPreviewWidget.h
         src/application/LayoutReviewWidget.h
         src/application/MainWindow.h
@@ -230,6 +231,7 @@ if (SAFECROWD_BUILD_APP)
         src/application/LayoutCanvasRendering.cpp
         src/application/LayoutCanvasSnapping.cpp
         src/application/LayoutNavigationPanelWidget.cpp
+        src/application/LayoutPreviewEditing.cpp
         src/application/LayoutPreviewWidget.cpp
         src/application/LayoutReviewWidget.cpp
         src/application/main.cpp

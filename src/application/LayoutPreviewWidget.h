@@ -26,6 +26,10 @@ class QWheelEvent;
 
 namespace safecrowd::application {
 
+struct LayoutPreviewEditOptions;
+struct LayoutPreviewEditResult;
+struct LayoutPreviewSelectionState;
+
 enum class PreviewSelectionKind {
     None,
     Multiple,
@@ -93,6 +97,9 @@ private:
 
     void applyToolAt(const QPointF& position);
     void clearSelection();
+    LayoutPreviewEditOptions editOptions() const;
+    LayoutPreviewSelectionState editSelectionState() const;
+    void applyEditResult(const LayoutPreviewEditResult& result);
     void createConnection(const QPointF& startWorld, const QPointF& endWorld);
     void createDoorAt(const QString& barrierId, const QPointF& position);
     bool createDoorSpan(
