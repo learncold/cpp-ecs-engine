@@ -133,13 +133,6 @@ private:
     safecrowd::domain::Point2D connectionCenter(const safecrowd::domain::Connection2D& connection) const;
     QString placementAt(const QPointF& position, const LayoutCanvasTransform& transform, double pickPadding = 0.0) const;
     QString selectedPlacementAt(const QPointF& position, const LayoutCanvasTransform& transform) const;
-    bool placementAreaBlocked(const std::vector<safecrowd::domain::Point2D>& area, int occupantCount) const;
-    bool placementPointBlocked(const safecrowd::domain::Point2D& point) const;
-    safecrowd::domain::Point2D defaultVelocityFrom(const safecrowd::domain::Point2D& point) const;
-    QString nextPlacementId(ScenarioCrowdPlacementKind kind) const;
-    QString nextConnectionBlockId() const;
-    QString nextEnvironmentHazardId() const;
-    QString nextRouteGuidanceId() const;
     void addGroupPlacement(const QPointF& start, const QPointF& end);
     void addIndividualPlacement(const QPointF& position);
     void addSourcePlacement(const QPointF& position);

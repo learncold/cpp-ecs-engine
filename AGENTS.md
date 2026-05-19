@@ -41,9 +41,116 @@
   - `#include "engine/..."`
 - Supporting repository areas:
   - `docs/` for requirements, architecture, and project-management notes
-  - `uml/` for PlantUML diagrams and explanations
+  - `uml/` for historical PlantUML diagrams and explanations; these files are stale and must not be treated as implementation or architecture authority
   - `.github/` for repository workflow/policy files
   - `external/` for vendored dependencies that must remain in-tree
+
+## Source Tree and File Roles
+The current `src/` tree is layered as follows. Keep new files in the matching layer and update this section when adding, removing, or renaming source files:
+
+```text
+src/
+  application/        Qt desktop app, widgets, view models, persistence adapters, and app-only authoring helpers
+  domain/             SafeCrowd domain models, import pipeline, scenario authoring, simulation, and metrics logic
+  engine/             Generic ECS runtime primitives, scheduling, storage, entities, and resources
+    internal/         Engine-only test/factory accessors that should not be consumed by domain or application code
+```
+
+Application layer file roles:
+- `IssueCardWidget.h/.cpp`: small Qt card used to show import/layout validation issues.
+- `LayoutCanvasRendering.h/.cpp`: shared canvas camera, bounds, transforms, and layout rendering helpers.
+- `LayoutCanvasSnapping.h/.cpp`: app-layer snapping helpers for layout canvas editing.
+- `LayoutNavigationPanelWidget.h/.cpp`: floor/layout navigation panel for review and editing workflows.
+- `LayoutPreviewEditing.h/.cpp`: mutation commands for layout preview editing, including create/delete/floor operations.
+- `LayoutPreviewGeometry.h/.cpp`: reusable geometry, floor/id, polygon, barrier, door, stair, and zone-neighbor helpers for layout preview editing.
+- `LayoutPreviewWidget.h/.cpp`: Qt canvas widget for layout preview interaction, selection, painting, camera, toolbar, and edit command orchestration.
+- `LayoutReviewWidget.h/.cpp`: layout review screen that combines preview, navigation, and issue context.
+- `main.cpp`: Qt application entry point.
+- `MainWindow.h/.cpp`: top-level application window and primary screen wiring.
+- `NavigationTreeWidget.h/.cpp`: project/navigation tree UI component.
+- `NewProjectRequest.h`: data object for new-project creation input.
+- `NewProjectWidget.h/.cpp`: new-project creation UI.
+- `ProjectListWidget.h/.cpp`: project list and project selection UI.
+- `ProjectMetadata.h`: lightweight project metadata model used by the app shell.
+- `ProjectNavigatorActions.h/.cpp`: app navigation action definitions and helpers.
+- `ProjectNavigatorWidget.h/.cpp`: project navigation sidebar/widget implementation.
+- `ProjectPersistence.h/.cpp`: application persistence adapter for projects, layouts, and scenarios.
+- `ProjectWorkspaceState.h`: application-level workspace state snapshot.
+- `ScenarioAuthoringWidget.h/.cpp`: scenario authoring screen that wires scenario canvas and controls.
+- `ScenarioBatchResultWidget.h/.cpp`: UI for displaying batch scenario run results.
+- `ScenarioCanvasAuthoringRules.h/.cpp`: app-internal scenario canvas authoring validation and draft creation/move rules.
+- `ScenarioCanvasWidget.h/.cpp`: interactive Qt canvas for scenario placements, hazards, blocks, guidance, selection, drag, and painting.
+- `ScenarioResultNavigation.h/.cpp`: helpers/widgets for navigating scenario result views.
+- `ScenarioResultWidget.h/.cpp`: UI for scenario result summaries and details.
+- `ScenarioRunWidget.h/.cpp`: UI for configuring and launching scenario runs.
+- `SimulationCanvasWidget.h/.cpp`: Qt canvas for simulation playback and visualization.
+- `ToolIconResources.h/.cpp`: helper functions for loading and recoloring tool icons.
+- `ToolIcons.qrc`: Qt resource collection for tool icon assets.
+- `UiStyle.h/.cpp`: shared app UI tokens and widget styling helpers.
+- `WorkspaceShell.h/.cpp`: main workspace shell composition and navigation host.
+
+Domain layer file roles:
+- `AgentComponents.h`: ECS component types for agents and simulation state.
+- `AlternativeRecommendationService.h/.cpp`: domain service for ranking or recommending scenario alternatives.
+- `CanonicalGeometry.h`: canonical geometry data structures used by import/normalization.
+- `CompressionSystem.h/.cpp`: domain simulation system for compression/crowding effects.
+- `DemoFixtureService.h/.cpp`: service for creating demo project fixtures.
+- `DemoLayouts.h/.cpp`: built-in demo layout definitions.
+- `DxfImportService.h/.cpp`: DXF import entry service.
+- `FacilityLayout2D.h`: core 2D facility layout model with floors, zones, connections, barriers, and controls.
+- `FacilityLayoutBuilder.h/.cpp`: builder utilities that produce `FacilityLayout2D` from normalized/imported geometry.
+- `Geometry2D.h`: shared 2D geometry primitives.
+- `GeometryNormalizer.h/.cpp`: geometry cleanup and normalization service.
+- `GeometryQueries.h/.cpp`: reusable geometry query functions such as point-in-polygon, distances, and walkable clearance.
+- `ImportContracts.h`: contracts and DTOs shared across import stages.
+- `ImportIssue.h/.cpp`: import issue model and formatting/classification helpers.
+- `ImportOrchestrator.h`: high-level import pipeline orchestration interface.
+- `ImportResult.h`: import result DTOs.
+- `ImportSemanticRules.h/.cpp`: semantic validation and conversion rules for imported geometry.
+- `ImportValidationService.h/.cpp`: validation service for import results and layout issues.
+- `Metrics.h`: common metric data structures.
+- `PopulationSpec.h`: population and initial placement domain models.
+- `PressureTuning.h`: pressure/crowding tuning constants or profiles.
+- `ProjectRepository.h`: domain-facing project repository abstraction.
+- `RawImportModel.h`: raw imported geometry/data model before normalization.
+- `SafeCrowdDomain.h/.cpp`: domain facade and cross-service wiring helpers.
+- `ScenarioAuthoring.h/.cpp`: scenario draft, control, hazard, guidance, and authoring helper models/functions.
+- `ScenarioBatchRunner.h/.cpp`: batch scenario execution service.
+- `ScenarioResultArtifacts.h`: scenario result artifact models.
+- `ScenarioRiskMetrics.h/.cpp`: risk metric data structures and calculations.
+- `ScenarioRiskMetricsSystem.cpp`: ECS-backed risk metric accumulation system implementation.
+- `ScenarioSimulationFrame.h`: simulation frame snapshot models.
+- `ScenarioSimulationInternal.h/.cpp`: internal scenario simulation helpers shared by simulation systems/runners.
+- `ScenarioSimulationMotionSystem.cpp`: agent movement and route-following simulation system.
+- `ScenarioSimulationRunner.h/.cpp`: scenario simulation runner service.
+- `ScenarioSimulationSystems.h/.cpp`: simulation system registration and shared system helpers.
+- `ScenarioTemplateCatalog.h`: predefined scenario template catalog models/helpers.
+
+Engine layer file roles:
+- `CommandBuffer.h`: deferred ECS command buffer for entity/component mutations.
+- `ComponentRegistry.h`: component type registration and metadata.
+- `DeterministicRng.h`: deterministic random number utilities.
+- `EcsCore.h`: core ECS type aliases and constants.
+- `EngineConfig.h`: engine runtime configuration model.
+- `EngineRuntime.h/.cpp`: top-level ECS runtime orchestration.
+- `EngineState.h`: runtime state container.
+- `EngineStats.h`: runtime statistics model.
+- `EngineStepContext.h`: per-step context passed to systems.
+- `EngineSystem.h`: system interface/base contract.
+- `EngineWorld.h`: ECS world container API.
+- `Entity.h`: entity identifier model.
+- `EntityRegistry.h/.cpp`: entity lifecycle registry.
+- `FrameClock.h/.cpp`: deterministic frame timing helper.
+- `IComponentStorage.h`: abstract component storage interface.
+- `PackedComponentStorage.h`: packed component storage implementation.
+- `ResourceStore.h`: typed runtime resource container.
+- `SystemDescriptor.h`: system metadata descriptor.
+- `SystemScheduler.h/.cpp`: system ordering and update scheduling.
+- `TriggerPolicy.h`: system trigger policy model.
+- `UpdatePhase.h`: update phase enumeration.
+- `WorldQuery.h`: query helpers for ECS world/component access.
+- `internal/EngineRuntimeTestAccess.h`: test-only accessors for engine runtime internals.
+- `internal/EngineWorldFactory.h`: internal factory helpers for constructing engine worlds.
 
 ## Architecture Rules
 - `engine` must not depend on `domain` or `application`.
@@ -120,6 +227,7 @@
 - Project workflow notes: `docs/process/GitHub Project.md`
 - Requirements and overview docs are under `docs/product/`.
 - Use `docs/README.md` as the entry point for the document map.
+- UML files and their explanatory notes under `uml/` are outdated historical references. Do not use them as the source of truth; verify current tracked source files and current docs instead.
 
 ## Review Priorities
 - Broken build or preset mismatch
