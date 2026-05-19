@@ -27,7 +27,7 @@ public:
     const SimulationFrame& frame() const noexcept;
     const ScenarioRiskSnapshot& riskSnapshot() const noexcept;
     const ScenarioRiskSnapshot& resultRiskSnapshot() const noexcept;
-    const ScenarioResultArtifacts& resultArtifacts() const noexcept;
+    const ScenarioResultArtifacts& resultArtifacts() const;
     double timeLimitSeconds() const noexcept;
     bool complete() const noexcept;
 

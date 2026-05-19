@@ -139,7 +139,13 @@ const ScenarioRiskSnapshot& ScenarioSimulationRunner::resultRiskSnapshot() const
     return resultRiskSnapshot_;
 }
 
-const ScenarioResultArtifacts& ScenarioSimulationRunner::resultArtifacts() const noexcept {
+const ScenarioResultArtifacts& ScenarioSimulationRunner::resultArtifacts() const {
+    if (runtime_ != nullptr) {
+        const auto& resources = runtime_->world().resources();
+        if (resources.contains<ScenarioResultArtifactsResource>()) {
+            return resources.get<ScenarioResultArtifactsResource>().artifacts;
+        }
+    }
     return resultArtifacts_;
 }
 
@@ -352,9 +358,6 @@ void ScenarioSimulationRunner::syncFrameFromRuntime() {
         const auto& metrics = resources.get<ScenarioRiskMetricsResource>();
         riskSnapshot_ = metrics.snapshot;
         resultRiskSnapshot_ = metrics.peakSnapshot;
-    }
-    if (resources.contains<ScenarioResultArtifactsResource>()) {
-        resultArtifacts_ = resources.get<ScenarioResultArtifactsResource>().artifacts;
     }
 }
 
