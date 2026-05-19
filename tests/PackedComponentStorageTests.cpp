@@ -1,5 +1,7 @@
+#include <limits>
 #include <memory>
 #include <stdexcept>
+#include <string>
 
 #include "TestSupport.h"
 
@@ -42,6 +44,11 @@ SC_TEST(PackedComponentStorageStoresAndRemovesComponentsDensely) {
     SC_EXPECT_EQ(storage.size(), static_cast<std::size_t>(2));
     SC_EXPECT_EQ(storage.get(first).value, 10);
     SC_EXPECT_EQ(storage.get(third).value, 30);
+
+    const auto& denseEntities = storage.entities();
+    SC_EXPECT_EQ(denseEntities.size(), std::size_t{2});
+    SC_EXPECT_TRUE(denseEntities[0] == first);
+    SC_EXPECT_TRUE(denseEntities[1] == third);
 
     bool threwOnMissingComponent = false;
     try {
@@ -88,6 +95,77 @@ SC_TEST(PackedComponentStorageRejectsInvalidOrDuplicateEntities) {
     }
 
     SC_EXPECT_TRUE(threwOnMissingRemove);
+}
+
+SC_TEST(PackedComponentStorageRejectsStaleGenerationLookup) {
+    using safecrowd::engine::Entity;
+    using safecrowd::engine::PackedComponentStorage;
+
+    PackedComponentStorage<int> storage;
+    const Entity stored{5, 2};
+    const Entity stale{5, 1};
+
+    storage.insert(stored, 42);
+
+    SC_EXPECT_TRUE(storage.contains(stored));
+    SC_EXPECT_TRUE(!storage.contains(stale));
+
+    bool threwOnStaleGet = false;
+    try {
+        static_cast<void>(storage.get(stale));
+    } catch (const std::invalid_argument& error) {
+        threwOnStaleGet = true;
+        SC_EXPECT_TRUE(std::string{error.what()} == "Component not found for entity.");
+    }
+
+    SC_EXPECT_TRUE(threwOnStaleGet);
+    SC_EXPECT_EQ(storage.get(stored), 42);
+}
+
+SC_TEST(PackedComponentStorageKeepsDistinctGenerationsWithSameIndex) {
+    using safecrowd::engine::Entity;
+    using safecrowd::engine::PackedComponentStorage;
+
+    PackedComponentStorage<int> storage;
+    const Entity older{9, 1};
+    const Entity newer{9, 2};
+
+    storage.insert(older, 10);
+    storage.insert(newer, 20);
+
+    SC_EXPECT_TRUE(storage.contains(older));
+    SC_EXPECT_TRUE(storage.contains(newer));
+    SC_EXPECT_EQ(storage.get(older), 10);
+    SC_EXPECT_EQ(storage.get(newer), 20);
+
+    storage.remove(newer);
+
+    SC_EXPECT_TRUE(storage.contains(older));
+    SC_EXPECT_TRUE(!storage.contains(newer));
+    SC_EXPECT_EQ(storage.get(older), 10);
+}
+
+SC_TEST(PackedComponentStorageHandlesLargeEntityIndexWithoutHugeSparseResize) {
+    using safecrowd::engine::Entity;
+    using safecrowd::engine::EntityIndex;
+    using safecrowd::engine::PackedComponentStorage;
+
+    PackedComponentStorage<int> storage;
+    const Entity large{
+        static_cast<EntityIndex>(std::numeric_limits<EntityIndex>::max() - 1U),
+        3,
+    };
+
+    storage.insert(large, 99);
+
+    SC_EXPECT_TRUE(storage.contains(large));
+    SC_EXPECT_EQ(storage.get(large), 99);
+    SC_EXPECT_EQ(storage.size(), std::size_t{1});
+
+    storage.remove(large);
+
+    SC_EXPECT_TRUE(!storage.contains(large));
+    SC_EXPECT_EQ(storage.size(), std::size_t{0});
 }
 
 SC_TEST(IComponentStorageEntityDestroyedRemovesStoredComponent) {

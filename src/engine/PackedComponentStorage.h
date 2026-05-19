@@ -1,10 +1,8 @@
 #pragma once
 
 #include <cstddef>
-#include <cstdint>
-#include <functional>
+#include <limits>
 #include <stdexcept>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -28,19 +26,33 @@ public:
         const std::size_t lastIndex = components_.size() - 1;
         const Entity lastEntity = entities_[lastIndex];
 
+        clearSparseIndex(entity, removedIndex);
+
         if (removedIndex != lastIndex) {
             components_[removedIndex] = std::move(components_[lastIndex]);
             entities_[removedIndex] = lastEntity;
-            entityToIndex_[lastEntity] = removedIndex;
+            updateSparseIndex(lastEntity, removedIndex);
         }
 
         components_.pop_back();
         entities_.pop_back();
-        entityToIndex_.erase(entity);
     }
 
     [[nodiscard]] bool contains(Entity entity) const noexcept {
-        return entity.isValid() && entityToIndex_.contains(entity);
+        if (!entity.isValid()) {
+            return false;
+        }
+
+        if (const auto sparseIndex = sparseIndexOf(entity);
+            sparseIndex != kSparseIndexSentinel) {
+            return true;
+        }
+
+        if (!shouldScanDense(entity)) {
+            return false;
+        }
+
+        return findDenseIndex(entity) != kSparseIndexSentinel;
     }
 
     [[nodiscard]] T& get(Entity entity) {
@@ -66,13 +78,8 @@ public:
     }
 
 private:
-    struct EntityHash {
-        [[nodiscard]] std::size_t operator()(const Entity& entity) const noexcept {
-            const auto packed =
-                (static_cast<std::uint64_t>(entity.generation) << 32U) | entity.index;
-            return std::hash<std::uint64_t>{}(packed);
-        }
-    };
+    static constexpr std::size_t kSparseIndexSentinel = std::numeric_limits<std::size_t>::max();
+    static constexpr std::size_t kMaxSparseSlots = 1U << 20U;
 
     template <typename U>
     void insertImpl(Entity entity, U&& component) {
@@ -95,7 +102,8 @@ private:
         }
 
         try {
-            entityToIndex_.emplace(entity, index);
+            ensureSparseSlot(entity);
+            updateSparseIndex(entity, index);
         } catch (...) {
             entities_.pop_back();
             components_.pop_back();
@@ -108,17 +116,90 @@ private:
             throw std::invalid_argument("Invalid entity handle.");
         }
 
-        const auto it = entityToIndex_.find(entity);
-        if (it == entityToIndex_.end()) {
+        std::size_t denseIndex = sparseIndexOf(entity);
+        if (denseIndex == kSparseIndexSentinel && shouldScanDense(entity)) {
+            denseIndex = findDenseIndex(entity);
+        }
+
+        if (denseIndex == kSparseIndexSentinel) {
             throw std::invalid_argument("Component not found for entity.");
         }
 
-        return it->second;
+        return denseIndex;
+    }
+
+    [[nodiscard]] bool shouldScanDense(Entity entity) const noexcept {
+        const auto index = static_cast<std::size_t>(entity.index);
+        if (index >= kMaxSparseSlots) {
+            return true;
+        }
+
+        if (index >= sparseIndices_.size()) {
+            return false;
+        }
+
+        return sparseIndices_[index] != kSparseIndexSentinel;
+    }
+
+    void ensureSparseSlot(Entity entity) {
+        const auto index = static_cast<std::size_t>(entity.index);
+        if (index >= kMaxSparseSlots || index < sparseIndices_.size()) {
+            return;
+        }
+
+        sparseIndices_.resize(index + 1, kSparseIndexSentinel);
+    }
+
+    void updateSparseIndex(Entity entity, std::size_t denseIndex) noexcept {
+        const auto index = static_cast<std::size_t>(entity.index);
+        if (index < sparseIndices_.size()) {
+            sparseIndices_[index] = denseIndex;
+        }
+    }
+
+    void clearSparseIndex(Entity entity, std::size_t denseIndex) noexcept {
+        const auto index = static_cast<std::size_t>(entity.index);
+        if (index >= sparseIndices_.size() || sparseIndices_[index] != denseIndex ||
+            denseIndex >= entities_.size() || !(entities_[denseIndex] == entity)) {
+            return;
+        }
+
+        sparseIndices_[index] = kSparseIndexSentinel;
+        for (std::size_t candidate = 0; candidate < entities_.size(); ++candidate) {
+            if (candidate != denseIndex && entities_[candidate].index == entity.index) {
+                sparseIndices_[index] = candidate;
+                return;
+            }
+        }
+    }
+
+    [[nodiscard]] std::size_t sparseIndexOf(Entity entity) const noexcept {
+        const auto index = static_cast<std::size_t>(entity.index);
+        if (index >= sparseIndices_.size()) {
+            return kSparseIndexSentinel;
+        }
+
+        const std::size_t denseIndex = sparseIndices_[index];
+        if (denseIndex == kSparseIndexSentinel || denseIndex >= entities_.size() ||
+            !(entities_[denseIndex] == entity)) {
+            return kSparseIndexSentinel;
+        }
+
+        return denseIndex;
+    }
+
+    [[nodiscard]] std::size_t findDenseIndex(Entity entity) const noexcept {
+        for (std::size_t index = 0; index < entities_.size(); ++index) {
+            if (entities_[index] == entity) {
+                return index;
+            }
+        }
+        return kSparseIndexSentinel;
     }
 
     std::vector<T> components_;
     std::vector<Entity> entities_;
-    std::unordered_map<Entity, std::size_t, EntityHash> entityToIndex_;
+    std::vector<std::size_t> sparseIndices_;
 };
 
 }  // namespace safecrowd::engine

@@ -1,6 +1,7 @@
 #include "TestSupport.h"
 
 #include <type_traits>
+#include <vector>
 
 #include "engine/internal/EngineWorldFactory.h"
 
@@ -14,6 +15,16 @@ struct Position {
 struct Velocity {
     float vx{0.0f};
     float vy{0.0f};
+};
+
+struct ConstPositionVisitor {
+    std::size_t* visited{nullptr};
+
+    void operator()(safecrowd::engine::Entity, const Position&) const {
+        ++(*visited);
+    }
+
+    void operator()(safecrowd::engine::Entity, Position&) const = delete;
 };
 
 }  // namespace
@@ -148,4 +159,81 @@ SC_TEST(WorldQuery_ForEachVisitsMatchedComponentsWithoutViewAllocation) {
     const auto& updated = world.query().get<Position>(e1);
     SC_EXPECT_NEAR(updated.x, 4.0f, 1e-6);
     SC_EXPECT_NEAR(updated.y, 6.0f, 1e-6);
+}
+
+SC_TEST(WorldQuery_ForEachConstOverloadPassesConstComponentRefs) {
+    safecrowd::engine::EcsCore core;
+    safecrowd::engine::ResourceStore resources;
+    safecrowd::engine::CommandBuffer buffer;
+    const auto world = safecrowd::engine::internal::EngineWorldFactory::create(core, resources, buffer);
+
+    const auto e = core.createEntity();
+    core.addComponent(e, Position{1.0f, 2.0f});
+
+    std::size_t visited = 0;
+    world.query().forEach<Position>(ConstPositionVisitor{&visited});
+
+    SC_EXPECT_EQ(visited, std::size_t{1});
+}
+
+SC_TEST(WorldQuery_ForEachUsesSmallestCandidateStorageOrder) {
+    safecrowd::engine::EcsCore core;
+    safecrowd::engine::ResourceStore resources;
+    safecrowd::engine::CommandBuffer buffer;
+    auto world = safecrowd::engine::internal::EngineWorldFactory::create(core, resources, buffer);
+
+    const auto e1 = core.createEntity();
+    const auto e2 = core.createEntity();
+    const auto e3 = core.createEntity();
+
+    core.addComponent(e1, Position{});
+    core.addComponent(e2, Position{});
+    core.addComponent(e3, Position{});
+    core.addComponent(e2, Velocity{});
+    core.addComponent(e1, Velocity{});
+
+    std::vector<safecrowd::engine::Entity> visited;
+    world.query().forEach<Position, Velocity>(
+        [&](safecrowd::engine::Entity entity, Position&, Velocity&) {
+            visited.push_back(entity);
+        });
+
+    SC_EXPECT_EQ(visited.size(), std::size_t{2});
+    SC_EXPECT_TRUE(visited[0] == e2);
+    SC_EXPECT_TRUE(visited[1] == e1);
+}
+
+SC_TEST(WorldQuery_ForEachKeepsFirstTemplateStorageOrderOnSizeTie) {
+    safecrowd::engine::EcsCore core;
+    safecrowd::engine::ResourceStore resources;
+    safecrowd::engine::CommandBuffer buffer;
+    auto world = safecrowd::engine::internal::EngineWorldFactory::create(core, resources, buffer);
+
+    const auto e1 = core.createEntity();
+    const auto e2 = core.createEntity();
+
+    core.addComponent(e2, Position{});
+    core.addComponent(e1, Position{});
+    core.addComponent(e1, Velocity{});
+    core.addComponent(e2, Velocity{});
+
+    std::vector<safecrowd::engine::Entity> positionFirst;
+    world.query().forEach<Position, Velocity>(
+        [&](safecrowd::engine::Entity entity, Position&, Velocity&) {
+            positionFirst.push_back(entity);
+        });
+
+    std::vector<safecrowd::engine::Entity> velocityFirst;
+    world.query().forEach<Velocity, Position>(
+        [&](safecrowd::engine::Entity entity, Velocity&, Position&) {
+            velocityFirst.push_back(entity);
+        });
+
+    SC_EXPECT_EQ(positionFirst.size(), std::size_t{2});
+    SC_EXPECT_TRUE(positionFirst[0] == e2);
+    SC_EXPECT_TRUE(positionFirst[1] == e1);
+
+    SC_EXPECT_EQ(velocityFirst.size(), std::size_t{2});
+    SC_EXPECT_TRUE(velocityFirst[0] == e1);
+    SC_EXPECT_TRUE(velocityFirst[1] == e2);
 }

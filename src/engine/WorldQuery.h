@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <functional>
 #include <limits>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -18,10 +19,12 @@ public:
     [[nodiscard]] std::vector<Entity> view() const {
         static_assert(sizeof...(Ts) > 0, "WorldQuery::view requires at least one component type.");
 
+        const EcsCore& core = core_;
+        const auto& registry = core.componentRegistry();
         Signature required{};
         bool allRegistered = true;
         ([&] {
-            const auto id = core_.componentRegistry().tryTypeOf<Ts>();
+            const auto id = registry.tryTypeOf<Ts>();
             if (!id.has_value()) {
                 allRegistered = false;
             } else {
@@ -31,15 +34,20 @@ public:
 
         if (!allRegistered) return {};
 
+        auto storages = std::make_tuple(&registry.storageFor<Ts>()...);
         const std::vector<Entity>* candidateEntities = nullptr;
         std::size_t smallestStorageSize = std::numeric_limits<std::size_t>::max();
-        ([&] {
-            const auto& entities = core_.componentRegistry().storageFor<Ts>().entities();
-            if (entities.size() < smallestStorageSize) {
-                smallestStorageSize = entities.size();
-                candidateEntities = &entities;
-            }
-        }(), ...);
+        std::apply(
+            [&](auto... storage) {
+                ([&] {
+                    const auto& entities = storage->entities();
+                    if (entities.size() < smallestStorageSize) {
+                        smallestStorageSize = entities.size();
+                        candidateEntities = &entities;
+                    }
+                }(), ...);
+            },
+            storages);
 
         std::vector<Entity> result;
         if (candidateEntities == nullptr) {
@@ -48,7 +56,7 @@ public:
 
         result.reserve(candidateEntities->size());
         for (const auto entity : *candidateEntities) {
-            const auto sig = core_.entityRegistry().signatureOf(entity);
+            const auto sig = core.entityRegistry().signatureOf(entity);
             if ((sig & required) == required) {
                 result.push_back(entity);
             }
@@ -66,10 +74,11 @@ public:
     void forEach(Fn&& fn) {
         static_assert(sizeof...(Ts) > 0, "WorldQuery::forEach requires at least one component type.");
 
+        auto& registry = core_.componentRegistry();
         Signature required{};
         bool allRegistered = true;
         ([&] {
-            const auto id = core_.componentRegistry().tryTypeOf<Ts>();
+            const auto id = registry.tryTypeOf<Ts>();
             if (!id.has_value()) {
                 allRegistered = false;
             } else {
@@ -79,15 +88,20 @@ public:
 
         if (!allRegistered) return;
 
+        auto storages = std::make_tuple(&registry.storageFor<Ts>()...);
         const std::vector<Entity>* candidateEntities = nullptr;
         std::size_t smallestStorageSize = std::numeric_limits<std::size_t>::max();
-        ([&] {
-            const auto& entities = core_.componentRegistry().storageFor<Ts>().entities();
-            if (entities.size() < smallestStorageSize) {
-                smallestStorageSize = entities.size();
-                candidateEntities = &entities;
-            }
-        }(), ...);
+        std::apply(
+            [&](auto... storage) {
+                ([&] {
+                    const auto& entities = storage->entities();
+                    if (entities.size() < smallestStorageSize) {
+                        smallestStorageSize = entities.size();
+                        candidateEntities = &entities;
+                    }
+                }(), ...);
+            },
+            storages);
 
         if (candidateEntities == nullptr) {
             return;
@@ -96,7 +110,11 @@ public:
         for (const auto entity : *candidateEntities) {
             const auto sig = core_.entityRegistry().signatureOf(entity);
             if ((sig & required) == required) {
-                std::invoke(fn, entity, get<Ts>(entity)...);
+                std::apply(
+                    [&](auto... storage) {
+                        std::invoke(fn, entity, storage->get(entity)...);
+                    },
+                    storages);
             }
         }
     }
@@ -105,10 +123,12 @@ public:
     void forEach(Fn&& fn) const {
         static_assert(sizeof...(Ts) > 0, "WorldQuery::forEach requires at least one component type.");
 
+        const EcsCore& core = core_;
+        const auto& registry = core.componentRegistry();
         Signature required{};
         bool allRegistered = true;
         ([&] {
-            const auto id = core_.componentRegistry().tryTypeOf<Ts>();
+            const auto id = registry.tryTypeOf<Ts>();
             if (!id.has_value()) {
                 allRegistered = false;
             } else {
@@ -118,15 +138,20 @@ public:
 
         if (!allRegistered) return;
 
+        auto storages = std::make_tuple(&registry.storageFor<Ts>()...);
         const std::vector<Entity>* candidateEntities = nullptr;
         std::size_t smallestStorageSize = std::numeric_limits<std::size_t>::max();
-        ([&] {
-            const auto& entities = core_.componentRegistry().storageFor<Ts>().entities();
-            if (entities.size() < smallestStorageSize) {
-                smallestStorageSize = entities.size();
-                candidateEntities = &entities;
-            }
-        }(), ...);
+        std::apply(
+            [&](auto... storage) {
+                ([&] {
+                    const auto& entities = storage->entities();
+                    if (entities.size() < smallestStorageSize) {
+                        smallestStorageSize = entities.size();
+                        candidateEntities = &entities;
+                    }
+                }(), ...);
+            },
+            storages);
 
         if (candidateEntities == nullptr) {
             return;
@@ -135,7 +160,11 @@ public:
         for (const auto entity : *candidateEntities) {
             const auto sig = core_.entityRegistry().signatureOf(entity);
             if ((sig & required) == required) {
-                std::invoke(fn, entity, get<Ts>(entity)...);
+                std::apply(
+                    [&](auto... storage) {
+                        std::invoke(fn, entity, storage->get(entity)...);
+                    },
+                    storages);
             }
         }
     }
