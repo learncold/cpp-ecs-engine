@@ -167,7 +167,7 @@ bool routeGuidancesEqual(const std::vector<RouteGuidanceDraft>& lhs,
             || lhs[i].installZoneId != rhs[i].installZoneId
             || !pointsEqual(lhs[i].installPosition, rhs[i].installPosition)
             || lhs[i].baseComplianceRate != rhs[i].baseComplianceRate
-            || lhs[i].guidanceStrength != rhs[i].guidanceStrength
+            || lhs[i].influenceRadiusMeters != rhs[i].influenceRadiusMeters
             || lhs[i].maxDetourMeters != rhs[i].maxDetourMeters
             || !routeGuidancePeriodsEqual(lhs[i].periods, rhs[i].periods)) {
             return false;

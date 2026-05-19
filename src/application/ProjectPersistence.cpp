@@ -1073,7 +1073,7 @@ QJsonObject routeGuidanceToJson(const safecrowd::domain::RouteGuidanceDraft& gui
     object["installPositionX"] = guidance.installPosition.x;
     object["installPositionY"] = guidance.installPosition.y;
     object["baseComplianceRate"] = guidance.baseComplianceRate;
-    object["guidanceStrength"] = guidance.guidanceStrength;
+    object["influenceRadiusMeters"] = guidance.influenceRadiusMeters;
     object["maxDetourMeters"] = guidance.maxDetourMeters;
     return object;
 }
@@ -1107,7 +1107,7 @@ safecrowd::domain::RouteGuidanceDraft routeGuidanceFromJson(const QJsonObject& o
         .y = object.value("installPositionY").toDouble(0.0),
     };
     guidance.baseComplianceRate = object.value("baseComplianceRate").toDouble(0.5);
-    guidance.guidanceStrength = object.value("guidanceStrength").toDouble(0.55);
+    guidance.influenceRadiusMeters = object.value("influenceRadiusMeters").toDouble(2.5);
     guidance.maxDetourMeters = object.value("maxDetourMeters").toDouble(20.0);
     return guidance;
 }

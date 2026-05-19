@@ -30,7 +30,7 @@ constexpr double kPi = 3.14159265358979323846;
 constexpr std::size_t kStagedEvacuationAgentsPerSpawn = 10;
 constexpr double kStagedEvacuationIntervalSeconds = 5.0;
 constexpr double kDefaultGuidanceCompliance = 0.5;
-constexpr double kDefaultGuidanceStrength = 0.55;
+constexpr double kDefaultGuidanceInfluenceRadiusMeters = 2.5;
 constexpr double kDefaultGuidanceMaxDetourMeters = 20.0;
 
 struct AlternativeRecommendationInput {
@@ -397,7 +397,7 @@ RouteGuidanceDraft makeGuidance(const std::string& id,
     guidance.guidedExitZoneId = guidedExitZoneId;
     guidance.installConnectionId = installConnectionId;
     guidance.baseComplianceRate = kDefaultGuidanceCompliance;
-    guidance.guidanceStrength = kDefaultGuidanceStrength;
+    guidance.influenceRadiusMeters = kDefaultGuidanceInfluenceRadiusMeters;
     guidance.maxDetourMeters = kDefaultGuidanceMaxDetourMeters;
     return guidance;
 }

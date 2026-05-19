@@ -300,9 +300,42 @@ QString formatRouteGuidanceTooltip(
             .arg(guidance.installPosition.y, 0, 'f', 1));
     }
     text.append(QString("\n Base compliance: %1").arg(std::clamp(guidance.baseComplianceRate, 0.0, 1.0), 0, 'f', 2));
-    text.append(QString("\n Strength: %1").arg(std::clamp(guidance.guidanceStrength, 0.0, 1.0), 0, 'f', 2));
-    text.append(QString("\n Max detour:%1m").arg(std::max(0.0, guidance.maxDetourMeters), 0, 'f', 1));
+    text.append(QString("\n Influence radius: %1m").arg(std::max(0.0, guidance.influenceRadiusMeters), 0, 'f', 1));
+    text.append(QString("\n Max detour: %1m").arg(std::max(0.0, guidance.maxDetourMeters), 0, 'f', 1));
     return text;
+}
+
+double routeGuidanceInfluenceRadiusPixels(
+    const LayoutCanvasTransform& transform,
+    const safecrowd::domain::RouteGuidanceDraft& guidance) {
+    const auto radiusMeters = std::max(0.0, guidance.influenceRadiusMeters);
+    if (!std::isfinite(radiusMeters) || radiusMeters <= 0.0) {
+        return 0.0;
+    }
+
+    const auto origin = transform.map({.x = 0.0, .y = 0.0});
+    const auto radiusPoint = transform.map({.x = radiusMeters, .y = 0.0});
+    return QLineF(origin, radiusPoint).length();
+}
+
+void drawRouteGuidanceInfluenceRadius(
+    QPainter& painter,
+    const QPointF& center,
+    double radiusPixels,
+    int alphaScale = 100) {
+    if (!std::isfinite(radiusPixels) || radiusPixels <= 0.0) {
+        return;
+    }
+
+    const auto alpha = [&](int value) {
+        return std::clamp((value * alphaScale) / 100, 0, 255);
+    };
+
+    painter.save();
+    painter.setPen(QPen(QColor(31, 95, 174, alpha(82)), 1.4, Qt::DashLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(QColor(31, 95, 174, alpha(22)));
+    painter.drawEllipse(center, radiusPixels, radiusPixels);
+    painter.restore();
 }
 
 std::optional<QPointF> routeGuidanceMarkerCenter(
@@ -795,7 +828,7 @@ public:
         auto* caption = new QLabel(
             "Route guidance settings.\n"
             "Period defines when the event is active.\n"
-            "Parameters control how strongly agents follow the guidance.\n"
+            "Parameters control compliance, influence distance, and detour tolerance.\n"
             "Target exit is selected by clicking an exit or a door on the canvas.",
             this);
         caption->setWordWrap(true);
@@ -898,16 +931,16 @@ public:
             2,
             std::clamp(guidance_.baseComplianceRate, 0.0, 1.0));
 
-        guidanceStrength_ = addField(
+        influenceRadiusMeters_ = addField(
             formLayout,
             row++,
-            "Guidance strength",
-            "Guidance strength (0~1). Examples: signage 0.25 / broadcast 0.55 / staff control 0.85.",
+            "Influence radius (m)",
+            "Maximum distance from this guidance marker where agents can be affected.",
             0.0,
-            1.0,
-            0.01,
-            2,
-            std::clamp(guidance_.guidanceStrength, 0.0, 1.0));
+            10'000.0,
+            0.5,
+            1,
+            std::max(0.0, guidance_.influenceRadiusMeters));
 
         maxDetourMeters_ = addField(
             formLayout,
@@ -1113,7 +1146,7 @@ private:
         }
 
         guidance_.baseComplianceRate = std::clamp(baseComplianceRate_->value(), 0.0, 1.0);
-        guidance_.guidanceStrength = std::clamp(guidanceStrength_->value(), 0.0, 1.0);
+        guidance_.influenceRadiusMeters = std::max(0.0, influenceRadiusMeters_->value());
         guidance_.maxDetourMeters = std::max(0.0, maxDetourMeters_->value());
         return true;
     }
@@ -1126,7 +1159,7 @@ private:
     QPushButton* removePeriodButton_{nullptr};
     std::vector<std::unique_ptr<PeriodRowWidgets>> periodRows_{};
     QDoubleSpinBox* baseComplianceRate_{nullptr};
-    QDoubleSpinBox* guidanceStrength_{nullptr};
+    QDoubleSpinBox* influenceRadiusMeters_{nullptr};
     QDoubleSpinBox* maxDetourMeters_{nullptr};
 };
 
@@ -2018,6 +2051,11 @@ void ScenarioCanvasWidget::drawRouteGuidances(QPainter& painter, const LayoutCan
 
         const QPointF markerCenter = *center;
 
+        drawRouteGuidanceInfluenceRadius(
+            painter,
+            markerCenter,
+            routeGuidanceInfluenceRadiusPixels(transform, guidance));
+
         const double r = 10.0;
         painter.setBrush(QColor("#1f5fae"));
         painter.drawEllipse(markerCenter, r, r);
@@ -2125,6 +2163,12 @@ void ScenarioCanvasWidget::drawDraggedEventPreview(QPainter& painter, const Layo
                 center = *previewCenter;
             }
         }
+
+        drawRouteGuidanceInfluenceRadius(
+            painter,
+            center,
+            routeGuidanceInfluenceRadiusPixels(transform, routeGuidances_[state.index]),
+            valid ? 80 : 45);
 
         painter.setPen(Qt::NoPen);
         painter.setBrush(alphaColor(QColor("#1f5fae"), 150));
@@ -2622,10 +2666,6 @@ void ScenarioCanvasWidget::addRouteGuidance(const QPointF& position) {
         });
         if (it != layout_.zones.end()) {
             clickedZone = &(*it);
-            if (it->kind == safecrowd::domain::ZoneKind::Exit) {
-                addRouteGuidanceForExitZone(*it);
-                return;
-            }
         }
     }
 
@@ -2634,11 +2674,16 @@ void ScenarioCanvasWidget::addRouteGuidance(const QPointF& position) {
     const auto dx = offsetPoint.x - point.x;
     const auto dy = offsetPoint.y - point.y;
     const auto pixelToleranceWorldUnits = std::hypot(dx, dy);
-    const auto toleranceWorldUnits = std::max(1.2, pixelToleranceWorldUnits);
+    const auto toleranceWorldUnits = std::max(0.2, pixelToleranceWorldUnits);
     const auto* connection = controlConnectionAt(point, toleranceWorldUnits);
 
     if (connection != nullptr) {
         addRouteGuidanceForConnection(*connection);
+        return;
+    }
+
+    if (clickedZone != nullptr && clickedZone->kind == safecrowd::domain::ZoneKind::Exit) {
+        addRouteGuidanceForExitZone(*clickedZone);
         return;
     }
 
@@ -2939,7 +2984,7 @@ bool ScenarioCanvasWidget::tryMoveRouteGuidance(
     }
 
     const auto offsetPoint = unmapPoint(position + QPointF(kPickRadiusPixels, 0.0));
-    const auto toleranceWorldUnits = std::max(1.2, std::hypot(offsetPoint.x - point.x, offsetPoint.y - point.y));
+    const auto toleranceWorldUnits = std::max(0.2, std::hypot(offsetPoint.x - point.x, offsetPoint.y - point.y));
     const auto* connection = controlConnectionAt(point, toleranceWorldUnits);
     ScenarioRouteGuidanceAuthoringResult result;
     if (connection != nullptr) {

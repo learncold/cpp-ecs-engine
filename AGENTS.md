@@ -46,7 +46,7 @@
   - `external/` for vendored dependencies that must remain in-tree
 
 ## Source Tree and File Roles
-The current `src/` tree is layered as follows. Keep new files in the matching layer and update this section when adding, removing, or renaming source files:
+The current `src/` tree is layered as follows. Keep new files in the matching layer and update this section when adding, removing, or renaming source files. This is required even for implementation-only changes that introduce new source/header files.
 
 ```text
 src/
@@ -121,7 +121,8 @@ Domain layer file roles:
 - `ScenarioRiskMetricsSystem.cpp`: ECS-backed risk metric accumulation system implementation.
 - `ScenarioSimulationFrame.h`: simulation frame snapshot models.
 - `ScenarioSimulationInternal.h/.cpp`: internal scenario simulation helpers shared by simulation systems/runners.
-- `ScenarioSimulationMotionSystem.cpp`: agent movement and route-following simulation system.
+- `ScenarioSimulationMotionSystem.cpp`: agent movement simulation system orchestration, movement integration, constraints, overlap resolution, and clock advancement.
+- `ScenarioSimulationRouteGuidance.h/.cpp`: internal route guidance controller, route planning/cache helpers, exit replanning, and hazard-aware route selection support for scenario simulation.
 - `ScenarioSimulationRunner.h/.cpp`: scenario simulation runner service.
 - `ScenarioSimulationSystems.h/.cpp`: simulation system registration and shared system helpers.
 - `ScenarioTemplateCatalog.h`: predefined scenario template catalog models/helpers.
@@ -201,6 +202,7 @@ Engine layer file roles:
 - Keep changes minimal and localized.
 - Preserve existing naming/style unless there is a clear reason to refactor.
 - Update docs when structure, build rules, or repository workflow changes.
+- When adding, removing, or renaming files under `src/`, update `CMakeLists.txt` wiring when needed and update the `Source Tree and File Roles` section in this file before finishing.
 - When changing contribution workflow files, keep `CONTRIBUTING.md` and `.github/` files aligned.
 
 ## UI Design Guidelines

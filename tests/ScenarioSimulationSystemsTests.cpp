@@ -380,6 +380,39 @@ safecrowd::domain::FacilityLayout2D twoExitGuidanceDetourLayout() {
     return layout;
 }
 
+safecrowd::domain::FacilityLayout2D sameExitTwoDoorGuidanceLayout() {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.zones.push_back({
+        .id = "room",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Room",
+        .area = {.outline = {{0.0, 0.0}, {2.0, 0.0}, {2.0, 4.0}, {0.0, 4.0}}},
+    });
+    layout.zones.push_back({
+        .id = "shared-exit",
+        .kind = safecrowd::domain::ZoneKind::Exit,
+        .label = "Shared Exit",
+        .area = {.outline = {{2.0, 0.0}, {4.0, 0.0}, {4.0, 4.0}, {2.0, 4.0}}},
+    });
+    layout.connections.push_back({
+        .id = "room-exit-lower",
+        .kind = safecrowd::domain::ConnectionKind::Exit,
+        .fromZoneId = "room",
+        .toZoneId = "shared-exit",
+        .effectiveWidth = 0.8,
+        .centerSpan = {{2.0, 0.3}, {2.0, 0.7}},
+    });
+    layout.connections.push_back({
+        .id = "room-exit-upper",
+        .kind = safecrowd::domain::ConnectionKind::Exit,
+        .fromZoneId = "room",
+        .toZoneId = "shared-exit",
+        .effectiveWidth = 0.8,
+        .centerSpan = {{2.0, 3.3}, {2.0, 3.7}},
+    });
+    return layout;
+}
+
 safecrowd::domain::FacilityLayout2D wideTwoExitHazardRouteLayout() {
     safecrowd::domain::FacilityLayout2D layout;
     layout.zones.push_back({
@@ -1627,7 +1660,6 @@ SC_TEST(ScenarioSimulationMotionSystem_TreatsZeroGuidanceDetourAsStrictTolerance
     guidance.id = "strict-detour-guidance";
     guidance.guidedExitZoneId = "far-exit";
     guidance.baseComplianceRate = 1.0;
-    guidance.guidanceStrength = 1.0;
     guidance.maxDetourMeters = 0.0;
 
     safecrowd::engine::EngineRuntime runtime({
@@ -1687,7 +1719,6 @@ SC_TEST(ScenarioSimulationMotionSystem_AppliesInstalledGuidanceOnlyNearInstallCo
         guidance.guidedExitZoneId = "far-exit";
         guidance.installConnectionId = "room-near-exit";
         guidance.baseComplianceRate = 1.0;
-        guidance.guidanceStrength = 1.0;
         guidance.maxDetourMeters = 100.0;
 
         safecrowd::engine::EngineRuntime runtime({
@@ -1729,6 +1760,72 @@ SC_TEST(ScenarioSimulationMotionSystem_AppliesInstalledGuidanceOnlyNearInstallCo
     SC_EXPECT_EQ(visibleRoute.guidanceEventId, std::string{"installed-guidance"});
 }
 
+SC_TEST(ScenarioSimulationMotionSystem_GuidanceInstalledOnExitDoorUsesThatDoorWhenExitZoneHasMultipleDoors) {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    seeds.push_back({
+        .position = {.value = {.x = 1.6, .y = 3.5}},
+        .agent = {.radius = 0.25f, .maxSpeed = 1.0f, .guidancePropensity = 1.0},
+        .velocity = {.value = {}},
+        .route = {
+            .waypoints = {{.x = 2.0, .y = 0.5}},
+            .waypointPassages = {{{.x = 2.0, .y = 0.3}, {.x = 2.0, .y = 0.7}}},
+            .waypointFromZoneIds = {"room"},
+            .waypointZoneIds = {"shared-exit"},
+            .waypointConnectionIds = {"room-exit-lower"},
+            .nextWaypointIndex = 0,
+            .currentSegmentStart = {.x = 1.6, .y = 3.5},
+            .previousDistanceToWaypoint = 3.0,
+            .destinationZoneId = "shared-exit",
+            .originalDestinationZoneId = "shared-exit",
+        },
+        .status = {},
+    });
+
+    safecrowd::domain::RouteGuidanceDraft guidance;
+    guidance.id = "upper-exit-door-guidance";
+    guidance.guidedExitZoneId = "shared-exit";
+    guidance.installConnectionId = "room-exit-upper";
+    guidance.baseComplianceRate = 1.0;
+    guidance.maxDetourMeters = 100.0;
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 13,
+    });
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioSimulationMotionSystem(
+            sameExitTwoDoorGuidanceLayout(),
+            std::vector<safecrowd::domain::RouteGuidanceDraft>{guidance}),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.1});
+    runtime.stepFrame(0.0);
+
+    const auto entities = runtime.world().query().view<
+        safecrowd::domain::Position,
+        safecrowd::domain::Agent,
+        safecrowd::domain::Velocity,
+        safecrowd::domain::AvoidanceState,
+        safecrowd::domain::EvacuationRoute,
+        safecrowd::domain::EvacuationStatus>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{1});
+    const auto& route = runtime.world().query().get<safecrowd::domain::EvacuationRoute>(entities.front());
+    SC_EXPECT_TRUE(route.followsGuidance);
+    SC_EXPECT_EQ(route.guidanceEventId, std::string{"upper-exit-door-guidance"});
+    SC_EXPECT_TRUE(std::find(
+        route.waypointConnectionIds.begin(),
+        route.waypointConnectionIds.end(),
+        std::string{"room-exit-upper"}) != route.waypointConnectionIds.end());
+    SC_EXPECT_TRUE(std::find(
+        route.waypointConnectionIds.begin(),
+        route.waypointConnectionIds.end(),
+        std::string{"room-exit-lower"}) == route.waypointConnectionIds.end());
+}
+
 SC_TEST(ScenarioSimulationMotionSystem_RechecksInstalledGuidanceAsAgentApproachesInstallConnection) {
     std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
     seeds.push_back({
@@ -1755,7 +1852,7 @@ SC_TEST(ScenarioSimulationMotionSystem_RechecksInstalledGuidanceAsAgentApproache
     guidance.guidedExitZoneId = "far-exit";
     guidance.installConnectionId = "room-near-exit";
     guidance.baseComplianceRate = 1.0;
-    guidance.guidanceStrength = 1.0;
+    guidance.influenceRadiusMeters = 2.0;
     guidance.maxDetourMeters = 100.0;
 
     safecrowd::engine::EngineRuntime runtime({
@@ -1819,7 +1916,6 @@ SC_TEST(ScenarioSimulationMotionSystem_AppliesRoomGuidanceOnlyNearInstallPositio
         guidance.installZoneId = "room";
         guidance.installPosition = {.x = 0.8, .y = 3.5};
         guidance.baseComplianceRate = 1.0;
-        guidance.guidanceStrength = 1.0;
         guidance.maxDetourMeters = 100.0;
 
         safecrowd::engine::EngineRuntime runtime({
@@ -1905,7 +2001,6 @@ SC_TEST(ScenarioSimulationMotionSystem_AppliesMultipleActiveGuidancesIndependent
     doorGuidance.guidedExitZoneId = "far-exit";
     doorGuidance.installConnectionId = "room-near-exit";
     doorGuidance.baseComplianceRate = 1.0;
-    doorGuidance.guidanceStrength = 1.0;
     doorGuidance.maxDetourMeters = 100.0;
 
     safecrowd::domain::RouteGuidanceDraft roomGuidance;
@@ -1914,7 +2009,6 @@ SC_TEST(ScenarioSimulationMotionSystem_AppliesMultipleActiveGuidancesIndependent
     roomGuidance.installZoneId = "room";
     roomGuidance.installPosition = {.x = 0.8, .y = 3.5};
     roomGuidance.baseComplianceRate = 1.0;
-    roomGuidance.guidanceStrength = 1.0;
     roomGuidance.maxDetourMeters = 100.0;
 
     safecrowd::engine::EngineRuntime runtime({
@@ -1988,7 +2082,6 @@ SC_TEST(ScenarioSimulationMotionSystem_LaterApplicableGuidanceReplacesRetainedIn
     doorGuidance.guidedExitZoneId = "far-exit";
     doorGuidance.installConnectionId = "room-near-exit";
     doorGuidance.baseComplianceRate = 1.0;
-    doorGuidance.guidanceStrength = 1.0;
     doorGuidance.maxDetourMeters = 100.0;
 
     safecrowd::domain::RouteGuidanceDraft roomGuidance;
@@ -1998,7 +2091,6 @@ SC_TEST(ScenarioSimulationMotionSystem_LaterApplicableGuidanceReplacesRetainedIn
     roomGuidance.installPosition = {.x = 1.6, .y = 0.5};
     roomGuidance.periods.push_back({.startSeconds = 0.2, .endSeconds = 10.0});
     roomGuidance.baseComplianceRate = 1.0;
-    roomGuidance.guidanceStrength = 1.0;
     roomGuidance.maxDetourMeters = 100.0;
 
     safecrowd::engine::EngineRuntime runtime({
@@ -2092,7 +2184,6 @@ SC_TEST(ScenarioSimulationMotionSystem_PrioritizesAgentsNearInstalledGuidanceBef
     guidance.guidedExitZoneId = "far-exit";
     guidance.installConnectionId = "room-near-exit";
     guidance.baseComplianceRate = 1.0;
-    guidance.guidanceStrength = 1.0;
     guidance.maxDetourMeters = 100.0;
 
     safecrowd::engine::EngineRuntime runtime({

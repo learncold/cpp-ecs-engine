@@ -22,7 +22,7 @@ SC_TEST(ProjectPersistence_preservesRecommendedScenarioDraftState) {
     guidance.id = "guidance-east";
     guidance.guidedExitZoneId = "exit-east";
     guidance.baseComplianceRate = 0.5;
-    guidance.guidanceStrength = 0.55;
+    guidance.influenceRadiusMeters = 2.5;
     guidance.maxDetourMeters = 20.0;
     draft.control.routeGuidances.push_back(guidance);
 
@@ -61,7 +61,7 @@ SC_TEST(ProjectPersistence_preservesRecommendedScenarioDraftState) {
     SC_EXPECT_EQ(loadedScenario.draft.control.routeGuidances.size(), std::size_t{1});
     SC_EXPECT_EQ(loadedScenario.draft.control.routeGuidances.front().guidedExitZoneId, std::string{"exit-east"});
     SC_EXPECT_NEAR(loadedScenario.draft.control.routeGuidances.front().baseComplianceRate, 0.5, 1e-9);
-    SC_EXPECT_NEAR(loadedScenario.draft.control.routeGuidances.front().guidanceStrength, 0.55, 1e-9);
+    SC_EXPECT_NEAR(loadedScenario.draft.control.routeGuidances.front().influenceRadiusMeters, 2.5, 1e-9);
     SC_EXPECT_NEAR(loadedScenario.draft.control.routeGuidances.front().maxDetourMeters, 20.0, 1e-9);
 }
 

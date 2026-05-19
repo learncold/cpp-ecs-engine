@@ -769,7 +769,7 @@ ScenarioRouteGuidanceAuthoringResult createScenarioRouteGuidanceForZonePosition(
     draft.installZoneId = zone.id;
     draft.installPosition = position;
     draft.baseComplianceRate = 0.5;
-    draft.guidanceStrength = 0.55;
+    draft.influenceRadiusMeters = 2.5;
     draft.maxDetourMeters = 20.0;
     return {.guidance = std::move(draft)};
 }
@@ -807,7 +807,7 @@ ScenarioRouteGuidanceAuthoringResult createScenarioRouteGuidanceForExitZone(
     draft.installZoneId = zone.id;
     draft.installPosition = representativePointInPolygon(zone.area).value_or(polygonCenter(zone.area));
     draft.baseComplianceRate = 0.5;
-    draft.guidanceStrength = 0.55;
+    draft.influenceRadiusMeters = 2.5;
     draft.maxDetourMeters = 20.0;
     return {.guidance = std::move(draft)};
 }
@@ -817,27 +817,30 @@ ScenarioRouteGuidanceAuthoringResult createScenarioRouteGuidanceForConnection(
     const QString& currentFloorId,
     const std::vector<safecrowd::domain::RouteGuidanceDraft>& guidances,
     const safecrowd::domain::Connection2D& connection) {
-    if (connection.kind != safecrowd::domain::ConnectionKind::Exit) {
+    if (connection.kind != safecrowd::domain::ConnectionKind::Doorway
+        && connection.kind != safecrowd::domain::ConnectionKind::Exit) {
         return {
             .guidance = std::nullopt,
-            .errorMessage = "This tool can only be used on exits.",
+            .errorMessage = "This tool can only be used on exits or doors.",
         };
+    }
+
+    for (const auto& existing : guidances) {
+        if (!existing.installConnectionId.empty() && existing.installConnectionId == connection.id) {
+            return {
+                .guidance = std::nullopt,
+                .errorMessage = "Guidance is already installed on this door or exit.",
+            };
+        }
     }
 
     const auto exitZoneId = pickNearestExitZoneIdForConnection(layout, connection);
     if (exitZoneId.empty()) {
         return {
             .guidance = std::nullopt,
-            .errorMessage = "No exit zone is connected to this exit.",
+            .errorMessage = "Could not find a reachable exit target for this guidance.",
         };
     }
-    const auto zoneIt = std::find_if(layout.zones.begin(), layout.zones.end(), [&](const auto& zone) {
-        return zone.id == exitZoneId;
-    });
-    if (zoneIt != layout.zones.end()) {
-        return createScenarioRouteGuidanceForExitZone(currentFloorId, guidances, *zoneIt);
-    }
-
     safecrowd::domain::RouteGuidanceDraft draft;
     draft.id = nextRouteGuidanceId(guidances).toStdString();
     draft.startSeconds = 0.0;
@@ -849,7 +852,7 @@ ScenarioRouteGuidanceAuthoringResult createScenarioRouteGuidanceForConnection(
     draft.installZoneId.clear();
     draft.installPosition = scenarioConnectionMarkerCenter(connection);
     draft.baseComplianceRate = 0.5;
-    draft.guidanceStrength = 0.55;
+    draft.influenceRadiusMeters = 2.5;
     draft.maxDetourMeters = 20.0;
     return {.guidance = std::move(draft)};
 }
@@ -863,6 +866,13 @@ ScenarioRouteGuidanceAuthoringResult moveScenarioRouteGuidanceToConnection(
     if (index >= guidances.size()) {
         return {};
     }
+    if (connection.kind != safecrowd::domain::ConnectionKind::Doorway
+        && connection.kind != safecrowd::domain::ConnectionKind::Exit) {
+        return {
+            .guidance = std::nullopt,
+            .errorMessage = "Guidance can only be moved onto exits or doors.",
+        };
+    }
 
     for (std::size_t otherIndex = 0; otherIndex < guidances.size(); ++otherIndex) {
         if (otherIndex == index) {
@@ -872,13 +882,19 @@ ScenarioRouteGuidanceAuthoringResult moveScenarioRouteGuidanceToConnection(
             && guidances[otherIndex].installConnectionId == connection.id) {
             return {
                 .guidance = std::nullopt,
-                .errorMessage = "Guidance is already installed on this door.",
+                .errorMessage = "Guidance is already installed on this door or exit.",
             };
         }
     }
 
     auto guidance = guidances[index];
     guidance.guidedExitZoneId = pickNearestExitZoneIdForConnection(layout, connection);
+    if (guidance.guidedExitZoneId.empty()) {
+        return {
+            .guidance = std::nullopt,
+            .errorMessage = "Could not find a reachable exit target for this guidance.",
+        };
+    }
     guidance.installConnectionId = connection.id;
     guidance.installFloorId = connection.floorId.empty() ? currentFloorId.toStdString() : connection.floorId;
     guidance.installZoneId.clear();

@@ -76,7 +76,7 @@ struct RouteGuidanceDraft {
     std::string installZoneId{};
     Point2D installPosition{};
     double baseComplianceRate{0.5};
-    double guidanceStrength{0.55};
+    double influenceRadiusMeters{2.5};
     double maxDetourMeters{20.0};
 };
 

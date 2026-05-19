@@ -234,9 +234,37 @@ QString formatRouteGuidanceTooltip(const safecrowd::domain::RouteGuidanceDraft& 
             .arg(guidance.installPosition.y, 0, 'f', 1));
     }
     text.append(QString("\n Base compliance: %1").arg(std::clamp(guidance.baseComplianceRate, 0.0, 1.0), 0, 'f', 2));
-    text.append(QString("\n Strength: %1").arg(std::clamp(guidance.guidanceStrength, 0.0, 1.0), 0, 'f', 2));
-    text.append(QString("\n Max detour:%1m").arg(std::max(0.0, guidance.maxDetourMeters), 0, 'f', 1));
+    text.append(QString("\n Influence radius: %1m").arg(std::max(0.0, guidance.influenceRadiusMeters), 0, 'f', 1));
+    text.append(QString("\n Max detour: %1m").arg(std::max(0.0, guidance.maxDetourMeters), 0, 'f', 1));
     return text;
+}
+
+double routeGuidanceInfluenceRadiusPixels(
+    const LayoutCanvasTransform& transform,
+    const safecrowd::domain::RouteGuidanceDraft& guidance) {
+    const auto radiusMeters = std::max(0.0, guidance.influenceRadiusMeters);
+    if (!std::isfinite(radiusMeters) || radiusMeters <= 0.0) {
+        return 0.0;
+    }
+
+    const auto origin = transform.map({.x = 0.0, .y = 0.0});
+    const auto radiusPoint = transform.map({.x = radiusMeters, .y = 0.0});
+    return QLineF(origin, radiusPoint).length();
+}
+
+void drawRouteGuidanceInfluenceRadius(
+    QPainter& painter,
+    const QPointF& center,
+    double radiusPixels) {
+    if (!std::isfinite(radiusPixels) || radiusPixels <= 0.0) {
+        return;
+    }
+
+    painter.save();
+    painter.setPen(QPen(QColor(31, 95, 174, 82), 1.4, Qt::DashLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(QColor(31, 95, 174, 22));
+    painter.drawEllipse(center, radiusPixels, radiusPixels);
+    painter.restore();
 }
 
 std::optional<std::size_t> hoveredConnectionBlockIndex(
@@ -1163,6 +1191,11 @@ void SimulationCanvasWidget::drawRouteGuidanceOverlay(QPainter& painter, const L
         if (!center.has_value()) {
             continue;
         }
+
+        drawRouteGuidanceInfluenceRadius(
+            painter,
+            *center,
+            routeGuidanceInfluenceRadiusPixels(transform, guidance));
 
         painter.setBrush(QColor("#1f5fae"));
 

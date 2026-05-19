@@ -1,4 +1,5 @@
 #include "domain/ScenarioSimulationSystems.h"
+#include "domain/ScenarioSimulationRouteGuidance.h"
 
 #include "domain/GeometryQueries.h"
 #include "domain/ScenarioRiskMetrics.h"
@@ -10,7 +11,6 @@
 #include <limits>
 #include <memory>
 #include <optional>
-#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -29,7 +29,7 @@ public:
 
     ScenarioSimulationMotionSystem(FacilityLayout2D layout, std::vector<RouteGuidanceDraft> routeGuidances)
         : layoutCache_(buildScenarioLayoutCache(std::move(layout))),
-          routeGuidances_(std::move(routeGuidances)) {
+          routeGuidance_(std::move(routeGuidances)) {
     }
 
     void configure(engine::EngineWorld& world) override {
@@ -56,7 +56,7 @@ public:
         const std::uint64_t layoutRevision = resources.contains<ScenarioLayoutRevisionResource>()
             ? resources.get<ScenarioLayoutRevisionResource>().revision
             : 0U;
-        refreshPlanningCache(layoutRevision);
+        routeGuidance_.refreshPlanningCache(layoutRevision);
         const auto clampedDelta = std::max(0.0, resources.get<ScenarioSimulationStepResource>().deltaSeconds);
         if (clampedDelta <= 0.0) {
             return;
@@ -78,7 +78,7 @@ public:
             ? &resources.get<ScenarioAgentSpatialIndexResource>()
             : nullptr;
 
-        applyRouteGuidance(query, entities, layoutCache, clock.elapsedSeconds, step.derivedSeed, sharedSpatialIndex);
+        routeGuidance_.apply(query, entities, layoutCache, clock.elapsedSeconds, step.derivedSeed, sharedSpatialIndex);
         advanceRoutesForCurrentZones(query, activeEntities_, layoutCache);
         replanBlockedExitRoutes(query, activeEntities_, layoutCache, clock.elapsedSeconds, layoutRevision, reactions);
         advanceRoutesForWaypointProgress(query, 0.0, activeEntities_, layoutCache);
@@ -354,17 +354,6 @@ private:
     static constexpr double kFailedSegmentReplanCooldownSeconds = 1.25;
     static constexpr double kClosureApproachSpeedFactor = 0.35;
 
-    struct RoutePlan {
-        std::vector<Point2D> waypoints{};
-        std::vector<LineSegment2D> waypointPassages{};
-        std::vector<std::string> waypointFromZoneIds{};
-        std::vector<std::string> waypointZoneIds{};
-        std::vector<std::string> waypointFloorIds{};
-        std::vector<std::string> waypointConnectionIds{};
-        std::vector<bool> waypointVerticalTransitions{};
-        std::string destinationZoneId{};
-    };
-
     struct RouteAdvanceResult {
         Point2D position{};
         bool advanced{false};
@@ -428,95 +417,6 @@ private:
         it->second.closureReactionReadySeconds = 0.0;
     }
 
-    static bool sameFloor(const std::string& lhs, const std::string& rhs) {
-        return lhs == rhs || lhs.empty() || rhs.empty();
-    }
-
-    static long long quantizedPlanningCoordinate(double value) {
-        return static_cast<long long>(std::llround(value * 1000.0));
-    }
-
-    static std::string pointCachePart(const Point2D& point) {
-        return std::to_string(quantizedPlanningCoordinate(point.x))
-            + ","
-            + std::to_string(quantizedPlanningCoordinate(point.y));
-    }
-
-    static std::string zoneRouteCacheKey(
-        const Point2D& start,
-        const std::string& startZoneId,
-        const std::string& exitZoneId) {
-        return startZoneId + '\x1f' + pointCachePart(start) + '\x1f' + exitZoneId;
-    }
-
-    static std::string pathCacheKey(
-        const std::string& floorId,
-        const Point2D& start,
-        const Point2D& goal,
-        double clearance) {
-        return floorId
-            + '\x1f'
-            + pointCachePart(start)
-            + '\x1f'
-            + pointCachePart(goal)
-            + '\x1f'
-            + std::to_string(quantizedPlanningCoordinate(clearance));
-    }
-
-    void refreshPlanningCache(std::uint64_t layoutRevision) const {
-        if (planningCacheRevision_ == layoutRevision) {
-            return;
-        }
-        planningCacheRevision_ = layoutRevision;
-        nearestExitRouteCache_.clear();
-        exitRouteCache_.clear();
-        pathCache_.clear();
-    }
-
-    std::optional<ZoneRouteToExit> cachedZoneRouteToNearestExit(
-        const ScenarioLayoutCacheResource& layoutCache,
-        const Point2D& start,
-        const std::string& startZoneId) const {
-        const auto key = zoneRouteCacheKey(start, startZoneId, std::string{"nearest"});
-        const auto it = nearestExitRouteCache_.find(key);
-        if (it != nearestExitRouteCache_.end()) {
-            return it->second;
-        }
-        auto route = simulation_internal::zoneRouteToNearestExit(layoutCache, start, startZoneId);
-        nearestExitRouteCache_.emplace(key, route);
-        return route;
-    }
-
-    std::optional<ZoneRouteResult> cachedZoneRouteToExit(
-        const ScenarioLayoutCacheResource& layoutCache,
-        const Point2D& start,
-        const std::string& startZoneId,
-        const std::string& exitZoneId) const {
-        const auto key = zoneRouteCacheKey(start, startZoneId, exitZoneId);
-        const auto it = exitRouteCache_.find(key);
-        if (it != exitRouteCache_.end()) {
-            return it->second;
-        }
-        auto route = simulation_internal::zoneRouteToExit(layoutCache, start, startZoneId, exitZoneId);
-        exitRouteCache_.emplace(key, route);
-        return route;
-    }
-
-    const std::vector<Point2D>& cachedPath(
-        const std::string& floorId,
-        const FacilityLayout2D& layout,
-        const Point2D& start,
-        const Point2D& goal,
-        double clearance) const {
-        const auto key = pathCacheKey(floorId, start, goal, clearance);
-        const auto it = pathCache_.find(key);
-        if (it != pathCache_.end()) {
-            return it->second;
-        }
-        auto [insertedIt, _] = pathCache_.emplace(key, buildPath(layout, start, goal, clearance));
-        return insertedIt->second;
-    }
-
     static Point2D hazardAvoidanceVelocityFor(
         const ScenarioEnvironmentReactionAgentState& state,
         const Point2D& position,
@@ -546,79 +446,6 @@ private:
             return nullptr;
         }
         return &layoutCache.layout.connections[it->second];
-    }
-
-    bool connectionTouchesFloor(
-        const ScenarioLayoutCacheResource& layoutCache,
-        const Connection2D& connection,
-        const std::string& floorId) const {
-        if (sameFloor(connection.floorId, floorId)) {
-            return true;
-        }
-        const auto fromFloorId = cachedFloorIdForZone(layoutCache, connection.fromZoneId);
-        const auto toFloorId = cachedFloorIdForZone(layoutCache, connection.toZoneId);
-        return sameFloor(fromFloorId, floorId) || sameFloor(toFloorId, floorId);
-    }
-
-    bool guidanceHasInstallPosition(const RouteGuidanceDraft& guidance) const {
-        return !guidance.installFloorId.empty() || !guidance.installZoneId.empty();
-    }
-
-    bool agentCanSeeGuidanceAtInstallConnection(
-        const ScenarioLayoutCacheResource& layoutCache,
-        const RouteGuidanceDraft& guidance,
-        const Position& position,
-        const Agent& agent,
-        const EvacuationRoute& route) const {
-        if (guidance.installConnectionId.empty()) {
-            return true;
-        }
-
-        const auto* connection = findConnectionById(layoutCache, guidance.installConnectionId);
-        if (connection == nullptr || !connectionTouchesFloor(layoutCache, *connection, route.currentFloorId)) {
-            return false;
-        }
-
-        const auto currentZoneId = zoneAt(layoutCache, position.value, route.currentFloorId);
-        if (!currentZoneId.empty()
-            && currentZoneId != connection->fromZoneId
-            && currentZoneId != connection->toZoneId) {
-            return false;
-        }
-
-        const auto closestOnInstall = closestPointOnSegment(
-            position.value,
-            connection->centerSpan.start,
-            connection->centerSpan.end);
-        const auto visibilityDistance = std::max(
-            2.0,
-            (connection->effectiveWidth * 0.5) + static_cast<double>(agent.radius) + 0.25);
-        return distanceBetween(position.value, closestOnInstall) <= visibilityDistance;
-    }
-
-    bool agentCanSeeGuidanceAtInstallPosition(
-        const ScenarioLayoutCacheResource& layoutCache,
-        const RouteGuidanceDraft& guidance,
-        const Position& position,
-        const Agent& agent,
-        const EvacuationRoute& route) const {
-        if (!guidanceHasInstallPosition(guidance) || !sameFloor(guidance.installFloorId, route.currentFloorId)) {
-            return false;
-        }
-
-        const auto currentZoneId = zoneAt(layoutCache, position.value, route.currentFloorId);
-        if (!guidance.installZoneId.empty() && currentZoneId != guidance.installZoneId) {
-            return false;
-        }
-
-        constexpr double kGuidanceVisibilityDistanceMeters = 2.5;
-        if (distanceBetween(position.value, guidance.installPosition) > kGuidanceVisibilityDistanceMeters) {
-            return false;
-        }
-
-        const auto& floorLayout = cachedLayoutForFloor(layoutCache, route.currentFloorId);
-        const auto clearance = std::max(0.08, static_cast<double>(agent.radius) + 0.05);
-        return lineOfSightClear(floorLayout, position.value, guidance.installPosition, clearance);
     }
 
     const Connection2D* nextBlockedConnection(
@@ -1009,783 +836,6 @@ private:
         return targetFloorId;
     }
 
-    static std::uint64_t fnv1a64(const std::string& value) {
-        std::uint64_t hash = 1469598103934665603ULL;
-        for (const unsigned char ch : value) {
-            hash ^= static_cast<std::uint64_t>(ch);
-            hash *= 1099511628211ULL;
-        }
-        return hash;
-    }
-
-    static std::uint64_t mix64(std::uint64_t value) {
-        value += 0x9e3779b97f4a7c15ULL;
-        value = (value ^ (value >> 30U)) * 0xbf58476d1ce4e5b9ULL;
-        value = (value ^ (value >> 27U)) * 0x94d049bb133111ebULL;
-        return value ^ (value >> 31U);
-    }
-
-    static double uniform01(std::uint64_t value) {
-        const auto mixed = mix64(value);
-        const auto mantissa = mixed >> 11U;
-        return static_cast<double>(mantissa) * (1.0 / 9007199254740992.0);
-    }
-
-    static double clamp01(double value) {
-        return std::clamp(value, 0.0, 1.0);
-    }
-
-    static double logit(double p) {
-        const auto clamped = std::clamp(p, 1e-6, 1.0 - 1e-6);
-        return std::log(clamped / (1.0 - clamped));
-    }
-
-    static double sigmoid(double x) {
-        if (x >= 0.0) {
-            const auto z = std::exp(-x);
-            return 1.0 / (1.0 + z);
-        }
-        const auto z = std::exp(x);
-        return z / (1.0 + z);
-    }
-
-    struct ActiveRouteGuidance {
-        const RouteGuidanceDraft* guidance{nullptr};
-        std::size_t guidanceIndex{0};
-        std::size_t periodIndex{0};
-        double startSeconds{0.0};
-        double endSeconds{0.0};
-    };
-
-    std::vector<ActiveRouteGuidance> activeRouteGuidances(double elapsedSeconds) const {
-        std::vector<ActiveRouteGuidance> active;
-        for (std::size_t guidanceIndex = 0; guidanceIndex < routeGuidances_.size(); ++guidanceIndex) {
-            const auto& guidance = routeGuidances_[guidanceIndex];
-            if (guidance.periods.empty()) {
-                const double start = 0.0;
-                const double end = 1e18;
-                if (elapsedSeconds + 1e-9 < start || elapsedSeconds > end + 1e-9) {
-                    continue;
-                }
-                active.push_back(ActiveRouteGuidance{
-                    .guidance = &guidance,
-                    .guidanceIndex = guidanceIndex,
-                    .periodIndex = 0,
-                    .startSeconds = start,
-                    .endSeconds = end,
-                });
-                continue;
-            }
-
-            for (std::size_t index = 0; index < guidance.periods.size(); ++index) {
-                const auto& period = guidance.periods[index];
-                const auto start = std::max(0.0, period.startSeconds);
-                const auto end = std::max(start, std::max(0.0, period.endSeconds));
-                if (elapsedSeconds + 1e-9 < start) {
-                    continue;
-                }
-                if (elapsedSeconds > end + 1e-9) {
-                    continue;
-                }
-                active.push_back(ActiveRouteGuidance{
-                    .guidance = &guidance,
-                    .guidanceIndex = guidanceIndex,
-                    .periodIndex = index,
-                    .startSeconds = start,
-                    .endSeconds = end,
-                });
-            }
-        }
-        return active;
-    }
-
-    std::string activeRouteGuidanceKey(const ActiveRouteGuidance& active) const {
-        if (active.guidance == nullptr) {
-            return {};
-        }
-        auto id = active.guidance->id;
-        if (id.empty()) {
-            id = "route-guidance:";
-            id.append(std::to_string(active.guidanceIndex));
-        }
-        if (!active.guidance->periods.empty()) {
-            id.append(":p");
-            id.append(std::to_string(active.periodIndex));
-        }
-        return id;
-    }
-
-    std::string activeRouteGuidanceSignature(const std::vector<ActiveRouteGuidance>& activeGuidances) const {
-        std::string signature;
-        for (const auto& active : activeGuidances) {
-            if (!signature.empty()) {
-                signature.push_back('\x1f');
-            }
-            signature.append(activeRouteGuidanceKey(active));
-        }
-        return signature;
-    }
-
-    const ActiveRouteGuidance* matchingActiveGuidance(
-        const std::vector<ActiveRouteGuidance>& activeGuidances,
-        const std::string& guidanceEventId) const {
-        if (guidanceEventId.empty()) {
-            return nullptr;
-        }
-        for (const auto& active : activeGuidances) {
-            if (activeRouteGuidanceKey(active) == guidanceEventId) {
-                return &active;
-            }
-        }
-        return nullptr;
-    }
-
-    const ActiveRouteGuidance* applicableActiveGuidance(
-        const std::vector<ActiveRouteGuidance>& activeGuidances,
-        const ScenarioLayoutCacheResource& layoutCache,
-        const Position& position,
-        const Agent& agent,
-        const EvacuationRoute& route) const {
-        const ActiveRouteGuidance* best = nullptr;
-        double bestStart = -1.0;
-        for (const auto& active : activeGuidances) {
-            if (active.guidance == nullptr) {
-                continue;
-            }
-            const auto& guidance = *active.guidance;
-            bool applicable = true;
-            if (!guidance.installConnectionId.empty()) {
-                applicable = agentCanSeeGuidanceAtInstallConnection(layoutCache, guidance, position, agent, route);
-            } else if (guidanceHasInstallPosition(guidance)) {
-                applicable = agentCanSeeGuidanceAtInstallPosition(layoutCache, guidance, position, agent, route);
-            }
-            if (!applicable) {
-                continue;
-            }
-            if (best == nullptr || active.startSeconds >= bestStart) {
-                bestStart = active.startSeconds;
-                best = &active;
-            }
-        }
-        return best;
-    }
-
-    std::optional<double> zoneDistanceToExit(
-        const ScenarioLayoutCacheResource& layoutCache,
-        const Point2D& start,
-        const std::string& startZoneId,
-        const std::string& exitZoneId) const {
-        const auto result = zoneRouteToExit(layoutCache, start, startZoneId, exitZoneId);
-        if (!result.has_value()) {
-            return std::nullopt;
-        }
-        return result->distance;
-    }
-
-    double guidancePriorityRadiusMeters(
-        const ScenarioLayoutCacheResource& layoutCache,
-        const RouteGuidanceDraft& guidance) const {
-        if (!guidance.installConnectionId.empty()) {
-            if (const auto* connection = findConnectionById(layoutCache, guidance.installConnectionId);
-                connection != nullptr) {
-                return std::max(2.0, (connection->effectiveWidth * 0.5) + 0.5);
-            }
-            return 2.0;
-        }
-        if (guidanceHasInstallPosition(guidance)) {
-            return 2.5;
-        }
-        return 0.0;
-    }
-
-    std::vector<engine::Entity> prioritizedGuidanceEntities(
-        engine::WorldQuery& query,
-        const std::vector<ActiveRouteGuidance>& activeGuidances,
-        const ScenarioLayoutCacheResource& layoutCache,
-        const ScenarioAgentSpatialIndexResource* sharedSpatialIndex,
-        const AgentSpatialIndex* localSpatialIndex) const {
-        std::vector<engine::Entity> prioritized;
-
-        auto appendNearby = [&](const Point2D& anchor, const std::string& floorId, double radius) {
-            if (radius <= 0.0) {
-                return;
-            }
-
-            std::vector<engine::Entity> nearby;
-            if (sharedSpatialIndex != nullptr) {
-                if (floorId.empty()) {
-                    for (const auto& [candidateFloorId, _] : sharedSpatialIndex->cellsByFloor) {
-                        const auto floorNearby = scenarioNearbyAgents(query, *sharedSpatialIndex, anchor, candidateFloorId, radius);
-                        nearby.insert(nearby.end(), floorNearby.begin(), floorNearby.end());
-                    }
-                } else {
-                    nearby = scenarioNearbyAgents(query, *sharedSpatialIndex, anchor, floorId, radius);
-                }
-            } else if (localSpatialIndex != nullptr) {
-                if (floorId.empty()) {
-                    nearby = nearbyAgents(query, *localSpatialIndex, anchor, radius);
-                } else {
-                    nearby = nearbyAgents(query, *localSpatialIndex, anchor, floorId, radius);
-                }
-            }
-            prioritized.insert(prioritized.end(), nearby.begin(), nearby.end());
-        };
-
-        for (const auto& active : activeGuidances) {
-            if (active.guidance == nullptr) {
-                continue;
-            }
-
-            const auto& guidance = *active.guidance;
-            const auto radius = guidancePriorityRadiusMeters(layoutCache, guidance);
-            if (!guidance.installConnectionId.empty()) {
-                const auto* connection = findConnectionById(layoutCache, guidance.installConnectionId);
-                if (connection == nullptr) {
-                    continue;
-                }
-                const auto floorId = connection->floorId.empty() ? guidance.installFloorId : connection->floorId;
-                appendNearby(midpoint(connection->centerSpan), floorId, radius);
-                continue;
-            }
-
-            if (guidanceHasInstallPosition(guidance)) {
-                appendNearby(guidance.installPosition, guidance.installFloorId, radius);
-            }
-        }
-
-        std::sort(prioritized.begin(), prioritized.end(), [](const auto& lhs, const auto& rhs) {
-            if (lhs.index != rhs.index) {
-                return lhs.index < rhs.index;
-            }
-            return lhs.generation < rhs.generation;
-        });
-        prioritized.erase(std::unique(prioritized.begin(), prioritized.end()), prioritized.end());
-        return prioritized;
-    }
-
-    double complianceProbability(
-        const RouteGuidanceDraft& guidance,
-        const Agent& agent,
-        double detourMeters) const {
-        constexpr double kStrengthBaseline = 0.55;
-        constexpr double kStrengthWeight = 4.0;
-        constexpr double kDetourWeight = 2.0;
-        constexpr double kPropensityWeight = 1.0;
-
-        const auto base = logit(clamp01(guidance.baseComplianceRate));
-        const auto strength = clamp01(guidance.guidanceStrength);
-        const auto detourRatio = std::max(0.0, detourMeters) / std::max(1e-6, guidance.maxDetourMeters);
-        const auto propensity = clamp01(agent.guidancePropensity);
-        const auto score =
-            base
-            + (kStrengthWeight * (strength - kStrengthBaseline))
-            - (kDetourWeight * detourRatio)
-            + (kPropensityWeight * logit(propensity));
-        return clamp01(sigmoid(score));
-    }
-
-    void applyRouteGuidanceToEntity(
-        engine::WorldQuery& query,
-        engine::Entity entity,
-        const ScenarioLayoutCacheResource& layoutCache,
-        const std::vector<ActiveRouteGuidance>& activeGuidances,
-        double elapsedSeconds,
-        std::uint64_t stableSeed) {
-        const auto& status = query.get<EvacuationStatus>(entity);
-        if (status.evacuated) {
-            return;
-        }
-
-        const auto& position = query.get<Position>(entity);
-        const auto& agent = query.get<Agent>(entity);
-        auto& route = query.get<EvacuationRoute>(entity);
-        if (route.originalDestinationZoneId.empty()) {
-            route.originalDestinationZoneId = route.destinationZoneId;
-        }
-
-        const auto startZoneId = zoneAt(layoutCache, position.value, route.currentFloorId);
-        if (startZoneId.empty()) {
-            return;
-        }
-
-        if (activeGuidances.empty()) {
-            route.guidanceEventId.clear();
-            route.followsGuidance = false;
-
-            std::string desiredExit = route.originalDestinationZoneId;
-            if (desiredExit.empty()) {
-                return;
-            }
-
-            if (route.destinationZoneId == desiredExit && !route.waypoints.empty()) {
-                return;
-            }
-
-            RoutePlan plan = routePlanToExit(layoutCache, position.value, startZoneId, desiredExit);
-            if (plan.destinationZoneId.empty()) {
-                plan = routePlanToNearestExit(layoutCache, position.value, startZoneId);
-            }
-            if (plan.destinationZoneId.empty()) {
-                return;
-            }
-            replaceRouteWithPlan(route, plan, position.value);
-            route.nextExitReplanSeconds = elapsedSeconds + 0.25;
-            return;
-        }
-
-        const auto* visibleGuidance = applicableActiveGuidance(activeGuidances, layoutCache, position, agent, route);
-        if (visibleGuidance != nullptr && visibleGuidance->guidance != nullptr
-            && (!visibleGuidance->guidance->installConnectionId.empty()
-                || guidanceHasInstallPosition(*visibleGuidance->guidance))) {
-            if (route.guidanceEventId == activeRouteGuidanceKey(*visibleGuidance)) {
-                return;
-            }
-        }
-
-        const auto* activeGuidance = visibleGuidance;
-        if (activeGuidance == nullptr) {
-            if (const auto* retained = matchingActiveGuidance(activeGuidances, route.guidanceEventId);
-                retained != nullptr
-                && retained->guidance != nullptr
-                && (!retained->guidance->installConnectionId.empty() || guidanceHasInstallPosition(*retained->guidance))) {
-                return;
-            }
-        }
-
-        if (activeGuidance == nullptr || activeGuidance->guidance == nullptr) {
-            if (!route.guidanceEventId.empty() || route.followsGuidance) {
-                route.guidanceEventId.clear();
-                route.followsGuidance = false;
-                const auto& desiredExit = route.originalDestinationZoneId;
-                if (!desiredExit.empty() && (route.destinationZoneId != desiredExit || route.waypoints.empty())) {
-                    auto plan = routePlanToExit(layoutCache, position.value, startZoneId, desiredExit);
-                    if (plan.destinationZoneId.empty()) {
-                        plan = routePlanToNearestExit(layoutCache, position.value, startZoneId);
-                    }
-                    if (!plan.destinationZoneId.empty()) {
-                        replaceRouteWithPlan(route, plan, position.value);
-                        route.nextExitReplanSeconds = elapsedSeconds + 0.25;
-                    }
-                }
-            }
-            return;
-        }
-
-        const auto& selectedGuidance = *activeGuidance->guidance;
-        const auto activeId = activeRouteGuidanceKey(*activeGuidance);
-        const auto activeIdHash = fnv1a64(activeId);
-
-        bool guidedExitValid = false;
-        if (!selectedGuidance.guidedExitZoneId.empty()) {
-            if (const auto* exitZone = findCachedZone(layoutCache, selectedGuidance.guidedExitZoneId);
-                exitZone != nullptr && exitZone->kind == ZoneKind::Exit) {
-                guidedExitValid = true;
-            }
-        }
-
-        double detourMeters = 0.0;
-        if (guidedExitValid && !route.originalDestinationZoneId.empty()) {
-            const auto* originalExit = findCachedZone(layoutCache, route.originalDestinationZoneId);
-            const auto* guidedExit = findCachedZone(layoutCache, selectedGuidance.guidedExitZoneId);
-            if (originalExit != nullptr && guidedExit != nullptr && originalExit->kind == ZoneKind::Exit
-                && guidedExit->kind == ZoneKind::Exit) {
-                const auto originalDistance = distanceBetween(position.value, polygonCenter(originalExit->area));
-                const auto guidedDistance = distanceBetween(position.value, polygonCenter(guidedExit->area));
-                detourMeters = std::max(0.0, guidedDistance - originalDistance);
-            }
-        }
-
-        const auto pFollow = complianceProbability(selectedGuidance, agent, detourMeters);
-        const auto u = uniform01(
-            stableSeed
-            ^ activeIdHash
-            ^ (static_cast<std::uint64_t>(entity.index) << 1U)
-            ^ static_cast<std::uint64_t>(entity.generation));
-        const bool follows = u < pFollow;
-
-        route.guidanceEventId = activeId;
-        route.followsGuidance = follows;
-
-        std::string desiredExit;
-        if (follows && guidedExitValid) {
-            desiredExit = selectedGuidance.guidedExitZoneId;
-        } else if (!follows) {
-            desiredExit = route.originalDestinationZoneId;
-        }
-
-        if (!desiredExit.empty() && route.destinationZoneId == desiredExit && !route.waypoints.empty()) {
-            return;
-        }
-
-        RoutePlan plan;
-        if (!desiredExit.empty()) {
-            plan = routePlanToExit(layoutCache, position.value, startZoneId, desiredExit);
-        }
-        if (plan.destinationZoneId.empty()) {
-            plan = routePlanToNearestExit(layoutCache, position.value, startZoneId);
-        }
-        if (plan.destinationZoneId.empty()) {
-            return;
-        }
-        replaceRouteWithPlan(route, plan, position.value);
-        route.nextExitReplanSeconds = elapsedSeconds + 0.25;
-    }
-
-    void applyRouteGuidance(
-        engine::WorldQuery& query,
-        const std::vector<engine::Entity>& entities,
-        const ScenarioLayoutCacheResource& layoutCache,
-        double elapsedSeconds,
-        std::uint64_t derivedSeed,
-        const ScenarioAgentSpatialIndexResource* sharedSpatialIndex) {
-        // Keep this small to avoid frame spikes when guidance toggles.
-        // Higher values converge faster but may cause noticeable hitching with many agents.
-        constexpr std::size_t kGuidanceReplanBudgetPerFrame = 50;
-
-        const auto activeGuidances = activeRouteGuidances(elapsedSeconds);
-        const auto activeSignature = activeRouteGuidanceSignature(activeGuidances);
-        const auto hasVisibilityAnchoredGuidance = std::any_of(activeGuidances.begin(), activeGuidances.end(), [&](const auto& active) {
-            return active.guidance != nullptr
-                && (!active.guidance->installConnectionId.empty() || guidanceHasInstallPosition(*active.guidance));
-        });
-
-        if (activeSignature != activeRouteGuidanceId_) {
-            activeRouteGuidanceId_ = activeSignature;
-            guidanceReplanCursor_ = 0;
-            guidanceReplanSeed_ = derivedSeed;
-            guidanceReplanPending_ = true;
-        } else if (hasVisibilityAnchoredGuidance && !guidanceReplanPending_) {
-            guidanceReplanCursor_ = 0;
-            guidanceReplanSeed_ = derivedSeed;
-            guidanceReplanPending_ = true;
-        }
-
-        std::optional<AgentSpatialIndex> localGuidanceIndex;
-        if (hasVisibilityAnchoredGuidance && sharedSpatialIndex == nullptr) {
-            localGuidanceIndex = buildAgentSpatialIndex(query, entities, 1.0);
-        }
-
-        if (hasVisibilityAnchoredGuidance) {
-            const auto prioritizedEntities = prioritizedGuidanceEntities(
-                query,
-                activeGuidances,
-                layoutCache,
-                sharedSpatialIndex,
-                localGuidanceIndex.has_value() ? &(*localGuidanceIndex) : nullptr);
-            for (const auto entity : prioritizedEntities) {
-                applyRouteGuidanceToEntity(
-                    query,
-                    entity,
-                    layoutCache,
-                    activeGuidances,
-                    elapsedSeconds,
-                    guidanceReplanSeed_);
-            }
-        }
-
-        if (!guidanceReplanPending_ || guidanceReplanCursor_ >= entities.size()) {
-            return;
-        }
-
-        const auto endIndex = std::min<std::size_t>(entities.size(), guidanceReplanCursor_ + kGuidanceReplanBudgetPerFrame);
-        const auto stableSeed = guidanceReplanSeed_;
-
-        for (std::size_t i = guidanceReplanCursor_; i < endIndex; ++i) {
-            applyRouteGuidanceToEntity(query, entities[i], layoutCache, activeGuidances, elapsedSeconds, stableSeed);
-        }
-
-        guidanceReplanCursor_ = endIndex;
-        if (guidanceReplanCursor_ >= entities.size()) {
-            guidanceReplanPending_ = false;
-        }
-    }
-
-    RoutePlan routePlanToNearestExit(
-        const ScenarioLayoutCacheResource& layoutCache,
-        const Point2D& start,
-        const std::string& startZoneId) const {
-        RoutePlan plan;
-        auto zoneRoute = cachedZoneRouteToNearestExit(layoutCache, start, startZoneId);
-        if (!zoneRoute.has_value() || zoneRoute->empty()) {
-            return plan;
-        }
-
-        plan.destinationZoneId = zoneRoute->zoneIds.back();
-
-        Point2D segmentStart = start;
-        auto appendSegment = [&](const std::vector<Point2D>& segment,
-                                 const LineSegment2D& finalPassage,
-                                 const std::string& finalFromZoneId,
-                                 const std::string& finalZoneId,
-                                 const std::string& finalFloorId,
-                                 const std::string& finalConnectionId,
-                                 bool finalVerticalTransition) {
-            for (std::size_t waypointIndex = 0; waypointIndex < segment.size(); ++waypointIndex) {
-                const bool isFinalWaypoint = waypointIndex + 1 == segment.size();
-                plan.waypoints.push_back(segment[waypointIndex]);
-                plan.waypointPassages.push_back(isFinalWaypoint ? finalPassage : pointPassage(segment[waypointIndex]));
-                plan.waypointFromZoneIds.push_back(isFinalWaypoint ? finalFromZoneId : std::string{});
-                plan.waypointZoneIds.push_back(isFinalWaypoint ? finalZoneId : std::string{});
-                plan.waypointFloorIds.push_back(isFinalWaypoint ? finalFloorId : std::string{});
-                plan.waypointConnectionIds.push_back(isFinalWaypoint ? finalConnectionId : std::string{});
-                plan.waypointVerticalTransitions.push_back(isFinalWaypoint && finalVerticalTransition);
-            }
-        };
-
-        for (std::size_t index = 1; index < zoneRoute->zoneIds.size(); ++index) {
-            const auto& fromZoneId = zoneRoute->zoneIds[index - 1];
-            const auto& toZoneId = zoneRoute->zoneIds[index];
-            const auto connectionIndex = zoneRoute->connectionIndices[index - 1];
-            if (connectionIndex < layoutCache.layout.connections.size()) {
-                const auto* connection = &layoutCache.layout.connections[connectionIndex];
-                const auto passage = passageWithClearance(*connection, kCandidateClearance);
-                const auto fromFloorId = cachedFloorIdForZone(layoutCache, fromZoneId);
-                const auto toFloorId = cachedFloorIdForZone(layoutCache, toZoneId);
-                const auto& segmentLayout = cachedLayoutForFloor(layoutCache, fromFloorId);
-                const auto target = closestPointOnSegment(segmentStart, passage.start, passage.end);
-                const auto& segment = cachedPath(fromFloorId, segmentLayout, segmentStart, target, kCandidateClearance);
-                appendSegment(
-                    segment,
-                    passage,
-                    fromZoneId,
-                    toZoneId,
-                    toFloorId.empty() ? fromFloorId : toFloorId,
-                    connection->id,
-                    isVerticalConnection(*connection));
-                segmentStart = target;
-            }
-        }
-
-        if (const auto* exitZone = findCachedZone(layoutCache, zoneRoute->zoneIds.back())) {
-            const auto exitCenter = polygonCenter(exitZone->area);
-            if (distanceBetween(segmentStart, exitCenter) > kArrivalEpsilon) {
-                const auto exitFloorId = exitZone->floorId;
-                const auto& segmentLayout = cachedLayoutForFloor(layoutCache, exitFloorId);
-                const auto& segment = cachedPath(exitFloorId, segmentLayout, segmentStart, exitCenter, kCandidateClearance);
-                appendSegment(segment, pointPassage(exitCenter), std::string{}, exitZone->id, exitFloorId, std::string{}, false);
-            }
-        }
-
-        if (!plan.waypoints.empty() && distanceBetween(start, plan.waypoints.front()) <= kArrivalEpsilon) {
-            plan.waypoints.erase(plan.waypoints.begin());
-            plan.waypointPassages.erase(plan.waypointPassages.begin());
-            plan.waypointFromZoneIds.erase(plan.waypointFromZoneIds.begin());
-            plan.waypointZoneIds.erase(plan.waypointZoneIds.begin());
-            plan.waypointFloorIds.erase(plan.waypointFloorIds.begin());
-            plan.waypointConnectionIds.erase(plan.waypointConnectionIds.begin());
-            plan.waypointVerticalTransitions.erase(plan.waypointVerticalTransitions.begin());
-        }
-        return plan;
-    }
-
-    RoutePlan routePlanToExit(
-        const ScenarioLayoutCacheResource& layoutCache,
-        const Point2D& start,
-        const std::string& startZoneId,
-        const std::string& exitZoneId) const {
-        RoutePlan plan;
-        const auto zoneRouteResult = cachedZoneRouteToExit(layoutCache, start, startZoneId, exitZoneId);
-        if (!zoneRouteResult.has_value() || zoneRouteResult->route.empty()) {
-            return plan;
-        }
-
-        const auto& zoneRoute = zoneRouteResult->route;
-        plan.destinationZoneId = zoneRoute.zoneIds.back();
-
-        Point2D segmentStart = start;
-        auto appendSegment = [&](const std::vector<Point2D>& segment,
-                                 const LineSegment2D& finalPassage,
-                                 const std::string& finalFromZoneId,
-                                 const std::string& finalZoneId,
-                                 const std::string& finalFloorId,
-                                 const std::string& finalConnectionId,
-                                 bool finalVerticalTransition) {
-            for (std::size_t waypointIndex = 0; waypointIndex < segment.size(); ++waypointIndex) {
-                const bool isFinalWaypoint = waypointIndex + 1 == segment.size();
-                plan.waypoints.push_back(segment[waypointIndex]);
-                plan.waypointPassages.push_back(isFinalWaypoint ? finalPassage : pointPassage(segment[waypointIndex]));
-                plan.waypointFromZoneIds.push_back(isFinalWaypoint ? finalFromZoneId : std::string{});
-                plan.waypointZoneIds.push_back(isFinalWaypoint ? finalZoneId : std::string{});
-                plan.waypointFloorIds.push_back(isFinalWaypoint ? finalFloorId : std::string{});
-                plan.waypointConnectionIds.push_back(isFinalWaypoint ? finalConnectionId : std::string{});
-                plan.waypointVerticalTransitions.push_back(isFinalWaypoint && finalVerticalTransition);
-            }
-        };
-
-        for (std::size_t index = 1; index < zoneRoute.zoneIds.size(); ++index) {
-            const auto& fromZoneId = zoneRoute.zoneIds[index - 1];
-            const auto& toZoneId = zoneRoute.zoneIds[index];
-            const auto connectionIndex = zoneRoute.connectionIndices[index - 1];
-            if (connectionIndex < layoutCache.layout.connections.size()) {
-                const auto* connection = &layoutCache.layout.connections[connectionIndex];
-                const auto passage = passageWithClearance(*connection, kCandidateClearance);
-                const auto fromFloorId = cachedFloorIdForZone(layoutCache, fromZoneId);
-                const auto toFloorId = cachedFloorIdForZone(layoutCache, toZoneId);
-                const auto& segmentLayout = cachedLayoutForFloor(layoutCache, fromFloorId);
-                const auto target = closestPointOnSegment(segmentStart, passage.start, passage.end);
-                const auto& segment = cachedPath(fromFloorId, segmentLayout, segmentStart, target, kCandidateClearance);
-                appendSegment(
-                    segment,
-                    passage,
-                    fromZoneId,
-                    toZoneId,
-                    toFloorId.empty() ? fromFloorId : toFloorId,
-                    connection->id,
-                    isVerticalConnection(*connection));
-                segmentStart = target;
-            }
-        }
-
-        if (const auto* exitZone = findCachedZone(layoutCache, zoneRoute.zoneIds.back())) {
-            const auto exitCenter = polygonCenter(exitZone->area);
-            if (distanceBetween(segmentStart, exitCenter) > kArrivalEpsilon) {
-                const auto exitFloorId = exitZone->floorId;
-                const auto& segmentLayout = cachedLayoutForFloor(layoutCache, exitFloorId);
-                const auto& segment = cachedPath(exitFloorId, segmentLayout, segmentStart, exitCenter, kCandidateClearance);
-                appendSegment(segment, pointPassage(exitCenter), std::string{}, exitZone->id, exitFloorId, std::string{}, false);
-            }
-        }
-
-        if (!plan.waypoints.empty() && distanceBetween(start, plan.waypoints.front()) <= kArrivalEpsilon) {
-            plan.waypoints.erase(plan.waypoints.begin());
-            plan.waypointPassages.erase(plan.waypointPassages.begin());
-            plan.waypointFromZoneIds.erase(plan.waypointFromZoneIds.begin());
-            plan.waypointZoneIds.erase(plan.waypointZoneIds.begin());
-            plan.waypointFloorIds.erase(plan.waypointFloorIds.begin());
-            plan.waypointConnectionIds.erase(plan.waypointConnectionIds.begin());
-            plan.waypointVerticalTransitions.erase(plan.waypointVerticalTransitions.begin());
-        }
-        return plan;
-    }
-
-    double hazardRoutePenalty(
-        const ScenarioLayoutCacheResource& layoutCache,
-        const RoutePlan& plan,
-        const Point2D& start,
-        const std::string& startFloorId,
-        const ScenarioActiveEnvironmentHazardsResource& activeHazards) const {
-        double penalty = 0.0;
-        for (const auto& hazard : activeHazards.hazards) {
-            bool routeTouchesHazard = false;
-
-            Point2D segmentStart = start;
-            std::string segmentFloorId = startFloorId;
-            for (std::size_t waypointIndex = 0; waypointIndex < plan.waypoints.size(); ++waypointIndex) {
-                const auto& segmentEnd = plan.waypoints[waypointIndex];
-                if (sameFloor(segmentFloorId, hazard.floorId)
-                    && distanceBetween(
-                        hazard.draft.position,
-                        closestPointOnSegment(hazard.draft.position, segmentStart, segmentEnd)) <= hazard.radiusMeters + 1e-9) {
-                    routeTouchesHazard = true;
-                    break;
-                }
-
-                if (waypointIndex < plan.waypointConnectionIds.size()) {
-                    const auto* connection = findConnectionById(layoutCache, plan.waypointConnectionIds[waypointIndex]);
-                    if (connection == nullptr) {
-                        segmentStart = segmentEnd;
-                        if (waypointIndex < plan.waypointFloorIds.size()
-                            && !plan.waypointFloorIds[waypointIndex].empty()) {
-                            segmentFloorId = plan.waypointFloorIds[waypointIndex];
-                        }
-                        continue;
-                    }
-                    const auto connectionFloorId = connection->floorId.empty()
-                        ? cachedFloorIdForZone(layoutCache, connection->fromZoneId)
-                        : connection->floorId;
-                    if (sameFloor(connectionFloorId, hazard.floorId)
-                        && distanceBetween(
-                            hazard.draft.position,
-                            closestPointOnSegment(
-                                hazard.draft.position,
-                                connection->centerSpan.start,
-                                connection->centerSpan.end)) <= hazard.radiusMeters + 1e-9) {
-                        routeTouchesHazard = true;
-                        break;
-                    }
-                }
-
-                segmentStart = segmentEnd;
-                if (waypointIndex < plan.waypointFloorIds.size()
-                    && !plan.waypointFloorIds[waypointIndex].empty()) {
-                    segmentFloorId = plan.waypointFloorIds[waypointIndex];
-                }
-            }
-
-            if (routeTouchesHazard) {
-                penalty += hazard.routePenaltyMeters;
-            }
-        }
-        return penalty;
-    }
-
-    RoutePlan routePlanToHazardAwareNearestExit(
-        const ScenarioLayoutCacheResource& layoutCache,
-        const Point2D& start,
-        const std::string& startZoneId,
-        const std::string& agentFloorId,
-        const ScenarioActiveEnvironmentHazardsResource& activeHazards) const {
-        std::string bestExitZoneId;
-        double bestScore = std::numeric_limits<double>::max();
-        double bestDistance = std::numeric_limits<double>::max();
-
-        for (const auto& zone : layoutCache.layout.zones) {
-            if (zone.kind != ZoneKind::Exit) {
-                continue;
-            }
-
-            const auto result = cachedZoneRouteToExit(layoutCache, start, startZoneId, zone.id);
-            if (!result.has_value() || result->route.empty()) {
-                continue;
-            }
-
-            if (result->distance >= bestScore) {
-                continue;
-            }
-
-            const auto plan = routePlanToExit(layoutCache, start, startZoneId, zone.id);
-            if (plan.destinationZoneId.empty()) {
-                continue;
-            }
-
-            const auto penalty = hazardRoutePenalty(layoutCache, plan, start, agentFloorId, activeHazards);
-            const auto score = result->distance + penalty;
-            if (score + 1e-9 < bestScore
-                || (std::fabs(score - bestScore) <= 1e-9 && result->distance < bestDistance)) {
-                bestScore = score;
-                bestDistance = result->distance;
-                bestExitZoneId = zone.id;
-            }
-        }
-
-        if (bestExitZoneId.empty()) {
-            return {};
-        }
-        return routePlanToExit(layoutCache, start, startZoneId, bestExitZoneId);
-    }
-
-    void replaceRouteWithPlan(EvacuationRoute& route, const RoutePlan& plan, const Point2D& start) const {
-        route.destinationZoneId = plan.destinationZoneId;
-        route.waypoints = plan.waypoints;
-        route.waypointPassages = plan.waypointPassages;
-        route.waypointFromZoneIds = plan.waypointFromZoneIds;
-        route.waypointZoneIds = plan.waypointZoneIds;
-        route.waypointFloorIds = plan.waypointFloorIds;
-        route.waypointConnectionIds = plan.waypointConnectionIds;
-        route.waypointVerticalTransitions = plan.waypointVerticalTransitions;
-        route.nextWaypointIndex = 0;
-        route.currentSegmentStart = start;
-        route.displayFloorId = route.currentFloorId;
-        route.previousDistanceToWaypoint = route.waypoints.empty()
-            ? 0.0
-            : distanceToRouteWaypoint(route, start);
-        route.stalledSeconds = 0.0;
-        route.noExitAvailable = false;
-        route.holdingForClosure = false;
-        route.closureHoldTarget = {};
-        route.nextSegmentReplanSeconds = 0.0;
-    }
-
     bool replanAfterVerticalTransition(
         const ScenarioLayoutCacheResource& layoutCache,
         EvacuationRoute& route,
@@ -1801,18 +851,18 @@ private:
             return false;
         }
 
-        RoutePlan plan;
+        ScenarioRoutePlan plan;
         if (route.followsGuidance && !route.destinationZoneId.empty()) {
-            plan = routePlanToExit(layoutCache, startPoint, startZoneId, route.destinationZoneId);
+            plan = routeGuidance_.routePlanToExit(layoutCache, startPoint, startZoneId, route.destinationZoneId);
         }
         if (plan.destinationZoneId.empty()) {
-            plan = routePlanToNearestExit(layoutCache, startPoint, startZoneId);
+            plan = routeGuidance_.routePlanToNearestExit(layoutCache, startPoint, startZoneId);
         }
         if (plan.destinationZoneId.empty()) {
             return false;
         }
 
-        replaceRouteWithPlan(route, plan, routeStartPoint);
+        routeGuidance_.replaceRouteWithPlan(route, plan, routeStartPoint);
         return true;
     }
 
@@ -2146,7 +1196,7 @@ private:
 
             const auto agentFloorId = !route.displayFloorId.empty() ? route.displayFloorId : route.currentFloorId;
             const auto plan =
-                routePlanToHazardAwareNearestExit(layoutCache, position.value, startZoneId, agentFloorId, *activeHazards);
+                routeGuidance_.routePlanToHazardAwareNearestExit(layoutCache, position.value, startZoneId, agentFloorId, *activeHazards);
             if (plan.destinationZoneId.empty()) {
                 route.nextExitReplanSeconds = elapsedSeconds + kExitReplanCooldownSeconds;
                 continue;
@@ -2156,7 +1206,7 @@ private:
                 continue;
             }
 
-            replaceRouteWithPlan(route, plan, position.value);
+            routeGuidance_.replaceRouteWithPlan(route, plan, position.value);
             route.nextExitReplanSeconds = elapsedSeconds + kExitReplanCooldownSeconds;
         }
     }
@@ -2263,15 +1313,6 @@ private:
         route.nextSegmentReplanSeconds = 0.0;
     }
 
-    static bool routePlanUsesConnection(const RoutePlan& plan, const std::string& connectionId) {
-        if (connectionId.empty()) {
-            return false;
-        }
-        return std::any_of(plan.waypointConnectionIds.begin(), plan.waypointConnectionIds.end(), [&](const auto& id) {
-            return id == connectionId;
-        });
-    }
-
     void replanBlockedExitRoutes(
         engine::WorldQuery& query,
         const std::vector<engine::Entity>& entities,
@@ -2324,12 +1365,12 @@ private:
                 continue;
             }
 
-            RoutePlan plan;
+            ScenarioRoutePlan plan;
             if (route.followsGuidance && !route.destinationZoneId.empty()) {
-                plan = routePlanToExit(layoutCache, position.value, startZoneId, route.destinationZoneId);
+                plan = routeGuidance_.routePlanToExit(layoutCache, position.value, startZoneId, route.destinationZoneId);
             }
             if (plan.destinationZoneId.empty()) {
-                plan = routePlanToNearestExit(layoutCache, position.value, startZoneId);
+                plan = routeGuidance_.routePlanToNearestExit(layoutCache, position.value, startZoneId);
             }
             if (blockedConnection != nullptr && routePlanUsesConnection(plan, blockedConnection->id)) {
                 plan = {};
@@ -2346,7 +1387,7 @@ private:
                 continue;
             }
 
-            replaceRouteWithPlan(route, plan, position.value);
+            routeGuidance_.replaceRouteWithPlan(route, plan, position.value);
             clearClosureReaction(reactions, entity.index);
             route.nextExitReplanSeconds = elapsedSeconds + kExitReplanCooldownSeconds;
         }
@@ -2392,7 +1433,7 @@ private:
                 continue;
             }
 
-            const auto& replacement = cachedPath(route.currentFloorId, floorLayout, position.value, target, clearance);
+            const auto& replacement = routeGuidance_.cachedPath(route.currentFloorId, floorLayout, position.value, target, clearance);
             if (replacement.size() <= 1) {
                 route.nextSegmentReplanSeconds = elapsedSeconds + kFailedSegmentReplanCooldownSeconds;
                 continue;
@@ -2617,16 +1658,8 @@ private:
     }
 
     std::optional<ScenarioLayoutCacheResource> layoutCache_{};
-    std::vector<RouteGuidanceDraft> routeGuidances_{};
-    std::string activeRouteGuidanceId_{};
-    bool guidanceReplanPending_{false};
-    std::size_t guidanceReplanCursor_{0};
-    std::uint64_t guidanceReplanSeed_{0U};
+    ScenarioRouteGuidanceController routeGuidance_{};
     std::vector<engine::Entity> activeEntities_{};
-    mutable std::uint64_t planningCacheRevision_{std::numeric_limits<std::uint64_t>::max()};
-    mutable std::unordered_map<std::string, std::optional<ZoneRouteToExit>> nearestExitRouteCache_{};
-    mutable std::unordered_map<std::string, std::optional<ZoneRouteResult>> exitRouteCache_{};
-    mutable std::unordered_map<std::string, std::vector<Point2D>> pathCache_{};
 };
 
 

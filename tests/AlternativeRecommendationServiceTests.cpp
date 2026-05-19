@@ -410,7 +410,7 @@ SC_TEST(AlternativeRecommendationService_addsRouteGuidanceForExitImbalance) {
     SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.front().guidedExitZoneId, std::string{"exit-east"});
     SC_EXPECT_TRUE(it->recommendedScenario.control.routeGuidances.front().installConnectionId.empty());
     SC_EXPECT_NEAR(it->recommendedScenario.control.routeGuidances.front().baseComplianceRate, 0.5, 1e-9);
-    SC_EXPECT_NEAR(it->recommendedScenario.control.routeGuidances.front().guidanceStrength, 0.55, 1e-9);
+    SC_EXPECT_NEAR(it->recommendedScenario.control.routeGuidances.front().influenceRadiusMeters, 2.5, 1e-9);
     SC_EXPECT_NEAR(it->recommendedScenario.control.routeGuidances.front().maxDetourMeters, 20.0, 1e-9);
     SC_EXPECT_TRUE(containsDiffKey(it->recommendedScenario, "control.routeGuidances"));
 }
