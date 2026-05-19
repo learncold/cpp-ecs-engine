@@ -9,6 +9,7 @@
 
 #include "domain/AgentComponents.h"
 #include "domain/FacilityLayout2D.h"
+#include "domain/GeometryQueries.h"
 #include "engine/Entity.h"
 #include "engine/WorldQuery.h"
 
@@ -56,11 +57,6 @@ struct MovementPlan {
     Point2D velocity{};
 };
 
-struct SpatialCell {
-    int x{0};
-    int y{0};
-};
-
 struct AgentSpatialIndex {
     double cellSize{1.0};
     std::unordered_map<std::string, std::unordered_map<long long, std::vector<engine::Entity>>> cellsByFloor{};
@@ -104,8 +100,6 @@ struct ZoneRouteResult {
     double distance{0.0};
 };
 
-long long spatialKey(const SpatialCell& cell);
-SpatialCell spatialCellFor(const Point2D& point, double cellSize);
 Bounds boundsOf(const Polygon2D& polygon);
 LayoutBounds boundsOf(const FacilityLayout2D& layout);
 double distanceBetween(const Point2D& lhs, const Point2D& rhs);
@@ -120,12 +114,9 @@ Point2D clampedToLength(const Point2D& point, double maxLength);
 Point2D midpoint(const LineSegment2D& line);
 double lengthSquaredOf(const LineSegment2D& line);
 LineSegment2D pointPassage(const Point2D& point);
-Point2D closestPointOnSegment(const Point2D& point, const Point2D& start, const Point2D& end);
 LineSegment2D passageWithClearance(const Connection2D& connection, double clearance);
 Point2D routeWaypointTarget(const EvacuationRoute& route, const Point2D& position);
 double distanceToRouteWaypoint(const EvacuationRoute& route, const Point2D& position);
-bool pointInRing(const std::vector<Point2D>& ring, const Point2D& point);
-Point2D polygonCenter(const Polygon2D& polygon);
 const Zone2D* findZone(const FacilityLayout2D& layout, const std::string& zoneId);
 const Connection2D* findConnectionBetween(const FacilityLayout2D& layout, const std::string& from, const std::string& to);
 std::optional<ZoneRouteToExit> zoneRouteToNearestExit(

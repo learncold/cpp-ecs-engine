@@ -1,5 +1,7 @@
 #include "application/LayoutCanvasRendering.h"
 
+#include "domain/GeometryQueries.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -19,9 +21,7 @@ namespace {
 const QColor kDoorStrokeColor("#ff8c00");
 const QColor kOpeningStrokeColor("#2f6fb2");
 
-bool matchesFloor(const std::string& elementFloorId, const std::string& floorId) {
-    return floorId.empty() || elementFloorId.empty() || elementFloorId == floorId;
-}
+using safecrowd::domain::matchesFloor;
 
 bool isVerticalConnection(const safecrowd::domain::Connection2D& connection) {
     return connection.kind == safecrowd::domain::ConnectionKind::Stair

@@ -1,5 +1,6 @@
 #include "domain/ScenarioSimulationSystems.h"
 
+#include "domain/GeometryQueries.h"
 #include "domain/ScenarioSimulationInternal.h"
 
 #include <algorithm>
@@ -40,11 +41,6 @@ void sortAndTrimTop(std::vector<T>& values, std::size_t maxCount, Compare compar
     values.resize(maxCount);
 }
 
-struct SpatialCell {
-    int x{0};
-    int y{0};
-};
-
 struct DensityCellAddress {
     SpatialCell cell{};
     std::string floorId{};
@@ -58,18 +54,6 @@ struct DensityCellAccumulator {
     std::vector<engine::Entity> entities{};
 };
 
-long long spatialKey(const SpatialCell& cell) {
-    return (static_cast<long long>(cell.x) << 32)
-        ^ static_cast<unsigned int>(cell.y);
-}
-
-SpatialCell spatialCellFor(const Point2D& point, double cellSize) {
-    return {
-        .x = static_cast<int>(std::floor(point.x / cellSize)),
-        .y = static_cast<int>(std::floor(point.y / cellSize)),
-    };
-}
-
 double distanceBetween(const Point2D& lhs, const Point2D& rhs) {
     return std::hypot(lhs.x - rhs.x, lhs.y - rhs.y);
 }
@@ -79,21 +63,6 @@ long long densitySpatialKey(const DensityCellAddress& address) {
     return cellKey ^ (static_cast<long long>(std::hash<std::string>{}(address.floorId)) << 1);
 }
 
-Point2D cellMin(const SpatialCell& cell, double cellSize) {
-    return {
-        .x = static_cast<double>(cell.x) * cellSize,
-        .y = static_cast<double>(cell.y) * cellSize,
-    };
-}
-
-Point2D cellMax(const SpatialCell& cell, double cellSize) {
-    const auto min = cellMin(cell, cellSize);
-    return {
-        .x = min.x + cellSize,
-        .y = min.y + cellSize,
-    };
-}
-
 void insertBarrierCoverageCells(
     std::unordered_map<std::string, std::unordered_map<long long, std::vector<std::size_t>>>& cellsByFloor,
     const std::string& floorId,
@@ -101,13 +70,9 @@ void insertBarrierCoverageCells(
     const Point2D& maxPoint,
     double cellSize,
     std::size_t barrierIndex) {
-    const auto minCell = spatialCellFor(minPoint, cellSize);
-    const auto maxCell = spatialCellFor(maxPoint, cellSize);
     auto& floorCells = cellsByFloor[floorId];
-    for (int y = minCell.y; y <= maxCell.y; ++y) {
-        for (int x = minCell.x; x <= maxCell.x; ++x) {
-            floorCells[spatialKey({.x = x, .y = y})].push_back(barrierIndex);
-        }
+    for (const auto& cell : spatialCellsForBounds(minPoint, maxPoint, cellSize)) {
+        floorCells[spatialKey(cell)].push_back(barrierIndex);
     }
 }
 
@@ -179,18 +144,16 @@ bool barrierWithinRadius(const Barrier2D& barrier, const Point2D& point, double 
 
     const auto& vertices = barrier.geometry.vertices;
     for (std::size_t index = 0; index + 1 < vertices.size(); ++index) {
-        const auto closest =
-            simulation_internal::closestPointOnSegment(point, vertices[index], vertices[index + 1]);
+        const auto closest = closestPointOnSegment(point, vertices[index], vertices[index + 1]);
         if (distanceBetween(point, closest) <= radius) {
             return true;
         }
     }
 
     if (barrier.geometry.closed) {
-        const auto closest =
-            simulation_internal::closestPointOnSegment(point, vertices.back(), vertices.front());
+        const auto closest = closestPointOnSegment(point, vertices.back(), vertices.front());
         if (distanceBetween(point, closest) <= radius
-            || simulation_internal::pointInRing(vertices, point)) {
+            || pointInRing(vertices, point)) {
             return true;
         }
     }
@@ -269,8 +232,8 @@ DensityCellMetric densityMetricFromCell(
     const DensityCellAccumulator& cell,
     double cellSize) {
     const auto count = static_cast<double>(cell.agentCount);
-    const auto min = cellMin(cell.cell, cellSize);
-    const auto max = cellMax(cell.cell, cellSize);
+    const auto min = spatialCellMin(cell.cell, cellSize);
+    const auto max = spatialCellMax(cell.cell, cellSize);
     return {
         .center = cell.agentCount == 0
             ? Point2D{.x = (min.x + max.x) * 0.5, .y = (min.y + max.y) * 0.5}
@@ -290,8 +253,8 @@ PressureCellMetric pressureMetricFromCell(
     const DensityCellAccumulator& cell,
     double cellSize) {
     const auto count = static_cast<double>(cell.agentCount);
-    const auto min = cellMin(cell.cell, cellSize);
-    const auto max = cellMax(cell.cell, cellSize);
+    const auto min = spatialCellMin(cell.cell, cellSize);
+    const auto max = spatialCellMax(cell.cell, cellSize);
     PressureCellMetric metric{
         .center = cell.agentCount == 0
             ? Point2D{.x = (min.x + max.x) * 0.5, .y = (min.y + max.y) * 0.5}

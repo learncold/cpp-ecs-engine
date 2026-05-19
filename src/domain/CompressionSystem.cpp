@@ -2,6 +2,7 @@
 
 #include "domain/AgentComponents.h"
 #include "domain/FacilityLayout2D.h"
+#include "domain/GeometryQueries.h"
 #include "domain/Metrics.h"
 #include "domain/PressureTuning.h"
 #include "domain/ScenarioSimulationInternal.h"
@@ -20,35 +21,10 @@ namespace {
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kReferenceDistanceMeters = kPressureReferenceDistanceMeters;
 
-struct SpatialCell {
-    int x{0};
-    int y{0};
-};
-
 double distanceBetween(const Point2D& lhs, const Point2D& rhs) {
     const double dx = lhs.x - rhs.x;
     const double dy = lhs.y - rhs.y;
     return std::sqrt(dx * dx + dy * dy);
-}
-
-double distancePointToSegment(const Point2D& point, const Point2D& start, const Point2D& end) {
-    const double dx = end.x - start.x;
-    const double dy = end.y - start.y;
-    const double lengthSquared = (dx * dx) + (dy * dy);
-
-    if (lengthSquared == 0.0) {
-        return distanceBetween(point, start);
-    }
-
-    const double t = std::clamp(
-        (((point.x - start.x) * dx) + ((point.y - start.y) * dy)) / lengthSquared,
-        0.0,
-        1.0);
-    const Point2D projection{
-        .x = start.x + (t * dx),
-        .y = start.y + (t * dy),
-    };
-    return distanceBetween(point, projection);
 }
 
 double barrierCompression(const Barrier2D& barrier, const Point2D& position, double referenceDistance) {
@@ -83,30 +59,14 @@ double localDensityRatio(std::size_t nearbyCount) {
     return densityPeoplePerSquareMeter / kPressureHighDensityThresholdPeoplePerSquareMeter;
 }
 
-long long spatialKey(const SpatialCell& cell) {
-    return (static_cast<long long>(cell.x) << 32)
-        ^ static_cast<unsigned int>(cell.y);
-}
-
-SpatialCell spatialCellFor(const Point2D& point, double cellSize) {
-    return {
-        .x = static_cast<int>(std::floor(point.x / cellSize)),
-        .y = static_cast<int>(std::floor(point.y / cellSize)),
-    };
-}
-
 void insertBarrierCoverageCells(
     std::unordered_map<long long, std::vector<engine::Entity>>& cells,
     const Point2D& minPoint,
     const Point2D& maxPoint,
     double cellSize,
     engine::Entity barrierEntity) {
-    const auto minCell = spatialCellFor(minPoint, cellSize);
-    const auto maxCell = spatialCellFor(maxPoint, cellSize);
-    for (int y = minCell.y; y <= maxCell.y; ++y) {
-        for (int x = minCell.x; x <= maxCell.x; ++x) {
-            cells[spatialKey({.x = x, .y = y})].push_back(barrierEntity);
-        }
+    for (const auto& cell : spatialCellsForBounds(minPoint, maxPoint, cellSize)) {
+        cells[spatialKey(cell)].push_back(barrierEntity);
     }
 }
 

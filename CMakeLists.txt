@@ -184,13 +184,17 @@ if (BUILD_TESTING)
     if (SAFECROWD_BUILD_APP)
         target_sources(safecrowd_tests
             PRIVATE
+                tests/LayoutCanvasSnappingTests.cpp
                 tests/ProjectPersistenceTests.cpp
+                src/application/LayoutCanvasRendering.cpp
+                src/application/LayoutCanvasSnapping.cpp
                 src/application/ProjectPersistence.cpp
         )
 
         target_link_libraries(safecrowd_tests
             PRIVATE
                 Qt6::Core
+                Qt6::Gui
         )
     endif()
 

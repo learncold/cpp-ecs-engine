@@ -1,5 +1,7 @@
 #include "application/SimulationCanvasWidget.h"
 
+#include "domain/GeometryQueries.h"
+
 #include <algorithm>
 #include <cmath>
 #include <utility>
@@ -46,16 +48,7 @@ enum class TimelineVisualState {
     Expired,
 };
 
-std::string defaultFloorId(const safecrowd::domain::FacilityLayout2D& layout) {
-    if (!layout.floors.empty() && !layout.floors.front().id.empty()) {
-        return layout.floors.front().id;
-    }
-    return layout.levelId;
-}
-
-bool matchesFloor(const std::string& elementFloorId, const std::string& floorId) {
-    return floorId.empty() || elementFloorId.empty() || elementFloorId == floorId;
-}
+using safecrowd::domain::matchesFloor;
 
 QString hazardKindLabel(safecrowd::domain::EnvironmentHazardKind kind) {
     switch (kind) {
@@ -136,20 +129,7 @@ safecrowd::domain::Point2D connectionCenter(const safecrowd::domain::Connection2
     };
 }
 
-safecrowd::domain::Point2D polygonCenter(const safecrowd::domain::Polygon2D& polygon) {
-    if (polygon.outline.empty()) {
-        return {};
-    }
-
-    double x = 0.0;
-    double y = 0.0;
-    for (const auto& point : polygon.outline) {
-        x += point.x;
-        y += point.y;
-    }
-    const auto count = static_cast<double>(polygon.outline.size());
-    return {.x = x / count, .y = y / count};
-}
+using safecrowd::domain::polygonCenter;
 
 bool hasExplicitGuidanceInstallPosition(const safecrowd::domain::RouteGuidanceDraft& guidance) {
     return !guidance.installFloorId.empty() || !guidance.installZoneId.empty();
@@ -509,7 +489,7 @@ SimulationCanvasWidget::SimulationCanvasWidget(safecrowd::domain::FacilityLayout
     setFocusPolicy(Qt::StrongFocus);
     setMinimumSize(520, 360);
     setStyleSheet("QWidget { background: #f4f7fb; }");
-    currentFloorId_ = defaultFloorId(layout_);
+    currentFloorId_ = safecrowd::domain::defaultFloorId(layout_);
     layoutBounds_ = collectLayoutCanvasBounds(layout_, currentFloorId_);
     QCoreApplication::instance()->installEventFilter(this);
     setupFloorSelector();

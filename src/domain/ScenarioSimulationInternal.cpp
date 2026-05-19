@@ -13,19 +13,6 @@
 
 namespace safecrowd::domain::simulation_internal {
 
-
-long long spatialKey(const SpatialCell& cell) {
-    return (static_cast<long long>(cell.x) << 32)
-        ^ static_cast<unsigned int>(cell.y);
-}
-
-SpatialCell spatialCellFor(const Point2D& point, double cellSize) {
-    return {
-        .x = static_cast<int>(std::floor(point.x / cellSize)),
-        .y = static_cast<int>(std::floor(point.y / cellSize)),
-    };
-}
-
 Bounds boundsOf(const Polygon2D& polygon) {
     if (polygon.outline.empty()) {
         return {};
@@ -104,19 +91,6 @@ double lengthSquaredOf(const LineSegment2D& line) {
 
 LineSegment2D pointPassage(const Point2D& point) {
     return {.start = point, .end = point};
-}
-
-Point2D closestPointOnSegment(const Point2D& point, const Point2D& start, const Point2D& end) {
-    const auto segment = end - start;
-    const auto lengthSquared = (segment.x * segment.x) + (segment.y * segment.y);
-    if (lengthSquared <= 1e-9) {
-        return start;
-    }
-    const auto t = std::clamp(
-        (((point.x - start.x) * segment.x) + ((point.y - start.y) * segment.y)) / lengthSquared,
-        0.0,
-        1.0);
-    return start + (segment * t);
 }
 
 LineSegment2D passageWithClearance(const Connection2D& connection, double clearance) {
@@ -226,10 +200,6 @@ bool pointWithinSegmentBounds(const Point2D& point, const Point2D& start, const 
         && point.y <= std::max(start.y, end.y) + padding;
 }
 
-double distancePointToSegment(const Point2D& point, const Point2D& start, const Point2D& end) {
-    return distanceBetween(point, closestPointOnSegment(point, start, end));
-}
-
 double segmentDistance(const Point2D& firstStart, const Point2D& firstEnd, const Point2D& secondStart, const Point2D& secondEnd) {
     if (segmentsIntersect(firstStart, firstEnd, secondStart, secondEnd)) {
         return 0.0;
@@ -240,40 +210,6 @@ double segmentDistance(const Point2D& firstStart, const Point2D& firstEnd, const
         distancePointToSegment(secondStart, firstStart, firstEnd),
         distancePointToSegment(secondEnd, firstStart, firstEnd),
     });
-}
-
-Point2D polygonCenter(const Polygon2D& polygon) {
-    if (polygon.outline.empty()) {
-        return {};
-    }
-
-    Point2D center{};
-    for (const auto& point : polygon.outline) {
-        center.x += point.x;
-        center.y += point.y;
-    }
-    const auto count = static_cast<double>(polygon.outline.size());
-    center.x /= count;
-    center.y /= count;
-    return center;
-}
-
-bool pointInRing(const std::vector<Point2D>& ring, const Point2D& point) {
-    if (ring.size() < 3) {
-        return false;
-    }
-
-    bool inside = false;
-    for (std::size_t i = 0, j = ring.size() - 1; i < ring.size(); j = i++) {
-        const auto& a = ring[i];
-        const auto& b = ring[j];
-        const auto intersects = ((a.y > point.y) != (b.y > point.y))
-            && (point.x < ((b.x - a.x) * (point.y - a.y) / ((b.y - a.y) == 0.0 ? 1e-9 : (b.y - a.y)) + a.x));
-        if (intersects) {
-            inside = !inside;
-        }
-    }
-    return inside;
 }
 
 bool pointInAnyZone(const FacilityLayout2D& layout, const Point2D& point) {
@@ -346,12 +282,8 @@ StairEntryDirection stairEntryDirectionForFloor(
     return StairEntryDirection::Unspecified;
 }
 
-bool matchesFloor(const std::string& elementFloorId, const std::string& floorId) {
-    return floorId.empty() || elementFloorId.empty() || elementFloorId == floorId;
-}
-
 bool zoneMatchesFloor(const Zone2D& zone, const std::string& floorId) {
-    return matchesFloor(zone.floorId, floorId);
+    return safecrowd::domain::matchesFloor(zone.floorId, floorId);
 }
 
 std::vector<LineSegment2D> stairEntryBarrierSegments(const Zone2D& zone, StairEntryDirection entryDirection) {

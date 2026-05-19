@@ -1,5 +1,7 @@
 #include "application/LayoutCanvasSnapping.h"
 
+#include "domain/GeometryQueries.h"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -14,24 +16,15 @@ struct SnapGeometry {
     std::vector<safecrowd::domain::LineSegment2D> edges{};
 };
 
-bool matchesFloor(const std::string& elementFloorId, const std::string& floorId) {
-    return floorId.empty() || elementFloorId.empty() || elementFloorId == floorId;
-}
-
-safecrowd::domain::Point2D operator-(const safecrowd::domain::Point2D& lhs, const safecrowd::domain::Point2D& rhs) {
-    return {.x = lhs.x - rhs.x, .y = lhs.y - rhs.y};
-}
+using safecrowd::domain::matchesFloor;
+using safecrowd::domain::closestPointOnSegment;
 
 safecrowd::domain::Point2D operator+(const safecrowd::domain::Point2D& lhs, const safecrowd::domain::Point2D& rhs) {
     return {.x = lhs.x + rhs.x, .y = lhs.y + rhs.y};
 }
 
-safecrowd::domain::Point2D operator*(const safecrowd::domain::Point2D& point, double scalar) {
-    return {.x = point.x * scalar, .y = point.y * scalar};
-}
-
-double dot(const safecrowd::domain::Point2D& lhs, const safecrowd::domain::Point2D& rhs) {
-    return (lhs.x * rhs.x) + (lhs.y * rhs.y);
+safecrowd::domain::Point2D operator-(const safecrowd::domain::Point2D& lhs, const safecrowd::domain::Point2D& rhs) {
+    return {.x = lhs.x - rhs.x, .y = lhs.y - rhs.y};
 }
 
 double screenDistance(
@@ -41,6 +34,15 @@ double screenDistance(
     const auto a = transform.map(lhs);
     const auto b = transform.map(rhs);
     return std::hypot(a.x() - b.x(), a.y() - b.y());
+}
+
+double maxAxisScreenDistance(
+    const LayoutCanvasTransform& transform,
+    const safecrowd::domain::Point2D& lhs,
+    const safecrowd::domain::Point2D& rhs) {
+    const auto a = transform.map(lhs);
+    const auto b = transform.map(rhs);
+    return std::max(std::abs(a.x() - b.x()), std::abs(a.y() - b.y()));
 }
 
 safecrowd::domain::Point2D snapPointToGrid(const safecrowd::domain::Point2D& point, double spacingMeters) {
@@ -57,20 +59,6 @@ safecrowd::domain::Point2D snapPointToGrid(const safecrowd::domain::Point2D& poi
 LayoutSnapOptions withoutGridSnap(LayoutSnapOptions options) {
     options.snapGrid = false;
     return options;
-}
-
-safecrowd::domain::Point2D closestPointOnSegment(
-    const safecrowd::domain::Point2D& point,
-    const safecrowd::domain::Point2D& start,
-    const safecrowd::domain::Point2D& end) {
-    const auto segment = end - start;
-    const auto lengthSquared = dot(segment, segment);
-    if (lengthSquared <= 1e-9) {
-        return start;
-    }
-
-    const auto t = std::clamp(dot(point - start, segment) / lengthSquared, 0.0, 1.0);
-    return start + (segment * t);
 }
 
 void appendPolygonSnapGeometry(
@@ -414,7 +402,7 @@ LayoutDragSnapResult snapLayoutSelectionDrag(
             continue;
         }
 
-        const auto distance = screenDistance(transform, moved, snapped.point);
+        const auto distance = maxAxisScreenDistance(transform, moved, snapped.point);
         if (distance <= bestDistance) {
             bestDistance = distance;
             result = {

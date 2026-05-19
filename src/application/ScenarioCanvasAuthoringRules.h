@@ -40,7 +40,6 @@ int scenarioSourceEmissionCount(
     double intervalSeconds,
     int targetAgentCount = 0);
 
-safecrowd::domain::Point2D scenarioPolygonCenter(const safecrowd::domain::Polygon2D& polygon);
 safecrowd::domain::Point2D scenarioPlacementCenter(const std::vector<safecrowd::domain::Point2D>& area);
 safecrowd::domain::Point2D scenarioConnectionMarkerCenter(const safecrowd::domain::Connection2D& connection);
 bool scenarioPointInsidePlacementArea(

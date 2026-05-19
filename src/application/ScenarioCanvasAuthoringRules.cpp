@@ -22,6 +22,7 @@ constexpr double kGeometryEpsilon = 1e-9;
 using safecrowd::domain::distancePointToSegment;
 using safecrowd::domain::pointInPolygon;
 using safecrowd::domain::pointInRing;
+using safecrowd::domain::polygonCenter;
 using safecrowd::domain::representativePointInPolygon;
 
 struct PointBounds {
@@ -108,12 +109,12 @@ safecrowd::domain::Point2D defaultVelocityFrom(
     std::optional<safecrowd::domain::Point2D> target;
     for (const auto& zone : layout.zones) {
         if (zone.kind == safecrowd::domain::ZoneKind::Exit) {
-            target = scenarioPolygonCenter(zone.area);
+            target = polygonCenter(zone.area);
             break;
         }
     }
     if (!target.has_value() && !layout.zones.empty()) {
-        target = scenarioPolygonCenter(layout.zones.back().area);
+        target = polygonCenter(layout.zones.back().area);
     }
     if (!target.has_value()) {
         return {};
@@ -316,7 +317,7 @@ std::string pickNearestExitZoneIdForPoint(
                 continue;
             }
 
-            const auto exitCenter = scenarioPolygonCenter(zone.area);
+            const auto exitCenter = polygonCenter(zone.area);
             const auto dx = exitCenter.x - point.x;
             const auto dy = exitCenter.y - point.y;
             const auto distanceSq = (dx * dx) + (dy * dy);
@@ -372,21 +373,6 @@ int scenarioSourceEmissionCount(
     const auto count = std::max<long long>(0, ticks) * static_cast<long long>(agentsPerSpawn);
     const auto cappedCount = targetAgentCount > 0 ? std::min<long long>(targetAgentCount, count) : count;
     return static_cast<int>(std::min<long long>(kScenarioMaxSourceOccupantCount, cappedCount));
-}
-
-safecrowd::domain::Point2D scenarioPolygonCenter(const safecrowd::domain::Polygon2D& polygon) {
-    if (polygon.outline.empty()) {
-        return {};
-    }
-
-    double x = 0.0;
-    double y = 0.0;
-    for (const auto& point : polygon.outline) {
-        x += point.x;
-        y += point.y;
-    }
-    const auto count = static_cast<double>(polygon.outline.size());
-    return {.x = x / count, .y = y / count};
 }
 
 safecrowd::domain::Point2D scenarioPlacementCenter(const std::vector<safecrowd::domain::Point2D>& area) {
@@ -819,7 +805,7 @@ ScenarioRouteGuidanceAuthoringResult createScenarioRouteGuidanceForExitZone(
     draft.installConnectionId.clear();
     draft.installFloorId = zone.floorId.empty() ? currentFloorId.toStdString() : zone.floorId;
     draft.installZoneId = zone.id;
-    draft.installPosition = representativePointInPolygon(zone.area).value_or(scenarioPolygonCenter(zone.area));
+    draft.installPosition = representativePointInPolygon(zone.area).value_or(polygonCenter(zone.area));
     draft.baseComplianceRate = 0.5;
     draft.guidanceStrength = 0.55;
     draft.maxDetourMeters = 20.0;
@@ -929,7 +915,7 @@ ScenarioRouteGuidanceAuthoringResult moveScenarioRouteGuidanceToExitZone(
     guidance.installConnectionId.clear();
     guidance.installFloorId = zone.floorId.empty() ? currentFloorId.toStdString() : zone.floorId;
     guidance.installZoneId = zone.id;
-    guidance.installPosition = representativePointInPolygon(zone.area).value_or(scenarioPolygonCenter(zone.area));
+    guidance.installPosition = representativePointInPolygon(zone.area).value_or(polygonCenter(zone.area));
     return {.guidance = std::move(guidance)};
 }
 

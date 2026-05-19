@@ -1,5 +1,7 @@
 #include "domain/FacilityLayoutBuilder.h"
 
+#include "domain/GeometryQueries.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -95,23 +97,6 @@ double distanceSquared(const Point2D& lhs, const Point2D& rhs) {
 
 double distanceBetween(const Point2D& lhs, const Point2D& rhs) {
     return std::sqrt(distanceSquared(lhs, rhs));
-}
-
-double distancePointToSegment(const Point2D& point, const LineSegment2D& segment) {
-    const auto direction = subtract(segment.end, segment.start);
-    const double magnitudeSquared = dot(direction, direction);
-
-    if (magnitudeSquared <= kEpsilon) {
-        return distanceBetween(point, segment.start);
-    }
-
-    const auto startToPoint = subtract(point, segment.start);
-    const double t = std::clamp(dot(startToPoint, direction) / magnitudeSquared, 0.0, 1.0);
-    const Point2D projection{
-        .x = segment.start.x + (direction.x * t),
-        .y = segment.start.y + (direction.y * t),
-    };
-    return distanceBetween(point, projection);
 }
 
 bool pointOnSegment(const Point2D& point, const LineSegment2D& segment, double tolerance = kBoundaryTolerance) {

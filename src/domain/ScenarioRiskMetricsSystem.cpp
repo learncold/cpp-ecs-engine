@@ -1,5 +1,6 @@
 #include "domain/ScenarioSimulationSystems.h"
 
+#include "domain/GeometryQueries.h"
 #include "domain/ScenarioSimulationInternal.h"
 
 #include <algorithm>
@@ -81,39 +82,28 @@ struct ScenarioPressureTrackingResource {
 };
 
 struct RiskCellAddress {
-    int x{0};
-    int y{0};
+    SpatialCell cell{};
     std::string floorId{};
 };
 
 RiskCellAddress riskCellAddress(const Point2D& point, const std::string& floorId) {
     return {
-        .x = static_cast<int>(std::floor(point.x / kScenarioHotspotCellSize)),
-        .y = static_cast<int>(std::floor(point.y / kScenarioHotspotCellSize)),
+        .cell = spatialCellFor(point, kScenarioHotspotCellSize),
         .floorId = floorId,
     };
 }
 
 long long riskCellKey(const RiskCellAddress& cell) {
-    const auto x = cell.x;
-    const auto y = cell.y;
-    const auto cellKey = (static_cast<long long>(x) << 32) ^ static_cast<unsigned int>(y);
+    const auto cellKey = spatialKey(cell.cell);
     return cellKey ^ (static_cast<long long>(std::hash<std::string>{}(cell.floorId)) << 1);
 }
 
 Point2D riskCellMin(const RiskCellAddress& cell) {
-    return {
-        .x = static_cast<double>(cell.x) * kScenarioHotspotCellSize,
-        .y = static_cast<double>(cell.y) * kScenarioHotspotCellSize,
-    };
+    return spatialCellMin(cell.cell, kScenarioHotspotCellSize);
 }
 
 Point2D riskCellMax(const RiskCellAddress& cell) {
-    const auto min = riskCellMin(cell);
-    return {
-        .x = min.x + kScenarioHotspotCellSize,
-        .y = min.y + kScenarioHotspotCellSize,
-    };
+    return spatialCellMax(cell.cell, kScenarioHotspotCellSize);
 }
 
 bool isStalled(const Velocity& velocity, const EvacuationRoute& route) {
@@ -228,27 +218,8 @@ bool isBottleneckSetWorse(
     return lhs.averageSpeed < rhs.averageSpeed;
 }
 
-double distancePointToSegment(const Point2D& point, const Point2D& start, const Point2D& end) {
-    const auto dx = end.x - start.x;
-    const auto dy = end.y - start.y;
-    const auto lengthSquared = (dx * dx) + (dy * dy);
-    if (lengthSquared <= 1e-9) {
-        return distanceBetween(point, start);
-    }
-
-    const auto t = std::clamp(
-        (((point.x - start.x) * dx) + ((point.y - start.y) * dy)) / lengthSquared,
-        0.0,
-        1.0);
-    const Point2D projection{
-        .x = start.x + (t * dx),
-        .y = start.y + (t * dy),
-    };
-    return distanceBetween(point, projection);
-}
-
 bool barrierMatchesFloor(const Barrier2D& barrier, const std::string& floorId) {
-    return barrier.floorId.empty() || floorId.empty() || barrier.floorId == floorId;
+    return matchesFloor(barrier.floorId, floorId);
 }
 
 double barrierCompression(const Barrier2D& barrier, const Point2D& position, double referenceDistance) {
@@ -292,13 +263,9 @@ ScenarioAgentSpatialIndexResource buildDisplayFloorPressureIndex(
 
         const auto& vertices = barrier.geometry.vertices;
         auto insertCoverage = [&](const Point2D& minPoint, const Point2D& maxPoint) {
-            const auto minCell = spatialCellFor(minPoint, index.cellSize);
-            const auto maxCell = spatialCellFor(maxPoint, index.cellSize);
             auto& floorCells = index.barrierIndicesByFloor[barrier.floorId];
-            for (int y = minCell.y; y <= maxCell.y; ++y) {
-                for (int x = minCell.x; x <= maxCell.x; ++x) {
-                    floorCells[spatialKey({.x = x, .y = y})].push_back(barrierIndex);
-                }
+            for (const auto& cell : spatialCellsForBounds(minPoint, maxPoint, index.cellSize)) {
+                floorCells[spatialKey(cell)].push_back(barrierIndex);
             }
         };
 
@@ -1229,30 +1196,24 @@ private:
                 if (floorIt == spatialIndex.displayCellsByFloor.end()) {
                     return;
                 }
-                const auto minCell = spatialCellFor(
-                    {
-                        .x = std::min(passage.start.x, passage.end.x) - kScenarioBottleneckRadius,
-                        .y = std::min(passage.start.y, passage.end.y) - kScenarioBottleneckRadius,
-                    },
-                    spatialIndex.cellSize);
-                const auto maxCell = spatialCellFor(
-                    {
-                        .x = std::max(passage.start.x, passage.end.x) + kScenarioBottleneckRadius,
-                        .y = std::max(passage.start.y, passage.end.y) + kScenarioBottleneckRadius,
-                    },
-                    spatialIndex.cellSize);
-                for (int y = minCell.y; y <= maxCell.y; ++y) {
-                    for (int x = minCell.x; x <= maxCell.x; ++x) {
-                        const auto cellIt = floorIt->second.find(spatialKey({.x = x, .y = y}));
-                        if (cellIt == floorIt->second.end()) {
-                            continue;
-                        }
-                        for (const auto entity : cellIt->second) {
-                            const auto packed =
-                                (static_cast<std::uint64_t>(entity.generation) << 32U) | entity.index;
-                            if (seen.insert(packed).second) {
-                                candidates.push_back(entity);
-                            }
+                const Point2D minPoint{
+                    .x = std::min(passage.start.x, passage.end.x) - kScenarioBottleneckRadius,
+                    .y = std::min(passage.start.y, passage.end.y) - kScenarioBottleneckRadius,
+                };
+                const Point2D maxPoint{
+                    .x = std::max(passage.start.x, passage.end.x) + kScenarioBottleneckRadius,
+                    .y = std::max(passage.start.y, passage.end.y) + kScenarioBottleneckRadius,
+                };
+                for (const auto& cell : spatialCellsForBounds(minPoint, maxPoint, spatialIndex.cellSize)) {
+                    const auto cellIt = floorIt->second.find(spatialKey(cell));
+                    if (cellIt == floorIt->second.end()) {
+                        continue;
+                    }
+                    for (const auto entity : cellIt->second) {
+                        const auto packed =
+                            (static_cast<std::uint64_t>(entity.generation) << 32U) | entity.index;
+                        if (seen.insert(packed).second) {
+                            candidates.push_back(entity);
                         }
                     }
                 }

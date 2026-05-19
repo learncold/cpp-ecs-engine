@@ -56,6 +56,7 @@ const QColor kSelectionHighlightColor("#0b3d78");
 
 using safecrowd::domain::distancePointToSegment;
 using safecrowd::domain::pointInPolygon;
+using safecrowd::domain::polygonCenter;
 
 struct OccupantSourceSettings {
     int agentsPerSpawn{kDefaultSourceAgentsPerSpawn};
@@ -66,7 +67,7 @@ struct OccupantSourceSettings {
 };
 
 bool matchesFloor(const std::string& elementFloorId, const QString& floorId) {
-    return floorId.isEmpty() || elementFloorId.empty() || QString::fromStdString(elementFloorId) == floorId;
+    return safecrowd::domain::matchesFloor(elementFloorId, floorId.toStdString());
 }
 
 bool editOccupantSourceSettings(
@@ -337,7 +338,7 @@ std::optional<QPointF> routeGuidanceMarkerCenter(
         if (!matchesFloor(it->floorId, currentFloorId)) {
             return std::nullopt;
         }
-        center = transform.map(scenarioPolygonCenter(it->area));
+        center = transform.map(polygonCenter(it->area));
     } else {
         return std::nullopt;
     }
@@ -421,14 +422,8 @@ std::optional<std::size_t> hoveredRouteGuidanceIndex(
     return closestIndex;
 }
 
-QString defaultFloorId(const safecrowd::domain::FacilityLayout2D& layout) {
-    if (!layout.floors.empty() && !layout.floors.front().id.empty()) {
-        return QString::fromStdString(layout.floors.front().id);
-    }
-    if (!layout.levelId.empty()) {
-        return QString::fromStdString(layout.levelId);
-    }
-    return {};
+QString defaultFloorIdText(const safecrowd::domain::FacilityLayout2D& layout) {
+    return QString::fromStdString(safecrowd::domain::defaultFloorId(layout));
 }
 
 QRectF groupMarkerBounds(const ScenarioCrowdPlacement& placement, const LayoutCanvasTransform& transform) {
@@ -1142,7 +1137,7 @@ ScenarioCanvasWidget::ScenarioCanvasWidget(
     QWidget* parent)
     : QWidget(parent),
       layout_(std::move(layout)) {
-    currentFloorId_ = defaultFloorId(layout_);
+    currentFloorId_ = defaultFloorIdText(layout_);
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
     setMinimumSize(520, 360);
@@ -1159,7 +1154,7 @@ ScenarioCanvasWidget::~ScenarioCanvasWidget() {
 
 void ScenarioCanvasWidget::setPlacements(std::vector<ScenarioCrowdPlacement> placements) {
     placements_ = std::move(placements);
-    const auto fallbackFloorId = currentFloorId_.isEmpty() ? defaultFloorId(layout_) : currentFloorId_;
+    const auto fallbackFloorId = currentFloorId_.isEmpty() ? defaultFloorIdText(layout_) : currentFloorId_;
     for (auto& placement : placements_) {
         if (placement.floorId.isEmpty()) {
             placement.floorId = fallbackFloorId;
@@ -1254,7 +1249,7 @@ void ScenarioCanvasWidget::activateLayoutElement(const QString& elementId) {
         }
         addEnvironmentHazardForZone(
             *it,
-            scenarioPolygonCenter(it->area),
+            polygonCenter(it->area),
             toolMode_ == ToolMode::FireHazard
                 ? safecrowd::domain::EnvironmentHazardKind::Fire
                 : safecrowd::domain::EnvironmentHazardKind::Smoke);

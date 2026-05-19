@@ -1,5 +1,7 @@
 #include "domain/ImportValidationService.h"
 
+#include "domain/GeometryQueries.h"
+
 #include <algorithm>
 #include <cmath>
 #include <string>
@@ -88,21 +90,6 @@ std::pair<double, double> projectedInterval(const LineSegment2D& segment, const 
     return {std::min(start, end), std::max(start, end)};
 }
 
-double distancePointToSegment(const Point2D& point, const LineSegment2D& segment) {
-    const auto direction = subtract(segment.end, segment.start);
-    const auto lengthSquared = dot(direction, direction);
-    if (lengthSquared <= kGeometryEpsilon) {
-        return distanceBetween(point, segment.start);
-    }
-
-    const auto t = std::clamp(dot(subtract(point, segment.start), direction) / lengthSquared, 0.0, 1.0);
-    const Point2D projected{
-        .x = segment.start.x + (direction.x * t),
-        .y = segment.start.y + (direction.y * t),
-    };
-    return distanceBetween(point, projected);
-}
-
 bool spansIntersect(const LineSegment2D& lhs, const LineSegment2D& rhs) {
     const auto lhsDirection = subtract(lhs.end, lhs.start);
     const auto rhsDirection = subtract(rhs.end, rhs.start);
@@ -179,47 +166,10 @@ bool spanContactsPolygonBoundary(const LineSegment2D& span, const Polygon2D& pol
     });
 }
 
-bool pointInRing(const Point2D& point, const std::vector<Point2D>& ring) {
-    if (ring.size() < 3) {
-        return false;
-    }
-
-    bool inside = false;
-    for (std::size_t index = 0, previous = ring.size() - 1; index < ring.size(); previous = index++) {
-        const auto& start = ring[previous];
-        const auto& end = ring[index];
-        const bool crossesY = (start.y > point.y) != (end.y > point.y);
-        if (!crossesY) {
-            continue;
-        }
-
-        const auto xAtPointY = start.x + ((point.y - start.y) * (end.x - start.x) / (end.y - start.y));
-        if (point.x <= xAtPointY + kGeometryEpsilon) {
-            inside = !inside;
-        }
-    }
-
-    return inside;
-}
-
-bool pointInPolygon(const Point2D& point, const Polygon2D& polygon) {
-    if (!pointInRing(point, polygon.outline)) {
-        return false;
-    }
-
-    for (const auto& hole : polygon.holes) {
-        if (pointInRing(point, hole)) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
 bool spanInteractsWithPolygon(const LineSegment2D& span, const Polygon2D& polygon) {
     return spanContactsPolygonBoundary(span, polygon)
-        || pointInPolygon(span.start, polygon)
-        || pointInPolygon(span.end, polygon);
+        || pointInPolygon(polygon, span.start)
+        || pointInPolygon(polygon, span.end);
 }
 
 const Zone2D* findZoneById(const FacilityLayout2D& layout, const std::string& zoneId) {

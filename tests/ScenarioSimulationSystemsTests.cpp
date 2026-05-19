@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "domain/AgentComponents.h"
+#include "domain/GeometryQueries.h"
 #include "domain/ScenarioSimulationInternal.h"
 #include "domain/ScenarioSimulationSystems.h"
 #include "engine/EngineRuntime.h"
@@ -452,7 +453,7 @@ safecrowd::domain::ScenarioAgentSeed doorRouteSeed(
     safecrowd::domain::LineSegment2D passage,
     double maxSpeed = 1.0,
     double closurePatienceSeconds = 0.0) {
-    const auto target = safecrowd::domain::simulation_internal::closestPointOnSegment(
+    const auto target = safecrowd::domain::closestPointOnSegment(
         start,
         passage.start,
         passage.end);

@@ -1,5 +1,7 @@
 #include "application/LayoutPreviewGeometry.h"
 
+#include "domain/GeometryQueries.h"
+
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -17,17 +19,11 @@ constexpr double kMinimumDoorWidth = 0.9;
 
 using Bounds2D = LayoutCanvasBounds;
 bool matchesFloor(const std::string& elementFloorId, const QString& floorId) {
-    return floorId.isEmpty() || elementFloorId.empty() || QString::fromStdString(elementFloorId) == floorId;
+    return safecrowd::domain::matchesFloor(elementFloorId, floorId.toStdString());
 }
 
 QString defaultFloorId(const safecrowd::domain::FacilityLayout2D& layout) {
-    if (!layout.floors.empty() && !layout.floors.front().id.empty()) {
-        return QString::fromStdString(layout.floors.front().id);
-    }
-    if (!layout.levelId.empty()) {
-        return QString::fromStdString(layout.levelId);
-    }
-    return "L1";
+    return QString::fromStdString(safecrowd::domain::defaultFloorId(layout, "L1"));
 }
 
 QString nextFloorId(const safecrowd::domain::FacilityLayout2D& layout) {
@@ -47,7 +43,7 @@ QString nextFloorId(const safecrowd::domain::FacilityLayout2D& layout) {
 }
 
 void ensureLayoutFloors(safecrowd::domain::FacilityLayout2D& layout) {
-    const auto floorId = defaultFloorId(layout);
+    const auto floorId = safecrowd::application::defaultFloorId(layout);
     if (layout.floors.empty()) {
         layout.floors.push_back({
             .id = floorId.toStdString(),

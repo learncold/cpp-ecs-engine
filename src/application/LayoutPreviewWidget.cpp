@@ -1248,6 +1248,29 @@ void LayoutPreviewWidget::mousePressEvent(QMouseEvent* event) {
         return;
     }
 
+    if (event->button() == Qt::LeftButton
+        && toolMode_ == ToolMode::Select
+        && importResult_.layout.has_value()
+        && hasSelection()) {
+        const auto bounds = collectBounds(importResult_, currentFloorId());
+        if (bounds.has_value()) {
+            const LayoutTransform transform(*bounds, previewViewport(rect()), camera_.zoom(), camera_.panOffset());
+            const bool clickedCurrentSelection = selectedElementContainsContextPoint(
+                *importResult_.layout,
+                event->position(),
+                transform,
+                currentFloorId(),
+                selectedZoneIds_,
+                selectedConnectionIds_,
+                selectedBarrierIds_);
+            if (clickedCurrentSelection) {
+                beginSelectionMove(event->position(), transform, *bounds);
+                event->accept();
+                return;
+            }
+        }
+    }
+
     if (camera_.beginPan(event)) {
         return;
     }
@@ -1300,23 +1323,6 @@ void LayoutPreviewWidget::mousePressEvent(QMouseEvent* event) {
             return;
         }
 
-        if (importResult_.layout.has_value() && hasSelection()) {
-            const LayoutTransform transform(*bounds, previewViewport(rect()), camera_.zoom(), camera_.panOffset());
-            const bool clickedCurrentSelection = selectedElementContainsContextPoint(
-                *importResult_.layout,
-                event->position(),
-                transform,
-                currentFloorId(),
-                selectedZoneIds_,
-                selectedConnectionIds_,
-                selectedBarrierIds_);
-            if (clickedCurrentSelection) {
-                beginSelectionMove(event->position(), transform, *bounds);
-                event->accept();
-                return;
-            }
-        }
-
         selectionDragging_ = true;
         selectionDragStart_ = event->position();
         selectionDragCurrent_ = selectionDragStart_;
@@ -1329,13 +1335,13 @@ void LayoutPreviewWidget::mousePressEvent(QMouseEvent* event) {
 }
 
 void LayoutPreviewWidget::mouseReleaseEvent(QMouseEvent* event) {
-    if (camera_.finishPan(event)) {
-        return;
-    }
-
     if (selectionMoveDragging_ && event->button() == Qt::LeftButton) {
         finishSelectionMove(event->position());
         event->accept();
+        return;
+    }
+
+    if (camera_.finishPan(event)) {
         return;
     }
 
@@ -1413,16 +1419,20 @@ void LayoutPreviewWidget::paintEvent(QPaintEvent* event) {
     painter.setRenderHint(QPainter::Antialiasing);
     painter.fillRect(rect(), QColor(250, 252, 255));
 
-    const auto bounds = collectBounds(importResult_, currentFloorId());
-    if (!bounds.has_value()) {
+    const auto liveBounds = collectBounds(importResult_, currentFloorId());
+    if (!liveBounds.has_value()) {
         painter.setPen(QPen(QColor(80, 80, 80), 1));
         painter.setFont(QFont("Segoe UI", 14, QFont::DemiBold));
         painter.drawText(rect(), Qt::AlignCenter, "No layout geometry imported");
         return;
     }
 
-    const QRectF viewport = previewViewport(rect());
-    const LayoutTransform transform(*bounds, viewport, camera_.zoom(), camera_.panOffset());
+    const bool freezeCamera = selectionMoveDragging_ && selectionMoveBounds_.valid();
+    const auto bounds = freezeCamera ? selectionMoveBounds_ : *liveBounds;
+    const QRectF viewport = freezeCamera ? selectionMoveViewport_ : previewViewport(rect());
+    const auto zoom = freezeCamera ? selectionMoveZoom_ : camera_.zoom();
+    const auto panOffset = freezeCamera ? selectionMovePanOffset_ : camera_.panOffset();
+    const LayoutTransform transform(bounds, viewport, zoom, panOffset);
 
     if (gridSnapEnabled_) {
         drawLayoutCanvasGrid(painter, viewport, transform, gridSpacingMeters_);
@@ -1591,7 +1601,7 @@ void LayoutPreviewWidget::paintEvent(QPaintEvent* event) {
 
     painter.setPen(QPen(QColor(115, 128, 140), 1));
     painter.setFont(QFont("Segoe UI", 9, QFont::Medium));
-    painter.drawText(viewport.adjusted(0, -10, 0, 0), Qt::AlignTop | Qt::AlignRight, QString("Zoom %1%").arg(static_cast<int>(camera_.zoom() * 100.0)));
+    painter.drawText(viewport.adjusted(0, -10, 0, 0), Qt::AlignTop | Qt::AlignRight, QString("Zoom %1%").arg(static_cast<int>(zoom * 100.0)));
     painter.drawText(viewport.adjusted(0, -10, 0, 0), Qt::AlignTop | Qt::AlignLeft, "Layout Preview");
 
 }
@@ -1602,6 +1612,11 @@ void LayoutPreviewWidget::resizeEvent(QResizeEvent* event) {
 }
 
 void LayoutPreviewWidget::wheelEvent(QWheelEvent* event) {
+    if (selectionMoveDragging_) {
+        event->accept();
+        return;
+    }
+
     if (switchFloorByWheel(event)) {
         return;
     }

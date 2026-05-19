@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 
 namespace safecrowd::domain {
@@ -33,21 +34,6 @@ PointBounds boundsOfPoints(const std::vector<Point2D>& points) {
         bounds.maxY = std::max(bounds.maxY, point.y);
     }
     return bounds;
-}
-
-Point2D polygonCenter(const Polygon2D& polygon) {
-    if (polygon.outline.empty()) {
-        return {};
-    }
-
-    double x = 0.0;
-    double y = 0.0;
-    for (const auto& point : polygon.outline) {
-        x += point.x;
-        y += point.y;
-    }
-    const auto count = static_cast<double>(polygon.outline.size());
-    return {.x = x / count, .y = y / count};
 }
 
 bool pointWithinSegmentBounds(
@@ -178,6 +164,35 @@ std::optional<Point2D> gridRepresentativePoint(const Polygon2D& polygon) {
 
 }  // namespace
 
+bool matchesFloor(std::string_view elementFloorId, std::string_view floorId) {
+    return floorId.empty() || elementFloorId.empty() || elementFloorId == floorId;
+}
+
+std::string defaultFloorId(const FacilityLayout2D& layout, std::string_view fallback) {
+    if (!layout.floors.empty() && !layout.floors.front().id.empty()) {
+        return layout.floors.front().id;
+    }
+    if (!layout.levelId.empty()) {
+        return layout.levelId;
+    }
+    return std::string{fallback};
+}
+
+Point2D polygonCenter(const Polygon2D& polygon) {
+    if (polygon.outline.empty()) {
+        return {};
+    }
+
+    double x = 0.0;
+    double y = 0.0;
+    for (const auto& point : polygon.outline) {
+        x += point.x;
+        y += point.y;
+    }
+    const auto count = static_cast<double>(polygon.outline.size());
+    return {.x = x / count, .y = y / count};
+}
+
 bool pointInRing(const std::vector<Point2D>& ring, const Point2D& point) {
     if (ring.size() < 3) {
         return false;
@@ -205,19 +220,31 @@ bool pointInPolygon(const Polygon2D& polygon, const Point2D& point) {
     });
 }
 
-double distancePointToSegment(const Point2D& point, const Point2D& start, const Point2D& end) {
+Point2D closestPointOnSegment(const Point2D& point, const Point2D& start, const Point2D& end) {
     const auto dx = end.x - start.x;
     const auto dy = end.y - start.y;
     const auto lengthSquared = (dx * dx) + (dy * dy);
     if (lengthSquared <= kGeometryEpsilon) {
-        return std::hypot(point.x - start.x, point.y - start.y);
+        return start;
     }
 
     const auto t = std::clamp(
         (((point.x - start.x) * dx) + ((point.y - start.y) * dy)) / lengthSquared,
         0.0,
         1.0);
-    return std::hypot(point.x - (start.x + (dx * t)), point.y - (start.y + (dy * t)));
+    return {
+        .x = start.x + (dx * t),
+        .y = start.y + (dy * t),
+    };
+}
+
+double distancePointToSegment(const Point2D& point, const Point2D& start, const Point2D& end) {
+    const auto closest = closestPointOnSegment(point, start, end);
+    return std::hypot(point.x - closest.x, point.y - closest.y);
+}
+
+double distancePointToSegment(const Point2D& point, const LineSegment2D& segment) {
+    return distancePointToSegment(point, segment.start, segment.end);
 }
 
 double distanceToPolygonBoundary(const Polygon2D& polygon, const Point2D& point) {
@@ -254,6 +281,58 @@ std::optional<Point2D> representativePointInPolygon(const Polygon2D& polygon) {
     return gridRepresentativePoint(polygon);
 }
 
+SpatialCell spatialCellFor(const Point2D& point, double cellSize) {
+    if (cellSize <= kGeometryEpsilon) {
+        return {};
+    }
+    return {
+        .x = static_cast<int>(std::floor(point.x / cellSize)),
+        .y = static_cast<int>(std::floor(point.y / cellSize)),
+    };
+}
+
+long long spatialKey(const SpatialCell& cell) {
+    const auto x = static_cast<std::uint64_t>(static_cast<std::uint32_t>(cell.x));
+    const auto y = static_cast<std::uint64_t>(static_cast<std::uint32_t>(cell.y));
+    return static_cast<long long>((x << 32) ^ y);
+}
+
+Point2D spatialCellMin(const SpatialCell& cell, double cellSize) {
+    return {
+        .x = static_cast<double>(cell.x) * cellSize,
+        .y = static_cast<double>(cell.y) * cellSize,
+    };
+}
+
+Point2D spatialCellMax(const SpatialCell& cell, double cellSize) {
+    const auto min = spatialCellMin(cell, cellSize);
+    return {
+        .x = min.x + cellSize,
+        .y = min.y + cellSize,
+    };
+}
+
+std::vector<SpatialCell> spatialCellsForBounds(const Point2D& minPoint, const Point2D& maxPoint, double cellSize) {
+    std::vector<SpatialCell> cells;
+    if (cellSize <= kGeometryEpsilon) {
+        return cells;
+    }
+
+    const auto minCell = spatialCellFor(minPoint, cellSize);
+    const auto maxCell = spatialCellFor(maxPoint, cellSize);
+    const auto minX = std::min(minCell.x, maxCell.x);
+    const auto maxX = std::max(minCell.x, maxCell.x);
+    const auto minY = std::min(minCell.y, maxCell.y);
+    const auto maxY = std::max(minCell.y, maxCell.y);
+    cells.reserve(static_cast<std::size_t>((maxX - minX + 1) * (maxY - minY + 1)));
+    for (int y = minY; y <= maxY; ++y) {
+        for (int x = minX; x <= maxX; ++x) {
+            cells.push_back({.x = x, .y = y});
+        }
+    }
+    return cells;
+}
+
 bool pointHasBarrierClearance(
     const FacilityLayout2D& layout,
     const Point2D& point,
@@ -264,7 +343,7 @@ bool pointHasBarrierClearance(
     }
 
     for (const auto& barrier : layout.barriers) {
-        if (!floorId.empty() && !barrier.floorId.empty() && barrier.floorId != floorId) {
+        if (!matchesFloor(barrier.floorId, floorId)) {
             continue;
         }
         if (!barrier.blocksMovement || barrier.geometry.vertices.size() < 2) {
@@ -293,7 +372,7 @@ bool pointInsideWalkableZoneWithClearance(
     const std::string& floorId,
     double clearance) {
     const auto zoneIt = std::find_if(layout.zones.begin(), layout.zones.end(), [&](const auto& zone) {
-        if (!floorId.empty() && !zone.floorId.empty() && zone.floorId != floorId) {
+        if (!matchesFloor(zone.floorId, floorId)) {
             return false;
         }
         return pointInPolygon(zone.area, point);

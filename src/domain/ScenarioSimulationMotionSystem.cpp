@@ -115,7 +115,7 @@ public:
             const auto& floorLayout = cachedLayoutForFloor(layoutCache, route.currentFloorId);
             const auto* destinationZone = findZone(floorLayout, route.destinationZoneId);
             if (destinationZone != nullptr
-                && simulation_internal::pointInRing(destinationZone->area.outline, position.value)) {
+                && pointInRing(destinationZone->area.outline, position.value)) {
                 status.evacuated = true;
                 status.completionTimeSeconds = clock.elapsedSeconds;
                 velocity.value = {};
@@ -846,7 +846,7 @@ private:
             if (dot(movement, *normal) < -kGeometryEpsilon) {
                 return false;
             }
-            return simulation_internal::pointInRing(endpointZone->area.outline, candidate)
+            return pointInRing(endpointZone->area.outline, candidate)
                 && !movementCrossesBarrier(layout, from, candidate);
         };
 
@@ -971,7 +971,7 @@ private:
         }
 
         auto validLanding = [&](const Point2D& candidate) {
-            return simulation_internal::pointInRing(toZone->area.outline, candidate)
+            return pointInRing(toZone->area.outline, candidate)
                 && pointHasBarrierClearance(targetLayout, candidate, clearance);
         };
 

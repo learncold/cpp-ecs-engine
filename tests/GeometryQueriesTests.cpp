@@ -2,6 +2,8 @@
 
 #include "domain/GeometryQueries.h"
 
+#include <cstddef>
+
 namespace {
 
 safecrowd::domain::Polygon2D rectangle(double minX, double minY, double maxX, double maxY) {
@@ -29,6 +31,71 @@ SC_TEST(GeometryQueries_PointInPolygonHandlesRectangleAndHole) {
     SC_EXPECT_TRUE(safecrowd::domain::pointInPolygon(polygon, {.x = 2.0, .y = 2.0}));
     SC_EXPECT_TRUE(!safecrowd::domain::pointInPolygon(polygon, {.x = 11.0, .y = 2.0}));
     SC_EXPECT_TRUE(!safecrowd::domain::pointInPolygon(polygon, {.x = 5.0, .y = 5.0}));
+}
+
+SC_TEST(GeometryQueries_MatchesFloorUsesEmptyFloorAsWildcard) {
+    SC_EXPECT_TRUE(safecrowd::domain::matchesFloor("", ""));
+    SC_EXPECT_TRUE(safecrowd::domain::matchesFloor("", "L1"));
+    SC_EXPECT_TRUE(safecrowd::domain::matchesFloor("L1", ""));
+    SC_EXPECT_TRUE(safecrowd::domain::matchesFloor("L1", "L1"));
+    SC_EXPECT_TRUE(!safecrowd::domain::matchesFloor("L1", "L2"));
+}
+
+SC_TEST(GeometryQueries_DefaultFloorIdUsesFloorThenLevelThenFallback) {
+    safecrowd::domain::FacilityLayout2D layout;
+    SC_EXPECT_EQ(safecrowd::domain::defaultFloorId(layout), "");
+    SC_EXPECT_EQ(safecrowd::domain::defaultFloorId(layout, "L1"), "L1");
+
+    layout.levelId = "LevelA";
+    SC_EXPECT_EQ(safecrowd::domain::defaultFloorId(layout, "L1"), "LevelA");
+
+    layout.floors.push_back({.id = "FloorA", .label = "Floor A"});
+    SC_EXPECT_EQ(safecrowd::domain::defaultFloorId(layout, "L1"), "FloorA");
+}
+
+SC_TEST(GeometryQueries_PolygonCenterAndSegmentHelpers) {
+    const auto center = safecrowd::domain::polygonCenter(rectangle(0.0, 0.0, 4.0, 2.0));
+    SC_EXPECT_NEAR(center.x, 2.0, 1e-9);
+    SC_EXPECT_NEAR(center.y, 1.0, 1e-9);
+
+    const safecrowd::domain::Point2D point{.x = 2.0, .y = 3.0};
+    const safecrowd::domain::Point2D start{.x = 0.0, .y = 0.0};
+    const safecrowd::domain::Point2D end{.x = 4.0, .y = 0.0};
+    const auto closest = safecrowd::domain::closestPointOnSegment(point, start, end);
+    SC_EXPECT_NEAR(closest.x, 2.0, 1e-9);
+    SC_EXPECT_NEAR(closest.y, 0.0, 1e-9);
+    SC_EXPECT_NEAR(safecrowd::domain::distancePointToSegment(point, start, end), 3.0, 1e-9);
+
+    const safecrowd::domain::LineSegment2D segment{.start = start, .end = end};
+    SC_EXPECT_NEAR(safecrowd::domain::distancePointToSegment(point, segment), 3.0, 1e-9);
+}
+
+SC_TEST(GeometryQueries_SpatialCellHelpers) {
+    const auto cell = safecrowd::domain::spatialCellFor({.x = 2.4, .y = -0.1}, 1.0);
+    SC_EXPECT_EQ(cell.x, 2);
+    SC_EXPECT_EQ(cell.y, -1);
+
+    const auto min = safecrowd::domain::spatialCellMin(cell, 1.5);
+    const auto max = safecrowd::domain::spatialCellMax(cell, 1.5);
+    SC_EXPECT_NEAR(min.x, 3.0, 1e-9);
+    SC_EXPECT_NEAR(min.y, -1.5, 1e-9);
+    SC_EXPECT_NEAR(max.x, 4.5, 1e-9);
+    SC_EXPECT_NEAR(max.y, 0.0, 1e-9);
+
+    const auto sameCell = safecrowd::domain::SpatialCell{.x = 2, .y = -1};
+    const auto otherCell = safecrowd::domain::SpatialCell{.x = 2, .y = 0};
+    SC_EXPECT_EQ(safecrowd::domain::spatialKey(cell), safecrowd::domain::spatialKey(sameCell));
+    SC_EXPECT_TRUE(safecrowd::domain::spatialKey(cell) != safecrowd::domain::spatialKey(otherCell));
+
+    const auto cells = safecrowd::domain::spatialCellsForBounds(
+        {.x = 0.1, .y = 0.1},
+        {.x = 2.1, .y = 1.1},
+        1.0);
+    SC_EXPECT_EQ(cells.size(), static_cast<std::size_t>(6));
+    SC_EXPECT_EQ(cells.front().x, 0);
+    SC_EXPECT_EQ(cells.front().y, 0);
+    SC_EXPECT_EQ(cells.back().x, 2);
+    SC_EXPECT_EQ(cells.back().y, 1);
 }
 
 SC_TEST(GeometryQueries_DistanceToPolygonBoundaryIncludesHoles) {

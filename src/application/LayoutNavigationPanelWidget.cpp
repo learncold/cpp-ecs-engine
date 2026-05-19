@@ -22,14 +22,11 @@ const QColor kExitAccentColor("#2d8f5b");
 const QColor kDoorAccentColor("#ff8c00");
 
 using safecrowd::domain::distanceToPolygonBoundary;
+using safecrowd::domain::matchesFloor;
 using safecrowd::domain::pointInPolygon;
 
 QString floorActionId(const std::string& floorId) {
     return QString("floor:%1").arg(QString::fromStdString(floorId));
-}
-
-bool matchesFloor(const std::string& elementFloorId, const std::string& floorId) {
-    return floorId.empty() || elementFloorId.empty() || elementFloorId == floorId;
 }
 
 QIcon treeIcon(const QString& resourcePath, const QColor& color) {

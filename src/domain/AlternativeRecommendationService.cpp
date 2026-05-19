@@ -611,11 +611,10 @@ struct FrameCounterflowObservation {
 
 struct CounterflowCellKey {
     std::string floorId{};
-    int x{0};
-    int y{0};
+    SpatialCell cell{};
 
     bool operator==(const CounterflowCellKey& other) const noexcept {
-        return floorId == other.floorId && x == other.x && y == other.y;
+        return floorId == other.floorId && cell.x == other.cell.x && cell.y == other.cell.y;
     }
 };
 
@@ -625,8 +624,7 @@ struct CounterflowCellKeyHash {
         const auto combine = [&](std::size_t value) {
             seed ^= value + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
         };
-        combine(std::hash<int>{}(key.x));
-        combine(std::hash<int>{}(key.y));
+        combine(std::hash<long long>{}(spatialKey(key.cell)));
         return seed;
     }
 };
@@ -640,8 +638,7 @@ struct CounterflowCellBucket {
 CounterflowCellKey counterflowCellKey(const SimulationAgentFrame& agent) {
     return {
         .floorId = agent.floorId,
-        .x = static_cast<int>(std::floor(agent.position.x / kCounterflowCellSizeMeters)),
-        .y = static_cast<int>(std::floor(agent.position.y / kCounterflowCellSizeMeters)),
+        .cell = spatialCellFor(agent.position, kCounterflowCellSizeMeters),
     };
 }
 
@@ -681,8 +678,7 @@ CounterflowCellBucket aggregateCounterflowNeighborhood(
         for (int dy = -1; dy <= 1; ++dy) {
             const CounterflowCellKey key{
                 .floorId = center.floorId,
-                .x = center.x + dx,
-                .y = center.y + dy,
+                .cell = {.x = center.cell.x + dx, .y = center.cell.y + dy},
             };
             const auto it = cells.find(key);
             if (it == cells.end()) {

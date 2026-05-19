@@ -17,6 +17,7 @@
 #include <QStandardPaths>
 #include <QStorageInfo>
 
+#include "domain/GeometryQueries.h"
 #include "domain/ImportValidationService.h"
 
 namespace safecrowd::application {
@@ -625,16 +626,6 @@ safecrowd::domain::Floor2D floorFromJson(const QJsonObject& object) {
     };
 }
 
-std::string defaultFloorId(const safecrowd::domain::FacilityLayout2D& layout) {
-    if (!layout.floors.empty() && !layout.floors.front().id.empty()) {
-        return layout.floors.front().id;
-    }
-    if (!layout.levelId.empty()) {
-        return layout.levelId;
-    }
-    return "L1";
-}
-
 void normalizeFloors(safecrowd::domain::FacilityLayout2D& layout) {
     if (layout.floors.empty()) {
         const auto floorId = layout.levelId.empty() ? std::string("L1") : layout.levelId;
@@ -644,7 +635,7 @@ void normalizeFloors(safecrowd::domain::FacilityLayout2D& layout) {
         });
     }
 
-    const auto floorId = defaultFloorId(layout);
+    const auto floorId = safecrowd::domain::defaultFloorId(layout, "L1");
     if (layout.levelId.empty()) {
         layout.levelId = floorId;
     }
