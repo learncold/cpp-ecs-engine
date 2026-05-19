@@ -1174,7 +1174,7 @@ ScenarioCanvasWidget::ScenarioCanvasWidget(
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
     setMinimumSize(520, 360);
-    setStyleSheet("QWidget { background: #f4f7fb; }");
+    ui::polishCanvasSurface(this);
     QCoreApplication::instance()->installEventFilter(this);
     setupToolbars();
 }
@@ -3395,22 +3395,14 @@ void ScenarioCanvasWidget::setToolMode(ToolMode mode) {
 }
 
 void ScenarioCanvasWidget::setupToolbars() {
-    const QString frameStyle =
-        "QFrame { background: rgba(255, 255, 255, 245); border: 1px solid #d7e0ea; border-radius: 0px; }"
-        "QToolButton { background: transparent; border: 0; border-radius: 0px; }"
-        "QToolButton:hover { background: #eef3f8; }"
-        "QToolButton:checked { background: #dce9f9; }";
-
     topToolbar_ = new QFrame(this);
-    topToolbar_->setStyleSheet(frameStyle);
+    ui::polishCanvasToolbar(topToolbar_);
     auto* topLayout = new QHBoxLayout(topToolbar_);
     topLayout->setContentsMargins(0, 0, 0, 0);
     topLayout->setSpacing(0);
 
     propertyPanel_ = new QFrame(this);
-    propertyPanel_->setStyleSheet(
-        "QFrame { background: rgba(255, 255, 255, 245); border: 1px solid #d7e0ea; border-radius: 0px; }"
-        "QSpinBox, QComboBox { min-height: 24px; padding: 0 8px; border: 1px solid #c9d5e2; border-radius: 0px; background: #ffffff; color: #16202b; }");
+    ui::polishScenarioCanvasPropertyPanel(propertyPanel_);
     auto* propertyLayout = new QHBoxLayout(propertyPanel_);
     propertyLayout->setContentsMargins(12, 0, 16, 0);
     propertyLayout->setSpacing(12);
@@ -3438,7 +3430,7 @@ void ScenarioCanvasWidget::setupToolbars() {
     topLayout->addStretch(1);
 
     groupCountLabel_ = new QLabel("Group count", propertyPanel_);
-    groupCountLabel_->setStyleSheet("QLabel { color: #4f5d6b; background: transparent; border: 0; }");
+    ui::polishCanvasInlineLabel(groupCountLabel_);
     propertyLayout->addWidget(groupCountLabel_);
     groupCountSpinBox_ = new QSpinBox(propertyPanel_);
     groupCountSpinBox_->setRange(1, 5000);
@@ -3446,7 +3438,7 @@ void ScenarioCanvasWidget::setupToolbars() {
     groupCountSpinBox_->setSuffix(" people");
     propertyLayout->addWidget(groupCountSpinBox_);
     groupDistributionLabel_ = new QLabel("Placement", propertyPanel_);
-    groupDistributionLabel_->setStyleSheet("QLabel { color: #4f5d6b; background: transparent; border: 0; }");
+    ui::polishCanvasInlineLabel(groupDistributionLabel_);
     propertyLayout->addWidget(groupDistributionLabel_);
     groupDistributionComboBox_ = new QComboBox(propertyPanel_);
     groupDistributionComboBox_->addItem("Uniform", static_cast<int>(safecrowd::domain::InitialPlacementDistribution::Uniform));

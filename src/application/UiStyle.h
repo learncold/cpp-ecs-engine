@@ -29,7 +29,19 @@ QString ghostRowStyleSheet();
 QString severityTextStyleSheet(const QColor& color);
 QString mutedTextStyleSheet();
 QString subtleTextStyleSheet();
+QString canvasSurfaceStyleSheet();
+QString canvasToolbarStyleSheet();
+QString layoutPreviewPropertyPanelStyleSheet();
+QString scenarioCanvasPropertyPanelStyleSheet();
+QString canvasInlineLabelStyleSheet();
+QString simulationFloorSelectorStyleSheet();
 
+void polishCanvasSurface(QWidget* widget);
+void polishCanvasToolbar(QWidget* widget);
+void polishLayoutPreviewPropertyPanel(QWidget* widget);
+void polishScenarioCanvasPropertyPanel(QWidget* widget);
+void polishCanvasInlineLabel(QWidget* widget);
+void polishSimulationFloorSelector(QWidget* widget);
 void polishScrollArea(QWidget* widget);
 
 }  // namespace safecrowd::application::ui

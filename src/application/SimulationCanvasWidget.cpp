@@ -1,5 +1,6 @@
 #include "application/SimulationCanvasWidget.h"
 
+#include "application/UiStyle.h"
 #include "domain/GeometryQueries.h"
 
 #include <algorithm>
@@ -516,7 +517,7 @@ SimulationCanvasWidget::SimulationCanvasWidget(safecrowd::domain::FacilityLayout
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
     setMinimumSize(520, 360);
-    setStyleSheet("QWidget { background: #f4f7fb; }");
+    ui::polishCanvasSurface(this);
     currentFloorId_ = safecrowd::domain::defaultFloorId(layout_);
     layoutBounds_ = collectLayoutCanvasBounds(layout_, currentFloorId_);
     QCoreApplication::instance()->installEventFilter(this);
@@ -1530,21 +1531,7 @@ void SimulationCanvasWidget::setupFloorSelector() {
 
     floorSelectorFrame_ = new QFrame(this);
     floorSelectorFrame_->setObjectName("simulationFloorSelector");
-    floorSelectorFrame_->setStyleSheet(
-        "QFrame#simulationFloorSelector {"
-        " background: rgba(255, 255, 255, 238);"
-        " border: 1px solid #d8e2ee;"
-        " border-radius: 10px;"
-        "}"
-        "QLabel { color: #4f5d6b; background: transparent; font-size: 12px; }"
-        "QComboBox {"
-        " background: #ffffff;"
-        " border: 1px solid #cad6e3;"
-        " border-radius: 7px;"
-        " padding: 4px 24px 4px 8px;"
-        " color: #16202b;"
-        " min-width: 116px;"
-        "}");
+    ui::polishSimulationFloorSelector(floorSelectorFrame_);
 
     auto* layout = new QHBoxLayout(floorSelectorFrame_);
     layout->setContentsMargins(10, 8, 10, 8);

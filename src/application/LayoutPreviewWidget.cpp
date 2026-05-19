@@ -12,6 +12,7 @@
 #include "application/LayoutPreviewGeometry.h"
 #include "application/LayoutPreviewEditing.h"
 #include "application/ToolIconResources.h"
+#include "application/UiStyle.h"
 
 #include <QCoreApplication>
 #include <QCheckBox>
@@ -2702,36 +2703,23 @@ void LayoutPreviewWidget::showSelectionContextMenu(const QPoint& globalPosition)
 }
 
 void LayoutPreviewWidget::setupToolbars() {
-    const QString frameStyle =
-        "QFrame { background: rgba(255, 255, 255, 245); border: 1px solid #d7e0ea; border-radius: 0px; }"
-        "QToolButton { background: transparent; border: 0; border-radius: 0px; }"
-        "QToolButton:hover { background: #eef3f8; }"
-        "QToolButton:checked { background: #dce9f9; }"
-        "QLabel { color: #607086; border: 0; padding-left: 10px; }"
-        "QComboBox { min-height: 28px; padding: 0 8px; border: 1px solid #c9d5e2; border-radius: 0px; background: #ffffff; color: #16202b; }";
-
     toolbarCorner_ = new QFrame(this);
-    toolbarCorner_->setStyleSheet(frameStyle);
+    ui::polishCanvasToolbar(toolbarCorner_);
 
     topToolbar_ = new QFrame(this);
-    topToolbar_->setStyleSheet(frameStyle);
+    ui::polishCanvasToolbar(topToolbar_);
     auto* topLayout = new QHBoxLayout(topToolbar_);
     topLayout->setContentsMargins(0, 0, 0, 0);
     topLayout->setSpacing(0);
 
     sideToolbar_ = new QFrame(this);
-    sideToolbar_->setStyleSheet(frameStyle);
+    ui::polishCanvasToolbar(sideToolbar_);
     auto* sideLayout = new QVBoxLayout(sideToolbar_);
     sideLayout->setContentsMargins(0, 0, 0, 0);
     sideLayout->setSpacing(0);
 
     propertyPanel_ = new QFrame(this);
-    propertyPanel_->setStyleSheet(
-        "QFrame { background: rgba(255, 255, 255, 245); border: 1px solid #d7e0ea; border-radius: 0px; }"
-        "QDoubleSpinBox { min-height: 24px; padding: 0 8px; border: 1px solid #c9d5e2; border-radius: 0px; background: #ffffff; color: #16202b; }"
-        "QComboBox { min-height: 24px; padding: 0 8px; border: 1px solid #c9d5e2; border-radius: 0px; background: #ffffff; color: #16202b; }"
-        "QCheckBox { color: #16202b; spacing: 8px; }"
-        "QCheckBox::indicator { width: 16px; height: 16px; }");
+    ui::polishLayoutPreviewPropertyPanel(propertyPanel_);
     auto* propertyLayout = new QHBoxLayout(propertyPanel_);
     propertyLayout->setContentsMargins(12, 0, 16, 0);
     propertyLayout->setSpacing(14);

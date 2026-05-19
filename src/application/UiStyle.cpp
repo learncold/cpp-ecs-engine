@@ -263,6 +263,97 @@ QString subtleTextStyleSheet() {
     return QString("QLabel { color: %1; }").arg(kTextMuted);
 }
 
+QString canvasSurfaceStyleSheet() {
+    return QString("QWidget { background: %1; }").arg(kSurfaceBase);
+}
+
+QString canvasToolbarStyleSheet() {
+    return QString(
+        "QFrame { background: rgba(255, 255, 255, 245); border: 1px solid %1; border-radius: 0px; }"
+        "QToolButton { background: transparent; border: 0; border-radius: 0px; }"
+        "QToolButton:hover { background: %2; }"
+        "QToolButton:checked { background: #dce9f9; }"
+        "QLabel { color: #607086; border: 0; padding-left: 10px; }"
+        "QComboBox { min-height: 28px; padding: 0 8px; border: 1px solid #c9d5e2; border-radius: 0px; background: %3; color: %4; }"
+    ).arg(kBorderSoft, kSurfaceHover, kSurfaceCard, kTextPrimary);
+}
+
+QString layoutPreviewPropertyPanelStyleSheet() {
+    return QString(
+        "QFrame { background: rgba(255, 255, 255, 245); border: 1px solid %1; border-radius: 0px; }"
+        "QDoubleSpinBox { min-height: 24px; padding: 0 8px; border: 1px solid #c9d5e2; border-radius: 0px; background: %2; color: %3; }"
+        "QComboBox { min-height: 24px; padding: 0 8px; border: 1px solid #c9d5e2; border-radius: 0px; background: %2; color: %3; }"
+        "QCheckBox { color: %3; spacing: 8px; }"
+        "QCheckBox::indicator { width: 16px; height: 16px; }"
+    ).arg(kBorderSoft, kSurfaceCard, kTextPrimary);
+}
+
+QString scenarioCanvasPropertyPanelStyleSheet() {
+    return QString(
+        "QFrame { background: rgba(255, 255, 255, 245); border: 1px solid %1; border-radius: 0px; }"
+        "QSpinBox, QComboBox { min-height: 24px; padding: 0 8px; border: 1px solid #c9d5e2; border-radius: 0px; background: %2; color: %3; }"
+    ).arg(kBorderSoft, kSurfaceCard, kTextPrimary);
+}
+
+QString canvasInlineLabelStyleSheet() {
+    return QString("QLabel { color: %1; background: transparent; border: 0; }").arg(kTextSecondary);
+}
+
+QString simulationFloorSelectorStyleSheet() {
+    return QString(
+        "QFrame#simulationFloorSelector {"
+        " background: rgba(255, 255, 255, 238);"
+        " border: 1px solid #d8e2ee;"
+        " border-radius: 10px;"
+        "}"
+        "QLabel { color: %1; background: transparent; font-size: 12px; }"
+        "QComboBox {"
+        " background: %2;"
+        " border: 1px solid #cad6e3;"
+        " border-radius: 7px;"
+        " padding: 4px 24px 4px 8px;"
+        " color: %3;"
+        " min-width: 116px;"
+        "}"
+    ).arg(kTextSecondary, kSurfaceCard, kTextPrimary);
+}
+
+void polishCanvasSurface(QWidget* widget) {
+    if (widget != nullptr) {
+        widget->setStyleSheet(canvasSurfaceStyleSheet());
+    }
+}
+
+void polishCanvasToolbar(QWidget* widget) {
+    if (widget != nullptr) {
+        widget->setStyleSheet(canvasToolbarStyleSheet());
+    }
+}
+
+void polishLayoutPreviewPropertyPanel(QWidget* widget) {
+    if (widget != nullptr) {
+        widget->setStyleSheet(layoutPreviewPropertyPanelStyleSheet());
+    }
+}
+
+void polishScenarioCanvasPropertyPanel(QWidget* widget) {
+    if (widget != nullptr) {
+        widget->setStyleSheet(scenarioCanvasPropertyPanelStyleSheet());
+    }
+}
+
+void polishCanvasInlineLabel(QWidget* widget) {
+    if (widget != nullptr) {
+        widget->setStyleSheet(canvasInlineLabelStyleSheet());
+    }
+}
+
+void polishSimulationFloorSelector(QWidget* widget) {
+    if (widget != nullptr) {
+        widget->setStyleSheet(simulationFloorSelectorStyleSheet());
+    }
+}
+
 void polishScrollArea(QWidget* widget) {
     if (auto* scrollArea = qobject_cast<QScrollArea*>(widget)) {
         scrollArea->setStyleSheet("QScrollArea { background: transparent; border: 0; }");

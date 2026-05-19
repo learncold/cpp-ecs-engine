@@ -190,7 +190,12 @@ if (BUILD_TESTING)
                 tests/ProjectPersistenceTests.cpp
                 src/application/LayoutCanvasRendering.cpp
                 src/application/LayoutCanvasSnapping.cpp
+                src/application/LayoutReviewCodec.cpp
+                src/application/ProjectMetadataCodec.cpp
                 src/application/ProjectPersistence.cpp
+                src/application/ProjectPersistenceJson.cpp
+                src/application/ResultArtifactsCodec.cpp
+                src/application/WorkspaceStateCodec.cpp
         )
 
         target_link_libraries(safecrowd_tests
@@ -214,6 +219,7 @@ if (SAFECROWD_BUILD_APP)
         src/application/LayoutPreviewEditing.h
         src/application/LayoutPreviewGeometry.h
         src/application/LayoutPreviewWidget.h
+        src/application/LayoutReviewCodec.h
         src/application/LayoutReviewWidget.h
         src/application/MainWindow.h
         src/application/NavigationTreeWidget.h
@@ -221,9 +227,11 @@ if (SAFECROWD_BUILD_APP)
         src/application/NewProjectWidget.h
         src/application/ProjectListWidget.h
         src/application/ProjectMetadata.h
+        src/application/ProjectMetadataCodec.h
         src/application/ProjectNavigatorActions.h
         src/application/ProjectNavigatorWidget.h
         src/application/ProjectPersistence.h
+        src/application/ProjectPersistenceJson.h
         src/application/ScenarioAuthoringWidget.h
         src/application/ScenarioBatchResultWidget.h
         src/application/ScenarioCanvasAuthoringRules.h
@@ -234,6 +242,8 @@ if (SAFECROWD_BUILD_APP)
         src/application/SimulationCanvasWidget.h
         src/application/ToolIconResources.h
         src/application/UiStyle.h
+        src/application/ResultArtifactsCodec.h
+        src/application/WorkspaceStateCodec.h
         src/application/WorkspaceShell.h
         src/application/IssueCardWidget.cpp
         src/application/LayoutCanvasRendering.cpp
@@ -242,15 +252,19 @@ if (SAFECROWD_BUILD_APP)
         src/application/LayoutPreviewEditing.cpp
         src/application/LayoutPreviewGeometry.cpp
         src/application/LayoutPreviewWidget.cpp
+        src/application/LayoutReviewCodec.cpp
         src/application/LayoutReviewWidget.cpp
         src/application/main.cpp
         src/application/MainWindow.cpp
         src/application/NavigationTreeWidget.cpp
         src/application/NewProjectWidget.cpp
         src/application/ProjectListWidget.cpp
+        src/application/ProjectMetadataCodec.cpp
         src/application/ProjectNavigatorActions.cpp
         src/application/ProjectNavigatorWidget.cpp
         src/application/ProjectPersistence.cpp
+        src/application/ProjectPersistenceJson.cpp
+        src/application/ResultArtifactsCodec.cpp
         src/application/ScenarioAuthoringWidget.cpp
         src/application/ScenarioBatchResultWidget.cpp
         src/application/ScenarioCanvasAuthoringRules.cpp
@@ -262,6 +276,7 @@ if (SAFECROWD_BUILD_APP)
         src/application/ToolIconResources.cpp
         src/application/ToolIcons.qrc
         src/application/UiStyle.cpp
+        src/application/WorkspaceStateCodec.cpp
         src/application/WorkspaceShell.cpp
     )
 

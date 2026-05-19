@@ -64,6 +64,7 @@ Application layer file roles:
 - `LayoutPreviewEditing.h/.cpp`: mutation commands for layout preview editing, including create/delete/floor operations.
 - `LayoutPreviewGeometry.h/.cpp`: reusable geometry, floor/id, polygon, barrier, door, stair, and zone-neighbor helpers for layout preview editing.
 - `LayoutPreviewWidget.h/.cpp`: Qt canvas widget for layout preview interaction, selection, painting, camera, toolbar, and edit command orchestration.
+- `LayoutReviewCodec.h/.cpp`: JSON codec for layout review state, facility layouts, import artifacts, trace refs, and import artifact version handling.
 - `LayoutReviewWidget.h/.cpp`: layout review screen that combines preview, navigation, and issue context.
 - `main.cpp`: Qt application entry point.
 - `MainWindow.h/.cpp`: top-level application window and primary screen wiring.
@@ -72,10 +73,13 @@ Application layer file roles:
 - `NewProjectWidget.h/.cpp`: new-project creation UI.
 - `ProjectListWidget.h/.cpp`: project list and project selection UI.
 - `ProjectMetadata.h`: lightweight project metadata model used by the app shell.
+- `ProjectMetadataCodec.h/.cpp`: JSON codec for project metadata and recent-project index entries.
 - `ProjectNavigatorActions.h/.cpp`: app navigation action definitions and helpers.
 - `ProjectNavigatorWidget.h/.cpp`: project navigation sidebar/widget implementation.
-- `ProjectPersistence.h/.cpp`: application persistence adapter for projects, layouts, and scenarios.
+- `ProjectPersistence.h/.cpp`: application persistence adapter for project file I/O, folder safety checks, and codec orchestration.
+- `ProjectPersistenceJson.h/.cpp`: low-level JSON helpers shared by persistence codecs.
 - `ProjectWorkspaceState.h`: application-level workspace state snapshot.
+- `ResultArtifactsCodec.h/.cpp`: JSON codec for simulation frames, risk snapshots, density metrics, and scenario result artifacts.
 - `ScenarioAuthoringWidget.h/.cpp`: scenario authoring screen that wires scenario canvas and controls.
 - `ScenarioBatchResultWidget.h/.cpp`: UI for displaying batch scenario run results.
 - `ScenarioCanvasAuthoringRules.h/.cpp`: app-internal scenario canvas authoring validation and draft creation/move rules.
@@ -87,6 +91,7 @@ Application layer file roles:
 - `ToolIconResources.h/.cpp`: helper functions for loading and recoloring tool icons.
 - `ToolIcons.qrc`: Qt resource collection for tool icon assets.
 - `UiStyle.h/.cpp`: shared app UI tokens and widget styling helpers.
+- `WorkspaceStateCodec.h/.cpp`: JSON codec for scenario drafts, saved authoring/result state, workspace state, and workspace version handling.
 - `WorkspaceShell.h/.cpp`: main workspace shell composition and navigation host.
 
 Domain layer file roles:
