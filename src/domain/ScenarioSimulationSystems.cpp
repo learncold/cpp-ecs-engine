@@ -969,14 +969,32 @@ void ScenarioResultArtifactsSystem::update(engine::EngineWorld& world, const eng
         ? &resources.get<ScenarioLayoutCacheResource>().layout
         : nullptr;
 
+    const auto entities = query.view<EvacuationStatus>();
     std::size_t totalAgentCount = 0;
     std::size_t evacuatedCount = 0;
+    for (const auto entity : entities) {
+        ++totalAgentCount;
+        if (query.get<EvacuationStatus>(entity).evacuated) {
+            ++evacuatedCount;
+        }
+    }
+
+    const auto shouldRecordSample =
+        result.artifacts.evacuationProgress.empty()
+        || evacuatedCount != result.lastRecordedEvacuatedCount
+        || elapsedSeconds + 1e-9 >= result.nextSampleTimeSeconds
+        || complete;
+    if (!shouldRecordSample) {
+        return;
+    }
+
     std::vector<double> completionTimes;
     std::unordered_map<std::string, ExitUsageMetric> exitUsageByZone;
     std::unordered_map<std::string, ZoneCompletionMetric> zoneCompletionByZone;
     std::unordered_map<std::string, PlacementCompletionMetric> placementCompletionById;
-    const auto entities = query.view<EvacuationStatus>();
     completionTimes.reserve(entities.size());
+    totalAgentCount = 0;
+    evacuatedCount = 0;
     for (const auto entity : entities) {
         ++totalAgentCount;
         const auto& status = query.get<EvacuationStatus>(entity);
@@ -1272,7 +1290,7 @@ void ScenarioResultArtifactsSystem::update(engine::EngineWorld& world, const eng
         pressureSummary.peakCriticalAgentCount =
             std::max(pressureSummary.peakCriticalAgentCount, metrics.peakSnapshot.criticalPressureAgentCount);
 
-        for (const auto& hotspot : metrics.snapshot.pressureHotspots) {
+        for (const auto& hotspot : metrics.peakSnapshot.pressureHotspots) {
             const DensityCellAddress address{
                 .cell = spatialCellFor(hotspot.center, kScenarioHotspotCellSize),
                 .floorId = hotspot.floorId,
@@ -1283,14 +1301,14 @@ void ScenarioResultArtifactsSystem::update(engine::EngineWorld& world, const eng
             }
         }
 
-        for (const auto& agent : metrics.snapshot.pressureAgents) {
+        for (const auto& agent : metrics.peakSnapshot.pressureAgents) {
             auto [peakAgentIt, inserted] = result.peakPressureAgentsById.try_emplace(agent.agentId, agent);
             if (!inserted && isPressureAgentWorse(agent, peakAgentIt->second)) {
                 peakAgentIt->second = agent;
             }
         }
 
-        for (const auto& event : metrics.snapshot.criticalPressureEvents) {
+        for (const auto& event : metrics.peakSnapshot.criticalPressureEvents) {
             const DensityCellAddress address{
                 .cell = spatialCellFor(event.center, kScenarioHotspotCellSize),
                 .floorId = event.floorId,
@@ -1367,15 +1385,6 @@ void ScenarioResultArtifactsSystem::update(engine::EngineWorld& world, const eng
                 }
                 return lhs.hazardId < rhs.hazardId;
             });
-    }
-
-    const auto shouldRecordSample =
-        result.artifacts.evacuationProgress.empty()
-        || evacuatedCount != result.lastRecordedEvacuatedCount
-        || elapsedSeconds + 1e-9 >= result.nextSampleTimeSeconds
-        || complete;
-    if (!shouldRecordSample) {
-        return;
     }
 
     result.artifacts.evacuationProgress.push_back({

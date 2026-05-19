@@ -1538,10 +1538,12 @@ private:
         engine::WorldQuery& query,
         const std::vector<engine::Entity>& entities,
         const ScenarioLayoutCacheResource& layoutCache) const {
+        std::unordered_set<unsigned long long> checkedPairs;
+        checkedPairs.reserve(entities.size() * 4);
         for (int iteration = 0; iteration < kOverlapRelaxationIterations; ++iteration) {
             const auto spatialIndex = buildAgentSpatialIndex(query, entities, 1.0);
-            std::unordered_set<unsigned long long> checkedPairs;
-            checkedPairs.reserve(entities.size() * 4);
+            checkedPairs.clear();
+            bool resolvedAnyOverlap = false;
             for (const auto first : entities) {
                 auto& firstStatus = query.get<EvacuationStatus>(first);
                 if (firstStatus.evacuated) {
@@ -1592,19 +1594,28 @@ private:
                     const auto push = std::min(0.08, (minimumDistance - distance) * 0.35);
                     const auto firstTarget = firstPosition.value + (direction * push);
                     const auto secondTarget = secondPosition.value - (direction * push);
-                    firstPosition.value = constrainedMoveForCurrentWaypoint(
+                    const auto firstNext = constrainedMoveForCurrentWaypoint(
                         layoutCache,
                         firstRoute,
                         firstPosition.value,
                         firstTarget,
                         static_cast<double>(firstAgent.radius));
-                    secondPosition.value = constrainedMoveForCurrentWaypoint(
+                    const auto secondNext = constrainedMoveForCurrentWaypoint(
                         layoutCache,
                         secondRoute,
                         secondPosition.value,
                         secondTarget,
                         static_cast<double>(secondAgent.radius));
+                    if (distanceBetween(firstNext, firstPosition.value) > kGeometryEpsilon
+                        || distanceBetween(secondNext, secondPosition.value) > kGeometryEpsilon) {
+                        resolvedAnyOverlap = true;
+                    }
+                    firstPosition.value = firstNext;
+                    secondPosition.value = secondNext;
                 }
+            }
+            if (!resolvedAnyOverlap) {
+                break;
             }
         }
     }
