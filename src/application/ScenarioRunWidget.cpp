@@ -728,13 +728,11 @@ void ScenarioRunWidget::refreshStatus() {
         fastForwardButton_->setText(fastForwardButtonText(playbackSpeedMultiplier_));
         fastForwardButton_->setEnabled(
             !batchRunner_.complete()
-            && !batchRunner_.empty()
-            && !hasCachedResults());
+            && !batchRunner_.empty());
     }
     if (resultButton_ != nullptr) {
         resultButton_->setEnabled(
-            (batchRunner_.complete() && !batchRunner_.empty())
-            || hasCachedResults());
+            batchRunner_.complete() && !batchRunner_.empty());
     }
 }
 
@@ -757,11 +755,6 @@ void ScenarioRunWidget::cycleFastForwardMode() {
         refreshStatus();
         return;
     }
-    if (hasCachedResults()) {
-        refreshStatus();
-        return;
-    }
-
     if (playbackSpeedMultiplier_ == 1) {
         playbackSpeedMultiplier_ = 2;
     } else if (playbackSpeedMultiplier_ == 2) {
@@ -794,8 +787,6 @@ void ScenarioRunWidget::showResults() {
     std::vector<SavedScenarioResultState> results;
     if (batchRunner_.complete() && !batchRunner_.empty()) {
         results = completedResults();
-    } else if (hasCachedResults()) {
-        results = cachedResults_;
     } else {
         return;
     }
