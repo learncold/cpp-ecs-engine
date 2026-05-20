@@ -60,6 +60,7 @@ struct MovementPlan {
 struct AgentSpatialIndex {
     double cellSize{1.0};
     std::unordered_map<std::string, std::unordered_map<long long, std::vector<engine::Entity>>> cellsByFloor{};
+    std::unordered_map<std::string, std::unordered_map<long long, std::vector<engine::Entity>>> displayCellsByFloor{};
 };
 
 struct LayoutBounds {
@@ -149,6 +150,7 @@ const std::vector<ScenarioConnectionTraversal>& cachedTraversalsForZone(
     const std::string& zoneId);
 std::string agentDisplayFloorId(const EvacuationRoute& route);
 std::string agentCollisionFloorId(const EvacuationRoute& route);
+bool agentCollisionScopesOverlap(const EvacuationRoute& lhs, const EvacuationRoute& rhs);
 void updateAgentPhysicsFloorIds(
     engine::WorldQuery& query,
     const ScenarioLayoutCacheResource& cache,
@@ -161,6 +163,12 @@ std::vector<engine::Entity> simulationEntities(engine::WorldQuery& query);
 AgentSpatialIndex buildAgentSpatialIndex(engine::WorldQuery& query, const std::vector<engine::Entity>& entities, double cellSize);
 std::vector<engine::Entity> nearbyAgents(engine::WorldQuery& query, const AgentSpatialIndex& index, const Point2D& point, double radius);
 std::vector<engine::Entity> nearbyAgents(
+    engine::WorldQuery& query,
+    const AgentSpatialIndex& index,
+    const Point2D& point,
+    const std::string& floorId,
+    double radius);
+std::vector<engine::Entity> nearbyDisplayAgents(
     engine::WorldQuery& query,
     const AgentSpatialIndex& index,
     const Point2D& point,

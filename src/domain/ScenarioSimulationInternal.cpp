@@ -410,6 +410,10 @@ void appendStairEntryBarriers(FacilityLayout2D& filtered, const FacilityLayout2D
     }
 }
 
+std::string verticalPhysicsFloorIdForConnectionId(const std::string& connectionId) {
+    return connectionId.empty() ? std::string{} : "vertical:" + connectionId;
+}
+
 FacilityLayout2D layoutForFloor(const FacilityLayout2D& layout, const std::string& floorId) {
     if (floorId.empty()) {
         return layout;
@@ -441,6 +445,91 @@ FacilityLayout2D layoutForFloor(const FacilityLayout2D& layout, const std::strin
         }
     }
     appendStairEntryBarriers(filtered, layout, floorId);
+    return filtered;
+}
+
+bool sameBarrierPoint(const Point2D& lhs, const Point2D& rhs) {
+    return std::fabs(lhs.x - rhs.x) <= kGeometryEpsilon
+        && std::fabs(lhs.y - rhs.y) <= kGeometryEpsilon;
+}
+
+bool sameBarrierGeometry(const Barrier2D& lhs, const Barrier2D& rhs) {
+    if (lhs.blocksMovement != rhs.blocksMovement
+        || lhs.geometry.closed != rhs.geometry.closed
+        || lhs.geometry.vertices.size() != rhs.geometry.vertices.size()) {
+        return false;
+    }
+
+    const auto& lhsVertices = lhs.geometry.vertices;
+    const auto& rhsVertices = rhs.geometry.vertices;
+    const bool sameOrder = [&]() {
+        for (std::size_t index = 0; index < lhsVertices.size(); ++index) {
+            if (!sameBarrierPoint(lhsVertices[index], rhsVertices[index])) {
+                return false;
+            }
+        }
+        return true;
+    }();
+    if (sameOrder) {
+        return true;
+    }
+
+    if (lhsVertices.size() != 2) {
+        return false;
+    }
+    return sameBarrierPoint(lhsVertices[0], rhsVertices[1])
+        && sameBarrierPoint(lhsVertices[1], rhsVertices[0]);
+}
+
+void appendUniqueBarrier(std::vector<Barrier2D>& barriers, Barrier2D barrier) {
+    if (std::any_of(barriers.begin(), barriers.end(), [&](const auto& existing) {
+            return sameBarrierGeometry(existing, barrier);
+        })) {
+        return;
+    }
+    barriers.push_back(std::move(barrier));
+}
+
+FacilityLayout2D layoutForVerticalConnection(const FacilityLayout2D& layout, const Connection2D& connection) {
+    const auto virtualFloorId = verticalPhysicsFloorIdForConnectionId(connection.id);
+    FacilityLayout2D filtered;
+    filtered.id = layout.id;
+    filtered.name = layout.name;
+    filtered.levelId = layout.levelId;
+    filtered.floors.push_back({
+        .id = virtualFloorId,
+        .label = connection.id.empty() ? std::string{"Vertical connection"} : connection.id,
+    });
+
+    auto appendEndpointZone = [&](const std::string& zoneId) {
+        const auto* zone = findZone(layout, zoneId);
+        if (zone == nullptr) {
+            return;
+        }
+        auto copy = *zone;
+        copy.floorId = virtualFloorId;
+        filtered.zones.push_back(std::move(copy));
+    };
+    appendEndpointZone(connection.fromZoneId);
+    appendEndpointZone(connection.toZoneId);
+
+    auto verticalConnection = connection;
+    verticalConnection.floorId = virtualFloorId;
+    filtered.connections.push_back(std::move(verticalConnection));
+
+    auto appendFloorBarriers = [&](const std::string& floorId) {
+        if (floorId.empty()) {
+            return;
+        }
+        auto floorLayout = layoutForFloor(layout, floorId);
+        for (auto barrier : floorLayout.barriers) {
+            barrier.floorId = virtualFloorId;
+            appendUniqueBarrier(filtered.barriers, std::move(barrier));
+        }
+    };
+    appendFloorBarriers(floorIdForZone(layout, connection.fromZoneId));
+    appendFloorBarriers(floorIdForZone(layout, connection.toZoneId));
+
     return filtered;
 }
 
@@ -480,6 +569,14 @@ ScenarioLayoutCacheResource buildScenarioLayoutCache(FacilityLayout2D layout) {
 
     for (const auto& floorId : floorIds) {
         cache.floorLayouts.emplace(floorId, layoutForFloor(cache.layout, floorId));
+    }
+    for (const auto& connection : cache.layout.connections) {
+        if (!isVerticalConnection(connection) || connection.id.empty()) {
+            continue;
+        }
+        cache.floorLayouts.emplace(
+            verticalPhysicsFloorIdForConnectionId(connection.id),
+            layoutForVerticalConnection(cache.layout, connection));
     }
 
     for (std::size_t index = 0; index < cache.layout.connections.size(); ++index) {
@@ -560,30 +657,16 @@ std::string agentCollisionFloorId(const EvacuationRoute& route) {
     return route.physicsFloorId.empty() ? agentDisplayFloorId(route) : route.physicsFloorId;
 }
 
+bool agentCollisionScopesOverlap(const EvacuationRoute& lhs, const EvacuationRoute& rhs) {
+    if (agentCollisionFloorId(lhs) == agentCollisionFloorId(rhs)) {
+        return true;
+    }
+    const auto lhsDisplayFloorId = agentDisplayFloorId(lhs);
+    return !lhsDisplayFloorId.empty() && lhsDisplayFloorId == agentDisplayFloorId(rhs);
+}
+
 std::string verticalPhysicsFloorId(const Connection2D& connection) {
-    return connection.id.empty() ? std::string{} : "vertical:" + connection.id;
-}
-
-const Connection2D* findConnectionById(const ScenarioLayoutCacheResource& cache, const std::string& connectionId) {
-    if (connectionId.empty()) {
-        return nullptr;
-    }
-    const auto it = cache.connectionIndices.find(connectionId);
-    if (it == cache.connectionIndices.end() || it->second >= cache.layout.connections.size()) {
-        return nullptr;
-    }
-    return &cache.layout.connections[it->second];
-}
-
-const Connection2D* currentVerticalConnection(const ScenarioLayoutCacheResource& cache, const EvacuationRoute& route) {
-    if (route.nextWaypointIndex >= route.waypointVerticalTransitions.size()
-        || !route.waypointVerticalTransitions[route.nextWaypointIndex]
-        || route.nextWaypointIndex >= route.waypointConnectionIds.size()) {
-        return nullptr;
-    }
-
-    const auto* connection = findConnectionById(cache, route.waypointConnectionIds[route.nextWaypointIndex]);
-    return connection != nullptr && isVerticalConnection(*connection) ? connection : nullptr;
+    return verticalPhysicsFloorIdForConnectionId(connection.id);
 }
 
 std::string physicsFloorIdForVerticalConnection(const Connection2D* connection) {
@@ -609,9 +692,8 @@ std::string physicsFloorIdForPositionInEndpointZone(
         return {};
     }
 
-    const auto influenceRadius = std::max(
-        kHeadOnLookAheadDistance,
-        static_cast<double>(agent.radius) + kDefaultAgentRadius + kPersonalSpaceBuffer);
+    const auto influenceRadius =
+        static_cast<double>(agent.radius) + kDefaultAgentRadius + kPersonalSpaceBuffer;
 
     const Connection2D* bestConnection = nullptr;
     double bestDistance = std::numeric_limits<double>::infinity();
@@ -657,11 +739,7 @@ void updateAgentPhysicsFloorIds(
         const auto& position = query.get<Position>(entity);
         const auto& agent = query.get<Agent>(entity);
         auto& route = query.get<EvacuationRoute>(entity);
-        auto physicsFloorId = physicsFloorIdForVerticalConnection(currentVerticalConnection(cache, route));
-        if (physicsFloorId.empty()) {
-            physicsFloorId = physicsFloorIdForPositionInEndpointZone(cache, position.value, agent, route);
-        }
-        route.physicsFloorId = std::move(physicsFloorId);
+        route.physicsFloorId = physicsFloorIdForPositionInEndpointZone(cache, position.value, agent, route);
     }
 }
 
@@ -1065,6 +1143,7 @@ AgentSpatialIndex buildAgentSpatialIndex(
     AgentSpatialIndex index;
     index.cellSize = cellSize;
     index.cellsByFloor.reserve(4);
+    index.displayCellsByFloor.reserve(4);
 
     for (const auto entity : entities) {
         const auto& status = query.get<EvacuationStatus>(entity);
@@ -1072,29 +1151,32 @@ AgentSpatialIndex buildAgentSpatialIndex(
             continue;
         }
         const auto& position = query.get<Position>(entity);
-        const auto floorId = query.contains<EvacuationRoute>(entity)
-            ? agentCollisionFloorId(query.get<EvacuationRoute>(entity))
-            : std::string{};
+        const auto* route = query.contains<EvacuationRoute>(entity) ? &query.get<EvacuationRoute>(entity) : nullptr;
+        const auto floorId = route != nullptr ? agentCollisionFloorId(*route) : std::string{};
+        const auto displayFloorId = route != nullptr ? agentDisplayFloorId(*route) : floorId;
         auto& floorCells = index.cellsByFloor[floorId];
-        floorCells[spatialKey(spatialCellFor(position.value, cellSize))].push_back(entity);
+        const auto cellKey = spatialKey(spatialCellFor(position.value, cellSize));
+        floorCells[cellKey].push_back(entity);
+        index.displayCellsByFloor[displayFloorId][cellKey].push_back(entity);
     }
     return index;
 }
 
-std::vector<engine::Entity> nearbyAgents(
+std::vector<engine::Entity> nearbyAgentsFromCells(
     engine::WorldQuery& query,
-    const AgentSpatialIndex& index,
+    const std::unordered_map<std::string, std::unordered_map<long long, std::vector<engine::Entity>>>& cellsByFloor,
+    double cellSize,
     const Point2D& point,
     const std::string& floorId,
     double radius) {
     std::vector<engine::Entity> candidates;
-    const auto floorIt = index.cellsByFloor.find(floorId);
-    if (floorIt == index.cellsByFloor.end()) {
+    const auto floorIt = cellsByFloor.find(floorId);
+    if (floorIt == cellsByFloor.end()) {
         return candidates;
     }
 
-    const auto center = spatialCellFor(point, index.cellSize);
-    const auto range = std::max(1, static_cast<int>(std::ceil(radius / index.cellSize)));
+    const auto center = spatialCellFor(point, cellSize);
+    const auto range = std::max(1, static_cast<int>(std::ceil(radius / cellSize)));
     for (int dy = -range; dy <= range; ++dy) {
         for (int dx = -range; dx <= range; ++dx) {
             const auto it = floorIt->second.find(spatialKey({.x = center.x + dx, .y = center.y + dy}));
@@ -1116,8 +1198,26 @@ std::vector<engine::Entity> nearbyAgents(
     engine::WorldQuery& query,
     const AgentSpatialIndex& index,
     const Point2D& point,
+    const std::string& floorId,
+    double radius) {
+    return nearbyAgentsFromCells(query, index.cellsByFloor, index.cellSize, point, floorId, radius);
+}
+
+std::vector<engine::Entity> nearbyAgents(
+    engine::WorldQuery& query,
+    const AgentSpatialIndex& index,
+    const Point2D& point,
     double radius) {
     return nearbyAgents(query, index, point, std::string{}, radius);
+}
+
+std::vector<engine::Entity> nearbyDisplayAgents(
+    engine::WorldQuery& query,
+    const AgentSpatialIndex& index,
+    const Point2D& point,
+    const std::string& floorId,
+    double radius) {
+    return nearbyAgentsFromCells(query, index.displayCellsByFloor, index.cellSize, point, floorId, radius);
 }
 
 Point2D deterministicFallbackDirection(engine::Entity entity) {
@@ -1172,7 +1272,7 @@ Point2D forwardPreservingAgentAvoidanceVelocity(
         const auto& otherPosition = query.get<Position>(other);
         const auto& otherAgent = query.get<Agent>(other);
         const auto& otherRoute = query.get<EvacuationRoute>(other);
-        if (agentCollisionFloorId(otherRoute) != agentCollisionFloorId(route)) {
+        if (!agentCollisionScopesOverlap(otherRoute, route)) {
             continue;
         }
         const auto offsetToOther = otherPosition.value - position.value;

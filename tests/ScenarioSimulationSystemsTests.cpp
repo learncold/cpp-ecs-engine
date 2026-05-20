@@ -68,9 +68,11 @@ class ConfigureConnectedStairEndpointAgentsSystem final : public safecrowd::engi
 public:
     ConfigureConnectedStairEndpointAgentsSystem(
         safecrowd::domain::FacilityLayout2D layout,
-        safecrowd::domain::Point2D position)
+        safecrowd::domain::Point2D position,
+        bool activeVerticalTransition = false)
         : layout_(std::move(layout))
-        , position_(position) {
+        , position_(position)
+        , activeVerticalTransition_(activeVerticalTransition) {
     }
 
     void configure(safecrowd::engine::EngineWorld& world) override {
@@ -80,23 +82,46 @@ public:
             .complete = false,
         });
         world.resources().set(safecrowd::domain::simulation_internal::buildScenarioLayoutCache(layout_));
+        auto routeForFloor = [&](const std::string& floorId) {
+            safecrowd::domain::EvacuationRoute route{
+                .currentFloorId = floorId,
+                .displayFloorId = floorId,
+            };
+            if (!activeVerticalTransition_ || (floorId != "L1" && floorId != "L2")) {
+                return route;
+            }
+
+            route.waypoints = {{.x = 1.0, .y = 1.0}};
+            route.waypointPassages = {{{.x = 0.6, .y = 1.0}, {.x = 1.4, .y = 1.0}}};
+            route.waypointFromZoneIds = {floorId == "L1" ? "stair-l1" : "stair-l2"};
+            route.waypointZoneIds = {floorId == "L1" ? "stair-l2" : "stair-l1"};
+            route.waypointFloorIds = {floorId == "L1" ? "L2" : "L1"};
+            route.waypointConnectionIds = {"stair-vertical"};
+            route.waypointVerticalTransitions = {true};
+            route.currentSegmentStart = position_;
+            route.previousDistanceToWaypoint = safecrowd::domain::simulation_internal::distanceBetween(
+                position_,
+                route.waypoints.front());
+            route.destinationZoneId = route.waypointZoneIds.front();
+            return route;
+        };
         world.commands().spawnEntity(
             safecrowd::domain::Position{.value = position_},
             safecrowd::domain::Agent{.radius = 0.25f, .maxSpeed = 1.5f},
             safecrowd::domain::Velocity{},
-            safecrowd::domain::EvacuationRoute{.currentFloorId = "L1", .displayFloorId = "L1"},
+            routeForFloor("L1"),
             safecrowd::domain::EvacuationStatus{});
         world.commands().spawnEntity(
             safecrowd::domain::Position{.value = position_},
             safecrowd::domain::Agent{.radius = 0.25f, .maxSpeed = 1.5f},
             safecrowd::domain::Velocity{},
-            safecrowd::domain::EvacuationRoute{.currentFloorId = "L2", .displayFloorId = "L2"},
+            routeForFloor("L2"),
             safecrowd::domain::EvacuationStatus{});
         world.commands().spawnEntity(
             safecrowd::domain::Position{.value = position_},
             safecrowd::domain::Agent{.radius = 0.25f, .maxSpeed = 1.5f},
             safecrowd::domain::Velocity{},
-            safecrowd::domain::EvacuationRoute{.currentFloorId = "L3", .displayFloorId = "L3"},
+            routeForFloor("L3"),
             safecrowd::domain::EvacuationStatus{});
     }
 
@@ -106,6 +131,7 @@ public:
 private:
     safecrowd::domain::FacilityLayout2D layout_{};
     safecrowd::domain::Point2D position_{};
+    bool activeVerticalTransition_{false};
 };
 
 class ConfigureBarrierIndexedLayoutSystem final : public safecrowd::engine::EngineSystem {
@@ -961,6 +987,50 @@ SC_TEST(ScenarioSpatialIndexSystem_SeparatesConnectedStairEndpointsAwayFromVerti
     runtime.addSystem(std::make_unique<ConfigureConnectedStairEndpointAgentsSystem>(
         layout,
         safecrowd::domain::Point2D{.x = 1.0, .y = 3.5}));
+    runtime.addSystem(
+        std::make_unique<safecrowd::domain::ScenarioSpatialIndexSystem>(1.0),
+        {.phase = safecrowd::engine::UpdatePhase::PreSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(1.0 / 30.0);
+
+    const auto& index = runtime.world().resources().get<safecrowd::domain::ScenarioAgentSpatialIndexResource>();
+    auto verticalNearby = safecrowd::domain::scenarioNearbyAgents(
+        runtime.world().query(),
+        index,
+        {.x = 1.0, .y = 3.5},
+        "vertical:stair-vertical",
+        0.4);
+    auto l1Nearby = safecrowd::domain::scenarioNearbyAgents(
+        runtime.world().query(),
+        index,
+        {.x = 1.0, .y = 3.5},
+        "L1",
+        0.4);
+    auto l2Nearby = safecrowd::domain::scenarioNearbyAgents(
+        runtime.world().query(),
+        index,
+        {.x = 1.0, .y = 3.5},
+        "L2",
+        0.4);
+
+    SC_EXPECT_EQ(verticalNearby.size(), std::size_t{0});
+    SC_EXPECT_EQ(l1Nearby.size(), std::size_t{1});
+    SC_EXPECT_EQ(l2Nearby.size(), std::size_t{1});
+}
+
+SC_TEST(ScenarioSpatialIndexSystem_DoesNotMergeActiveVerticalRoutesAwayFromPortal) {
+    const auto layout = connectedStairPhysicsBucketLayout();
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 34,
+    });
+    runtime.addSystem(std::make_unique<ConfigureConnectedStairEndpointAgentsSystem>(
+        layout,
+        safecrowd::domain::Point2D{.x = 1.0, .y = 3.5},
+        true));
     runtime.addSystem(
         std::make_unique<safecrowd::domain::ScenarioSpatialIndexSystem>(1.0),
         {.phase = safecrowd::engine::UpdatePhase::PreSimulation,

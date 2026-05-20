@@ -724,20 +724,21 @@ void ScenarioOccupantSourceSpawnSystem::spawnDueSeeds(engine::EngineWorld& world
     world.resources().set(ScenarioScheduledSpawnResource{.pendingCount = seeds_.size() - nextSeedIndex_});
 }
 
-std::vector<engine::Entity> scenarioNearbyAgents(
+std::vector<engine::Entity> scenarioNearbyAgentsFromCells(
     engine::WorldQuery& query,
-    const ScenarioAgentSpatialIndexResource& index,
+    const std::unordered_map<std::string, std::unordered_map<long long, std::vector<engine::Entity>>>& cellsByFloor,
+    double cellSize,
     const Point2D& point,
     const std::string& floorId,
     double radius) {
     std::vector<engine::Entity> candidates;
-    const auto floorIt = index.cellsByFloor.find(floorId);
-    if (floorIt == index.cellsByFloor.end()) {
+    const auto floorIt = cellsByFloor.find(floorId);
+    if (floorIt == cellsByFloor.end()) {
         return candidates;
     }
 
-    const auto center = spatialCellFor(point, index.cellSize);
-    const auto range = std::max(1, static_cast<int>(std::ceil(radius / index.cellSize)));
+    const auto center = spatialCellFor(point, cellSize);
+    const auto range = std::max(1, static_cast<int>(std::ceil(radius / cellSize)));
     std::vector<engine::Entity> bucketEntries;
     appendSpatialBucketEntries(floorIt->second, center, range, bucketEntries);
     for (const auto entity : bucketEntries) {
@@ -747,6 +748,24 @@ std::vector<engine::Entity> scenarioNearbyAgents(
         }
     }
     return candidates;
+}
+
+std::vector<engine::Entity> scenarioNearbyAgents(
+    engine::WorldQuery& query,
+    const ScenarioAgentSpatialIndexResource& index,
+    const Point2D& point,
+    const std::string& floorId,
+    double radius) {
+    return scenarioNearbyAgentsFromCells(query, index.cellsByFloor, index.cellSize, point, floorId, radius);
+}
+
+std::vector<engine::Entity> scenarioNearbyDisplayAgents(
+    engine::WorldQuery& query,
+    const ScenarioAgentSpatialIndexResource& index,
+    const Point2D& point,
+    const std::string& floorId,
+    double radius) {
+    return scenarioNearbyAgentsFromCells(query, index.displayCellsByFloor, index.cellSize, point, floorId, radius);
 }
 
 std::vector<const Barrier2D*> scenarioNearbyBarriers(

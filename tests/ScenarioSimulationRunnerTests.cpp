@@ -92,6 +92,23 @@ bool agentKeepsBarrierClearance(
     return true;
 }
 
+double maxSameFloorAgentOverlap(const safecrowd::domain::SimulationFrame& frame) {
+    double maxOverlap = 0.0;
+    for (std::size_t first = 0; first < frame.agents.size(); ++first) {
+        for (std::size_t second = first + 1; second < frame.agents.size(); ++second) {
+            const auto& firstAgent = frame.agents[first];
+            const auto& secondAgent = frame.agents[second];
+            if (firstAgent.floorId != secondAgent.floorId) {
+                continue;
+            }
+            const auto minimumDistance = firstAgent.radius + secondAgent.radius;
+            const auto actualDistance = testDistanceBetween(firstAgent.position, secondAgent.position);
+            maxOverlap = std::max(maxOverlap, minimumDistance - actualDistance);
+        }
+    }
+    return std::max(0.0, maxOverlap);
+}
+
 safecrowd::domain::FacilityLayout2D blockedDoorLayout() {
     safecrowd::domain::FacilityLayout2D layout;
     layout.zones.push_back({
@@ -1849,6 +1866,36 @@ SC_TEST(ScenarioSimulationRunnerMovesFollowingAgentsThroughDescendingUShapedStai
 
     SC_EXPECT_EQ(agentsStillOnUpperFloor, std::size_t{0});
     SC_EXPECT_EQ(stalledAgents, std::size_t{0});
+}
+
+SC_TEST(ScenarioSimulationRunnerLimitsUShapedStairOverlapWhileQueuing) {
+    safecrowd::domain::InitialPlacement2D placement;
+    placement.id = "descending-queue";
+    placement.floorId = "L2";
+    placement.zoneId = "stair-l2";
+    placement.initialVelocity = {.x = 0.0, .y = -1.0};
+    placement.explicitPositions = {
+        {.x = 2.95, .y = 3.45},
+        {.x = 3.55, .y = 3.45},
+        {.x = 2.95, .y = 2.85},
+        {.x = 3.55, .y = 2.85},
+        {.x = 2.95, .y = 2.25},
+        {.x = 3.55, .y = 2.25},
+    };
+
+    safecrowd::domain::ScenarioDraft scenario;
+    scenario.population.initialPlacements.push_back(placement);
+    scenario.execution.timeLimitSeconds = 8.0;
+
+    const auto layout = descendingWestEntryUShapedStairTransitionLayout();
+    safecrowd::domain::ScenarioSimulationRunner runner(layout, scenario);
+    double maxOverlap = 0.0;
+    for (int i = 0; i < 80 && !runner.complete(); ++i) {
+        runner.step(0.1);
+        maxOverlap = std::max(maxOverlap, maxSameFloorAgentOverlap(runner.frame()));
+    }
+
+    SC_EXPECT_NEAR(maxOverlap, 0.0, 0.05);
 }
 
 SC_TEST(ScenarioSimulationRunnerKeepsCrowdedUShapedStairConnectionClearOfWalls) {

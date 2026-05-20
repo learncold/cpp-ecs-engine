@@ -211,7 +211,6 @@ public:
                 continue;
             }
 
-            const auto& floorLayout = cachedLayoutForFloor(layoutCache, route.currentFloorId);
             const auto routeDirection = (target - position.value) * (1.0 / distance);
             const auto maxSpeed = effectiveMaxSpeed(layoutCache, agent, route, position.value);
             double pressureSpeedFactor = 1.0;
@@ -239,19 +238,14 @@ public:
                 static_cast<double>(agent.radius) + kDefaultAgentRadius + kPersonalSpaceBuffer,
                 kHeadOnLookAheadDistance);
             const auto collisionFloorId = agentCollisionFloorId(route);
-            const auto neighborCandidates = sharedSpatialIndex != nullptr
-                ? scenarioNearbyAgents(
-                    query,
-                    *sharedSpatialIndex,
-                    position.value,
-                    collisionFloorId,
-                    neighborRadius)
-                : nearbyAgents(
-                    query,
-                    *localNeighborIndex,
-                    position.value,
-                    collisionFloorId,
-                    neighborRadius);
+            const auto& physicsLayout = cachedLayoutForFloor(layoutCache, collisionFloorId);
+            const auto neighborCandidates = nearbyAgentsForRoute(
+                query,
+                sharedSpatialIndex,
+                localNeighborIndex ? &(*localNeighborIndex) : nullptr,
+                position.value,
+                route,
+                neighborRadius);
             const auto avoidanceVelocity =
                 forwardPreservingAgentAvoidanceVelocity(
                     query,
@@ -264,18 +258,20 @@ public:
             const auto barrierReferenceSpeed = std::max(
                 adjustedHazardMaxSpeed,
                 (static_cast<double>(agent.maxSpeed) * 0.75) * pressureSpeedFactor);
-            const auto barrierVelocity = sharedSpatialIndex != nullptr
+            const auto barrierVelocity = !route.physicsFloorId.empty()
+                ? barrierSeparationVelocity(physicsLayout, position, agent, barrierReferenceSpeed)
+                : (sharedSpatialIndex != nullptr
                 ? barrierSeparationVelocity(
                     scenarioNearbyBarriers(
                         layoutCache.layout,
                         *sharedSpatialIndex,
                         position.value,
-                        route.currentFloorId,
+                        collisionFloorId,
                         static_cast<double>(agent.radius) + kBarrierAvoidanceBuffer),
                     position,
                     agent,
                     barrierReferenceSpeed)
-                : barrierSeparationVelocity(floorLayout, position, agent, barrierReferenceSpeed);
+                : barrierSeparationVelocity(physicsLayout, position, agent, barrierReferenceSpeed));
             const auto scaledBarrierVelocity = barrierVelocity * pressureBarrierScale;
             const auto hazardAvoidanceVelocity =
                 hazardState == nullptr
@@ -340,6 +336,8 @@ public:
         advanceRoutesForWaypointProgress(query, clampedDelta, activeEntities_, layoutCache);
         updateAgentPhysicsFloorIds(query, layoutCache, activeEntities_);
         resolveAgentOverlaps(query, activeEntities_, layoutCache);
+        advanceVerticalRoutesAtPortal(query, activeEntities_, layoutCache);
+        updateAgentPhysicsFloorIds(query, layoutCache, activeEntities_);
         const auto pendingScheduledSpawns = resources.contains<ScenarioScheduledSpawnResource>()
             ? resources.get<ScenarioScheduledSpawnResource>().pendingCount
             : std::size_t{0};
@@ -358,6 +356,42 @@ private:
         Point2D position{};
         bool advanced{false};
     };
+
+    static void appendUniqueEntities(std::vector<engine::Entity>& target, const std::vector<engine::Entity>& source) {
+        for (const auto entity : source) {
+            if (std::find(target.begin(), target.end(), entity) == target.end()) {
+                target.push_back(entity);
+            }
+        }
+    }
+
+    std::vector<engine::Entity> nearbyAgentsForRoute(
+        engine::WorldQuery& query,
+        const ScenarioAgentSpatialIndexResource* sharedSpatialIndex,
+        const AgentSpatialIndex* localSpatialIndex,
+        const Point2D& position,
+        const EvacuationRoute& route,
+        double radius) const {
+        std::vector<engine::Entity> candidates;
+        const auto collisionFloorId = agentCollisionFloorId(route);
+        const auto displayFloorId = agentDisplayFloorId(route);
+        if (sharedSpatialIndex != nullptr) {
+            candidates = scenarioNearbyAgents(query, *sharedSpatialIndex, position, collisionFloorId, radius);
+            appendUniqueEntities(
+                candidates,
+                scenarioNearbyDisplayAgents(query, *sharedSpatialIndex, position, displayFloorId, radius));
+            return candidates;
+        }
+        if (localSpatialIndex == nullptr) {
+            return candidates;
+        }
+
+        candidates = nearbyAgents(query, *localSpatialIndex, position, collisionFloorId, radius);
+        appendUniqueEntities(
+            candidates,
+            nearbyDisplayAgents(query, *localSpatialIndex, position, displayFloorId, radius));
+        return candidates;
+    }
 
     void refreshActiveEntities(engine::WorldQuery& query, const std::vector<engine::Entity>& entities) {
         activeEntities_.clear();
@@ -713,16 +747,19 @@ private:
         const Point2D& from,
         const Point2D& to,
         double clearance) const {
-        const auto& layout = cachedLayoutForFloor(layoutCache, route.currentFloorId);
-        if (!currentWaypointIsVertical(route)) {
-            const auto constrained = constrainedMove(layout, from, to, clearance);
-            if (distanceBetween(constrained, from) > kGeometryEpsilon) {
-                return constrained;
-            }
+        const auto& layout = cachedLayoutForFloor(
+            layoutCache,
+            !route.physicsFloorId.empty() && !currentWaypointIsVertical(route)
+                ? route.currentFloorId
+                : agentCollisionFloorId(route));
+        const auto constrained = constrainedMove(layout, from, to, clearance);
+        if (distanceBetween(constrained, from) > kGeometryEpsilon) {
+            return constrained;
+        }
+        if (route.physicsFloorId.empty() && !currentWaypointIsVertical(route)) {
             return constrainedMoveOutOfVerticalPortalContact(layoutCache, route, from, to, clearance);
         }
-
-        return constrainedMoveWithBarrierClearance(layout, from, to, clearance);
+        return constrained;
     }
 
     std::optional<Point2D> verticalTransitionLandingPoint(
@@ -1553,12 +1590,12 @@ private:
                 auto& firstPosition = query.get<Position>(first);
                 const auto& firstAgent = query.get<Agent>(first);
                 const auto& firstRoute = query.get<EvacuationRoute>(first);
-                const auto firstCollisionFloorId = agentCollisionFloorId(firstRoute);
-                const auto candidates = nearbyAgents(
+                const auto candidates = nearbyAgentsForRoute(
                     query,
-                    spatialIndex,
+                    nullptr,
+                    &spatialIndex,
                     firstPosition.value,
-                    firstCollisionFloorId,
+                    firstRoute,
                     static_cast<double>(firstAgent.radius) + kDefaultAgentRadius);
                 for (const auto second : candidates) {
                     if (first == second) {
@@ -1580,7 +1617,7 @@ private:
                     auto& secondPosition = query.get<Position>(second);
                     const auto& secondAgent = query.get<Agent>(second);
                     const auto& secondRoute = query.get<EvacuationRoute>(second);
-                    if (agentCollisionFloorId(secondRoute) != firstCollisionFloorId) {
+                    if (!agentCollisionScopesOverlap(secondRoute, firstRoute)) {
                         continue;
                     }
                     const auto delta = firstPosition.value - secondPosition.value;

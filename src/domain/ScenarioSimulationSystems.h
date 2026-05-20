@@ -174,6 +174,12 @@ std::vector<engine::Entity> scenarioNearbyAgents(
     const Point2D& point,
     const std::string& floorId,
     double radius);
+std::vector<engine::Entity> scenarioNearbyDisplayAgents(
+    engine::WorldQuery& query,
+    const ScenarioAgentSpatialIndexResource& index,
+    const Point2D& point,
+    const std::string& floorId,
+    double radius);
 std::vector<const Barrier2D*> scenarioNearbyBarriers(
     const FacilityLayout2D& layout,
     const ScenarioAgentSpatialIndexResource& index,
