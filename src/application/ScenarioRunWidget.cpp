@@ -652,12 +652,16 @@ void ScenarioRunWidget::refreshStatus() {
         }
     }
     if (scenarioLabel_ != nullptr) {
-        scenarioLabel_->setText(QString("Scenario: %1\nBatch: %2 / %3 complete")
+        const auto completedRuns = static_cast<int>(std::count_if(batchRunner_.runs().begin(), batchRunner_.runs().end(), [](const auto& run) {
+            return run.complete;
+        }));
+        const auto runCount = static_cast<int>(batchRunner_.size());
+        scenarioLabel_->setText(QString("Running %1 scenario%2\nSelected: %3\nBatch: %4 / %5 complete")
+            .arg(runCount)
+            .arg(runCount == 1 ? "" : "s")
             .arg(QString::fromStdString(selectedRun.scenario.name))
-            .arg(static_cast<int>(std::count_if(batchRunner_.runs().begin(), batchRunner_.runs().end(), [](const auto& run) {
-                return run.complete;
-            })))
-            .arg(static_cast<int>(batchRunner_.size())));
+            .arg(completedRuns)
+            .arg(runCount));
     }
     if (statusLabel_ != nullptr) {
         statusLabel_->setText(QString("Status: %1")

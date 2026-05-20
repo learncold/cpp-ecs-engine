@@ -13,6 +13,7 @@
 #include <QComboBox>
 #include <QEvent>
 #include <QFrame>
+#include <QFontMetrics>
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -151,6 +152,40 @@ std::vector<std::pair<double, double>> progressSeries(const SavedScenarioResultS
     return series;
 }
 
+std::vector<int> defaultCompareIndices(
+    const std::vector<SavedScenarioResultState>& results,
+    int currentResultIndex,
+    int baselineResultIndex) {
+    constexpr std::size_t kDefaultCompareSelectionLimit = 8;
+
+    std::vector<int> indices;
+    indices.reserve(std::min(results.size(), kDefaultCompareSelectionLimit));
+    auto addIndex = [&](int index) {
+        if (index < 0 || index >= static_cast<int>(results.size())) {
+            return;
+        }
+        if (std::find(indices.begin(), indices.end(), index) == indices.end()) {
+            indices.push_back(index);
+        }
+    };
+
+    if (results.size() <= kDefaultCompareSelectionLimit) {
+        for (int index = 0; index < static_cast<int>(results.size()); ++index) {
+            addIndex(index);
+        }
+        return indices;
+    }
+
+    addIndex(baselineResultIndex);
+    addIndex(currentResultIndex);
+    for (int index = 0;
+         indices.size() < kDefaultCompareSelectionLimit && index < static_cast<int>(results.size());
+         ++index) {
+        addIndex(index);
+    }
+    return indices;
+}
+
 enum class ComparisonGraphMode {
     Remaining,
     Exits,
@@ -195,7 +230,7 @@ protected:
         painter.setPen(QPen(QColor("#d7e0ea"), 1));
         painter.drawRoundedRect(rect().adjusted(0, 0, -1, -1), 8, 8);
 
-        const QRectF plot = rect().adjusted(40, 16, -18, -44);
+        const QRectF plot = rect().adjusted(40, 16, -18, -68);
         if (results_ == nullptr || selectedIndices_.empty() || plot.width() <= 1.0 || plot.height() <= 1.0) {
             painter.setPen(QColor("#6b7785"));
             painter.setFont(ui::font(ui::FontRole::Caption));
@@ -212,7 +247,7 @@ protected:
         } else {
             drawExits(painter, plot);
         }
-        drawLegend(painter, QRectF(rect().left() + 12, rect().bottom() - 34, rect().width() - 24, 24));
+        drawLegend(painter, QRectF(rect().left() + 12, rect().bottom() - 52, rect().width() - 24, 42));
     }
 
     void mouseMoveEvent(QMouseEvent* event) override {
@@ -253,11 +288,44 @@ private:
             QColor("#dc2626"),
             QColor("#7c3aed"),
             QColor("#ea580c"),
+            QColor("#0891b2"),
+            QColor("#be123c"),
+            QColor("#4d7c0f"),
+            QColor("#9333ea"),
+            QColor("#0f766e"),
+            QColor("#b45309"),
+            QColor("#475569"),
         };
         if (index == displayIndex_) {
             return QColor("#1d4ed8");
         }
         return colors[static_cast<std::size_t>(std::abs(index)) % colors.size()];
+    }
+
+    Qt::PenStyle lineStyleForSeries(int index) const {
+        if (index == displayIndex_) {
+            return Qt::SolidLine;
+        }
+        constexpr int kPaletteSize = 12;
+        switch ((std::abs(index) / kPaletteSize) % 4) {
+        case 1:
+            return Qt::DashLine;
+        case 2:
+            return Qt::DotLine;
+        case 3:
+            return Qt::DashDotLine;
+        default:
+            return Qt::SolidLine;
+        }
+    }
+
+    QPen penForSeries(int index, double width) const {
+        return QPen(
+            colorForSeries(index),
+            index == displayIndex_ ? std::max(width, 2.8) : width,
+            lineStyleForSeries(index),
+            Qt::RoundCap,
+            Qt::RoundJoin);
     }
 
     double remainingMaxTimeSeconds() const {
@@ -316,7 +384,7 @@ private:
         if (mode_ != ComparisonGraphMode::Remaining || !validIndex(displayIndex_)) {
             return std::nullopt;
         }
-        const QRectF plot = QRectF(rect()).adjusted(40, 16, -18, -44);
+        const QRectF plot = QRectF(rect()).adjusted(40, 16, -18, -68);
         if (!plot.contains(position)) {
             return std::nullopt;
         }
@@ -383,7 +451,7 @@ private:
                     path.lineTo(x, y);
                 }
             }
-            painter.setPen(QPen(colorForSeries(index), index == displayIndex_ ? 2.8 : 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            painter.setPen(penForSeries(index, 2.0));
             painter.drawPath(path);
         }
 
@@ -463,7 +531,7 @@ private:
                     path.lineTo(x, y);
                 }
             }
-            painter.setPen(QPen(colorForSeries(index), index == displayIndex_ ? 2.8 : 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            painter.setPen(penForSeries(index, 2.0));
             painter.drawPath(path);
             for (int exitIndex = 0; exitIndex < static_cast<int>(exits.size()); ++exitIndex) {
                 double usageRatio = 0.0;
@@ -488,21 +556,61 @@ private:
 
     void drawLegend(QPainter& painter, const QRectF& legendRect) {
         painter.setFont(ui::font(ui::FontRole::Caption));
-        double x = legendRect.left();
-        const auto y = legendRect.center().y();
+        QFontMetrics metrics(painter.font());
+
+        std::vector<int> visibleIndices;
+        visibleIndices.reserve(selectedIndices_.size());
         for (const auto index : selectedIndices_) {
             if (!validIndex(index)) {
                 continue;
             }
-            const auto name = QString::fromStdString((*results_)[static_cast<std::size_t>(index)].scenario.name);
-            painter.setPen(QPen(colorForSeries(index), index == displayIndex_ ? 2.8 : 2.0));
-            painter.drawLine(QPointF(x, y), QPointF(x + 18, y));
+            visibleIndices.push_back(index);
+        }
+        if (visibleIndices.empty()) {
+            return;
+        }
+
+        constexpr double kEntryWidth = 148.0;
+        constexpr int kMaxRows = 2;
+        const int columns = std::max(1, static_cast<int>(std::floor(legendRect.width() / kEntryWidth)));
+        const int maxEntries = std::max(1, columns * kMaxRows);
+        const bool hasOverflow = static_cast<int>(visibleIndices.size()) > maxEntries;
+        const int visibleCount = static_cast<int>(visibleIndices.size());
+        const int scenarioEntries = hasOverflow ? std::max(0, maxEntries - 1) : std::min(visibleCount, maxEntries);
+        const auto rowHeight = legendRect.height() / static_cast<double>(kMaxRows);
+
+        auto drawSlot = [&](int slot, int index) {
+            const int row = slot / columns;
+            const int column = slot % columns;
+            const auto x = legendRect.left() + static_cast<double>(column) * kEntryWidth;
+            const auto y = legendRect.top() + (static_cast<double>(row) + 0.5) * rowHeight;
+            const QRectF textRect(x + 24.0, legendRect.top() + static_cast<double>(row) * rowHeight, kEntryWidth - 30.0, rowHeight);
+            const auto name = metrics.elidedText(
+                QString::fromStdString((*results_)[static_cast<std::size_t>(index)].scenario.name),
+                Qt::ElideRight,
+                static_cast<int>(textRect.width()));
+
+            painter.setPen(penForSeries(index, 2.0));
+            painter.drawLine(QPointF(x, y), QPointF(x + 18.0, y));
             painter.setPen(QColor("#344256"));
-            painter.drawText(QRectF(x + 24, legendRect.top(), 120, legendRect.height()), Qt::AlignLeft | Qt::AlignVCenter, name);
-            x += 148;
-            if (x > legendRect.right() - 120) {
-                break;
-            }
+            painter.drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter, name);
+        };
+
+        for (int slot = 0; slot < scenarioEntries; ++slot) {
+            drawSlot(slot, visibleIndices[static_cast<std::size_t>(slot)]);
+        }
+
+        if (hasOverflow) {
+            const int slot = scenarioEntries;
+            const int row = slot / columns;
+            const int column = slot % columns;
+            const auto x = legendRect.left() + static_cast<double>(column) * kEntryWidth;
+            const QRectF textRect(x, legendRect.top() + static_cast<double>(row) * rowHeight, kEntryWidth, rowHeight);
+            painter.setPen(QColor("#6b7785"));
+            painter.drawText(
+                textRect,
+                Qt::AlignLeft | Qt::AlignVCenter,
+                QString("+%1 more").arg(static_cast<int>(visibleIndices.size()) - scenarioEntries));
         }
     }
 
@@ -724,25 +832,7 @@ ScenarioBatchResultWidget::ScenarioBatchResultWidget(
     if (!results_.empty()) {
         resultNavigationView_ = resultNavigationViewFromSaved(results_[static_cast<std::size_t>(currentResultIndex_)].navigationView);
     }
-    const auto baselineIndex = baselineResultIndex();
-    if (results_.size() <= 2) {
-        for (int index = 0; index < static_cast<int>(results_.size()); ++index) {
-            selectedCompareIndices_.push_back(index);
-        }
-    } else {
-        if (baselineIndex >= 0) {
-            selectedCompareIndices_.push_back(baselineIndex);
-        }
-        if (currentResultIndex_ >= 0
-            && std::find(selectedCompareIndices_.begin(), selectedCompareIndices_.end(), currentResultIndex_) == selectedCompareIndices_.end()) {
-            selectedCompareIndices_.push_back(currentResultIndex_);
-        }
-        for (int index = 0; selectedCompareIndices_.size() < 2 && index < static_cast<int>(results_.size()); ++index) {
-            if (std::find(selectedCompareIndices_.begin(), selectedCompareIndices_.end(), index) == selectedCompareIndices_.end()) {
-                selectedCompareIndices_.push_back(index);
-            }
-        }
-    }
+    selectedCompareIndices_ = defaultCompareIndices(results_, currentResultIndex_, baselineResultIndex());
     for (int index = 0; index < static_cast<int>(results_.size()); ++index) {
         selectedRecommendationIndices_.push_back(index);
     }
@@ -944,6 +1034,30 @@ QWidget* ScenarioBatchResultWidget::createSummaryPanel() {
     intro->setStyleSheet(ui::mutedTextStyleSheet());
     layout->addWidget(intro);
 
+    comparisonCountLabel_ = createLabel("", content, ui::FontRole::Caption);
+    comparisonCountLabel_->setStyleSheet(ui::subtleTextStyleSheet());
+    layout->addWidget(comparisonCountLabel_);
+
+    auto* selectionControls = new QWidget(content);
+    auto* selectionLayout = new QHBoxLayout(selectionControls);
+    selectionLayout->setContentsMargins(0, 0, 0, 0);
+    selectionLayout->setSpacing(8);
+
+    auto* selectAllButton = new QPushButton("Select All", selectionControls);
+    selectAllButton->setFont(ui::font(ui::FontRole::Caption));
+    selectAllButton->setStyleSheet(ui::secondaryButtonStyleSheet());
+    auto* baselineCurrentButton = new QPushButton("Baseline + Current", selectionControls);
+    baselineCurrentButton->setFont(ui::font(ui::FontRole::Caption));
+    baselineCurrentButton->setStyleSheet(ui::secondaryButtonStyleSheet());
+    auto* clearButton = new QPushButton("Clear", selectionControls);
+    clearButton->setFont(ui::font(ui::FontRole::Caption));
+    clearButton->setStyleSheet(ui::secondaryButtonStyleSheet());
+
+    selectionLayout->addWidget(selectAllButton);
+    selectionLayout->addWidget(baselineCurrentButton);
+    selectionLayout->addWidget(clearButton);
+    layout->addWidget(selectionControls);
+
     compareCheckBoxes_.clear();
     for (int row = 0; row < static_cast<int>(results_.size()); ++row) {
         const auto& result = results_[row];
@@ -966,6 +1080,17 @@ QWidget* ScenarioBatchResultWidget::createSummaryPanel() {
             refreshComparisonSelection();
         });
     }
+
+    connect(selectAllButton, &QPushButton::clicked, this, [this]() {
+        selectAllComparisonScenarios();
+    });
+    connect(baselineCurrentButton, &QPushButton::clicked, this, [this]() {
+        selectBaselineAndCurrentComparisonScenarios();
+    });
+    connect(clearButton, &QPushButton::clicked, this, [this]() {
+        clearComparisonScenarios();
+    });
+    refreshComparisonCountLabel();
 
     auto* detailCard = new QFrame(content);
     detailCard->setStyleSheet(ui::panelStyleSheet());
@@ -1321,21 +1446,23 @@ void ScenarioBatchResultWidget::refreshComparisonSelection() {
             selectedCompareIndices_.push_back(index);
         }
     }
-    if (selectedCompareIndices_.empty() && !compareCheckBoxes_.empty()) {
-        const auto fallbackIndex = std::clamp(currentResultIndex_, 0, static_cast<int>(compareCheckBoxes_.size()) - 1);
-        if (auto* checkbox = compareCheckBoxes_[static_cast<std::size_t>(fallbackIndex)]; checkbox != nullptr) {
-            const QSignalBlocker blocker(checkbox);
-            checkbox->setChecked(true);
-        }
-        selectedCompareIndices_.push_back(fallbackIndex);
-    }
     if (remainingChart_ != nullptr) {
         static_cast<ComparisonGraphWidget*>(remainingChart_)->setResults(results_, selectedCompareIndices_, currentResultIndex_);
     }
     if (exitsChart_ != nullptr) {
         static_cast<ComparisonGraphWidget*>(exitsChart_)->setResults(results_, selectedCompareIndices_, currentResultIndex_);
     }
+    refreshComparisonCountLabel();
     refreshPressureComparisonTable();
+}
+
+void ScenarioBatchResultWidget::refreshComparisonCountLabel() {
+    if (comparisonCountLabel_ == nullptr) {
+        return;
+    }
+    comparisonCountLabel_->setText(QString("Comparing %1 / %2 scenarios")
+        .arg(static_cast<int>(selectedCompareIndices_.size()))
+        .arg(static_cast<int>(results_.size())));
 }
 
 void ScenarioBatchResultWidget::refreshPressureComparisonTable() {
@@ -1344,9 +1471,6 @@ void ScenarioBatchResultWidget::refreshPressureComparisonTable() {
     }
 
     std::vector<int> visibleIndices = selectedCompareIndices_;
-    if (visibleIndices.empty() && currentResultIndex_ >= 0 && currentResultIndex_ < static_cast<int>(results_.size())) {
-        visibleIndices.push_back(currentResultIndex_);
-    }
 
     pressureTable_->setRowCount(static_cast<int>(visibleIndices.size()));
     for (int row = 0; row < static_cast<int>(visibleIndices.size()); ++row) {
@@ -1373,6 +1497,68 @@ void ScenarioBatchResultWidget::refreshPressureComparisonTable() {
         pressureTable_->setItem(row, 5, tableItem(formatSeconds(summary.peakAtSeconds), emphasized));
     }
     pressureTable_->resizeRowsToContents();
+}
+
+void ScenarioBatchResultWidget::selectAllComparisonScenarios() {
+    std::vector<int> indices;
+    indices.reserve(results_.size());
+    for (int index = 0; index < static_cast<int>(results_.size()); ++index) {
+        indices.push_back(index);
+    }
+    setComparisonSelection(std::move(indices));
+}
+
+void ScenarioBatchResultWidget::selectBaselineAndCurrentComparisonScenarios() {
+    std::vector<int> indices;
+    const auto baselineIndex = baselineResultIndex();
+    if (baselineIndex >= 0) {
+        indices.push_back(baselineIndex);
+    }
+    if (currentResultIndex_ >= 0
+        && currentResultIndex_ < static_cast<int>(results_.size())
+        && std::find(indices.begin(), indices.end(), currentResultIndex_) == indices.end()) {
+        indices.push_back(currentResultIndex_);
+    }
+    setComparisonSelection(std::move(indices));
+}
+
+void ScenarioBatchResultWidget::clearComparisonScenarios() {
+    setComparisonSelection({});
+}
+
+void ScenarioBatchResultWidget::setComparisonSelection(std::vector<int> indices) {
+    selectedCompareIndices_.clear();
+    selectedCompareIndices_.reserve(indices.size());
+    for (const auto index : indices) {
+        if (index < 0 || index >= static_cast<int>(results_.size())) {
+            continue;
+        }
+        if (std::find(selectedCompareIndices_.begin(), selectedCompareIndices_.end(), index) == selectedCompareIndices_.end()) {
+            selectedCompareIndices_.push_back(index);
+        }
+    }
+
+    syncCompareCheckBoxes();
+    if (remainingChart_ != nullptr) {
+        static_cast<ComparisonGraphWidget*>(remainingChart_)->setResults(results_, selectedCompareIndices_, currentResultIndex_);
+    }
+    if (exitsChart_ != nullptr) {
+        static_cast<ComparisonGraphWidget*>(exitsChart_)->setResults(results_, selectedCompareIndices_, currentResultIndex_);
+    }
+    refreshComparisonCountLabel();
+    refreshPressureComparisonTable();
+}
+
+void ScenarioBatchResultWidget::syncCompareCheckBoxes() {
+    for (int index = 0; index < static_cast<int>(compareCheckBoxes_.size()); ++index) {
+        auto* checkbox = compareCheckBoxes_[static_cast<std::size_t>(index)];
+        if (checkbox == nullptr) {
+            continue;
+        }
+        const QSignalBlocker blocker(checkbox);
+        checkbox->setChecked(std::find(selectedCompareIndices_.begin(), selectedCompareIndices_.end(), index)
+            != selectedCompareIndices_.end());
+    }
 }
 
 void ScenarioBatchResultWidget::setRecommendationScenarioSelected(int index, bool selected) {
