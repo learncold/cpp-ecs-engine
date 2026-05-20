@@ -68,6 +68,8 @@ public:
         const ScenarioLayoutCacheResource& layoutCache,
         double elapsedSeconds,
         std::uint64_t derivedSeed,
+        const ScenarioEnvironmentReactionResource* reactions,
+        const ScenarioActiveEnvironmentHazardsResource* activeHazards,
         const ScenarioAgentSpatialIndexResource* sharedSpatialIndex);
 
 private:

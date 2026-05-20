@@ -78,7 +78,15 @@ public:
             ? &resources.get<ScenarioAgentSpatialIndexResource>()
             : nullptr;
 
-        routeGuidance_.apply(query, entities, layoutCache, clock.elapsedSeconds, step.derivedSeed, sharedSpatialIndex);
+        routeGuidance_.apply(
+            query,
+            entities,
+            layoutCache,
+            clock.elapsedSeconds,
+            step.derivedSeed,
+            reactions,
+            activeHazards,
+            sharedSpatialIndex);
         advanceRoutesForCurrentZones(query, activeEntities_, layoutCache);
         replanBlockedExitRoutes(query, activeEntities_, layoutCache, clock.elapsedSeconds, layoutRevision, reactions);
         advanceRoutesForWaypointProgress(query, 0.0, activeEntities_, layoutCache);
@@ -1208,7 +1216,19 @@ private:
             return;
         }
 
-        for (const auto entity : entities) {
+        if (entities.empty()) {
+            hazardReplanCursor_ = 0;
+            return;
+        }
+
+        constexpr std::size_t kHazardReplanEntityBudgetPerFrame = 50;
+        if (hazardReplanCursor_ >= entities.size()) {
+            hazardReplanCursor_ = 0;
+        }
+        const auto startCursor = hazardReplanCursor_;
+        const auto visitCount = std::min<std::size_t>(entities.size(), kHazardReplanEntityBudgetPerFrame);
+        for (std::size_t offset = 0; offset < visitCount; ++offset) {
+            const auto entity = entities[(startCursor + offset) % entities.size()];
             const auto* hazardState = activeHazardState(reactions, entity.index);
             if (hazardState == nullptr) {
                 continue;
@@ -1246,6 +1266,7 @@ private:
             routeGuidance_.replaceRouteWithPlan(route, plan, position.value);
             route.nextExitReplanSeconds = elapsedSeconds + kExitReplanCooldownSeconds;
         }
+        hazardReplanCursor_ = (startCursor + visitCount) % entities.size();
     }
 
     bool closureReadyForBlockedConnection(
@@ -1708,6 +1729,7 @@ private:
     std::optional<ScenarioLayoutCacheResource> layoutCache_{};
     ScenarioRouteGuidanceController routeGuidance_{};
     std::vector<engine::Entity> activeEntities_{};
+    mutable std::size_t hazardReplanCursor_{0};
 };
 
 
