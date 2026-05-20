@@ -535,6 +535,24 @@ private:
         const EvacuationRoute& route,
         const Point2D& position,
         double agentRadius) const {
+        return verticalPassageReached(layoutCache, route, position, agentRadius, kGeometryEpsilon);
+    }
+
+    bool verticalPassageNearlyReachedAfterStall(
+        const ScenarioLayoutCacheResource& layoutCache,
+        const EvacuationRoute& route,
+        const Point2D& position,
+        double agentRadius) const {
+        const auto tolerance = std::max(kPortalCrossingEpsilon * 0.25, static_cast<double>(agentRadius) * 0.02);
+        return verticalPassageReached(layoutCache, route, position, agentRadius, tolerance);
+    }
+
+    bool verticalPassageReached(
+        const ScenarioLayoutCacheResource& layoutCache,
+        const EvacuationRoute& route,
+        const Point2D& position,
+        double agentRadius,
+        double planeTolerance) const {
         if (route.nextWaypointIndex >= route.waypointPassages.size()
             || route.nextWaypointIndex >= route.waypointFromZoneIds.size()
             || route.nextWaypointIndex >= route.waypointZoneIds.size()) {
@@ -566,7 +584,7 @@ private:
             return false;
         }
 
-        return dot(position - passageMidpoint, *normal) >= -kGeometryEpsilon;
+        return dot(position - passageMidpoint, *normal) >= -std::max(0.0, planeTolerance);
     }
 
     std::optional<Point2D> passageNormalTowardCurrentWaypoint(
@@ -1113,6 +1131,16 @@ private:
                         }
                         break;
                     }
+                }
+                if (verticalTransition
+                    && route.stalledSeconds >= kWaypointStallSeconds
+                    && verticalPassageNearlyReachedAfterStall(layoutCache, route, position.value, agent.radius)) {
+                    const auto advance = advanceRouteWaypoint(layoutCache, route, agent, position.value);
+                    position.value = advance.position;
+                    if (advance.advanced) {
+                        continue;
+                    }
+                    break;
                 }
 
                 route.previousDistanceToWaypoint = std::min(route.previousDistanceToWaypoint, distance);
