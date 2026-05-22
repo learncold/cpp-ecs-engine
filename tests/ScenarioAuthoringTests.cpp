@@ -121,14 +121,30 @@ SC_TEST(environmentHazardRuntimeProfile_UsesSharedSeverityAndScheduleRules) {
     SC_EXPECT_TRUE(!environmentHazardHasOpenEndedSchedule(hazard));
 }
 
+SC_TEST(environmentHazardInfluenceAt_UsesSmoothSeverityFalloff) {
+    auto hazard = makeSmokeHazard();
+    hazard.severity = ScenarioElementSeverity::High;
+
+    SC_EXPECT_NEAR(environmentHazardInfluenceAt(hazard, 0.0), 1.0, 1e-9);
+    SC_EXPECT_NEAR(environmentHazardInfluenceAt(hazard, 2.5), 0.5, 1e-9);
+    SC_EXPECT_NEAR(environmentHazardInfluenceAt(hazard, 5.0), 0.0, 1e-9);
+    SC_EXPECT_NEAR(environmentHazardInfluenceAt(hazard, 7.5), 0.0, 1e-9);
+}
+
 SC_TEST(environmentHazardSmokeSpeed_UsesVisibilityBasedPathfinderRule) {
     auto hazard = makeSmokeHazard();
     hazard.severity = ScenarioElementSeverity::High;
 
     SC_EXPECT_NEAR(environmentHazardSmokeVisibilityMetersAt(hazard, 0.0), 0.5, 1e-9);
+    SC_EXPECT_NEAR(environmentHazardSmokeVisibilityMetersAt(hazard, 2.5), 1.75, 1e-9);
     SC_EXPECT_NEAR(environmentHazardSmokeVisibilityMetersAt(hazard, 5.0), 3.0, 1e-9);
     SC_EXPECT_NEAR(environmentHazardSmokeSpeedMetersPerSecond(1.5, 0.5), 0.65, 1e-9);
     SC_EXPECT_NEAR(environmentHazardSpeedFactorAt(hazard, 0.0, 1.5), 0.65 / 1.5, 1e-9);
+    SC_EXPECT_NEAR(environmentHazardSpeedFactorAt(hazard, 5.0, 1.5), 1.0, 1e-9);
+
+    hazard.kind = EnvironmentHazardKind::Fire;
+    SC_EXPECT_NEAR(environmentHazardSpeedFactorAt(hazard, 0.0, 1.5), 0.60, 1e-9);
+    SC_EXPECT_NEAR(environmentHazardSpeedFactorAt(hazard, 2.5, 1.5), 0.80, 1e-9);
     SC_EXPECT_NEAR(environmentHazardSpeedFactorAt(hazard, 5.0, 1.5), 1.0, 1e-9);
 }
 

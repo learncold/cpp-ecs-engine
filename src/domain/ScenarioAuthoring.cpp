@@ -256,6 +256,17 @@ double environmentHazardRadiusMeters(ScenarioElementSeverity severity) {
     }
 }
 
+double environmentHazardInfluenceAt(const EnvironmentHazardDraft& hazard, double distanceMeters) {
+    const auto radius = environmentHazardRadiusMeters(hazard.severity);
+    if (radius <= 1e-9) {
+        return 0.0;
+    }
+
+    const auto t = std::clamp(std::max(0.0, distanceMeters) / radius, 0.0, 1.0);
+    const auto smooth = t * t * (3.0 - (2.0 * t));
+    return 1.0 - smooth;
+}
+
 double environmentHazardRoutePenaltyMeters(ScenarioElementSeverity severity) {
     switch (severity) {
     case ScenarioElementSeverity::Low:
@@ -323,13 +334,12 @@ double environmentHazardSmokeVisibilityMetersAt(const EnvironmentHazardDraft& ha
         break;
     }
 
-    const auto distance = std::max(0.0, distanceMeters);
-    if (distance >= radius) {
+    const auto influence = environmentHazardInfluenceAt(hazard, distanceMeters);
+    if (influence <= 1e-9) {
         return 3.0;
     }
 
-    const auto t = std::clamp(distance / radius, 0.0, 1.0);
-    return sourceVisibility + ((3.0 - sourceVisibility) * t);
+    return 3.0 - ((3.0 - sourceVisibility) * influence);
 }
 
 double environmentHazardSmokeSpeedMetersPerSecond(double smokeFreeSpeedMetersPerSecond, double visibilityMeters) {
@@ -367,8 +377,8 @@ double environmentHazardSpeedFactorAt(
     }
 
     const auto centerFactor = environmentHazardSpeedFactor(hazard.kind, hazard.severity);
-    const auto proximity = 1.0 - std::clamp(std::max(0.0, distanceMeters) / radius, 0.0, 1.0);
-    return 1.0 - ((1.0 - centerFactor) * proximity);
+    const auto influence = environmentHazardInfluenceAt(hazard, distanceMeters);
+    return 1.0 - ((1.0 - centerFactor) * influence);
 }
 
 EnvironmentHazardRuntimeProfile environmentHazardRuntimeProfile(const EnvironmentHazardDraft& hazard) {

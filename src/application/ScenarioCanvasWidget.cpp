@@ -251,6 +251,9 @@ QString formatEnvironmentHazardTooltip(const safecrowd::domain::EnvironmentHazar
             .arg(std::max(start, hazard.endSeconds), 0, 'f', 1));
     }
     text.append(QString("\nSeverity: %1").arg(severityLabel(hazard.severity)));
+    text.append(QString("\nInfluence radius: %1m")
+        .arg(safecrowd::domain::environmentHazardRadiusMeters(hazard.severity), 0, 'f', 1));
+    text.append(QStringLiteral("\nDetection varies by agent sensitivity"));
     return text;
 }
 

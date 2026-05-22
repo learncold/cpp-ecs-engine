@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -126,6 +127,10 @@ struct ScenarioActiveEnvironmentHazard {
 
 struct ScenarioActiveEnvironmentHazardsResource {
     std::vector<ScenarioActiveEnvironmentHazard> hazards{};
+    std::string signature{};
+    double cellSizeMeters{1.0};
+    double maxRadiusMeters{0.0};
+    std::unordered_map<std::string, std::unordered_map<long long, std::vector<std::size_t>>> hazardIndicesByFloor{};
 };
 
 struct ScenarioHazardExposureResource {
@@ -184,6 +189,17 @@ std::vector<const Barrier2D*> scenarioNearbyBarriers(
     const FacilityLayout2D& layout,
     const ScenarioAgentSpatialIndexResource& index,
     const Point2D& point,
+    const std::string& floorId,
+    double radius);
+std::vector<std::size_t> scenarioNearbyHazardIndices(
+    const ScenarioActiveEnvironmentHazardsResource& hazards,
+    const Point2D& point,
+    const std::string& floorId,
+    double radius);
+std::vector<std::size_t> scenarioHazardIndicesNearSegment(
+    const ScenarioActiveEnvironmentHazardsResource& hazards,
+    const Point2D& start,
+    const Point2D& end,
     const std::string& floorId,
     double radius);
 

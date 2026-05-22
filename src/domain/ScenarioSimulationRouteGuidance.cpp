@@ -64,6 +64,8 @@ public:
         nearestExitRouteCache_.clear();
         exitRouteCache_.clear();
         pathCache_.clear();
+        hazardAwareExitPlanCache_.clear();
+        routeHazardPenaltyCache_.clear();
     }
 
     std::optional<ZoneRouteToExit> cachedZoneRouteToNearestExit(
@@ -420,6 +422,240 @@ public:
         return signature;
     }
 
+    static std::string activeHazardSignature(const ScenarioActiveEnvironmentHazardsResource* activeHazards) {
+        if (activeHazards == nullptr || activeHazards->hazards.empty()) {
+            return {};
+        }
+        if (!activeHazards->signature.empty()) {
+            return activeHazards->signature;
+        }
+
+        std::string signature;
+        for (const auto& hazard : activeHazards->hazards) {
+            if (!signature.empty()) {
+                signature.push_back('\x1f');
+            }
+            signature.append(hazard.key);
+            signature.push_back('\x1e');
+            signature.append(hazard.floorId);
+            signature.push_back('\x1e');
+            signature.append(pointCachePart(hazard.draft.position));
+            signature.push_back('\x1e');
+            signature.append(std::to_string(quantizedPlanningCoordinate(hazard.radiusMeters)));
+            signature.push_back('\x1e');
+            signature.append(std::to_string(quantizedPlanningCoordinate(hazard.routePenaltyMeters)));
+        }
+        return signature;
+    }
+
+    static constexpr double kHazardSafeRoutePenaltyMeters = 1.0;
+
+    void refreshRouteSafetyCache(const std::string& activeGuidanceSignature,
+                                 const std::string& activeHazardSignature) const {
+        if (routeSafetyGuidanceSignature_ == activeGuidanceSignature
+            && routeSafetyHazardSignature_ == activeHazardSignature) {
+            return;
+        }
+        routeSafetyGuidanceSignature_ = activeGuidanceSignature;
+        routeSafetyHazardSignature_ = activeHazardSignature;
+        hazardAwareExitPlanCache_.clear();
+        routeHazardPenaltyCache_.clear();
+    }
+
+    static bool hasActiveHazards(const ScenarioActiveEnvironmentHazardsResource* activeHazards) {
+        return activeHazards != nullptr && !activeHazards->hazards.empty();
+    }
+
+    static bool agentAwareOfActiveHazard(
+        const ScenarioEnvironmentReactionResource* reactions,
+        engine::Entity entity,
+        const ScenarioActiveEnvironmentHazardsResource* activeHazards) {
+        if (reactions == nullptr || !hasActiveHazards(activeHazards)) {
+            return false;
+        }
+        const auto it = reactions->agentsById.find(entity.index);
+        if (it == reactions->agentsById.end()
+            || !it->second.hazardAware
+            || it->second.hazardKey.empty()) {
+            return false;
+        }
+        return std::any_of(activeHazards->hazards.begin(), activeHazards->hazards.end(), [&](const auto& hazard) {
+            return hazard.key == it->second.hazardKey;
+        });
+    }
+
+    static ScenarioRoutePlan remainingRoutePlan(const EvacuationRoute& route) {
+        ScenarioRoutePlan plan;
+        plan.destinationZoneId = route.destinationZoneId;
+        if (route.nextWaypointIndex >= route.waypoints.size()) {
+            return plan;
+        }
+
+        for (std::size_t index = route.nextWaypointIndex; index < route.waypoints.size(); ++index) {
+            plan.waypoints.push_back(route.waypoints[index]);
+            plan.waypointPassages.push_back(index < route.waypointPassages.size()
+                ? route.waypointPassages[index]
+                : pointPassage(route.waypoints[index]));
+            plan.waypointFromZoneIds.push_back(index < route.waypointFromZoneIds.size()
+                ? route.waypointFromZoneIds[index]
+                : std::string{});
+            plan.waypointZoneIds.push_back(index < route.waypointZoneIds.size()
+                ? route.waypointZoneIds[index]
+                : std::string{});
+            plan.waypointFloorIds.push_back(index < route.waypointFloorIds.size()
+                ? route.waypointFloorIds[index]
+                : std::string{});
+            plan.waypointConnectionIds.push_back(index < route.waypointConnectionIds.size()
+                ? route.waypointConnectionIds[index]
+                : std::string{});
+            plan.waypointVerticalTransitions.push_back(index < route.waypointVerticalTransitions.size()
+                ? route.waypointVerticalTransitions[index]
+                : false);
+        }
+        return plan;
+    }
+
+    static std::string routePlanSafetyKey(
+        const std::string& activeHazardSignature,
+        const Point2D& start,
+        const std::string& startFloorId,
+        const ScenarioRoutePlan& plan) {
+        std::string key = activeHazardSignature;
+        key.push_back('\x1d');
+        key.append(startFloorId);
+        key.push_back('\x1d');
+        key.append(pointCachePart(start));
+        key.push_back('\x1d');
+        key.append(plan.destinationZoneId);
+        for (std::size_t index = 0; index < plan.waypoints.size(); ++index) {
+            key.push_back('\x1d');
+            key.append(pointCachePart(plan.waypoints[index]));
+            if (index < plan.waypointFloorIds.size()) {
+                key.push_back('@');
+                key.append(plan.waypointFloorIds[index]);
+            }
+            if (index < plan.waypointConnectionIds.size()) {
+                key.push_back('#');
+                key.append(plan.waypointConnectionIds[index]);
+            }
+        }
+        return key;
+    }
+
+    std::string hazardAwareExitPlanCacheKey(
+        const Point2D& start,
+        const std::string& startZoneId,
+        const std::string& agentFloorId,
+        const std::string& activeHazardSignature,
+        const std::string& excludedExitZoneId) const {
+        return std::to_string(planningCacheRevision_)
+            + '\x1f'
+            + activeHazardSignature
+            + '\x1f'
+            + startZoneId
+            + '\x1f'
+            + agentFloorId
+            + '\x1f'
+            + excludedExitZoneId
+            + '\x1f'
+            + pointCachePart(start);
+    }
+
+    double cachedHazardRoutePenalty(
+        const ScenarioLayoutCacheResource& layoutCache,
+        const ScenarioRoutePlan& plan,
+        const Point2D& start,
+        const std::string& startFloorId,
+        const ScenarioActiveEnvironmentHazardsResource& activeHazards,
+        const std::string& activeHazardSignature) const {
+        if (activeHazardSignature.empty() || plan.destinationZoneId.empty()) {
+            return 0.0;
+        }
+
+        const auto key = routePlanSafetyKey(activeHazardSignature, start, startFloorId, plan);
+        const auto it = routeHazardPenaltyCache_.find(key);
+        if (it != routeHazardPenaltyCache_.end()) {
+            return it->second;
+        }
+
+        const auto penalty = hazardRoutePenalty(layoutCache, plan, start, startFloorId, activeHazards);
+        routeHazardPenaltyCache_.emplace(key, penalty);
+        return penalty;
+    }
+
+    double remainingRouteHazardPenalty(
+        const ScenarioLayoutCacheResource& layoutCache,
+        const EvacuationRoute& route,
+        const Point2D& position,
+        const std::string& startFloorId,
+        const ScenarioActiveEnvironmentHazardsResource& activeHazards) const {
+        const auto hazardSignature = activeHazardSignature(&activeHazards);
+        if (hazardSignature.empty()) {
+            return 0.0;
+        }
+        return cachedHazardRoutePenalty(
+            layoutCache,
+            remainingRoutePlan(route),
+            position,
+            startFloorId,
+            activeHazards,
+            hazardSignature);
+    }
+
+    bool remainingRouteHazardSafe(
+        const ScenarioLayoutCacheResource& layoutCache,
+        const EvacuationRoute& route,
+        const Point2D& position,
+        const std::string& startFloorId,
+        const ScenarioActiveEnvironmentHazardsResource* activeHazards,
+        const std::string& activeHazardSignature) const {
+        if (!hasActiveHazards(activeHazards) || activeHazardSignature.empty()) {
+            return true;
+        }
+        const auto plan = remainingRoutePlan(route);
+        return cachedHazardRoutePenalty(
+            layoutCache,
+            plan,
+            position,
+            startFloorId,
+            *activeHazards,
+            activeHazardSignature) <= kHazardSafeRoutePenaltyMeters;
+    }
+
+    ScenarioRoutePlan safetyConstrainedGuidancePlan(
+        const ScenarioLayoutCacheResource& layoutCache,
+        const ScenarioRoutePlan& preferredPlan,
+        const Point2D& start,
+        const std::string& startZoneId,
+        const std::string& agentFloorId,
+        const ScenarioActiveEnvironmentHazardsResource* activeHazards,
+        const std::string& activeHazardSignature) const {
+        if (!hasActiveHazards(activeHazards) || activeHazardSignature.empty()) {
+            return preferredPlan;
+        }
+        if (!preferredPlan.destinationZoneId.empty()
+            && cachedHazardRoutePenalty(
+                layoutCache,
+                preferredPlan,
+                start,
+                agentFloorId,
+                *activeHazards,
+                activeHazardSignature) <= kHazardSafeRoutePenaltyMeters) {
+            return preferredPlan;
+        }
+
+        auto fallback = routePlanToHazardAwareNearestExit(
+            layoutCache,
+            start,
+            startZoneId,
+            agentFloorId,
+            *activeHazards);
+        if (!fallback.destinationZoneId.empty()) {
+            return fallback;
+        }
+        return preferredPlan;
+    }
+
     const ActiveRouteGuidance* matchingActiveGuidance(
         const std::vector<ActiveRouteGuidance>& activeGuidances,
         const std::string& guidanceEventId) const {
@@ -604,7 +840,10 @@ public:
         const ScenarioLayoutCacheResource& layoutCache,
         const std::vector<ActiveRouteGuidance>& activeGuidances,
         double elapsedSeconds,
-        std::uint64_t stableSeed) {
+        std::uint64_t stableSeed,
+        const ScenarioEnvironmentReactionResource* reactions,
+        const ScenarioActiveEnvironmentHazardsResource* activeHazards,
+        const std::string& activeHazardSignature) {
         const auto& status = query.get<EvacuationStatus>(entity);
         if (status.evacuated) {
             return;
@@ -621,6 +860,9 @@ public:
         if (startZoneId.empty()) {
             return;
         }
+        const auto agentFloorId = !route.displayFloorId.empty() ? route.displayFloorId : route.currentFloorId;
+        const auto useHazardAwareSafety = agentAwareOfActiveHazard(reactions, entity, activeHazards)
+            && !activeHazardSignature.empty();
 
         if (activeGuidances.empty()) {
             route.guidanceEventId.clear();
@@ -631,7 +873,15 @@ public:
                 return;
             }
 
-            if (route.destinationZoneId == desiredExit && !route.waypoints.empty()) {
+            if (route.destinationZoneId == desiredExit && !route.waypoints.empty()
+                && (!useHazardAwareSafety
+                    || remainingRouteHazardSafe(
+                        layoutCache,
+                        route,
+                        position.value,
+                        agentFloorId,
+                        activeHazards,
+                        activeHazardSignature))) {
                 return;
             }
 
@@ -639,7 +889,28 @@ public:
             if (plan.destinationZoneId.empty()) {
                 plan = routePlanToNearestExit(layoutCache, position.value, startZoneId);
             }
+            if (useHazardAwareSafety) {
+                plan = safetyConstrainedGuidancePlan(
+                    layoutCache,
+                    plan,
+                    position.value,
+                    startZoneId,
+                    agentFloorId,
+                    activeHazards,
+                    activeHazardSignature);
+            }
             if (plan.destinationZoneId.empty()) {
+                return;
+            }
+            if (route.destinationZoneId == plan.destinationZoneId && !route.waypoints.empty()
+                && (!useHazardAwareSafety
+                    || remainingRouteHazardSafe(
+                        layoutCache,
+                        route,
+                        position.value,
+                        agentFloorId,
+                        activeHazards,
+                        activeHazardSignature))) {
                 return;
             }
             replaceRouteWithPlan(route, plan, position.value);
@@ -655,7 +926,15 @@ public:
                 const bool routeNeedsConnectionCorrection =
                     guidanceTargetsExitConnection(layoutCache, *visibleGuidance->guidance)
                     && !routeUsesConnection(route, visibleGuidance->guidance->installConnectionId);
-                if (!routeNeedsConnectionCorrection) {
+                if (!routeNeedsConnectionCorrection
+                    && (!useHazardAwareSafety
+                        || remainingRouteHazardSafe(
+                            layoutCache,
+                            route,
+                            position.value,
+                            agentFloorId,
+                            activeHazards,
+                            activeHazardSignature))) {
                     return;
                 }
             }
@@ -670,7 +949,15 @@ public:
                 const bool routeNeedsConnectionCorrection =
                     guidanceTargetsExitConnection(layoutCache, *retained->guidance)
                     && !routeUsesConnection(route, retained->guidance->installConnectionId);
-                if (!routeNeedsConnectionCorrection) {
+                if (!routeNeedsConnectionCorrection
+                    && (!useHazardAwareSafety
+                        || remainingRouteHazardSafe(
+                            layoutCache,
+                            route,
+                            position.value,
+                            agentFloorId,
+                            activeHazards,
+                            activeHazardSignature))) {
                     return;
                 }
                 activeGuidance = retained;
@@ -682,12 +969,39 @@ public:
                 route.guidanceEventId.clear();
                 route.followsGuidance = false;
                 const auto& desiredExit = route.originalDestinationZoneId;
-                if (!desiredExit.empty() && (route.destinationZoneId != desiredExit || route.waypoints.empty())) {
+                if (!desiredExit.empty()) {
+                    const bool currentRouteSafe = !useHazardAwareSafety
+                        || remainingRouteHazardSafe(
+                            layoutCache,
+                            route,
+                            position.value,
+                            agentFloorId,
+                            activeHazards,
+                            activeHazardSignature);
+                    const bool currentNeedsPlan =
+                        route.destinationZoneId != desiredExit || route.waypoints.empty() || !currentRouteSafe;
+                    if (!currentNeedsPlan) {
+                        return;
+                    }
+
                     auto plan = routePlanToExit(layoutCache, position.value, startZoneId, desiredExit);
                     if (plan.destinationZoneId.empty()) {
                         plan = routePlanToNearestExit(layoutCache, position.value, startZoneId);
                     }
-                    if (!plan.destinationZoneId.empty()) {
+                    if (useHazardAwareSafety) {
+                        plan = safetyConstrainedGuidancePlan(
+                            layoutCache,
+                            plan,
+                            position.value,
+                            startZoneId,
+                            agentFloorId,
+                            activeHazards,
+                            activeHazardSignature);
+                    }
+                    if (!plan.destinationZoneId.empty()
+                        && (plan.destinationZoneId != route.destinationZoneId
+                            || route.waypoints.empty()
+                            || !currentRouteSafe)) {
                         replaceRouteWithPlan(route, plan, position.value);
                         route.nextExitReplanSeconds = elapsedSeconds + 0.25;
                     }
@@ -743,7 +1057,16 @@ public:
             && guidanceTargetsExitConnection(layoutCache, selectedGuidance);
         if (!desiredExit.empty() && route.destinationZoneId == desiredExit && !route.waypoints.empty()
             && !shouldUseGuidanceConnection) {
-            return;
+            if (!useHazardAwareSafety
+                || remainingRouteHazardSafe(
+                    layoutCache,
+                    route,
+                    position.value,
+                    agentFloorId,
+                    activeHazards,
+                    activeHazardSignature)) {
+                return;
+            }
         }
 
         ScenarioRoutePlan plan;
@@ -754,8 +1077,28 @@ public:
                 plan = routePlanToExit(layoutCache, position.value, startZoneId, desiredExit);
             }
         }
+        if (useHazardAwareSafety) {
+            plan = safetyConstrainedGuidancePlan(
+                layoutCache,
+                plan,
+                position.value,
+                startZoneId,
+                agentFloorId,
+                activeHazards,
+                activeHazardSignature);
+        }
         if (plan.destinationZoneId.empty()) {
-            plan = routePlanToNearestExit(layoutCache, position.value, startZoneId);
+            if (useHazardAwareSafety && activeHazards != nullptr) {
+                plan = routePlanToHazardAwareNearestExit(
+                    layoutCache,
+                    position.value,
+                    startZoneId,
+                    agentFloorId,
+                    *activeHazards);
+            }
+            if (plan.destinationZoneId.empty()) {
+                plan = routePlanToNearestExit(layoutCache, position.value, startZoneId);
+            }
         }
         if (plan.destinationZoneId.empty()) {
             return;
@@ -770,6 +1113,8 @@ public:
         const ScenarioLayoutCacheResource& layoutCache,
         double elapsedSeconds,
         std::uint64_t derivedSeed,
+        const ScenarioEnvironmentReactionResource* reactions,
+        const ScenarioActiveEnvironmentHazardsResource* activeHazards,
         const ScenarioAgentSpatialIndexResource* sharedSpatialIndex) {
         // Keep this small to avoid frame spikes when guidance toggles.
         // Higher values converge faster but may cause noticeable hitching with many agents.
@@ -777,9 +1122,16 @@ public:
 
         const auto activeGuidances = activeRouteGuidances(elapsedSeconds);
         const auto activeSignature = activeRouteGuidanceSignature(activeGuidances);
+        const auto hazardSignature = activeHazardSignature(activeHazards);
+        refreshRouteSafetyCache(activeSignature, hazardSignature);
         const auto hasVisibilityAnchoredGuidance = std::any_of(activeGuidances.begin(), activeGuidances.end(), [&](const auto& active) {
             return active.guidance != nullptr
                 && (!active.guidance->installConnectionId.empty() || guidanceHasInstallPosition(*active.guidance));
+        });
+        const auto hasGlobalGuidance = std::any_of(activeGuidances.begin(), activeGuidances.end(), [&](const auto& active) {
+            return active.guidance != nullptr
+                && active.guidance->installConnectionId.empty()
+                && !guidanceHasInstallPosition(*active.guidance);
         });
 
         if (activeSignature != activeRouteGuidanceId_) {
@@ -787,7 +1139,7 @@ public:
             guidanceReplanCursor_ = 0;
             guidanceReplanSeed_ = derivedSeed;
             guidanceReplanPending_ = true;
-        } else if (hasVisibilityAnchoredGuidance && !guidanceReplanPending_) {
+        } else if (hasGlobalGuidance && !guidanceReplanPending_) {
             guidanceReplanCursor_ = 0;
             guidanceReplanSeed_ = derivedSeed;
             guidanceReplanPending_ = true;
@@ -812,7 +1164,10 @@ public:
                     layoutCache,
                     activeGuidances,
                     elapsedSeconds,
-                    guidanceReplanSeed_);
+                    guidanceReplanSeed_,
+                    reactions,
+                    activeHazards,
+                    hazardSignature);
             }
         }
 
@@ -824,7 +1179,16 @@ public:
         const auto stableSeed = guidanceReplanSeed_;
 
         for (std::size_t i = guidanceReplanCursor_; i < endIndex; ++i) {
-            applyRouteGuidanceToEntity(query, entities[i], layoutCache, activeGuidances, elapsedSeconds, stableSeed);
+            applyRouteGuidanceToEntity(
+                query,
+                entities[i],
+                layoutCache,
+                activeGuidances,
+                elapsedSeconds,
+                stableSeed,
+                reactions,
+                activeHazards,
+                hazardSignature);
         }
 
         guidanceReplanCursor_ = endIndex;
@@ -1118,63 +1482,139 @@ public:
         return plan;
     }
 
+    static Point2D interpolateSegmentPoint(const Point2D& start, const Point2D& end, double t) {
+        return {
+            .x = start.x + ((end.x - start.x) * t),
+            .y = start.y + ((end.y - start.y) * t),
+        };
+    }
+
+    static double dotDelta(double ax, double ay, double bx, double by) {
+        return (ax * bx) + (ay * by);
+    }
+
+    static double hazardSegmentExposureMeters(
+        const ScenarioActiveEnvironmentHazard& hazard,
+        const Point2D& segmentStart,
+        const Point2D& segmentEnd) {
+        const auto radius = std::max(0.0, hazard.radiusMeters);
+        if (radius <= 1e-9) {
+            return 0.0;
+        }
+
+        const auto dx = segmentEnd.x - segmentStart.x;
+        const auto dy = segmentEnd.y - segmentStart.y;
+        const auto lengthSquared = (dx * dx) + (dy * dy);
+        if (lengthSquared <= 1e-12) {
+            return 0.0;
+        }
+
+        const auto fx = segmentStart.x - hazard.draft.position.x;
+        const auto fy = segmentStart.y - hazard.draft.position.y;
+        const auto a = lengthSquared;
+        const auto b = 2.0 * dotDelta(fx, fy, dx, dy);
+        const auto c = dotDelta(fx, fy, fx, fy) - (radius * radius);
+        const auto discriminant = (b * b) - (4.0 * a * c);
+        if (discriminant < -1e-12) {
+            return 0.0;
+        }
+
+        double enter = 0.0;
+        double exit = 1.0;
+        if (discriminant >= 0.0) {
+            const auto root = std::sqrt(std::max(0.0, discriminant));
+            enter = (-b - root) / (2.0 * a);
+            exit = (-b + root) / (2.0 * a);
+        }
+
+        enter = std::clamp(enter, 0.0, 1.0);
+        exit = std::clamp(exit, 0.0, 1.0);
+        if (exit <= enter + 1e-12) {
+            const auto startInside = distanceBetween(segmentStart, hazard.draft.position) <= radius + 1e-9;
+            const auto endInside = distanceBetween(segmentEnd, hazard.draft.position) <= radius + 1e-9;
+            if (!startInside && !endInside) {
+                return 0.0;
+            }
+            enter = 0.0;
+            exit = 1.0;
+        }
+
+        const auto overlapLength = std::sqrt(lengthSquared) * (exit - enter);
+        if (overlapLength <= 1e-9) {
+            return 0.0;
+        }
+
+        const auto midpoint = interpolateSegmentPoint(segmentStart, segmentEnd, (enter + exit) * 0.5);
+        const auto influence = environmentHazardInfluenceAt(
+            hazard.draft,
+            distanceBetween(midpoint, hazard.draft.position));
+        return overlapLength * influence;
+    }
+
     double hazardRoutePenalty(
         const ScenarioLayoutCacheResource& layoutCache,
         const ScenarioRoutePlan& plan,
         const Point2D& start,
         const std::string& startFloorId,
         const ScenarioActiveEnvironmentHazardsResource& activeHazards) const {
-        double penalty = 0.0;
-        for (const auto& hazard : activeHazards.hazards) {
-            bool routeTouchesHazard = false;
+        if (activeHazards.hazards.empty()) {
+            return 0.0;
+        }
 
-            Point2D segmentStart = start;
-            std::string segmentFloorId = startFloorId;
-            for (std::size_t waypointIndex = 0; waypointIndex < plan.waypoints.size(); ++waypointIndex) {
-                const auto& segmentEnd = plan.waypoints[waypointIndex];
-                if (matchesFloor(segmentFloorId, hazard.floorId)
-                    && distanceBetween(
-                        hazard.draft.position,
-                        closestPointOnSegment(hazard.draft.position, segmentStart, segmentEnd)) <= hazard.radiusMeters + 1e-9) {
-                    routeTouchesHazard = true;
-                    break;
+        std::vector<double> exposureMeters(activeHazards.hazards.size(), 0.0);
+
+        auto addSegmentExposure = [&](const Point2D& segmentStart,
+                                      const Point2D& segmentEnd,
+                                      const std::string& segmentFloorId) {
+            const auto candidateHazards = scenarioHazardIndicesNearSegment(
+                activeHazards,
+                segmentStart,
+                segmentEnd,
+                segmentFloorId,
+                activeHazards.maxRadiusMeters);
+            for (const auto hazardIndex : candidateHazards) {
+                if (hazardIndex >= activeHazards.hazards.size()) {
+                    continue;
                 }
+                const auto& hazard = activeHazards.hazards[hazardIndex];
+                if (!matchesFloor(segmentFloorId, hazard.floorId)) {
+                    continue;
+                }
+                exposureMeters[hazardIndex] += hazardSegmentExposureMeters(hazard, segmentStart, segmentEnd);
+            }
+        };
 
-                if (waypointIndex < plan.waypointConnectionIds.size()) {
-                    const auto* connection = findConnectionById(layoutCache, plan.waypointConnectionIds[waypointIndex]);
-                    if (connection == nullptr) {
-                        segmentStart = segmentEnd;
-                        if (waypointIndex < plan.waypointFloorIds.size()
-                            && !plan.waypointFloorIds[waypointIndex].empty()) {
-                            segmentFloorId = plan.waypointFloorIds[waypointIndex];
-                        }
-                        continue;
-                    }
+        Point2D segmentStart = start;
+        std::string segmentFloorId = startFloorId;
+        for (std::size_t waypointIndex = 0; waypointIndex < plan.waypoints.size(); ++waypointIndex) {
+            const auto& segmentEnd = plan.waypoints[waypointIndex];
+            addSegmentExposure(segmentStart, segmentEnd, segmentFloorId);
+
+            if (waypointIndex < plan.waypointConnectionIds.size()) {
+                const auto* connection = findConnectionById(layoutCache, plan.waypointConnectionIds[waypointIndex]);
+                if (connection != nullptr) {
                     const auto connectionFloorId = connection->floorId.empty()
                         ? cachedFloorIdForZone(layoutCache, connection->fromZoneId)
                         : connection->floorId;
-                    if (matchesFloor(connectionFloorId, hazard.floorId)
-                        && distanceBetween(
-                            hazard.draft.position,
-                            closestPointOnSegment(
-                                hazard.draft.position,
-                                connection->centerSpan.start,
-                                connection->centerSpan.end)) <= hazard.radiusMeters + 1e-9) {
-                        routeTouchesHazard = true;
-                        break;
-                    }
-                }
-
-                segmentStart = segmentEnd;
-                if (waypointIndex < plan.waypointFloorIds.size()
-                    && !plan.waypointFloorIds[waypointIndex].empty()) {
-                    segmentFloorId = plan.waypointFloorIds[waypointIndex];
+                    addSegmentExposure(connection->centerSpan.start, connection->centerSpan.end, connectionFloorId);
                 }
             }
 
-            if (routeTouchesHazard) {
-                penalty += hazard.routePenaltyMeters;
+            segmentStart = segmentEnd;
+            if (waypointIndex < plan.waypointFloorIds.size()
+                && !plan.waypointFloorIds[waypointIndex].empty()) {
+                segmentFloorId = plan.waypointFloorIds[waypointIndex];
             }
+        }
+
+        double penalty = 0.0;
+        for (std::size_t hazardIndex = 0; hazardIndex < activeHazards.hazards.size(); ++hazardIndex) {
+            const auto& hazard = activeHazards.hazards[hazardIndex];
+            const auto radius = std::max(0.0, hazard.radiusMeters);
+            if (radius <= 1e-9 || exposureMeters[hazardIndex] <= 1e-9) {
+                continue;
+            }
+            penalty += hazard.routePenaltyMeters * std::clamp(exposureMeters[hazardIndex] / radius, 0.0, 1.0);
         }
         return penalty;
     }
@@ -1184,13 +1624,24 @@ public:
         const Point2D& start,
         const std::string& startZoneId,
         const std::string& agentFloorId,
-        const ScenarioActiveEnvironmentHazardsResource& activeHazards) const {
-        std::string bestExitZoneId;
-        double bestScore = std::numeric_limits<double>::max();
+        const ScenarioActiveEnvironmentHazardsResource& activeHazards,
+        const std::string& excludedExitZoneId = {}) const {
+        const auto hazardSignature = activeHazardSignature(&activeHazards);
+        const auto cacheKey = hazardAwareExitPlanCacheKey(start, startZoneId, agentFloorId, hazardSignature, excludedExitZoneId);
+        const auto cachedIt = hazardAwareExitPlanCache_.find(cacheKey);
+        if (cachedIt != hazardAwareExitPlanCache_.end()) {
+            return cachedIt->second;
+        }
+
+        ScenarioRoutePlan bestPlan;
+        double bestPenalty = std::numeric_limits<double>::max();
         double bestDistance = std::numeric_limits<double>::max();
 
         for (const auto& zone : layoutCache.layout.zones) {
             if (zone.kind != ZoneKind::Exit) {
+                continue;
+            }
+            if (!excludedExitZoneId.empty() && zone.id == excludedExitZoneId) {
                 continue;
             }
 
@@ -1199,29 +1650,28 @@ public:
                 continue;
             }
 
-            if (result->distance >= bestScore) {
-                continue;
-            }
-
             const auto plan = routePlanToExit(layoutCache, start, startZoneId, zone.id);
             if (plan.destinationZoneId.empty()) {
                 continue;
             }
 
-            const auto penalty = hazardRoutePenalty(layoutCache, plan, start, agentFloorId, activeHazards);
-            const auto score = result->distance + penalty;
-            if (score + 1e-9 < bestScore
-                || (std::fabs(score - bestScore) <= 1e-9 && result->distance < bestDistance)) {
-                bestScore = score;
+            const auto penalty = cachedHazardRoutePenalty(
+                layoutCache,
+                plan,
+                start,
+                agentFloorId,
+                activeHazards,
+                hazardSignature);
+            if (penalty + 1e-9 < bestPenalty
+                || (std::fabs(penalty - bestPenalty) <= 1e-9 && result->distance < bestDistance)) {
+                bestPenalty = penalty;
                 bestDistance = result->distance;
-                bestExitZoneId = zone.id;
+                bestPlan = plan;
             }
         }
 
-        if (bestExitZoneId.empty()) {
-            return {};
-        }
-        return routePlanToExit(layoutCache, start, startZoneId, bestExitZoneId);
+        hazardAwareExitPlanCache_.emplace(cacheKey, bestPlan);
+        return bestPlan;
     }
 
     void replaceRouteWithPlan(EvacuationRoute& route, const ScenarioRoutePlan& plan, const Point2D& start) const {
@@ -1257,6 +1707,10 @@ private:
     mutable std::unordered_map<std::string, std::optional<ZoneRouteToExit>> nearestExitRouteCache_{};
     mutable std::unordered_map<std::string, std::optional<ZoneRouteResult>> exitRouteCache_{};
     mutable std::unordered_map<std::string, std::vector<Point2D>> pathCache_{};
+    mutable std::string routeSafetyGuidanceSignature_{};
+    mutable std::string routeSafetyHazardSignature_{};
+    mutable std::unordered_map<std::string, ScenarioRoutePlan> hazardAwareExitPlanCache_{};
+    mutable std::unordered_map<std::string, double> routeHazardPenaltyCache_{};
 };
 
 ScenarioRouteGuidanceController::ScenarioRouteGuidanceController()
@@ -1310,6 +1764,40 @@ ScenarioRoutePlan ScenarioRouteGuidanceController::routePlanToHazardAwareNearest
     return impl_->routePlanToHazardAwareNearestExit(layoutCache, start, startZoneId, agentFloorId, activeHazards);
 }
 
+ScenarioRoutePlan ScenarioRouteGuidanceController::routePlanToHazardAwareNearestExitExcluding(
+    const ScenarioLayoutCacheResource& layoutCache,
+    const Point2D& start,
+    const std::string& startZoneId,
+    const std::string& agentFloorId,
+    const ScenarioActiveEnvironmentHazardsResource& activeHazards,
+    const std::string& excludedExitZoneId) const {
+    return impl_->routePlanToHazardAwareNearestExit(
+        layoutCache,
+        start,
+        startZoneId,
+        agentFloorId,
+        activeHazards,
+        excludedExitZoneId);
+}
+
+double ScenarioRouteGuidanceController::hazardRoutePenalty(
+    const ScenarioLayoutCacheResource& layoutCache,
+    const ScenarioRoutePlan& plan,
+    const Point2D& start,
+    const std::string& startFloorId,
+    const ScenarioActiveEnvironmentHazardsResource& activeHazards) const {
+    return impl_->hazardRoutePenalty(layoutCache, plan, start, startFloorId, activeHazards);
+}
+
+double ScenarioRouteGuidanceController::remainingRouteHazardPenalty(
+    const ScenarioLayoutCacheResource& layoutCache,
+    const EvacuationRoute& route,
+    const Point2D& position,
+    const std::string& startFloorId,
+    const ScenarioActiveEnvironmentHazardsResource& activeHazards) const {
+    return impl_->remainingRouteHazardPenalty(layoutCache, route, position, startFloorId, activeHazards);
+}
+
 void ScenarioRouteGuidanceController::replaceRouteWithPlan(
     EvacuationRoute& route,
     const ScenarioRoutePlan& plan,
@@ -1323,8 +1811,18 @@ void ScenarioRouteGuidanceController::apply(
     const ScenarioLayoutCacheResource& layoutCache,
     double elapsedSeconds,
     std::uint64_t derivedSeed,
+    const ScenarioEnvironmentReactionResource* reactions,
+    const ScenarioActiveEnvironmentHazardsResource* activeHazards,
     const ScenarioAgentSpatialIndexResource* sharedSpatialIndex) {
-    impl_->applyRouteGuidance(query, entities, layoutCache, elapsedSeconds, derivedSeed, sharedSpatialIndex);
+    impl_->applyRouteGuidance(
+        query,
+        entities,
+        layoutCache,
+        elapsedSeconds,
+        derivedSeed,
+        reactions,
+        activeHazards,
+        sharedSpatialIndex);
 }
 
 bool routePlanUsesConnection(const ScenarioRoutePlan& plan, const std::string& connectionId) {

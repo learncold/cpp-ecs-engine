@@ -87,6 +87,9 @@ QString formatEnvironmentHazardTooltip(const safecrowd::domain::EnvironmentHazar
             .arg(std::max(start, hazard.endSeconds), 0, 'f', 1));
     }
     text.append(QString("\nSeverity: %1").arg(severityLabel(hazard.severity)));
+    text.append(QString("\nInfluence radius: %1m")
+        .arg(safecrowd::domain::environmentHazardRadiusMeters(hazard.severity), 0, 'f', 1));
+    text.append(QStringLiteral("\nDetection varies by agent sensitivity"));
     return text;
 }
 
@@ -1132,8 +1135,16 @@ void SimulationCanvasWidget::drawEnvironmentHazardOverlay(QPainter& painter, con
             markerFill = QColor(100, 116, 139, 115);
         }
         QRadialGradient gradient(center, radius);
+        auto falloffColor = [&](double ratio, QColor color) {
+            const auto influence = safecrowd::domain::environmentHazardInfluenceAt(
+                hazard,
+                radiusMeters * std::clamp(ratio, 0.0, 1.0));
+            color.setAlpha(std::clamp(static_cast<int>(std::lround(static_cast<double>(color.alpha()) * influence)), 0, 255));
+            return color;
+        };
         gradient.setColorAt(0.0, core);
-        gradient.setColorAt(0.48, mid);
+        gradient.setColorAt(0.35, falloffColor(0.35, core));
+        gradient.setColorAt(0.65, falloffColor(0.65, mid));
         gradient.setColorAt(1.0, edge);
         painter.setPen(Qt::NoPen);
         painter.setBrush(gradient);

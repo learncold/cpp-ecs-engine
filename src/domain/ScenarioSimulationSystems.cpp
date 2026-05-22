@@ -339,6 +339,77 @@ std::string hazardRuntimeKey(const EnvironmentHazardDraft& hazard, std::size_t i
     return "hazard-" + std::to_string(index + 1);
 }
 
+long long quantizedHazardSignatureValue(double value) {
+    return static_cast<long long>(std::llround(value * 1000.0));
+}
+
+std::string hazardSignaturePoint(const Point2D& point) {
+    return std::to_string(quantizedHazardSignatureValue(point.x))
+        + ","
+        + std::to_string(quantizedHazardSignatureValue(point.y));
+}
+
+std::string activeHazardsSignature(const std::vector<ScenarioActiveEnvironmentHazard>& hazards) {
+    std::string signature;
+    for (const auto& hazard : hazards) {
+        if (!signature.empty()) {
+            signature.push_back('\x1f');
+        }
+        signature.append(hazard.key);
+        signature.push_back('\x1e');
+        signature.append(hazard.floorId);
+        signature.push_back('\x1e');
+        signature.append(hazardSignaturePoint(hazard.draft.position));
+        signature.push_back('\x1e');
+        signature.append(std::to_string(static_cast<int>(hazard.draft.kind)));
+        signature.push_back('\x1e');
+        signature.append(std::to_string(static_cast<int>(hazard.draft.severity)));
+        signature.push_back('\x1e');
+        signature.append(std::to_string(quantizedHazardSignatureValue(hazard.radiusMeters)));
+        signature.push_back('\x1e');
+        signature.append(std::to_string(quantizedHazardSignatureValue(hazard.routePenaltyMeters)));
+    }
+    return signature;
+}
+
+void insertHazardCoverageCells(
+    std::unordered_map<std::string, std::unordered_map<long long, std::vector<std::size_t>>>& cellsByFloor,
+    const ScenarioActiveEnvironmentHazard& hazard,
+    double cellSize,
+    std::size_t hazardIndex) {
+    const auto radius = std::max(0.0, hazard.radiusMeters);
+    if (cellSize <= 1e-9 || radius <= 1e-9) {
+        return;
+    }
+
+    auto& floorCells = cellsByFloor[hazard.floorId];
+    const Point2D minPoint{
+        .x = hazard.draft.position.x - radius,
+        .y = hazard.draft.position.y - radius,
+    };
+    const Point2D maxPoint{
+        .x = hazard.draft.position.x + radius,
+        .y = hazard.draft.position.y + radius,
+    };
+    for (const auto& cell : spatialCellsForBounds(minPoint, maxPoint, cellSize)) {
+        floorCells[spatialKey(cell)].push_back(hazardIndex);
+    }
+}
+
+void refreshActiveHazardSpatialCache(ScenarioActiveEnvironmentHazardsResource& resource) {
+    constexpr double kHazardCellSizeMeters = 1.0;
+    resource.signature = activeHazardsSignature(resource.hazards);
+    resource.cellSizeMeters = kHazardCellSizeMeters;
+    resource.maxRadiusMeters = 0.0;
+    resource.hazardIndicesByFloor.clear();
+
+    for (std::size_t index = 0; index < resource.hazards.size(); ++index) {
+        const auto& hazard = resource.hazards[index];
+        resource.maxRadiusMeters = std::max(resource.maxRadiusMeters, std::max(0.0, hazard.radiusMeters));
+        insertHazardCoverageCells(resource.hazardIndicesByFloor, hazard, resource.cellSizeMeters, index);
+    }
+}
+
 HazardExposureMetric hazardExposureMetric(
     const EnvironmentHazardDraft& hazard,
     const std::string& key,
@@ -504,9 +575,10 @@ public:
             ? std::max(0.0, resources.get<ScenarioSimulationStepResource>().deltaSeconds)
             : 0.0;
 
-        auto activeHazards = buildActiveHazards(elapsedSeconds);
         auto& activeResource = resources.get<ScenarioActiveEnvironmentHazardsResource>();
-        activeResource.hazards = activeHazards;
+        activeResource.hazards = buildActiveHazards(elapsedSeconds);
+        refreshActiveHazardSpatialCache(activeResource);
+        const auto& activeHazards = activeResource.hazards;
 
         auto& reactions = resources.get<ScenarioEnvironmentReactionResource>();
         auto& exposure = resources.get<ScenarioHazardExposureResource>();
@@ -531,7 +603,18 @@ public:
             double detectedRadius = 0.0;
             double bestProximity = std::numeric_limits<double>::max();
 
-            for (const auto& hazard : activeHazards) {
+            const auto detectionRadius = activeResource.maxRadiusMeters * std::max({
+                1.0,
+                std::max(0.0, agent.hazardSensitivity),
+                std::max(0.0, agent.smokeSensitivity),
+            });
+            const auto candidateHazards =
+                scenarioNearbyHazardIndices(activeResource, position.value, agentFloorId, detectionRadius);
+            for (const auto hazardIndex : candidateHazards) {
+                if (hazardIndex >= activeHazards.size()) {
+                    continue;
+                }
+                const auto& hazard = activeHazards[hazardIndex];
                 if (!sameFloor(agentFloorId, hazard.floorId)) {
                     continue;
                 }
@@ -813,6 +896,147 @@ std::vector<const Barrier2D*> scenarioNearbyBarriers(
         }
     }
     return candidates;
+}
+
+namespace {
+
+bool hazardFloorMatchesQuery(const std::string& hazardFloorId, const std::string& floorId) {
+    return floorId.empty() || hazardFloorId.empty() || hazardFloorId == floorId;
+}
+
+void appendUniqueHazardIndex(std::vector<std::size_t>& indices, std::size_t index) {
+    if (std::find(indices.begin(), indices.end(), index) == indices.end()) {
+        indices.push_back(index);
+    }
+}
+
+std::vector<std::size_t> allHazardIndicesForFloor(
+    const ScenarioActiveEnvironmentHazardsResource& hazards,
+    const std::string& floorId) {
+    std::vector<std::size_t> indices;
+    indices.reserve(hazards.hazards.size());
+    for (std::size_t index = 0; index < hazards.hazards.size(); ++index) {
+        if (hazardFloorMatchesQuery(hazards.hazards[index].floorId, floorId)) {
+            indices.push_back(index);
+        }
+    }
+    return indices;
+}
+
+void appendHazardCellCandidates(
+    const ScenarioActiveEnvironmentHazardsResource& hazards,
+    const std::string& candidateFloorId,
+    const std::vector<long long>& cellKeys,
+    std::vector<std::size_t>& indices) {
+    const auto floorIt = hazards.hazardIndicesByFloor.find(candidateFloorId);
+    if (floorIt == hazards.hazardIndicesByFloor.end()) {
+        return;
+    }
+    for (const auto cellKey : cellKeys) {
+        const auto cellIt = floorIt->second.find(cellKey);
+        if (cellIt == floorIt->second.end()) {
+            continue;
+        }
+        for (const auto index : cellIt->second) {
+            appendUniqueHazardIndex(indices, index);
+        }
+    }
+}
+
+void appendHazardFloorCandidates(
+    const ScenarioActiveEnvironmentHazardsResource& hazards,
+    const std::string& floorId,
+    const std::vector<long long>& cellKeys,
+    std::vector<std::size_t>& indices) {
+    if (floorId.empty()) {
+        for (const auto& [candidateFloorId, _] : hazards.hazardIndicesByFloor) {
+            appendHazardCellCandidates(hazards, candidateFloorId, cellKeys, indices);
+        }
+        return;
+    }
+    appendHazardCellCandidates(hazards, floorId, cellKeys, indices);
+    appendHazardCellCandidates(hazards, std::string{}, cellKeys, indices);
+}
+
+std::vector<long long> spatialKeysAroundPoint(const Point2D& point, double radius, double cellSize) {
+    std::vector<long long> keys;
+    if (cellSize <= 1e-9) {
+        return keys;
+    }
+    const auto center = spatialCellFor(point, cellSize);
+    const auto range = std::max(1, static_cast<int>(std::ceil(std::max(0.0, radius) / cellSize)));
+    keys.reserve(static_cast<std::size_t>((range * 2 + 1) * (range * 2 + 1)));
+    for (int dy = -range; dy <= range; ++dy) {
+        for (int dx = -range; dx <= range; ++dx) {
+            keys.push_back(spatialKey({.x = center.x + dx, .y = center.y + dy}));
+        }
+    }
+    return keys;
+}
+
+std::vector<long long> spatialKeysForSegmentBounds(
+    const Point2D& start,
+    const Point2D& end,
+    double radius,
+    double cellSize) {
+    std::vector<long long> keys;
+    if (cellSize <= 1e-9) {
+        return keys;
+    }
+    const auto expansion = std::max(0.0, radius);
+    const Point2D minPoint{
+        .x = std::min(start.x, end.x) - expansion,
+        .y = std::min(start.y, end.y) - expansion,
+    };
+    const Point2D maxPoint{
+        .x = std::max(start.x, end.x) + expansion,
+        .y = std::max(start.y, end.y) + expansion,
+    };
+    const auto cells = spatialCellsForBounds(minPoint, maxPoint, cellSize);
+    keys.reserve(cells.size());
+    for (const auto& cell : cells) {
+        keys.push_back(spatialKey(cell));
+    }
+    return keys;
+}
+
+}  // namespace
+
+std::vector<std::size_t> scenarioNearbyHazardIndices(
+    const ScenarioActiveEnvironmentHazardsResource& hazards,
+    const Point2D& point,
+    const std::string& floorId,
+    double radius) {
+    if (hazards.hazards.empty()) {
+        return {};
+    }
+    if (hazards.hazardIndicesByFloor.empty()) {
+        return allHazardIndicesForFloor(hazards, floorId);
+    }
+
+    std::vector<std::size_t> indices;
+    const auto cellKeys = spatialKeysAroundPoint(point, radius, hazards.cellSizeMeters);
+    appendHazardFloorCandidates(hazards, floorId, cellKeys, indices);
+    return indices;
+}
+
+std::vector<std::size_t> scenarioHazardIndicesNearSegment(
+    const ScenarioActiveEnvironmentHazardsResource& hazards,
+    const Point2D& start,
+    const Point2D& end,
+    const std::string& floorId,
+    double radius) {
+    if (hazards.hazards.empty()) {
+        return {};
+    }
+    if (hazards.hazardIndicesByFloor.empty()) {
+        return allHazardIndicesForFloor(hazards, floorId);
+    }
+
+    std::vector<std::size_t> indices;
+    const auto cellKeys = spatialKeysForSegmentBounds(start, end, radius, hazards.cellSizeMeters);
+    appendHazardFloorCandidates(hazards, floorId, cellKeys, indices);
+    return indices;
 }
 
 ScenarioSpatialIndexSystem::ScenarioSpatialIndexSystem(double cellSize)

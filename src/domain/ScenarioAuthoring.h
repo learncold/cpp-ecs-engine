@@ -133,6 +133,7 @@ std::vector<std::string> computeScenarioDiffKeys(const ScenarioDraft& baseline,
                                                  const ScenarioDraft& variant);
 
 double environmentHazardRadiusMeters(ScenarioElementSeverity severity);
+double environmentHazardInfluenceAt(const EnvironmentHazardDraft& hazard, double distanceMeters);
 double environmentHazardRoutePenaltyMeters(ScenarioElementSeverity severity);
 double environmentHazardSeverityWeight(ScenarioElementSeverity severity);
 double environmentHazardSpeedFactor(EnvironmentHazardKind kind, ScenarioElementSeverity severity);
