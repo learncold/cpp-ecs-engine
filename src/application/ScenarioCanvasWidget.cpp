@@ -1229,6 +1229,11 @@ void ScenarioCanvasWidget::setRouteGuidancesChangedHandler(
     routeGuidancesChangedHandler_ = std::move(handler);
 }
 
+void ScenarioCanvasWidget::setScenarioElementSelectionChangedHandler(
+    std::function<void(const ScenarioCanvasSelection&)> handler) {
+    scenarioElementSelectionChangedHandler_ = std::move(handler);
+}
+
 void ScenarioCanvasWidget::setLayoutElementActivatedHandler(std::function<void(const QString&)> handler) {
     layoutElementActivatedHandler_ = std::move(handler);
 }
@@ -2527,6 +2532,7 @@ void ScenarioCanvasWidget::addGroupPlacement(const QPointF& start, const QPointF
     if (crowdSelectionChangedHandler_) {
         crowdSelectionChangedHandler_(id);
     }
+    emitScenarioSelection(ScenarioCanvasSelectionKind::CrowdPlacement, id);
     emitPlacementsChanged();
     update();
 }
@@ -2547,6 +2553,7 @@ void ScenarioCanvasWidget::addIndividualPlacement(const QPointF& position) {
     if (crowdSelectionChangedHandler_) {
         crowdSelectionChangedHandler_(id);
     }
+    emitScenarioSelection(ScenarioCanvasSelectionKind::CrowdPlacement, id);
     emitPlacementsChanged();
     update();
 }
@@ -2575,6 +2582,7 @@ void ScenarioCanvasWidget::addSourcePlacement(const QPointF& position) {
     if (crowdSelectionChangedHandler_) {
         crowdSelectionChangedHandler_(id);
     }
+    emitScenarioSelection(ScenarioCanvasSelectionKind::CrowdPlacement, id);
     emitPlacementsChanged();
     update();
 }
@@ -2607,6 +2615,7 @@ void ScenarioCanvasWidget::addConnectionBlockForConnection(const safecrowd::doma
     }
 
     connectionBlocks_.push_back(*result.block);
+    emitScenarioSelection(ScenarioCanvasSelectionKind::ConnectionBlock, QString::fromStdString(result.block->id));
     emitConnectionBlocksChanged();
     update();
 }
@@ -2629,6 +2638,7 @@ void ScenarioCanvasWidget::addEnvironmentHazard(
     }
 
     environmentHazards_.push_back(*result.hazard);
+    emitScenarioSelection(ScenarioCanvasSelectionKind::EnvironmentHazard, QString::fromStdString(result.hazard->id));
     emitEnvironmentHazardsChanged();
     update();
 }
@@ -2651,6 +2661,7 @@ void ScenarioCanvasWidget::addEnvironmentHazardForZone(
     }
 
     environmentHazards_.push_back(*result.hazard);
+    emitScenarioSelection(ScenarioCanvasSelectionKind::EnvironmentHazard, QString::fromStdString(result.hazard->id));
     emitEnvironmentHazardsChanged();
     update();
 }
@@ -2712,6 +2723,7 @@ void ScenarioCanvasWidget::addRouteGuidanceForZonePosition(
     }
 
     routeGuidances_.push_back(*result.guidance);
+    emitScenarioSelection(ScenarioCanvasSelectionKind::RouteGuidance, QString::fromStdString(result.guidance->id));
     emitRouteGuidancesChanged();
     update();
 }
@@ -2726,6 +2738,7 @@ void ScenarioCanvasWidget::addRouteGuidanceForExitZone(const safecrowd::domain::
     }
 
     routeGuidances_.push_back(*result.guidance);
+    emitScenarioSelection(ScenarioCanvasSelectionKind::RouteGuidance, QString::fromStdString(result.guidance->id));
     emitRouteGuidancesChanged();
     update();
 }
@@ -2744,6 +2757,7 @@ void ScenarioCanvasWidget::addRouteGuidanceForConnection(const safecrowd::domain
     }
 
     routeGuidances_.push_back(*result.guidance);
+    emitScenarioSelection(ScenarioCanvasSelectionKind::RouteGuidance, QString::fromStdString(result.guidance->id));
     emitRouteGuidancesChanged();
     update();
 }
@@ -2757,6 +2771,10 @@ bool ScenarioCanvasWidget::beginEventDrag(const QPointF& position, const LayoutC
         currentFloorId_,
         position);
     if (hoveredGuidance.has_value()) {
+        focusedLayoutElementId_.clear();
+        focusedCrowdElementId_.clear();
+        focusedPlacementId_.clear();
+        selectedPlacementIds_.clear();
         eventDragState_ = EventDragState{
             .kind = DraggableEventKind::RouteGuidance,
             .index = *hoveredGuidance,
@@ -2764,6 +2782,15 @@ bool ScenarioCanvasWidget::beginEventDrag(const QPointF& position, const LayoutC
             .previewScreenPosition = position,
             .hasValidPreview = true,
         };
+        if (layoutElementActivatedHandler_) {
+            layoutElementActivatedHandler_({});
+        }
+        if (crowdSelectionChangedHandler_) {
+            crowdSelectionChangedHandler_({});
+        }
+        emitScenarioSelection(
+            ScenarioCanvasSelectionKind::RouteGuidance,
+            QString::fromStdString(routeGuidances_[*hoveredGuidance].id));
         eventDragging_ = true;
         return true;
     }
@@ -2775,6 +2802,10 @@ bool ScenarioCanvasWidget::beginEventDrag(const QPointF& position, const LayoutC
         currentFloorId_,
         position);
     if (hoveredHazard.has_value()) {
+        focusedLayoutElementId_.clear();
+        focusedCrowdElementId_.clear();
+        focusedPlacementId_.clear();
+        selectedPlacementIds_.clear();
         eventDragState_ = EventDragState{
             .kind = DraggableEventKind::EnvironmentHazard,
             .index = *hoveredHazard,
@@ -2782,12 +2813,25 @@ bool ScenarioCanvasWidget::beginEventDrag(const QPointF& position, const LayoutC
             .previewScreenPosition = position,
             .hasValidPreview = true,
         };
+        if (layoutElementActivatedHandler_) {
+            layoutElementActivatedHandler_({});
+        }
+        if (crowdSelectionChangedHandler_) {
+            crowdSelectionChangedHandler_({});
+        }
+        emitScenarioSelection(
+            ScenarioCanvasSelectionKind::EnvironmentHazard,
+            QString::fromStdString(environmentHazards_[*hoveredHazard].id));
         eventDragging_ = true;
         return true;
     }
 
     const auto hoveredBlock = hoveredConnectionBlockIndex(layout_, connectionBlocks_, transform, currentFloorId_, position);
     if (hoveredBlock.has_value()) {
+        focusedLayoutElementId_.clear();
+        focusedCrowdElementId_.clear();
+        focusedPlacementId_.clear();
+        selectedPlacementIds_.clear();
         eventDragState_ = EventDragState{
             .kind = DraggableEventKind::ConnectionBlock,
             .index = *hoveredBlock,
@@ -2795,6 +2839,15 @@ bool ScenarioCanvasWidget::beginEventDrag(const QPointF& position, const LayoutC
             .previewScreenPosition = position,
             .hasValidPreview = true,
         };
+        if (layoutElementActivatedHandler_) {
+            layoutElementActivatedHandler_({});
+        }
+        if (crowdSelectionChangedHandler_) {
+            crowdSelectionChangedHandler_({});
+        }
+        emitScenarioSelection(
+            ScenarioCanvasSelectionKind::ConnectionBlock,
+            QString::fromStdString(connectionBlocks_[*hoveredBlock].id));
         eventDragging_ = true;
         return true;
     }
@@ -3031,6 +3084,7 @@ void ScenarioCanvasWidget::selectSingleAt(const QPointF& position, const LayoutC
         if (crowdSelectionChangedHandler_) {
             crowdSelectionChangedHandler_(crowdElementId);
         }
+        emitScenarioSelection(ScenarioCanvasSelectionKind::CrowdPlacement, crowdElementId);
         return;
     }
 
@@ -3079,6 +3133,9 @@ void ScenarioCanvasWidget::selectPlacementsInRect(const QRectF& screenRect, cons
     if (crowdSelectionChangedHandler_) {
         crowdSelectionChangedHandler_(focusedPlacementId_);
     }
+    emitScenarioSelection(
+        focusedPlacementId_.isEmpty() ? ScenarioCanvasSelectionKind::None : ScenarioCanvasSelectionKind::CrowdPlacement,
+        focusedPlacementId_);
 }
 
 void ScenarioCanvasWidget::selectLayoutElementAt(const QPointF& position) {
@@ -3108,6 +3165,9 @@ void ScenarioCanvasWidget::selectLayoutElementAt(const QPointF& position) {
     if (crowdSelectionChangedHandler_) {
         crowdSelectionChangedHandler_({});
     }
+    emitScenarioSelection(
+        selectedId.isEmpty() ? ScenarioCanvasSelectionKind::None : ScenarioCanvasSelectionKind::LayoutElement,
+        selectedId);
     update();
 }
 
@@ -3297,6 +3357,12 @@ bool ScenarioCanvasWidget::deleteCrowdElement(const QString& crowdElementId) {
     emitPlacementsChanged();
     update();
     return true;
+}
+
+void ScenarioCanvasWidget::emitScenarioSelection(ScenarioCanvasSelectionKind kind, const QString& id) {
+    if (scenarioElementSelectionChangedHandler_) {
+        scenarioElementSelectionChangedHandler_(ScenarioCanvasSelection{.kind = kind, .id = id});
+    }
 }
 
 void ScenarioCanvasWidget::emitPlacementsChanged() {

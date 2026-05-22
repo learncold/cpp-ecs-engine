@@ -51,6 +51,20 @@ struct ScenarioCrowdPlacement {
     double sourceIntervalSeconds{5.0};
 };
 
+enum class ScenarioCanvasSelectionKind {
+    None,
+    LayoutElement,
+    CrowdPlacement,
+    ConnectionBlock,
+    EnvironmentHazard,
+    RouteGuidance,
+};
+
+struct ScenarioCanvasSelection {
+    ScenarioCanvasSelectionKind kind{ScenarioCanvasSelectionKind::None};
+    QString id{};
+};
+
 class ScenarioCanvasWidget : public QWidget {
 public:
     explicit ScenarioCanvasWidget(
@@ -66,6 +80,7 @@ public:
     void setEnvironmentHazardsChangedHandler(std::function<void(const std::vector<safecrowd::domain::EnvironmentHazardDraft>&)> handler);
     void setRouteGuidances(std::vector<safecrowd::domain::RouteGuidanceDraft> guidances);
     void setRouteGuidancesChangedHandler(std::function<void(const std::vector<safecrowd::domain::RouteGuidanceDraft>&)> handler);
+    void setScenarioElementSelectionChangedHandler(std::function<void(const ScenarioCanvasSelection&)> handler);
     void setLayoutElementActivatedHandler(std::function<void(const QString&)> handler);
     void setCrowdSelectionChangedHandler(std::function<void(const QString&)> handler);
     void focusLayoutElement(const QString& elementId);
@@ -170,6 +185,7 @@ private:
     void drawEnvironmentHazards(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawRouteGuidances(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawDraggedEventPreview(QPainter& painter, const LayoutCanvasTransform& transform) const;
+    void emitScenarioSelection(ScenarioCanvasSelectionKind kind, const QString& id);
     void emitPlacementsChanged();
     void emitConnectionBlocksChanged();
     void emitEnvironmentHazardsChanged();
@@ -220,6 +236,7 @@ private:
     QString hoveredConnectionBlockId_{};
     QString hoveredEnvironmentHazardId_{};
     QString hoveredRouteGuidanceId_{};
+    std::function<void(const ScenarioCanvasSelection&)> scenarioElementSelectionChangedHandler_{};
     std::function<void(const QString&)> layoutElementActivatedHandler_{};
     std::function<void(const QString&)> crowdSelectionChangedHandler_{};
     std::function<void(const std::vector<ScenarioCrowdPlacement>&)> placementsChangedHandler_{};

@@ -56,6 +56,8 @@ public:
         std::vector<ScenarioState> scenarios{};
         int currentScenarioIndex{-1};
         NavigationView navigationView{NavigationView::Layout};
+        bool inspectorPanelVisible{true};
+        bool scenarioPanelVisible{true};
         RightPanelMode rightPanelMode{RightPanelMode::Scenario};
     };
 
@@ -82,6 +84,7 @@ private:
     void refreshNavigationPanel();
     void refreshRightPanel();
     void refreshScenarioSwitcher();
+    void refreshPanelToggles();
     void recomputeDiffKeysAfterScenarioChanged(ScenarioState& scenario);
     void recomputeDependentVariationDiffKeys(const QString& baselineId);
     void recomputeVariationDiffKeysIfAlternative(ScenarioState& scenario) const;
@@ -90,11 +93,27 @@ private:
     void updateCurrentScenarioPlacements(const std::vector<ScenarioCrowdPlacement>& placements);
     void showEmptyCanvas();
     void showScenarioNameDialog(int sourceIndex);
+    QWidget* createRightPanelContainer();
+    QWidget* createElementInspectorPanel();
     QWidget* createRunPanel();
     QWidget* createScenarioPanel();
+    QWidget* createPanelToggleBar();
+    void setInspectorSelectionFromCanvas(const ScenarioCanvasSelection& selection);
+    void setInspectorSelectionFromEventId(const QString& rawId);
+    void setInspectorSelectionNone();
     ScenarioState* currentScenario();
     const ScenarioState* currentScenario() const;
     std::vector<safecrowd::domain::ScenarioDraft> stagedRunnableScenarios() const;
+
+    enum class InspectorSelectionKind {
+        None,
+        Layout,
+        Crowd,
+        ConnectionBlock,
+        EnvironmentHazard,
+        RouteGuidance,
+        OperationalEvent,
+    };
 
     QString projectName_{};
     safecrowd::domain::FacilityLayout2D layout_{};
@@ -104,16 +123,24 @@ private:
     std::vector<ScenarioState> scenarios_{};
     int currentScenarioIndex_{-1};
     NavigationView navigationView_{NavigationView::Layout};
-    RightPanelMode rightPanelMode_{RightPanelMode::Scenario};
+    bool inspectorPanelVisible_{true};
+    bool scenarioPanelVisible_{true};
     QSet<QString> layoutExpandedNodeIds_{};
     QString selectedLayoutElementId_{};
     QSet<QString> crowdExpandedNodeIds_{};
     QString selectedCrowdElementId_{};
+    QSet<QString> eventExpandedNodeIds_{};
+    QString selectedEventElementId_{};
+    InspectorSelectionKind inspectorSelectionKind_{InspectorSelectionKind::None};
+    QString inspectorSelectionId_{};
     WorkspaceShell* shell_{nullptr};
     ScenarioCanvasWidget* canvas_{nullptr};
     QComboBox* scenarioSwitcher_{nullptr};
+    QWidget* elementInspectorPanel_{nullptr};
     QWidget* scenarioOverviewPanel_{nullptr};
     QWidget* scenarioDiffPanel_{nullptr};
+    QPushButton* inspectorPanelToggleButton_{nullptr};
+    QPushButton* scenarioPanelToggleButton_{nullptr};
     QLabel* stagedScenariosLabel_{nullptr};
     QPushButton* newScenarioButton_{nullptr};
     QPushButton* stageScenarioButton_{nullptr};

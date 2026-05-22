@@ -597,6 +597,8 @@ void ScenarioRunWidget::returnToAuthoring() {
         }
     }
     initial.rightPanelMode = ScenarioAuthoringWidget::RightPanelMode::Scenario;
+    initial.inspectorPanelVisible = true;
+    initial.scenarioPanelVisible = true;
 
     auto* authoringWidget = new ScenarioAuthoringWidget(
         projectName_,

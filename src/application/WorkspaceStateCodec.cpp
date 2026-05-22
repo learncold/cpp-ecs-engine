@@ -438,6 +438,8 @@ QJsonObject authoringStateToJson(const SavedScenarioAuthoringState& authoring) {
     object["scenarios"] = scenarios;
     object["currentScenarioIndex"] = authoring.currentScenarioIndex;
     object["navigationView"] = static_cast<int>(authoring.navigationView);
+    object["inspectorPanelVisible"] = authoring.inspectorPanelVisible;
+    object["scenarioPanelVisible"] = authoring.scenarioPanelVisible;
     object["rightPanelMode"] = static_cast<int>(authoring.rightPanelMode);
     return object;
 }
@@ -450,6 +452,14 @@ SavedScenarioAuthoringState authoringStateFromJson(const QJsonObject& object) {
     authoring.currentScenarioIndex = object.value("currentScenarioIndex").toInt(-1);
     authoring.navigationView = static_cast<SavedNavigationView>(object.value("navigationView").toInt());
     authoring.rightPanelMode = static_cast<SavedRightPanelMode>(object.value("rightPanelMode").toInt(1));
+    if (object.contains("inspectorPanelVisible") || object.contains("scenarioPanelVisible")) {
+        authoring.inspectorPanelVisible = object.value("inspectorPanelVisible").toBool(true);
+        authoring.scenarioPanelVisible = object.value("scenarioPanelVisible").toBool(true);
+    } else {
+        const bool visible = authoring.rightPanelMode != SavedRightPanelMode::None;
+        authoring.inspectorPanelVisible = visible;
+        authoring.scenarioPanelVisible = visible;
+    }
     return authoring;
 }
 

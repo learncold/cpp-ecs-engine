@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cmath>
 #include <utility>
 #include <vector>
 
@@ -25,6 +26,8 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSizePolicy>
+#include <QSlider>
+#include <QSpinBox>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -573,7 +576,12 @@ void clearLayout(QLayout* layout) {
         return;
     }
     while (auto* item = layout->takeAt(0)) {
+        if (auto* childLayout = item->layout()) {
+            clearLayout(childLayout);
+        }
         if (auto* widget = item->widget()) {
+            widget->hide();
+            widget->setParent(nullptr);
             widget->deleteLater();
         }
         delete item;
@@ -586,6 +594,7 @@ QFrame* createInspectorCard(QWidget* parent) {
         "QFrame { background: #ffffff; border: 1px solid #d7e0ea; border-radius: 12px; }"
         "QLabel { background: transparent; border: 0; }");
     card->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+    card->setMinimumWidth(0);
     return card;
 }
 
@@ -640,6 +649,293 @@ void addStatusMessage(QVBoxLayout* layout, const QString& text, QWidget* parent)
     auto* message = createLabel(text, parent, ui::FontRole::Body);
     message->setStyleSheet(ui::mutedTextStyleSheet());
     layout->addWidget(message);
+}
+
+int severitySliderValue(safecrowd::domain::ScenarioElementSeverity severity) {
+    switch (severity) {
+    case safecrowd::domain::ScenarioElementSeverity::Low:
+        return 0;
+    case safecrowd::domain::ScenarioElementSeverity::High:
+        return 2;
+    case safecrowd::domain::ScenarioElementSeverity::Medium:
+    default:
+        return 1;
+    }
+}
+
+safecrowd::domain::ScenarioElementSeverity severityFromSliderValue(int value) {
+    if (value <= 0) {
+        return safecrowd::domain::ScenarioElementSeverity::Low;
+    }
+    if (value >= 2) {
+        return safecrowd::domain::ScenarioElementSeverity::High;
+    }
+    return safecrowd::domain::ScenarioElementSeverity::Medium;
+}
+
+QString intervalsToEditorText(const std::vector<safecrowd::domain::ConnectionBlockIntervalDraft>& intervals) {
+    QStringList lines;
+    for (const auto& interval : intervals) {
+        lines << QString("%1 - %2")
+            .arg(std::max(0.0, interval.startSeconds), 0, 'f', 1)
+            .arg(std::max(0.0, interval.endSeconds), 0, 'f', 1);
+    }
+    return lines.join('\n');
+}
+
+bool parseIntervalEditorText(
+    const QString& text,
+    std::vector<safecrowd::domain::ConnectionBlockIntervalDraft>* intervals,
+    QString* errorMessage) {
+    if (intervals == nullptr) {
+        return false;
+    }
+
+    std::vector<safecrowd::domain::ConnectionBlockIntervalDraft> parsed;
+    const auto lines = text.split('\n');
+    for (int i = 0; i < lines.size(); ++i) {
+        const auto line = lines.at(i).trimmed();
+        if (line.isEmpty()) {
+            continue;
+        }
+
+        QString startText;
+        QString endText;
+        const auto dashIndex = line.indexOf('-');
+        if (dashIndex >= 0) {
+            startText = line.left(dashIndex).trimmed();
+            endText = line.mid(dashIndex + 1).trimmed();
+        } else {
+            const auto parts = line.simplified().split(' ');
+            if (parts.size() == 2) {
+                startText = parts.at(0);
+                endText = parts.at(1);
+            }
+        }
+
+        bool startOk = false;
+        bool endOk = false;
+        const auto startSeconds = startText.toDouble(&startOk);
+        const auto endSeconds = endText.toDouble(&endOk);
+        if (!startOk || !endOk || startSeconds < 0.0 || endSeconds < startSeconds) {
+            if (errorMessage != nullptr) {
+                *errorMessage = QString("Use \"start - end\" seconds on line %1. End must be greater than or equal to start.").arg(i + 1);
+            }
+            return false;
+        }
+
+        parsed.push_back({
+            .startSeconds = startSeconds,
+            .endSeconds = endSeconds,
+        });
+    }
+
+    *intervals = std::move(parsed);
+    return true;
+}
+
+QString routeGuidancePeriodsToEditorText(const std::vector<safecrowd::domain::RouteGuidancePeriodDraft>& periods) {
+    std::vector<safecrowd::domain::ConnectionBlockIntervalDraft> intervals;
+    intervals.reserve(periods.size());
+    for (const auto& period : periods) {
+        intervals.push_back({
+            .startSeconds = period.startSeconds,
+            .endSeconds = period.endSeconds,
+        });
+    }
+    return intervalsToEditorText(intervals);
+}
+
+std::vector<safecrowd::domain::RouteGuidancePeriodDraft> routeGuidancePeriodsFromIntervals(
+    const std::vector<safecrowd::domain::ConnectionBlockIntervalDraft>& intervals) {
+    std::vector<safecrowd::domain::RouteGuidancePeriodDraft> periods;
+    periods.reserve(intervals.size());
+    for (const auto& interval : intervals) {
+        periods.push_back({
+            .startSeconds = interval.startSeconds,
+            .endSeconds = interval.endSeconds,
+        });
+    }
+    return periods;
+}
+
+QWidget* createSliderEditor(
+    QWidget* parent,
+    QSlider** sliderOut,
+    QLabel** valueLabelOut,
+    int minimum,
+    int maximum,
+    int value,
+    std::function<QString(int)> valueText) {
+    auto* container = new QWidget(parent);
+    container->setMinimumWidth(0);
+    container->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    auto* layout = new QHBoxLayout(container);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(8);
+
+    auto* slider = new QSlider(Qt::Horizontal, container);
+    slider->setRange(minimum, maximum);
+    slider->setValue(std::clamp(value, minimum, maximum));
+    slider->setMinimumWidth(0);
+    slider->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    layout->addWidget(slider, 1);
+
+    auto* label = createLabel(valueText(slider->value()), container, ui::FontRole::Caption);
+    label->setMinimumWidth(42);
+    label->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    label->setStyleSheet(ui::mutedTextStyleSheet());
+    layout->addWidget(label);
+
+    QObject::connect(slider, &QSlider::valueChanged, label, [label, valueText = std::move(valueText)](int changedValue) {
+        label->setText(valueText(changedValue));
+    });
+
+    if (sliderOut != nullptr) {
+        *sliderOut = slider;
+    }
+    if (valueLabelOut != nullptr) {
+        *valueLabelOut = label;
+    }
+    return container;
+}
+
+void configureInspectorForm(QFormLayout* form) {
+    if (form == nullptr) {
+        return;
+    }
+
+    form->setContentsMargins(0, 0, 0, 0);
+    form->setHorizontalSpacing(8);
+    form->setVerticalSpacing(8);
+    form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    form->setRowWrapPolicy(QFormLayout::WrapLongRows);
+}
+
+void constrainInspectorField(QWidget* widget) {
+    if (widget == nullptr) {
+        return;
+    }
+
+    widget->setMinimumWidth(0);
+    widget->setSizePolicy(QSizePolicy::Ignored, widget->sizePolicy().verticalPolicy());
+}
+
+void configureInspectorCombo(QComboBox* combo) {
+    if (combo == nullptr) {
+        return;
+    }
+
+    combo->setMinimumWidth(0);
+    combo->setMinimumContentsLength(8);
+    combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    combo->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    combo->setToolTip(combo->currentText());
+    QObject::connect(combo, &QComboBox::currentTextChanged, combo, [combo](const QString& text) {
+        combo->setToolTip(text);
+    });
+}
+
+void configureInspectorTextEdit(QPlainTextEdit* edit) {
+    if (edit == nullptr) {
+        return;
+    }
+
+    edit->setMinimumWidth(0);
+    edit->setLineWrapMode(QPlainTextEdit::WidgetWidth);
+    edit->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+}
+
+void configureInspectorActionButton(QPushButton* button) {
+    if (button == nullptr) {
+        return;
+    }
+
+    button->setMinimumWidth(0);
+    button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+}
+
+QComboBox* createZoneCombo(
+    QWidget* parent,
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const std::string& selectedZoneId) {
+    auto* combo = new QComboBox(parent);
+    for (const auto& zone : layout.zones) {
+        combo->addItem(zoneLabel(zone), QString::fromStdString(zone.id));
+    }
+    combo->setCurrentIndex(std::max(0, combo->findData(QString::fromStdString(selectedZoneId))));
+    configureInspectorCombo(combo);
+    return combo;
+}
+
+QComboBox* createExitZoneCombo(
+    QWidget* parent,
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const std::string& selectedZoneId) {
+    auto* combo = new QComboBox(parent);
+    combo->addItem("Nearest exit", QString{});
+    for (const auto& zone : layout.zones) {
+        if (zone.kind == safecrowd::domain::ZoneKind::Exit) {
+            combo->addItem(zoneLabel(zone), QString::fromStdString(zone.id));
+        }
+    }
+    combo->setCurrentIndex(std::max(0, combo->findData(QString::fromStdString(selectedZoneId))));
+    configureInspectorCombo(combo);
+    return combo;
+}
+
+QComboBox* createConnectionCombo(
+    QWidget* parent,
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const std::string& selectedConnectionId,
+    bool includeNone = false,
+    const QString& noneLabel = QStringLiteral("Use zone position")) {
+    auto* combo = new QComboBox(parent);
+    if (includeNone) {
+        combo->addItem(noneLabel, QString{});
+    }
+    for (const auto& connection : layout.connections) {
+        combo->addItem(connectionLabel(layout, connection), QString::fromStdString(connection.id));
+    }
+    combo->setCurrentIndex(std::max(0, combo->findData(QString::fromStdString(selectedConnectionId))));
+    configureInspectorCombo(combo);
+    return combo;
+}
+
+const safecrowd::domain::Zone2D* findZone(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const QString& zoneId) {
+    const auto zoneIdStd = zoneId.toStdString();
+    const auto it = std::find_if(layout.zones.begin(), layout.zones.end(), [&](const auto& zone) {
+        return zone.id == zoneIdStd;
+    });
+    return it == layout.zones.end() ? nullptr : &(*it);
+}
+
+const safecrowd::domain::Zone2D* findZoneContainingPoint(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const safecrowd::domain::Point2D& point) {
+    const auto it = std::find_if(layout.zones.begin(), layout.zones.end(), [&](const auto& zone) {
+        return pointInPolygon(zone.area, point);
+    });
+    return it == layout.zones.end() ? nullptr : &(*it);
+}
+
+const safecrowd::domain::Connection2D* findConnection(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const QString& connectionId) {
+    const auto connectionIdStd = connectionId.toStdString();
+    const auto it = std::find_if(layout.connections.begin(), layout.connections.end(), [&](const auto& connection) {
+        return connection.id == connectionIdStd;
+    });
+    return it == layout.connections.end() ? nullptr : &(*it);
+}
+
+safecrowd::domain::Point2D connectionCenter(const safecrowd::domain::Connection2D& connection) {
+    return {
+        .x = (connection.centerSpan.start.x + connection.centerSpan.end.x) * 0.5,
+        .y = (connection.centerSpan.start.y + connection.centerSpan.end.y) * 0.5,
+    };
 }
 
 void addDiffRow(QVBoxLayout* layout, const QString& category, const QString& summary, QWidget* parent) {
@@ -751,6 +1047,37 @@ QIcon makeLayoutIcon(const QColor& color) {
     painter.drawRect(QRectF(11, 24, 22, 10));
     painter.drawLine(QPointF(20, 15), QPointF(24, 15));
     painter.drawLine(QPointF(22, 20), QPointF(22, 24));
+    return QIcon(pixmap);
+}
+
+QIcon makeInspectorPanelIcon(const QColor& color) {
+    QPixmap pixmap(44, 44);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(QPen(color, 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawRoundedRect(QRectF(11, 9, 22, 26), 4, 4);
+    painter.drawLine(QPointF(16, 17), QPointF(28, 17));
+    painter.drawLine(QPointF(16, 23), QPointF(25, 23));
+    painter.drawLine(QPointF(16, 29), QPointF(28, 29));
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(color);
+    painter.drawEllipse(QPointF(29, 23), 3.0, 3.0);
+    return QIcon(pixmap);
+}
+
+QIcon makeScenarioPanelIcon(const QColor& color) {
+    QPixmap pixmap(44, 44);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(QPen(color, 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawRoundedRect(QRectF(10, 10, 24, 24), 5, 5);
+    painter.drawLine(QPointF(16, 17), QPointF(28, 17));
+    painter.drawLine(QPointF(16, 23), QPointF(28, 23));
+    painter.drawLine(QPointF(16, 29), QPointF(24, 29));
     return QIcon(pixmap);
 }
 
@@ -1080,17 +1407,20 @@ QWidget* createEventsPanel(
     const ScenarioAuthoringWidget::ScenarioState* scenario,
     const WorkspaceShell* shell,
     QWidget* parent,
+    std::function<void(const QString&)> selectItemHandler,
+    NavigationTreeState navigationState,
+    std::function<void(const QSet<QString>&)> expandedStateChangedHandler,
     std::function<void(const QString&)> deleteItemHandler,
     std::function<void(const QString&)> settingsItemHandler) {
     return new NavigationTreeWidget(
         "Events / Hazards",
         buildEventsTree(layout, scenario),
         "No operational events, hazards, or blocked exits yet",
-        {},
+        std::move(selectItemHandler),
         parent,
         shell != nullptr ? shell->createPanelHeader("Events / Hazards", parent, false) : nullptr,
-        {},
-        {},
+        std::move(navigationState),
+        std::move(expandedStateChangedHandler),
         std::move(deleteItemHandler),
         std::move(settingsItemHandler),
         QString("Settings..."));
@@ -1143,7 +1473,8 @@ ScenarioAuthoringWidget::ScenarioAuthoringWidget(
       scenarios_(std::move(initialState.scenarios)),
       currentScenarioIndex_(initialState.currentScenarioIndex),
       navigationView_(initialState.navigationView),
-      rightPanelMode_(initialState.rightPanelMode) {
+      inspectorPanelVisible_(initialState.inspectorPanelVisible),
+      scenarioPanelVisible_(initialState.scenarioPanelVisible) {
     for (auto& scenario : scenarios_) {
         if (!scenarioHasOccupants(scenario)) {
             scenario.stagedForRun = false;
@@ -1157,11 +1488,15 @@ void ScenarioAuthoringWidget::initializeUi(bool promptForScenario) {
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
 
-    shell_ = new WorkspaceShell(this);
+    shell_ = new WorkspaceShell(WorkspaceShellOptions{
+        .showReviewPanelToggle = false,
+        .reviewPanelWidth = 560,
+    }, this);
     shell_->setTools({"Project"});
     shell_->setSaveProjectHandler(saveProjectHandler_);
     shell_->setOpenProjectHandler(openProjectHandler_);
     shell_->setBackHandler(backToLayoutReviewHandler_);
+    shell_->setTopBarTrailingWidget(createPanelToggleBar());
     refreshRightPanel();
     rootLayout->addWidget(shell_);
 
@@ -1179,18 +1514,11 @@ SavedScenarioAuthoringState ScenarioAuthoringWidget::currentSavedState() const {
     SavedScenarioAuthoringState state;
     state.currentScenarioIndex = currentScenarioIndex_;
     state.navigationView = savedNavigationView(navigationView_);
-    switch (rightPanelMode_) {
-    case RightPanelMode::None:
-        state.rightPanelMode = SavedRightPanelMode::None;
-        break;
-    case RightPanelMode::Run:
-        state.rightPanelMode = SavedRightPanelMode::Run;
-        break;
-    case RightPanelMode::Scenario:
-    default:
-        state.rightPanelMode = SavedRightPanelMode::Scenario;
-        break;
-    }
+    state.inspectorPanelVisible = inspectorPanelVisible_;
+    state.scenarioPanelVisible = scenarioPanelVisible_;
+    state.rightPanelMode = (inspectorPanelVisible_ || scenarioPanelVisible_)
+        ? SavedRightPanelMode::Scenario
+        : SavedRightPanelMode::None;
     state.scenarios.reserve(scenarios_.size());
     for (const auto& scenario : scenarios_) {
         auto draft = scenario.draft;
@@ -1208,7 +1536,11 @@ ScenarioAuthoringWidget::InitialState ScenarioAuthoringWidget::currentInitialSta
     InitialState state;
     state.currentScenarioIndex = currentScenarioIndex_;
     state.navigationView = navigationView_;
-    state.rightPanelMode = rightPanelMode_;
+    state.inspectorPanelVisible = inspectorPanelVisible_;
+    state.scenarioPanelVisible = scenarioPanelVisible_;
+    state.rightPanelMode = (inspectorPanelVisible_ || scenarioPanelVisible_)
+        ? RightPanelMode::Scenario
+        : RightPanelMode::None;
     state.scenarios.reserve(scenarios_.size());
     for (const auto& scenario : scenarios_) {
         auto copy = scenario;
@@ -1290,6 +1622,9 @@ void ScenarioAuthoringWidget::createScenarioWithName(const QString& name, int so
 
     scenarios_.push_back(std::move(scenario));
     currentScenarioIndex_ = static_cast<int>(scenarios_.size()) - 1;
+    selectedLayoutElementId_.clear();
+    selectedCrowdElementId_.clear();
+    setInspectorSelectionNone();
     recomputeVariationDiffKeysIfAlternative(scenarios_.back());
     refreshScenarioSwitcher();
     refreshCanvas();
@@ -1317,33 +1652,50 @@ void ScenarioAuthoringWidget::refreshCanvas() {
     canvas_->setPlacementsChangedHandler([this](const std::vector<ScenarioCrowdPlacement>& placements) {
         updateCurrentScenarioPlacements(placements);
     });
+    canvas_->setScenarioElementSelectionChangedHandler([this](const ScenarioCanvasSelection& selection) {
+        setInspectorSelectionFromCanvas(selection);
+    });
     canvas_->setLayoutElementActivatedHandler([this](const QString& elementId) {
         selectedLayoutElementId_ = elementId;
         if (!elementId.isEmpty()) {
             selectedCrowdElementId_.clear();
+            selectedEventElementId_.clear();
+            inspectorSelectionKind_ = InspectorSelectionKind::Layout;
+            inspectorSelectionId_ = elementId;
             if (navigationView_ != NavigationView::Layout) {
                 navigationView_ = NavigationView::Layout;
                 refreshNavigationPanel();
+                refreshInspector();
                 return;
             }
+        } else if (inspectorSelectionKind_ == InspectorSelectionKind::Layout) {
+            setInspectorSelectionNone();
         }
         if (navigationView_ == NavigationView::Layout) {
             refreshNavigationPanel();
         }
+        refreshInspector();
     });
     canvas_->setCrowdSelectionChangedHandler([this](const QString& elementId) {
         selectedCrowdElementId_ = elementId;
         if (!elementId.isEmpty()) {
             selectedLayoutElementId_.clear();
+            selectedEventElementId_.clear();
+            inspectorSelectionKind_ = InspectorSelectionKind::Crowd;
+            inspectorSelectionId_ = elementId.section('/', 0, 0);
             if (navigationView_ != NavigationView::Crowd) {
                 navigationView_ = NavigationView::Crowd;
                 refreshNavigationPanel();
+                refreshInspector();
                 return;
             }
+        } else if (inspectorSelectionKind_ == InspectorSelectionKind::Crowd) {
+            setInspectorSelectionNone();
         }
         if (navigationView_ == NavigationView::Crowd) {
             refreshNavigationPanel();
         }
+        refreshInspector();
     });
     canvas_->setConnectionBlocks(scenario->draft.control.connectionBlocks);
     canvas_->setConnectionBlocksChangedHandler([this](const std::vector<safecrowd::domain::ConnectionBlockDraft>& blocks) {
@@ -1459,6 +1811,769 @@ void ScenarioAuthoringWidget::refreshInspector() {
         }
     }
 
+    if (elementInspectorPanel_ != nullptr) {
+        auto* panelLayout = qobject_cast<QVBoxLayout*>(elementInspectorPanel_->layout());
+        clearLayout(panelLayout);
+        if (panelLayout != nullptr) {
+            if (!hasScenario) {
+                addStatusMessage(panelLayout, "No scenario selected", elementInspectorPanel_);
+            } else if (inspectorSelectionKind_ == InspectorSelectionKind::None || inspectorSelectionId_.isEmpty()) {
+                addStatusMessage(panelLayout, "Select a scenario element on the canvas or in the navigation panel.", elementInspectorPanel_);
+            } else if (inspectorSelectionKind_ == InspectorSelectionKind::Layout) {
+                auto* title = createLabel("Layout element", elementInspectorPanel_, ui::FontRole::SectionTitle);
+                panelLayout->addWidget(title);
+                const auto idStd = inspectorSelectionId_.toStdString();
+                addMetaRow(panelLayout, "ID", inspectorSelectionId_, elementInspectorPanel_);
+                if (inspectorSelectionId_.startsWith("floor:")) {
+                    addMetaRow(panelLayout, "Type", "Floor", elementInspectorPanel_);
+                    addMetaRow(panelLayout, "Floor", inspectorSelectionId_.mid(QString("floor:").size()), elementInspectorPanel_);
+                } else if (const auto zoneIt = std::find_if(layout_.zones.begin(), layout_.zones.end(), [&](const auto& zone) {
+                               return zone.id == idStd;
+                           });
+                           zoneIt != layout_.zones.end()) {
+                    addMetaRow(panelLayout, "Type", "Zone", elementInspectorPanel_);
+                    addMetaRow(panelLayout, "Name", zoneName(layout_, zoneIt->id), elementInspectorPanel_);
+                    addMetaRow(panelLayout, "Floor", QString::fromStdString(zoneIt->floorId), elementInspectorPanel_);
+                    addMetaRow(panelLayout, "Capacity", QString::number(static_cast<int>(zoneIt->defaultCapacity)), elementInspectorPanel_);
+                } else if (const auto connectionIt = std::find_if(layout_.connections.begin(), layout_.connections.end(), [&](const auto& connection) {
+                               return connection.id == idStd;
+                           });
+                           connectionIt != layout_.connections.end()) {
+                    addMetaRow(panelLayout, "Type", "Connection", elementInspectorPanel_);
+                    addMetaRow(panelLayout, "Name", connectionLabel(layout_, *connectionIt), elementInspectorPanel_);
+                    addMetaRow(panelLayout, "Floor", QString::fromStdString(connectionIt->floorId), elementInspectorPanel_);
+                    addMetaRow(panelLayout, "Width", QString("%1 m").arg(connectionIt->effectiveWidth, 0, 'f', 2), elementInspectorPanel_);
+                } else if (const auto barrierIt = std::find_if(layout_.barriers.begin(), layout_.barriers.end(), [&](const auto& barrier) {
+                               return barrier.id == idStd;
+                           });
+                           barrierIt != layout_.barriers.end()) {
+                    addMetaRow(panelLayout, "Type", "Barrier", elementInspectorPanel_);
+                    addMetaRow(panelLayout, "Floor", QString::fromStdString(barrierIt->floorId), elementInspectorPanel_);
+                    addMetaRow(panelLayout, "Blocks", barrierIt->blocksMovement ? "Yes" : "No", elementInspectorPanel_);
+                } else {
+                    addStatusMessage(panelLayout, "Selected layout element was not found.", elementInspectorPanel_);
+                }
+            } else if (inspectorSelectionKind_ == InspectorSelectionKind::Crowd) {
+                auto* scenarioMutable = currentScenario();
+                auto placementIt = scenarioMutable == nullptr
+                    ? std::vector<ScenarioCrowdPlacement>::iterator{}
+                    : std::find_if(scenarioMutable->crowdPlacements.begin(), scenarioMutable->crowdPlacements.end(), [&](const auto& placement) {
+                        return placement.id == inspectorSelectionId_;
+                    });
+                if (scenarioMutable == nullptr || placementIt == scenarioMutable->crowdPlacements.end()) {
+                    addStatusMessage(panelLayout, "Selected crowd placement was not found.", elementInspectorPanel_);
+                } else {
+                    auto* title = createLabel("Crowd", elementInspectorPanel_, ui::FontRole::SectionTitle);
+                    panelLayout->addWidget(title);
+                    addMetaRow(panelLayout, "ID", placementIt->id, elementInspectorPanel_);
+                    addMetaRow(panelLayout, "Type", placementIt->kind == ScenarioCrowdPlacementKind::Source
+                        ? "Source"
+                        : (placementIt->kind == ScenarioCrowdPlacementKind::Group ? "Group" : "Individual"), elementInspectorPanel_);
+                    addMetaRow(panelLayout, "Zone", placementIt->zoneId, elementInspectorPanel_);
+                    addMetaRow(panelLayout, "Floor", placementIt->floorId, elementInspectorPanel_);
+
+                    auto* form = new QFormLayout();
+                    configureInspectorForm(form);
+                    auto* nameEdit = new QLineEdit(elementInspectorPanel_);
+                    nameEdit->setText(placementIt->name.isEmpty() ? placementIt->id : placementIt->name);
+                    constrainInspectorField(nameEdit);
+                    auto* countSpin = new QSpinBox(elementInspectorPanel_);
+                    countSpin->setRange(placementIt->kind == ScenarioCrowdPlacementKind::Individual ? 1 : 0, 100000);
+                    countSpin->setValue(std::max(0, placementIt->occupantCount));
+                    constrainInspectorField(countSpin);
+                    form->addRow("Name", nameEdit);
+                    form->addRow("Count", countSpin);
+
+                    QDoubleSpinBox* positionXSpin = nullptr;
+                    QDoubleSpinBox* positionYSpin = nullptr;
+                    if (placementIt->kind != ScenarioCrowdPlacementKind::Group && !placementIt->area.empty()) {
+                        positionXSpin = new QDoubleSpinBox(elementInspectorPanel_);
+                        positionXSpin->setRange(-100000.0, 100000.0);
+                        positionXSpin->setDecimals(2);
+                        positionXSpin->setValue(placementIt->area.front().x);
+                        constrainInspectorField(positionXSpin);
+                        form->addRow("X", positionXSpin);
+
+                        positionYSpin = new QDoubleSpinBox(elementInspectorPanel_);
+                        positionYSpin->setRange(-100000.0, 100000.0);
+                        positionYSpin->setDecimals(2);
+                        positionYSpin->setValue(placementIt->area.front().y);
+                        constrainInspectorField(positionYSpin);
+                        form->addRow("Y", positionYSpin);
+                    }
+
+                    auto* velocityXSpin = new QDoubleSpinBox(elementInspectorPanel_);
+                    velocityXSpin->setRange(-20.0, 20.0);
+                    velocityXSpin->setDecimals(2);
+                    velocityXSpin->setSingleStep(0.1);
+                    velocityXSpin->setValue(placementIt->velocity.x);
+                    constrainInspectorField(velocityXSpin);
+                    form->addRow("Velocity X", velocityXSpin);
+
+                    auto* velocityYSpin = new QDoubleSpinBox(elementInspectorPanel_);
+                    velocityYSpin->setRange(-20.0, 20.0);
+                    velocityYSpin->setDecimals(2);
+                    velocityYSpin->setSingleStep(0.1);
+                    velocityYSpin->setValue(placementIt->velocity.y);
+                    constrainInspectorField(velocityYSpin);
+                    form->addRow("Velocity Y", velocityYSpin);
+
+                    auto* distributionCombo = new QComboBox(elementInspectorPanel_);
+                    distributionCombo->addItem("Uniform", static_cast<int>(safecrowd::domain::InitialPlacementDistribution::Uniform));
+                    distributionCombo->addItem("Random", static_cast<int>(safecrowd::domain::InitialPlacementDistribution::Random));
+                    distributionCombo->setCurrentIndex(std::max(0, distributionCombo->findData(static_cast<int>(placementIt->distribution))));
+                    configureInspectorCombo(distributionCombo);
+                    QSpinBox* agentsPerSpawnSpin = nullptr;
+                    QDoubleSpinBox* startSpin = nullptr;
+                    QDoubleSpinBox* endSpin = nullptr;
+                    QDoubleSpinBox* intervalSpin = nullptr;
+                    if (placementIt->kind != ScenarioCrowdPlacementKind::Source) {
+                        form->addRow("Distribution", distributionCombo);
+                    } else {
+                        agentsPerSpawnSpin = new QSpinBox(elementInspectorPanel_);
+                        agentsPerSpawnSpin->setRange(1, 100000);
+                        agentsPerSpawnSpin->setValue(std::max(1, placementIt->sourceAgentsPerSpawn));
+                        constrainInspectorField(agentsPerSpawnSpin);
+                        startSpin = new QDoubleSpinBox(elementInspectorPanel_);
+                        startSpin->setRange(0.0, 86400.0);
+                        startSpin->setDecimals(1);
+                        startSpin->setSuffix(" s");
+                        startSpin->setValue(std::max(0.0, placementIt->sourceStartSeconds));
+                        constrainInspectorField(startSpin);
+                        endSpin = new QDoubleSpinBox(elementInspectorPanel_);
+                        endSpin->setRange(0.0, 86400.0);
+                        endSpin->setDecimals(1);
+                        endSpin->setSuffix(" s");
+                        endSpin->setValue(std::max(placementIt->sourceStartSeconds, placementIt->sourceEndSeconds));
+                        constrainInspectorField(endSpin);
+                        intervalSpin = new QDoubleSpinBox(elementInspectorPanel_);
+                        intervalSpin->setRange(0.1, 86400.0);
+                        intervalSpin->setDecimals(1);
+                        intervalSpin->setSuffix(" s");
+                        intervalSpin->setValue(std::max(0.1, placementIt->sourceIntervalSeconds));
+                        constrainInspectorField(intervalSpin);
+                        form->addRow("Per spawn", agentsPerSpawnSpin);
+                        form->addRow("Start", startSpin);
+                        form->addRow("End", endSpin);
+                        form->addRow("Interval", intervalSpin);
+                    }
+                    panelLayout->addLayout(form);
+
+                    auto* applyButton = new QPushButton("Apply Changes", elementInspectorPanel_);
+                    applyButton->setFont(ui::font(ui::FontRole::Body));
+                    applyButton->setStyleSheet(ui::secondaryButtonStyleSheet());
+                    configureInspectorActionButton(applyButton);
+                    panelLayout->addWidget(applyButton);
+                    const auto placementId = inspectorSelectionId_;
+                    connect(applyButton, &QPushButton::clicked, this, [this, placementId, nameEdit, countSpin, positionXSpin, positionYSpin, velocityXSpin, velocityYSpin, distributionCombo, agentsPerSpawnSpin, startSpin, endSpin, intervalSpin]() {
+                        auto* scenario = currentScenario();
+                        if (scenario == nullptr) {
+                            return;
+                        }
+                        auto placementIt = std::find_if(scenario->crowdPlacements.begin(), scenario->crowdPlacements.end(), [&](const auto& placement) {
+                            return placement.id == placementId;
+                        });
+                        if (placementIt == scenario->crowdPlacements.end()) {
+                            return;
+                        }
+                        placementIt->name = nameEdit->text().trimmed();
+                        placementIt->occupantCount = countSpin->value();
+                        if (positionXSpin != nullptr && positionYSpin != nullptr
+                            && placementIt->kind != ScenarioCrowdPlacementKind::Group) {
+                            const safecrowd::domain::Point2D position{
+                                .x = positionXSpin->value(),
+                                .y = positionYSpin->value(),
+                            };
+                            const auto* zone = findZoneContainingPoint(layout_, position);
+                            if (zone == nullptr) {
+                                QMessageBox::warning(this, "Edit crowd", "The placement location must stay inside a walkable zone.");
+                                return;
+                            }
+                            placementIt->area = {position};
+                            placementIt->zoneId = QString::fromStdString(zone->id);
+                            placementIt->floorId = QString::fromStdString(zone->floorId);
+                        }
+                        placementIt->velocity = {
+                            .x = velocityXSpin->value(),
+                            .y = velocityYSpin->value(),
+                        };
+                        if (placementIt->kind != ScenarioCrowdPlacementKind::Source) {
+                            placementIt->distribution = static_cast<safecrowd::domain::InitialPlacementDistribution>(
+                                distributionCombo->currentData().toInt());
+                        } else {
+                            if (agentsPerSpawnSpin != nullptr) {
+                                placementIt->sourceAgentsPerSpawn = agentsPerSpawnSpin->value();
+                            }
+                            if (startSpin != nullptr) {
+                                placementIt->sourceStartSeconds = std::max(0.0, startSpin->value());
+                            }
+                            if (endSpin != nullptr) {
+                                placementIt->sourceEndSeconds = std::max(placementIt->sourceStartSeconds, endSpin->value());
+                            }
+                            if (intervalSpin != nullptr) {
+                                placementIt->sourceIntervalSeconds = std::max(0.1, intervalSpin->value());
+                            }
+                        }
+                        selectedCrowdElementId_ = placementId;
+                        inspectorSelectionKind_ = InspectorSelectionKind::Crowd;
+                        inspectorSelectionId_ = placementId;
+                        updateCurrentScenarioPlacements(scenario->crowdPlacements);
+                        if (canvas_ != nullptr) {
+                            canvas_->setPlacements(scenario->crowdPlacements);
+                            canvas_->focusPlacement(placementId);
+                        }
+                    });
+                }
+            } else if (inspectorSelectionKind_ == InspectorSelectionKind::ConnectionBlock) {
+                const auto idStd = inspectorSelectionId_.toStdString();
+                const auto blockIt = std::find_if(scenario->draft.control.connectionBlocks.begin(), scenario->draft.control.connectionBlocks.end(), [&](const auto& block) {
+                    return block.id == idStd;
+                });
+                if (blockIt == scenario->draft.control.connectionBlocks.end()) {
+                    addStatusMessage(panelLayout, "Selected block was not found.", elementInspectorPanel_);
+                } else {
+                    panelLayout->addWidget(createLabel("Blocked Door / Exit", elementInspectorPanel_, ui::FontRole::SectionTitle));
+                    addMetaRow(panelLayout, "ID", inspectorSelectionId_, elementInspectorPanel_);
+
+                    auto* form = new QFormLayout();
+                    configureInspectorForm(form);
+
+                    auto* targetCombo = createConnectionCombo(elementInspectorPanel_, layout_, blockIt->connectionId);
+                    form->addRow("Target", targetCombo);
+
+                    auto* alwaysCheck = new QCheckBox("Always blocked", elementInspectorPanel_);
+                    alwaysCheck->setChecked(blockIt->intervals.empty());
+                    form->addRow("", alwaysCheck);
+
+                    auto* intervalEdit = new QPlainTextEdit(elementInspectorPanel_);
+                    intervalEdit->setPlainText(intervalsToEditorText(blockIt->intervals));
+                    intervalEdit->setPlaceholderText("0 - 30\n60 - 90");
+                    intervalEdit->setMinimumHeight(74);
+                    intervalEdit->setEnabled(!alwaysCheck->isChecked());
+                    configureInspectorTextEdit(intervalEdit);
+                    form->addRow("Intervals", intervalEdit);
+                    connect(alwaysCheck, &QCheckBox::toggled, intervalEdit, [intervalEdit](bool checked) {
+                        intervalEdit->setEnabled(!checked);
+                    });
+
+                    auto* help = createLabel("One interval per line, in seconds. Leave Always blocked on for a permanent closure.", elementInspectorPanel_, ui::FontRole::Caption);
+                    help->setStyleSheet(ui::mutedTextStyleSheet());
+                    form->addRow("", help);
+                    panelLayout->addLayout(form);
+
+                    auto* applyButton = new QPushButton("Apply Changes", elementInspectorPanel_);
+                    applyButton->setFont(ui::font(ui::FontRole::Body));
+                    applyButton->setStyleSheet(ui::secondaryButtonStyleSheet());
+                    configureInspectorActionButton(applyButton);
+                    panelLayout->addWidget(applyButton);
+                    const auto blockId = inspectorSelectionId_;
+                    connect(applyButton, &QPushButton::clicked, this, [this, blockId, targetCombo, alwaysCheck, intervalEdit]() {
+                        auto* scenario = currentScenario();
+                        if (scenario == nullptr) {
+                            return;
+                        }
+                        auto& blocks = scenario->draft.control.connectionBlocks;
+                        auto blockIt = std::find_if(blocks.begin(), blocks.end(), [&](const auto& block) {
+                            return QString::fromStdString(block.id) == blockId;
+                        });
+                        if (blockIt == blocks.end()) {
+                            return;
+                        }
+
+                        const auto targetConnectionId = targetCombo->currentData().toString();
+                        if (findConnection(layout_, targetConnectionId) == nullptr) {
+                            QMessageBox::warning(this, "Edit blocked door", "Select a valid door or exit.");
+                            return;
+                        }
+
+                        std::vector<safecrowd::domain::ConnectionBlockIntervalDraft> intervals;
+                        if (!alwaysCheck->isChecked()) {
+                            QString errorMessage;
+                            if (!parseIntervalEditorText(intervalEdit->toPlainText(), &intervals, &errorMessage)) {
+                                QMessageBox::warning(this, "Edit blocked door", errorMessage);
+                                return;
+                            }
+                            if (intervals.empty()) {
+                                QMessageBox::warning(this, "Edit blocked door", "Add at least one interval, or turn on Always blocked.");
+                                return;
+                            }
+                        }
+
+                        blockIt->connectionId = targetConnectionId.toStdString();
+                        blockIt->intervals = std::move(intervals);
+                        selectedEventElementId_ = blockId;
+                        inspectorSelectionKind_ = InspectorSelectionKind::ConnectionBlock;
+                        inspectorSelectionId_ = blockId;
+                        if (canvas_ != nullptr) {
+                            canvas_->setConnectionBlocks(blocks);
+                        }
+                        recomputeDiffKeysAfterScenarioChanged(*scenario);
+                        refreshNavigationPanel();
+                        refreshInspector();
+                    });
+                }
+            } else if (inspectorSelectionKind_ == InspectorSelectionKind::EnvironmentHazard) {
+                const auto idStd = inspectorSelectionId_.toStdString();
+                auto* scenarioMutable = currentScenario();
+                auto hazardIt = scenarioMutable == nullptr
+                    ? std::vector<safecrowd::domain::EnvironmentHazardDraft>::iterator{}
+                    : std::find_if(scenarioMutable->draft.environment.hazards.begin(), scenarioMutable->draft.environment.hazards.end(), [&](const auto& hazard) {
+                        return hazard.id == idStd;
+                    });
+                if (scenarioMutable == nullptr || hazardIt == scenarioMutable->draft.environment.hazards.end()) {
+                    addStatusMessage(panelLayout, "Selected hazard was not found.", elementInspectorPanel_);
+                } else {
+                    panelLayout->addWidget(createLabel("Hazard", elementInspectorPanel_, ui::FontRole::SectionTitle));
+                    addMetaRow(panelLayout, "ID", inspectorSelectionId_, elementInspectorPanel_);
+
+                    auto* form = new QFormLayout();
+                    configureInspectorForm(form);
+
+                    auto* kindCombo = new QComboBox(elementInspectorPanel_);
+                    kindCombo->addItem("Fire", static_cast<int>(safecrowd::domain::EnvironmentHazardKind::Fire));
+                    kindCombo->addItem("Smoke", static_cast<int>(safecrowd::domain::EnvironmentHazardKind::Smoke));
+                    kindCombo->setCurrentIndex(std::max(0, kindCombo->findData(static_cast<int>(hazardIt->kind))));
+                    configureInspectorCombo(kindCombo);
+                    form->addRow("Kind", kindCombo);
+
+                    auto* nameEdit = new QLineEdit(elementInspectorPanel_);
+                    nameEdit->setText(QString::fromStdString(hazardIt->name));
+                    constrainInspectorField(nameEdit);
+                    form->addRow("Name", nameEdit);
+
+                    auto* zoneCombo = createZoneCombo(elementInspectorPanel_, layout_, hazardIt->affectedZoneId);
+                    form->addRow("Zone", zoneCombo);
+
+                    auto* xSpin = new QDoubleSpinBox(elementInspectorPanel_);
+                    xSpin->setRange(-100000.0, 100000.0);
+                    xSpin->setDecimals(2);
+                    xSpin->setValue(hazardIt->position.x);
+                    constrainInspectorField(xSpin);
+                    form->addRow("X", xSpin);
+
+                    auto* ySpin = new QDoubleSpinBox(elementInspectorPanel_);
+                    ySpin->setRange(-100000.0, 100000.0);
+                    ySpin->setDecimals(2);
+                    ySpin->setValue(hazardIt->position.y);
+                    constrainInspectorField(ySpin);
+                    form->addRow("Y", ySpin);
+
+                    auto* startSpin = new QDoubleSpinBox(elementInspectorPanel_);
+                    startSpin->setRange(0.0, 86400.0);
+                    startSpin->setDecimals(1);
+                    startSpin->setSuffix(" s");
+                    startSpin->setValue(std::max(0.0, hazardIt->startSeconds));
+                    constrainInspectorField(startSpin);
+                    form->addRow("Start", startSpin);
+
+                    const auto openEnded = safecrowd::domain::environmentHazardHasOpenEndedSchedule(*hazardIt);
+                    auto* endSpin = new QDoubleSpinBox(elementInspectorPanel_);
+                    endSpin->setRange(0.0, 86400.0);
+                    endSpin->setDecimals(1);
+                    endSpin->setSuffix(" s");
+                    endSpin->setValue(openEnded ? std::max(0.0, hazardIt->startSeconds) : std::max(hazardIt->startSeconds, hazardIt->endSeconds));
+                    endSpin->setEnabled(!openEnded);
+                    constrainInspectorField(endSpin);
+                    form->addRow("End", endSpin);
+
+                    auto* openEndedCheck = new QCheckBox("Open ended", elementInspectorPanel_);
+                    openEndedCheck->setChecked(openEnded);
+                    form->addRow("", openEndedCheck);
+                    connect(openEndedCheck, &QCheckBox::toggled, endSpin, [startSpin, endSpin](bool checked) {
+                        endSpin->setEnabled(!checked);
+                        if (checked) {
+                            endSpin->setValue(startSpin->value());
+                        }
+                    });
+                    connect(startSpin, qOverload<double>(&QDoubleSpinBox::valueChanged), endSpin, [openEndedCheck, endSpin](double value) {
+                        if (openEndedCheck->isChecked()) {
+                            endSpin->setValue(value);
+                        }
+                    });
+
+                    QSlider* severitySlider = nullptr;
+                    form->addRow("Severity", createSliderEditor(
+                        elementInspectorPanel_,
+                        &severitySlider,
+                        nullptr,
+                        0,
+                        2,
+                        severitySliderValue(hazardIt->severity),
+                        [](int value) {
+                            return severityLabel(severityFromSliderValue(value));
+                        }));
+
+                    auto* noteEdit = new QPlainTextEdit(elementInspectorPanel_);
+                    noteEdit->setPlainText(QString::fromStdString(hazardIt->note));
+                    noteEdit->setMinimumHeight(74);
+                    configureInspectorTextEdit(noteEdit);
+                    form->addRow("Note", noteEdit);
+                    panelLayout->addLayout(form);
+
+                    auto* applyButton = new QPushButton("Apply Changes", elementInspectorPanel_);
+                    applyButton->setFont(ui::font(ui::FontRole::Body));
+                    applyButton->setStyleSheet(ui::secondaryButtonStyleSheet());
+                    configureInspectorActionButton(applyButton);
+                    panelLayout->addWidget(applyButton);
+                    const auto hazardId = inspectorSelectionId_;
+                    connect(applyButton, &QPushButton::clicked, this, [this, hazardId, kindCombo, nameEdit, zoneCombo, xSpin, ySpin, startSpin, endSpin, openEndedCheck, severitySlider, noteEdit]() {
+                        auto* scenario = currentScenario();
+                        if (scenario == nullptr) {
+                            return;
+                        }
+                        auto& hazards = scenario->draft.environment.hazards;
+                        auto hazardIt = std::find_if(hazards.begin(), hazards.end(), [&](auto& hazard) {
+                            return QString::fromStdString(hazard.id) == hazardId;
+                        });
+                        if (hazardIt == hazards.end()) {
+                            return;
+                        }
+
+                        const auto name = nameEdit->text().trimmed();
+                        if (name.isEmpty()) {
+                            QMessageBox::warning(this, "Edit hazard", "Enter a hazard name.");
+                            return;
+                        }
+                        const auto zoneId = zoneCombo->currentData().toString();
+                        const auto* zone = findZone(layout_, zoneId);
+                        if (zone == nullptr) {
+                            QMessageBox::warning(this, "Edit hazard", "Select a valid affected zone.");
+                            return;
+                        }
+
+                        const safecrowd::domain::Point2D position{
+                            .x = xSpin->value(),
+                            .y = ySpin->value(),
+                        };
+                        if (!pointInPolygon(zone->area, position)) {
+                            QMessageBox::warning(this, "Edit hazard", "The hazard location must stay inside the affected zone.");
+                            return;
+                        }
+                        if (!openEndedCheck->isChecked() && endSpin->value() <= startSpin->value()) {
+                            QMessageBox::warning(this, "Edit hazard", "Set the end time after the start time.");
+                            return;
+                        }
+
+                        hazardIt->kind = static_cast<safecrowd::domain::EnvironmentHazardKind>(kindCombo->currentData().toInt());
+                        hazardIt->name = name.toStdString();
+                        hazardIt->affectedZoneId = zoneId.toStdString();
+                        hazardIt->floorId = zone->floorId;
+                        hazardIt->position = position;
+                        hazardIt->startSeconds = std::max(0.0, startSpin->value());
+                        hazardIt->endSeconds = openEndedCheck->isChecked()
+                            ? hazardIt->startSeconds
+                            : std::max(hazardIt->startSeconds, endSpin->value());
+                        hazardIt->severity = severityFromSliderValue(severitySlider != nullptr ? severitySlider->value() : 1);
+                        hazardIt->note = noteEdit->toPlainText().trimmed().toStdString();
+                        if (canvas_ != nullptr) {
+                            canvas_->setEnvironmentHazards(hazards);
+                        }
+                        selectedEventElementId_ = hazardId;
+                        inspectorSelectionKind_ = InspectorSelectionKind::EnvironmentHazard;
+                        inspectorSelectionId_ = hazardId;
+                        recomputeDiffKeysAfterScenarioChanged(*scenario);
+                        refreshNavigationPanel();
+                        refreshInspector();
+                    });
+                }
+            } else if (inspectorSelectionKind_ == InspectorSelectionKind::RouteGuidance) {
+                const auto idStd = inspectorSelectionId_.toStdString();
+                const auto guidanceIt = std::find_if(scenario->draft.control.routeGuidances.begin(), scenario->draft.control.routeGuidances.end(), [&](const auto& guidance) {
+                    return guidance.id == idStd;
+                });
+                if (guidanceIt == scenario->draft.control.routeGuidances.end()) {
+                    addStatusMessage(panelLayout, "Selected route guidance was not found.", elementInspectorPanel_);
+                } else {
+                    panelLayout->addWidget(createLabel("Route Guidance", elementInspectorPanel_, ui::FontRole::SectionTitle));
+                    addMetaRow(panelLayout, "ID", inspectorSelectionId_, elementInspectorPanel_);
+
+                    auto* form = new QFormLayout();
+                    configureInspectorForm(form);
+
+                    auto* exitCombo = createExitZoneCombo(elementInspectorPanel_, layout_, guidanceIt->guidedExitZoneId);
+                    form->addRow("Exit", exitCombo);
+
+                    auto* connectionCombo = createConnectionCombo(
+                        elementInspectorPanel_,
+                        layout_,
+                        guidanceIt->installConnectionId,
+                        true,
+                        "Use zone position");
+                    form->addRow("Install", connectionCombo);
+
+                    auto* zoneCombo = createZoneCombo(elementInspectorPanel_, layout_, guidanceIt->installZoneId);
+                    form->addRow("Zone", zoneCombo);
+
+                    auto* xSpin = new QDoubleSpinBox(elementInspectorPanel_);
+                    xSpin->setRange(-100000.0, 100000.0);
+                    xSpin->setDecimals(2);
+                    xSpin->setValue(guidanceIt->installPosition.x);
+                    constrainInspectorField(xSpin);
+                    form->addRow("X", xSpin);
+
+                    auto* ySpin = new QDoubleSpinBox(elementInspectorPanel_);
+                    ySpin->setRange(-100000.0, 100000.0);
+                    ySpin->setDecimals(2);
+                    ySpin->setValue(guidanceIt->installPosition.y);
+                    constrainInspectorField(ySpin);
+                    form->addRow("Y", ySpin);
+
+                    const bool installedOnConnection = !connectionCombo->currentData().toString().isEmpty();
+                    if (installedOnConnection) {
+                        if (const auto* connection = findConnection(layout_, connectionCombo->currentData().toString()); connection != nullptr) {
+                            const auto center = connectionCenter(*connection);
+                            xSpin->setValue(center.x);
+                            ySpin->setValue(center.y);
+                        }
+                    }
+                    zoneCombo->setEnabled(!installedOnConnection);
+                    xSpin->setEnabled(!installedOnConnection);
+                    ySpin->setEnabled(!installedOnConnection);
+                    connect(connectionCombo, qOverload<int>(&QComboBox::currentIndexChanged), xSpin, [this, connectionCombo, zoneCombo, xSpin, ySpin](int) {
+                        const auto connectionId = connectionCombo->currentData().toString();
+                        const bool useConnection = !connectionId.isEmpty();
+                        zoneCombo->setEnabled(!useConnection);
+                        xSpin->setEnabled(!useConnection);
+                        ySpin->setEnabled(!useConnection);
+                        if (const auto* connection = findConnection(layout_, connectionId); connection != nullptr) {
+                            const auto center = connectionCenter(*connection);
+                            xSpin->setValue(center.x);
+                            ySpin->setValue(center.y);
+                        }
+                    });
+
+                    QSlider* complianceSlider = nullptr;
+                    form->addRow("Compliance", createSliderEditor(
+                        elementInspectorPanel_,
+                        &complianceSlider,
+                        nullptr,
+                        0,
+                        100,
+                        static_cast<int>(std::lround(std::clamp(guidanceIt->baseComplianceRate, 0.0, 1.0) * 100.0)),
+                        [](int value) {
+                            return QString("%1%").arg(value);
+                        }));
+
+                    auto* radiusSpin = new QDoubleSpinBox(elementInspectorPanel_);
+                    radiusSpin->setRange(0.0, 10000.0);
+                    radiusSpin->setDecimals(1);
+                    radiusSpin->setSingleStep(0.5);
+                    radiusSpin->setSuffix(" m");
+                    radiusSpin->setValue(std::max(0.0, guidanceIt->influenceRadiusMeters));
+                    constrainInspectorField(radiusSpin);
+                    form->addRow("Radius", radiusSpin);
+
+                    auto* maxDetourSpin = new QDoubleSpinBox(elementInspectorPanel_);
+                    maxDetourSpin->setRange(0.0, 10000.0);
+                    maxDetourSpin->setDecimals(1);
+                    maxDetourSpin->setSingleStep(1.0);
+                    maxDetourSpin->setSuffix(" m");
+                    maxDetourSpin->setValue(std::max(0.0, guidanceIt->maxDetourMeters));
+                    constrainInspectorField(maxDetourSpin);
+                    form->addRow("Max detour", maxDetourSpin);
+
+                    std::vector<safecrowd::domain::RouteGuidancePeriodDraft> periodsForUi = guidanceIt->periods;
+                    if (periodsForUi.empty() && (guidanceIt->startSeconds > 0.0 || guidanceIt->endSeconds > 0.0)) {
+                        periodsForUi.push_back({
+                            .startSeconds = std::max(0.0, guidanceIt->startSeconds),
+                            .endSeconds = std::max(std::max(0.0, guidanceIt->startSeconds), guidanceIt->endSeconds),
+                        });
+                    }
+
+                    auto* alwaysActiveCheck = new QCheckBox("Always active", elementInspectorPanel_);
+                    alwaysActiveCheck->setChecked(periodsForUi.empty());
+                    form->addRow("", alwaysActiveCheck);
+
+                    auto* periodEdit = new QPlainTextEdit(elementInspectorPanel_);
+                    periodEdit->setPlainText(routeGuidancePeriodsToEditorText(periodsForUi));
+                    periodEdit->setPlaceholderText("0 - 120\n240 - 360");
+                    periodEdit->setMinimumHeight(74);
+                    periodEdit->setEnabled(!alwaysActiveCheck->isChecked());
+                    configureInspectorTextEdit(periodEdit);
+                    form->addRow("Periods", periodEdit);
+                    connect(alwaysActiveCheck, &QCheckBox::toggled, periodEdit, [periodEdit](bool checked) {
+                        periodEdit->setEnabled(!checked);
+                    });
+
+                    auto* help = createLabel("Periods use one start-end pair per line, in seconds.", elementInspectorPanel_, ui::FontRole::Caption);
+                    help->setStyleSheet(ui::mutedTextStyleSheet());
+                    form->addRow("", help);
+                    panelLayout->addLayout(form);
+
+                    auto* applyButton = new QPushButton("Apply Changes", elementInspectorPanel_);
+                    applyButton->setFont(ui::font(ui::FontRole::Body));
+                    applyButton->setStyleSheet(ui::secondaryButtonStyleSheet());
+                    configureInspectorActionButton(applyButton);
+                    panelLayout->addWidget(applyButton);
+                    const auto guidanceId = inspectorSelectionId_;
+                    connect(applyButton, &QPushButton::clicked, this, [this, guidanceId, exitCombo, connectionCombo, zoneCombo, xSpin, ySpin, complianceSlider, radiusSpin, maxDetourSpin, alwaysActiveCheck, periodEdit]() {
+                        auto* scenario = currentScenario();
+                        if (scenario == nullptr) {
+                            return;
+                        }
+                        auto& guidances = scenario->draft.control.routeGuidances;
+                        auto guidanceIt = std::find_if(guidances.begin(), guidances.end(), [&](auto& guidance) {
+                            return QString::fromStdString(guidance.id) == guidanceId;
+                        });
+                        if (guidanceIt == guidances.end()) {
+                            return;
+                        }
+
+                        const auto exitZoneId = exitCombo->currentData().toString();
+                        if (!exitZoneId.isEmpty()) {
+                            const auto* exitZone = findZone(layout_, exitZoneId);
+                            if (exitZone == nullptr || exitZone->kind != safecrowd::domain::ZoneKind::Exit) {
+                                QMessageBox::warning(this, "Edit route guidance", "Select a valid target exit.");
+                                return;
+                            }
+                        }
+
+                        const auto connectionId = connectionCombo->currentData().toString();
+                        if (!connectionId.isEmpty()) {
+                            const auto* connection = findConnection(layout_, connectionId);
+                            if (connection == nullptr) {
+                                QMessageBox::warning(this, "Edit route guidance", "Select a valid install connection.");
+                                return;
+                            }
+                            guidanceIt->installConnectionId = connectionId.toStdString();
+                            guidanceIt->installZoneId.clear();
+                            guidanceIt->installFloorId = connection->floorId;
+                            guidanceIt->installPosition = connectionCenter(*connection);
+                        } else {
+                            const auto zoneId = zoneCombo->currentData().toString();
+                            const auto* zone = findZone(layout_, zoneId);
+                            if (zone == nullptr) {
+                                QMessageBox::warning(this, "Edit route guidance", "Select a valid install zone.");
+                                return;
+                            }
+                            const safecrowd::domain::Point2D position{
+                                .x = xSpin->value(),
+                                .y = ySpin->value(),
+                            };
+                            if (!pointInPolygon(zone->area, position)) {
+                                QMessageBox::warning(this, "Edit route guidance", "The guidance location must stay inside the install zone.");
+                                return;
+                            }
+                            guidanceIt->installConnectionId.clear();
+                            guidanceIt->installZoneId = zoneId.toStdString();
+                            guidanceIt->installFloorId = zone->floorId;
+                            guidanceIt->installPosition = position;
+                        }
+
+                        std::vector<safecrowd::domain::ConnectionBlockIntervalDraft> intervals;
+                        if (!alwaysActiveCheck->isChecked()) {
+                            QString errorMessage;
+                            if (!parseIntervalEditorText(periodEdit->toPlainText(), &intervals, &errorMessage)) {
+                                QMessageBox::warning(this, "Edit route guidance", errorMessage);
+                                return;
+                            }
+                            if (intervals.empty()) {
+                                QMessageBox::warning(this, "Edit route guidance", "Add at least one active period, or turn on Always active.");
+                                return;
+                            }
+                        }
+
+                        guidanceIt->guidedExitZoneId = exitZoneId.toStdString();
+                        guidanceIt->baseComplianceRate = std::clamp(
+                            static_cast<double>(complianceSlider != nullptr ? complianceSlider->value() : 50) / 100.0,
+                            0.0,
+                            1.0);
+                        guidanceIt->influenceRadiusMeters = std::max(0.0, radiusSpin->value());
+                        guidanceIt->maxDetourMeters = std::max(0.0, maxDetourSpin->value());
+                        guidanceIt->periods = routeGuidancePeriodsFromIntervals(intervals);
+                        if (guidanceIt->periods.empty()) {
+                            guidanceIt->startSeconds = 0.0;
+                            guidanceIt->endSeconds = 0.0;
+                        } else {
+                            guidanceIt->startSeconds = guidanceIt->periods.front().startSeconds;
+                            guidanceIt->endSeconds = guidanceIt->periods.front().endSeconds;
+                        }
+
+                        selectedEventElementId_ = guidanceId;
+                        inspectorSelectionKind_ = InspectorSelectionKind::RouteGuidance;
+                        inspectorSelectionId_ = guidanceId;
+                        if (canvas_ != nullptr) {
+                            canvas_->setRouteGuidances(guidances);
+                        }
+                        recomputeDiffKeysAfterScenarioChanged(*scenario);
+                        refreshNavigationPanel();
+                        refreshInspector();
+                    });
+                }
+            } else if (inspectorSelectionKind_ == InspectorSelectionKind::OperationalEvent) {
+                auto* scenarioMutable = currentScenario();
+                const auto idStd = inspectorSelectionId_.toStdString();
+                auto eventIt = scenarioMutable == nullptr
+                    ? std::vector<safecrowd::domain::OperationalEventDraft>::iterator{}
+                    : std::find_if(scenarioMutable->events.begin(), scenarioMutable->events.end(), [&](const auto& event) {
+                        return event.id == idStd;
+                    });
+                if (scenarioMutable == nullptr || eventIt == scenarioMutable->events.end()) {
+                    addStatusMessage(panelLayout, "Selected event was not found.", elementInspectorPanel_);
+                } else {
+                    panelLayout->addWidget(createLabel("Operational Event", elementInspectorPanel_, ui::FontRole::SectionTitle));
+                    addMetaRow(panelLayout, "ID", inspectorSelectionId_, elementInspectorPanel_);
+
+                    auto* form = new QFormLayout();
+                    configureInspectorForm(form);
+
+                    auto* nameEdit = new QLineEdit(elementInspectorPanel_);
+                    nameEdit->setText(QString::fromStdString(eventIt->name));
+                    constrainInspectorField(nameEdit);
+                    form->addRow("Name", nameEdit);
+
+                    auto* triggerEdit = new QPlainTextEdit(elementInspectorPanel_);
+                    triggerEdit->setPlainText(QString::fromStdString(eventIt->triggerSummary));
+                    triggerEdit->setMinimumHeight(70);
+                    configureInspectorTextEdit(triggerEdit);
+                    form->addRow("Trigger", triggerEdit);
+
+                    auto* targetEdit = new QPlainTextEdit(elementInspectorPanel_);
+                    targetEdit->setPlainText(QString::fromStdString(eventIt->targetSummary));
+                    targetEdit->setMinimumHeight(70);
+                    configureInspectorTextEdit(targetEdit);
+                    form->addRow("Target", targetEdit);
+                    panelLayout->addLayout(form);
+
+                    auto* applyButton = new QPushButton("Apply Changes", elementInspectorPanel_);
+                    applyButton->setFont(ui::font(ui::FontRole::Body));
+                    applyButton->setStyleSheet(ui::secondaryButtonStyleSheet());
+                    configureInspectorActionButton(applyButton);
+                    panelLayout->addWidget(applyButton);
+                    const auto eventId = inspectorSelectionId_;
+                    connect(applyButton, &QPushButton::clicked, this, [this, eventId, nameEdit, triggerEdit, targetEdit]() {
+                        auto* scenario = currentScenario();
+                        if (scenario == nullptr) {
+                            return;
+                        }
+                        auto eventIt = std::find_if(scenario->events.begin(), scenario->events.end(), [&](auto& event) {
+                            return QString::fromStdString(event.id) == eventId;
+                        });
+                        if (eventIt == scenario->events.end()) {
+                            return;
+                        }
+                        const auto name = nameEdit->text().trimmed();
+                        if (name.isEmpty()) {
+                            QMessageBox::warning(this, "Edit event", "Enter an event name.");
+                            return;
+                        }
+                        eventIt->name = name.toStdString();
+                        eventIt->triggerSummary = triggerEdit->toPlainText().trimmed().toStdString();
+                        eventIt->targetSummary = targetEdit->toPlainText().trimmed().toStdString();
+                        scenario->draft.control.events = scenario->events;
+                        selectedEventElementId_ = eventId;
+                        inspectorSelectionKind_ = InspectorSelectionKind::OperationalEvent;
+                        inspectorSelectionId_ = eventId;
+                        recomputeDiffKeysAfterScenarioChanged(*scenario);
+                        refreshNavigationPanel();
+                        refreshInspector();
+                    });
+                }
+            }
+            panelLayout->addStretch(1);
+        }
+    }
+
     if (newScenarioButton_ != nullptr) {
         newScenarioButton_->setText(hasScenario ? "New Scenario from Current" : "New Scenario");
     }
@@ -1556,9 +2671,15 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
             [this](const QString& elementId) {
                 selectedLayoutElementId_ = elementId;
                 selectedCrowdElementId_.clear();
+                selectedEventElementId_.clear();
+                inspectorSelectionKind_ = elementId.isEmpty()
+                    ? InspectorSelectionKind::None
+                    : InspectorSelectionKind::Layout;
+                inspectorSelectionId_ = elementId;
                 if (canvas_ != nullptr) {
                     canvas_->activateLayoutElement(elementId);
                 }
+                refreshInspector();
             },
             shell_,
             shell_->createPanelHeader("Layout", shell_, false),
@@ -1578,9 +2699,15 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
             [this](const QString& placementId) {
                 selectedCrowdElementId_ = placementId;
                 selectedLayoutElementId_.clear();
+                selectedEventElementId_.clear();
+                inspectorSelectionKind_ = placementId.isEmpty()
+                    ? InspectorSelectionKind::None
+                    : InspectorSelectionKind::Crowd;
+                inspectorSelectionId_ = placementId.section('/', 0, 0);
                 if (canvas_ != nullptr) {
                     canvas_->focusPlacement(placementId);
                 }
+                refreshInspector();
             },
             NavigationTreeState{
                 .expandedNodeIds = crowdExpandedNodeIds_,
@@ -1605,12 +2732,26 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
         shell_,
         shell_,
         [this](const QString& rawId) {
+            setInspectorSelectionFromEventId(rawId);
+        },
+        NavigationTreeState{
+            .expandedNodeIds = eventExpandedNodeIds_,
+            .selectedId = selectedEventElementId_,
+            .restoreExpandedState = true,
+        },
+        [this](const QSet<QString>& expandedNodeIds) {
+            eventExpandedNodeIds_ = expandedNodeIds;
+        },
+        [this](const QString& rawId) {
             auto* scenario = currentScenario();
             if (scenario == nullptr || rawId.isEmpty()) {
                 return;
             }
 
             const auto id = rawId.section('/', 0, 0);
+            if (inspectorSelectionId_ == id) {
+                setInspectorSelectionNone();
+            }
             if (canvas_ != nullptr && canvas_->deleteConnectionBlockById(id)) {
                 return;
             }
@@ -1704,6 +2845,7 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
 
 void ScenarioAuthoringWidget::refreshRightPanel() {
     scenarioSwitcher_ = nullptr;
+    elementInspectorPanel_ = nullptr;
     scenarioOverviewPanel_ = nullptr;
     scenarioDiffPanel_ = nullptr;
     newScenarioButton_ = nullptr;
@@ -1715,18 +2857,16 @@ void ScenarioAuthoringWidget::refreshRightPanel() {
         return;
     }
 
-    if (rightPanelMode_ == RightPanelMode::None) {
+    refreshPanelToggles();
+    if (!inspectorPanelVisible_ && !scenarioPanelVisible_) {
         shell_->setReviewPanelVisible(false);
         return;
     }
 
+    const int panelCount = (inspectorPanelVisible_ ? 1 : 0) + (scenarioPanelVisible_ ? 1 : 0);
+    shell_->setReviewPanelWidth(panelCount > 1 ? 560 : 280);
+    shell_->setReviewPanel(createRightPanelContainer());
     shell_->setReviewPanelVisible(true);
-    if (rightPanelMode_ == RightPanelMode::Run) {
-        shell_->setReviewPanel(createRunPanel());
-    } else {
-        rightPanelMode_ = RightPanelMode::Scenario;
-        shell_->setReviewPanel(createScenarioPanel());
-    }
     refreshScenarioSwitcher();
     refreshInspector();
 }
@@ -1744,6 +2884,118 @@ void ScenarioAuthoringWidget::refreshScenarioSwitcher() {
     }
     scenarioSwitcher_->setCurrentIndex(currentScenarioIndex_);
     scenarioSwitcher_->blockSignals(false);
+}
+
+void ScenarioAuthoringWidget::setInspectorSelectionNone() {
+    inspectorSelectionKind_ = InspectorSelectionKind::None;
+    inspectorSelectionId_.clear();
+    selectedEventElementId_.clear();
+}
+
+void ScenarioAuthoringWidget::setInspectorSelectionFromCanvas(const ScenarioCanvasSelection& selection) {
+    const auto rootId = selection.id.section('/', 0, 0);
+    switch (selection.kind) {
+    case ScenarioCanvasSelectionKind::LayoutElement:
+        selectedLayoutElementId_ = selection.id;
+        selectedCrowdElementId_.clear();
+        selectedEventElementId_.clear();
+        inspectorSelectionKind_ = selection.id.isEmpty() ? InspectorSelectionKind::None : InspectorSelectionKind::Layout;
+        inspectorSelectionId_ = selection.id;
+        if (!selection.id.isEmpty() && navigationView_ != NavigationView::Layout) {
+            navigationView_ = NavigationView::Layout;
+            refreshNavigationPanel();
+        }
+        break;
+    case ScenarioCanvasSelectionKind::CrowdPlacement:
+        selectedCrowdElementId_ = selection.id;
+        selectedLayoutElementId_.clear();
+        selectedEventElementId_.clear();
+        inspectorSelectionKind_ = rootId.isEmpty() ? InspectorSelectionKind::None : InspectorSelectionKind::Crowd;
+        inspectorSelectionId_ = rootId;
+        if (!rootId.isEmpty() && navigationView_ != NavigationView::Crowd) {
+            navigationView_ = NavigationView::Crowd;
+            refreshNavigationPanel();
+        }
+        break;
+    case ScenarioCanvasSelectionKind::ConnectionBlock:
+        selectedLayoutElementId_.clear();
+        selectedCrowdElementId_.clear();
+        selectedEventElementId_ = rootId;
+        inspectorSelectionKind_ = rootId.isEmpty() ? InspectorSelectionKind::None : InspectorSelectionKind::ConnectionBlock;
+        inspectorSelectionId_ = rootId;
+        if (!rootId.isEmpty() && navigationView_ != NavigationView::Events) {
+            navigationView_ = NavigationView::Events;
+            refreshNavigationPanel();
+        } else if (navigationView_ == NavigationView::Events) {
+            refreshNavigationPanel();
+        }
+        break;
+    case ScenarioCanvasSelectionKind::EnvironmentHazard:
+        selectedLayoutElementId_.clear();
+        selectedCrowdElementId_.clear();
+        selectedEventElementId_ = rootId;
+        inspectorSelectionKind_ = rootId.isEmpty() ? InspectorSelectionKind::None : InspectorSelectionKind::EnvironmentHazard;
+        inspectorSelectionId_ = rootId;
+        if (!rootId.isEmpty() && navigationView_ != NavigationView::Events) {
+            navigationView_ = NavigationView::Events;
+            refreshNavigationPanel();
+        } else if (navigationView_ == NavigationView::Events) {
+            refreshNavigationPanel();
+        }
+        break;
+    case ScenarioCanvasSelectionKind::RouteGuidance:
+        selectedLayoutElementId_.clear();
+        selectedCrowdElementId_.clear();
+        selectedEventElementId_ = rootId;
+        inspectorSelectionKind_ = rootId.isEmpty() ? InspectorSelectionKind::None : InspectorSelectionKind::RouteGuidance;
+        inspectorSelectionId_ = rootId;
+        if (!rootId.isEmpty() && navigationView_ != NavigationView::Events) {
+            navigationView_ = NavigationView::Events;
+            refreshNavigationPanel();
+        } else if (navigationView_ == NavigationView::Events) {
+            refreshNavigationPanel();
+        }
+        break;
+    case ScenarioCanvasSelectionKind::None:
+    default:
+        setInspectorSelectionNone();
+        break;
+    }
+    refreshInspector();
+}
+
+void ScenarioAuthoringWidget::setInspectorSelectionFromEventId(const QString& rawId) {
+    const auto* scenario = currentScenario();
+    const auto rootId = rawId.section('/', 0, 0);
+    selectedLayoutElementId_.clear();
+    selectedCrowdElementId_.clear();
+    selectedEventElementId_ = rawId;
+    inspectorSelectionId_ = rootId;
+    inspectorSelectionKind_ = InspectorSelectionKind::None;
+
+    if (scenario != nullptr && !rootId.isEmpty()) {
+        const auto rootIdStd = rootId.toStdString();
+        if (std::any_of(scenario->events.begin(), scenario->events.end(), [&](const auto& event) {
+                return event.id == rootIdStd;
+            })) {
+            inspectorSelectionKind_ = InspectorSelectionKind::OperationalEvent;
+        } else if (std::any_of(scenario->draft.environment.hazards.begin(), scenario->draft.environment.hazards.end(), [&](const auto& hazard) {
+                return hazard.id == rootIdStd;
+            })) {
+            inspectorSelectionKind_ = InspectorSelectionKind::EnvironmentHazard;
+        } else if (std::any_of(scenario->draft.control.routeGuidances.begin(), scenario->draft.control.routeGuidances.end(), [&](const auto& guidance) {
+                return guidance.id == rootIdStd;
+            })) {
+            inspectorSelectionKind_ = InspectorSelectionKind::RouteGuidance;
+        } else if (std::any_of(scenario->draft.control.connectionBlocks.begin(), scenario->draft.control.connectionBlocks.end(), [&](const auto& block) {
+                return block.id == rootIdStd;
+            })) {
+            inspectorSelectionKind_ = InspectorSelectionKind::ConnectionBlock;
+        }
+    }
+
+    refreshNavigationPanel();
+    refreshInspector();
 }
 
 void ScenarioAuthoringWidget::runStagedScenarios() {
@@ -1928,6 +3180,133 @@ void ScenarioAuthoringWidget::showScenarioNameDialog(int sourceIndex) {
     createScenarioWithName(name, sourceIndex);
 }
 
+QWidget* ScenarioAuthoringWidget::createPanelToggleBar() {
+    auto* bar = new QWidget(shell_);
+    auto* layout = new QHBoxLayout(bar);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(8);
+
+    const auto buttonStyle = QString(
+        "QPushButton {"
+        " background: #ffffff;"
+        " border: 1px solid #d7e0ea;"
+        " border-radius: 8px;"
+        " padding: 4px;"
+        "}"
+        "QPushButton:hover {"
+        " background: #eef3f8;"
+        " border-color: #b8c6d6;"
+        "}"
+        "QPushButton:checked {"
+        " background: #e6eef8;"
+        " border-color: #1f5fae;"
+        "}");
+
+    inspectorPanelToggleButton_ = new QPushButton(bar);
+    inspectorPanelToggleButton_->setCheckable(true);
+    inspectorPanelToggleButton_->setChecked(inspectorPanelVisible_);
+    inspectorPanelToggleButton_->setIcon(makeInspectorPanelIcon(QColor("#16202b")));
+    inspectorPanelToggleButton_->setIconSize(QSize(22, 22));
+    inspectorPanelToggleButton_->setFixedSize(36, 32);
+    inspectorPanelToggleButton_->setCursor(Qt::PointingHandCursor);
+    inspectorPanelToggleButton_->setToolTip("Inspector");
+    inspectorPanelToggleButton_->setAccessibleName("Toggle Inspector panel");
+    inspectorPanelToggleButton_->setStyleSheet(buttonStyle);
+    layout->addWidget(inspectorPanelToggleButton_);
+
+    scenarioPanelToggleButton_ = new QPushButton(bar);
+    scenarioPanelToggleButton_->setCheckable(true);
+    scenarioPanelToggleButton_->setChecked(scenarioPanelVisible_);
+    scenarioPanelToggleButton_->setIcon(makeScenarioPanelIcon(QColor("#16202b")));
+    scenarioPanelToggleButton_->setIconSize(QSize(22, 22));
+    scenarioPanelToggleButton_->setFixedSize(36, 32);
+    scenarioPanelToggleButton_->setCursor(Qt::PointingHandCursor);
+    scenarioPanelToggleButton_->setToolTip("Scenario");
+    scenarioPanelToggleButton_->setAccessibleName("Toggle Scenario panel");
+    scenarioPanelToggleButton_->setStyleSheet(buttonStyle);
+    layout->addWidget(scenarioPanelToggleButton_);
+
+    connect(inspectorPanelToggleButton_, &QPushButton::clicked, this, [this]() {
+        inspectorPanelVisible_ = !inspectorPanelVisible_;
+        refreshRightPanel();
+    });
+    connect(scenarioPanelToggleButton_, &QPushButton::clicked, this, [this]() {
+        scenarioPanelVisible_ = !scenarioPanelVisible_;
+        refreshRightPanel();
+    });
+
+    return bar;
+}
+
+void ScenarioAuthoringWidget::refreshPanelToggles() {
+    if (inspectorPanelToggleButton_ != nullptr) {
+        inspectorPanelToggleButton_->blockSignals(true);
+        inspectorPanelToggleButton_->setChecked(inspectorPanelVisible_);
+        inspectorPanelToggleButton_->blockSignals(false);
+    }
+    if (scenarioPanelToggleButton_ != nullptr) {
+        scenarioPanelToggleButton_->blockSignals(true);
+        scenarioPanelToggleButton_->setChecked(scenarioPanelVisible_);
+        scenarioPanelToggleButton_->blockSignals(false);
+    }
+}
+
+QWidget* ScenarioAuthoringWidget::createRightPanelContainer() {
+    auto* container = new QWidget(shell_);
+    auto* layout = new QHBoxLayout(container);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(12);
+
+    if (inspectorPanelVisible_) {
+        layout->addWidget(createElementInspectorPanel(), 1);
+    }
+    if (inspectorPanelVisible_ && scenarioPanelVisible_) {
+        auto* separator = new QFrame(container);
+        separator->setFrameShape(QFrame::NoFrame);
+        separator->setFixedWidth(1);
+        separator->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
+        separator->setStyleSheet("QFrame { background: #c9d5e2; border: 0; min-width: 1px; max-width: 1px; }");
+        layout->addWidget(separator);
+    }
+    if (scenarioPanelVisible_) {
+        layout->addWidget(createScenarioPanel(), 1);
+    }
+    return container;
+}
+
+QWidget* ScenarioAuthoringWidget::createElementInspectorPanel() {
+    auto* inspector = new QWidget(shell_);
+    inspector->setMinimumWidth(0);
+    auto* inspectorLayout = new QVBoxLayout(inspector);
+    inspectorLayout->setContentsMargins(0, 0, 0, 0);
+    inspectorLayout->setSpacing(12);
+    inspectorLayout->addWidget(createLabel("Inspector", inspector, ui::FontRole::Title));
+
+    auto* card = createInspectorCard(inspector);
+    auto* cardLayout = new QVBoxLayout(card);
+    cardLayout->setContentsMargins(0, 0, 0, 0);
+    cardLayout->setSpacing(0);
+
+    auto* scrollArea = new QScrollArea(card);
+    scrollArea->setMinimumWidth(0);
+    scrollArea->setWidgetResizable(true);
+    scrollArea->setFrameShape(QFrame::NoFrame);
+    scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scrollArea->setStyleSheet("QScrollArea { background: transparent; border: 0; }");
+    elementInspectorPanel_ = new QWidget(scrollArea);
+    elementInspectorPanel_->setMinimumWidth(0);
+    elementInspectorPanel_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    auto* contentLayout = new QVBoxLayout(elementInspectorPanel_);
+    contentLayout->setContentsMargins(12, 11, 12, 11);
+    contentLayout->setSpacing(8);
+    scrollArea->setWidget(elementInspectorPanel_);
+    cardLayout->addWidget(scrollArea);
+    inspectorLayout->addWidget(card, 1);
+
+    return inspector;
+}
+
 QWidget* ScenarioAuthoringWidget::createRunPanel() {
     auto* panel = new QWidget(shell_);
     auto* layout = new QVBoxLayout(panel);
@@ -1955,7 +3334,7 @@ QWidget* ScenarioAuthoringWidget::createRunPanel() {
         runStagedScenarios();
     });
     connect(editButton, &QPushButton::clicked, this, [this]() {
-        rightPanelMode_ = RightPanelMode::Scenario;
+        scenarioPanelVisible_ = true;
         refreshRightPanel();
     });
 
@@ -2065,6 +3444,9 @@ QWidget* ScenarioAuthoringWidget::createScenarioPanel() {
     connect(scenarioSwitcher_, &QComboBox::currentIndexChanged, this, [this](int index) {
         if (index >= 0 && index < static_cast<int>(scenarios_.size()) && index != currentScenarioIndex_) {
             currentScenarioIndex_ = index;
+            selectedLayoutElementId_.clear();
+            selectedCrowdElementId_.clear();
+            setInspectorSelectionNone();
             refreshCanvas();
             refreshNavigationPanel();
             refreshInspector();

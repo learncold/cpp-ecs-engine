@@ -58,6 +58,7 @@ public:
     void setNavigationMode(WorkspaceNavigationMode mode);
     void setReviewPanel(QWidget* panel);
     void setReviewPanelVisible(bool visible);
+    void setReviewPanelWidth(int width);
     void setTopBarTrailingWidget(QWidget* widget);
     void setCanvas(QWidget* canvas);
     void setSaveProjectHandler(std::function<void()> handler);

@@ -48,6 +48,8 @@ struct SavedScenarioAuthoringState {
     std::vector<SavedScenarioState> scenarios{};
     int currentScenarioIndex{-1};
     SavedNavigationView navigationView{SavedNavigationView::Layout};
+    bool inspectorPanelVisible{true};
+    bool scenarioPanelVisible{true};
     SavedRightPanelMode rightPanelMode{SavedRightPanelMode::Scenario};
 };
 

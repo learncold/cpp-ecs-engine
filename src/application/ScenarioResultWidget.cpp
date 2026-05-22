@@ -1531,6 +1531,8 @@ void ScenarioResultWidget::createRecommendedScenario(
         existingIndex.has_value()) {
         initial.currentScenarioIndex = *existingIndex;
         initial.rightPanelMode = ScenarioAuthoringWidget::RightPanelMode::Scenario;
+        initial.inspectorPanelVisible = true;
+        initial.scenarioPanelVisible = true;
     } else {
         recommendedScenario.scenarioId = uniqueScenarioId(initial, recommendedScenario.scenarioId);
         recommendedScenario.name = uniqueScenarioName(initial, recommendedScenario.name);
@@ -1543,6 +1545,8 @@ void ScenarioResultWidget::createRecommendedScenario(
         initial.scenarios.push_back(std::move(state));
         initial.currentScenarioIndex = static_cast<int>(initial.scenarios.size()) - 1;
         initial.rightPanelMode = ScenarioAuthoringWidget::RightPanelMode::Scenario;
+        initial.inspectorPanelVisible = true;
+        initial.scenarioPanelVisible = true;
     }
 
     auto* authoringWidget = new ScenarioAuthoringWidget(
@@ -1575,6 +1579,8 @@ void ScenarioResultWidget::navigateToAuthoring(bool showRunPanel) {
     initial.rightPanelMode = showRunPanel
         ? ScenarioAuthoringWidget::RightPanelMode::Run
         : ScenarioAuthoringWidget::RightPanelMode::Scenario;
+    initial.inspectorPanelVisible = true;
+    initial.scenarioPanelVisible = true;
 
     auto* authoringWidget = new ScenarioAuthoringWidget(
         projectName_,

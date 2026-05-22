@@ -81,6 +81,8 @@ ProjectWorkspaceState makeEvacuationScenarioDemoWorkspace() {
     });
     authoring.currentScenarioIndex = 1;
     authoring.navigationView = SavedNavigationView::Events;
+    authoring.inspectorPanelVisible = true;
+    authoring.scenarioPanelVisible = true;
     authoring.rightPanelMode = SavedRightPanelMode::Scenario;
 
     ProjectWorkspaceState workspace;
@@ -121,6 +123,8 @@ ProjectWorkspaceState makeTwoFloorEvacuationDemoWorkspace() {
     });
     authoring.currentScenarioIndex = 1;
     authoring.navigationView = SavedNavigationView::Events;
+    authoring.inspectorPanelVisible = true;
+    authoring.scenarioPanelVisible = true;
     authoring.rightPanelMode = SavedRightPanelMode::Scenario;
 
     ProjectWorkspaceState workspace;
@@ -229,18 +233,6 @@ SavedNavigationView savedNavigationViewFromInitial(ScenarioAuthoringWidget::Navi
     }
 }
 
-SavedRightPanelMode savedRightPanelModeFromInitial(ScenarioAuthoringWidget::RightPanelMode mode) {
-    switch (mode) {
-    case ScenarioAuthoringWidget::RightPanelMode::None:
-        return SavedRightPanelMode::None;
-    case ScenarioAuthoringWidget::RightPanelMode::Run:
-        return SavedRightPanelMode::Run;
-    case ScenarioAuthoringWidget::RightPanelMode::Scenario:
-    default:
-        return SavedRightPanelMode::Scenario;
-    }
-}
-
 ScenarioAuthoringWidget::ScenarioState scenarioStateFromSaved(
     const SavedScenarioState& saved,
     const safecrowd::domain::FacilityLayout2D& layout) {
@@ -299,6 +291,8 @@ ScenarioAuthoringWidget::InitialState initialStateFromSaved(
     ScenarioAuthoringWidget::InitialState initial;
     initial.currentScenarioIndex = saved.currentScenarioIndex;
     initial.navigationView = navigationViewFromSaved(saved.navigationView);
+    initial.inspectorPanelVisible = saved.inspectorPanelVisible;
+    initial.scenarioPanelVisible = saved.scenarioPanelVisible;
     initial.rightPanelMode = rightPanelModeFromSaved(saved.rightPanelMode);
     initial.scenarios.reserve(saved.scenarios.size());
     for (const auto& scenario : saved.scenarios) {
@@ -314,7 +308,11 @@ SavedScenarioAuthoringState savedStateFromInitial(const ScenarioAuthoringWidget:
     SavedScenarioAuthoringState saved;
     saved.currentScenarioIndex = initial.currentScenarioIndex;
     saved.navigationView = savedNavigationViewFromInitial(initial.navigationView);
-    saved.rightPanelMode = savedRightPanelModeFromInitial(initial.rightPanelMode);
+    saved.inspectorPanelVisible = initial.inspectorPanelVisible;
+    saved.scenarioPanelVisible = initial.scenarioPanelVisible;
+    saved.rightPanelMode = (initial.inspectorPanelVisible || initial.scenarioPanelVisible)
+        ? SavedRightPanelMode::Scenario
+        : SavedRightPanelMode::None;
     saved.scenarios.reserve(initial.scenarios.size());
     for (const auto& scenario : initial.scenarios) {
         auto draft = scenario.draft;

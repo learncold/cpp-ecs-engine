@@ -504,6 +504,11 @@ void WorkspaceShell::setReviewPanelVisible(bool visible) {
     updateReviewPanelToggle();
 }
 
+void WorkspaceShell::setReviewPanelWidth(int width) {
+    reviewPanelWidth_ = std::max(0, width);
+    setFixedWidthVisible(reviewPanel_, reviewPanelVisible_, reviewPanelWidth_);
+}
+
 void WorkspaceShell::setTopBarTrailingWidget(QWidget* widget) {
     replaceSingleWidget(topBarTrailingLayout_, widget);
 }
