@@ -14,6 +14,7 @@
 #include <QEvent>
 #include <QFrame>
 #include <QFontMetrics>
+#include <QGridLayout>
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -26,6 +27,7 @@
 #include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSlider>
+#include <QStringList>
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QTableWidgetItem>
@@ -129,6 +131,51 @@ QString scenarioRoleLabel(safecrowd::domain::ScenarioRole role) {
     default:
         return "Alternative";
     }
+}
+
+QString wrapPanelText(const QString& text, int maxLineCharacters) {
+    if (maxLineCharacters <= 0 || text.size() <= maxLineCharacters) {
+        return text;
+    }
+
+    QStringList lines;
+    QString currentLine;
+    for (const auto& word : text.split(' ', Qt::SkipEmptyParts)) {
+        if (word.size() > maxLineCharacters) {
+            if (!currentLine.isEmpty()) {
+                lines.push_back(currentLine);
+                currentLine.clear();
+            }
+            for (int offset = 0; offset < word.size(); offset += maxLineCharacters) {
+                lines.push_back(word.mid(offset, maxLineCharacters));
+            }
+            continue;
+        }
+
+        const auto candidate = currentLine.isEmpty() ? word : QString("%1 %2").arg(currentLine, word);
+        if (candidate.size() > maxLineCharacters && !currentLine.isEmpty()) {
+            lines.push_back(currentLine);
+            currentLine = word;
+        } else {
+            currentLine = candidate;
+        }
+    }
+
+    if (!currentLine.isEmpty()) {
+        lines.push_back(currentLine);
+    }
+    return lines.join('\n');
+}
+
+QString compareScenarioLabel(const SavedScenarioResultState& result) {
+    const auto name = wrapPanelText(QString::fromStdString(result.scenario.name), 34);
+    const auto meta = wrapPanelText(
+        QString("%1  -  %2  -  %3")
+            .arg(scenarioRoleLabel(result.scenario.role))
+            .arg(formatSeconds(finalSeconds(result)))
+            .arg(safecrowd::domain::scenarioRiskLevelLabel(result.risk.completionRisk)),
+        38);
+    return QString("%1\n%2").arg(name, meta);
 }
 
 std::vector<std::pair<double, double>> progressSeries(const SavedScenarioResultState& result) {
@@ -578,13 +625,18 @@ private:
         const int visibleCount = static_cast<int>(visibleIndices.size());
         const int scenarioEntries = hasOverflow ? std::max(0, maxEntries - 1) : std::min(visibleCount, maxEntries);
         const auto rowHeight = legendRect.height() / static_cast<double>(kMaxRows);
+        const auto slotWidth = legendRect.width() / static_cast<double>(columns);
 
         auto drawSlot = [&](int slot, int index) {
             const int row = slot / columns;
             const int column = slot % columns;
-            const auto x = legendRect.left() + static_cast<double>(column) * kEntryWidth;
+            const auto x = legendRect.left() + static_cast<double>(column) * slotWidth;
             const auto y = legendRect.top() + (static_cast<double>(row) + 0.5) * rowHeight;
-            const QRectF textRect(x + 24.0, legendRect.top() + static_cast<double>(row) * rowHeight, kEntryWidth - 30.0, rowHeight);
+            const QRectF textRect(
+                x + 24.0,
+                legendRect.top() + static_cast<double>(row) * rowHeight,
+                std::max(0.0, slotWidth - 30.0),
+                rowHeight);
             const auto name = metrics.elidedText(
                 QString::fromStdString((*results_)[static_cast<std::size_t>(index)].scenario.name),
                 Qt::ElideRight,
@@ -604,8 +656,12 @@ private:
             const int slot = scenarioEntries;
             const int row = slot / columns;
             const int column = slot % columns;
-            const auto x = legendRect.left() + static_cast<double>(column) * kEntryWidth;
-            const QRectF textRect(x, legendRect.top() + static_cast<double>(row) * rowHeight, kEntryWidth, rowHeight);
+            const auto x = legendRect.left() + static_cast<double>(column) * slotWidth;
+            const QRectF textRect(
+                x,
+                legendRect.top() + static_cast<double>(row) * rowHeight,
+                slotWidth,
+                rowHeight);
             painter.setPen(QColor("#6b7785"));
             painter.drawText(
                 textRect,
@@ -1026,49 +1082,57 @@ QWidget* ScenarioBatchResultWidget::createSummaryPanel() {
     scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     ui::polishScrollArea(scrollArea);
     auto* content = new QWidget(scrollArea);
+    content->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     auto* layout = new QVBoxLayout(content);
-    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setContentsMargins(0, 0, 10, 0);
     layout->setSpacing(12);
 
     auto* intro = createLabel("Choose which completed scenarios appear together in the comparison graphs and pressure summary table.", content, ui::FontRole::Caption);
+    intro->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     intro->setStyleSheet(ui::mutedTextStyleSheet());
     layout->addWidget(intro);
 
     comparisonCountLabel_ = createLabel("", content, ui::FontRole::Caption);
+    comparisonCountLabel_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     comparisonCountLabel_->setStyleSheet(ui::subtleTextStyleSheet());
     layout->addWidget(comparisonCountLabel_);
 
     auto* selectionControls = new QWidget(content);
-    auto* selectionLayout = new QHBoxLayout(selectionControls);
+    selectionControls->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+    auto* selectionLayout = new QGridLayout(selectionControls);
     selectionLayout->setContentsMargins(0, 0, 0, 0);
     selectionLayout->setSpacing(8);
 
     auto* selectAllButton = new QPushButton("Select All", selectionControls);
     selectAllButton->setFont(ui::font(ui::FontRole::Caption));
+    selectAllButton->setMinimumWidth(0);
+    selectAllButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     selectAllButton->setStyleSheet(ui::secondaryButtonStyleSheet());
     auto* baselineCurrentButton = new QPushButton("Baseline + Current", selectionControls);
     baselineCurrentButton->setFont(ui::font(ui::FontRole::Caption));
+    baselineCurrentButton->setMinimumWidth(0);
+    baselineCurrentButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     baselineCurrentButton->setStyleSheet(ui::secondaryButtonStyleSheet());
     auto* clearButton = new QPushButton("Clear", selectionControls);
     clearButton->setFont(ui::font(ui::FontRole::Caption));
+    clearButton->setMinimumWidth(0);
+    clearButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     clearButton->setStyleSheet(ui::secondaryButtonStyleSheet());
 
-    selectionLayout->addWidget(selectAllButton);
-    selectionLayout->addWidget(baselineCurrentButton);
-    selectionLayout->addWidget(clearButton);
+    selectionLayout->addWidget(selectAllButton, 0, 0);
+    selectionLayout->addWidget(clearButton, 0, 1);
+    selectionLayout->addWidget(baselineCurrentButton, 1, 0, 1, 2);
+    selectionLayout->setColumnStretch(0, 1);
+    selectionLayout->setColumnStretch(1, 1);
     layout->addWidget(selectionControls);
 
     compareCheckBoxes_.clear();
     for (int row = 0; row < static_cast<int>(results_.size()); ++row) {
         const auto& result = results_[row];
-        auto* checkbox = new QCheckBox(
-            QString("%1\n%2  -  %3  -  %4")
-                .arg(QString::fromStdString(result.scenario.name))
-                .arg(scenarioRoleLabel(result.scenario.role))
-                .arg(formatSeconds(finalSeconds(result)))
-                .arg(safecrowd::domain::scenarioRiskLevelLabel(result.risk.completionRisk)),
-            content);
+        auto* checkbox = new QCheckBox(compareScenarioLabel(result), content);
         checkbox->setFont(ui::font(ui::FontRole::Body));
+        checkbox->setMinimumWidth(0);
+        checkbox->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         checkbox->setChecked(std::find(selectedCompareIndices_.begin(), selectedCompareIndices_.end(), row) != selectedCompareIndices_.end());
         checkbox->setStyleSheet(
             "QCheckBox { background: #ffffff; border: 1px solid #d7e0ea; border-radius: 8px; padding: 8px; color: #16202b; }"
