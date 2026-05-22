@@ -478,6 +478,31 @@ safecrowd::domain::FacilityLayout2D wideTwoExitHazardRouteLayout() {
     return layout;
 }
 
+safecrowd::domain::FacilityLayout2D rightExitHazardDetourLayout() {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.zones.push_back({
+        .id = "room",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Room",
+        .area = {.outline = {{0.0, 0.0}, {10.0, 0.0}, {10.0, 10.0}, {0.0, 10.0}}},
+    });
+    layout.zones.push_back({
+        .id = "right-exit",
+        .kind = safecrowd::domain::ZoneKind::Exit,
+        .label = "Right Exit",
+        .area = {.outline = {{10.0, 4.0}, {12.0, 4.0}, {12.0, 6.0}, {10.0, 6.0}}},
+    });
+    layout.connections.push_back({
+        .id = "room-right-exit",
+        .kind = safecrowd::domain::ConnectionKind::Exit,
+        .fromZoneId = "room",
+        .toZoneId = "right-exit",
+        .effectiveWidth = 0.8,
+        .centerSpan = {{10.0, 4.7}, {10.0, 5.3}},
+    });
+    return layout;
+}
+
 safecrowd::domain::ScenarioAgentSeed straightRouteSeed(
     safecrowd::domain::Point2D start,
     double maxSpeed = 1.0,
@@ -2506,6 +2531,144 @@ SC_TEST(ScenarioSimulationMotionSystem_DelaysGuidanceHazardAvoidanceUntilAwarene
     SC_EXPECT_TRUE(!reaction.hazardAware);
     SC_EXPECT_TRUE(route.followsGuidance);
     SC_EXPECT_EQ(route.destinationZoneId, std::string{"near-exit"});
+}
+
+SC_TEST(ScenarioSimulationMotionSystem_ExpiredHazardAwarenessDoesNotRevealNewHazards) {
+    auto seed = doorRouteSeed(
+        {.x = 5.0, .y = 5.0},
+        "far-exit",
+        "room-far-exit",
+        {{.x = 10.0, .y = 8.7}, {.x = 10.0, .y = 9.3}},
+        0.0);
+    seed.agent.guidancePropensity = 1.0;
+    seed.agent.reactionDelaySeconds = 0.0;
+    seed.route.originalDestinationZoneId = "far-exit";
+
+    auto expiredFire = hazardDraft(
+        "expired-fire",
+        safecrowd::domain::EnvironmentHazardKind::Fire,
+        safecrowd::domain::ScenarioElementSeverity::Low,
+        {.x = 5.0, .y = 5.0},
+        "room");
+    expiredFire.endSeconds = 0.05;
+
+    auto futureFire = hazardDraft(
+        "future-near-route-fire",
+        safecrowd::domain::EnvironmentHazardKind::Fire,
+        safecrowd::domain::ScenarioElementSeverity::Low,
+        {.x = 9.5, .y = 1.0},
+        "room");
+    futureFire.startSeconds = 1.0;
+    futureFire.endSeconds = 1.0;
+
+    safecrowd::domain::RouteGuidanceDraft guidance;
+    guidance.id = "future-global-near-guidance";
+    guidance.guidedExitZoneId = "near-exit";
+    guidance.baseComplianceRate = 1.0;
+    guidance.maxDetourMeters = 100.0;
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 0.1,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 126,
+    });
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(
+        std::vector<safecrowd::domain::ScenarioAgentSeed>{seed},
+        10.0));
+    addHazardGuidanceMotionSystems(runtime, wideTwoExitHazardRouteLayout(), {expiredFire, futureFire}, {guidance});
+
+    runtime.play();
+    stepScenarioRuntime(runtime, 0.1);
+
+    const auto entities = runtime.world().query().view<
+        safecrowd::domain::Position,
+        safecrowd::domain::Agent,
+        safecrowd::domain::Velocity,
+        safecrowd::domain::AvoidanceState,
+        safecrowd::domain::EvacuationRoute,
+        safecrowd::domain::EvacuationStatus>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{1});
+    const auto& firstReaction =
+        runtime.world().resources().get<safecrowd::domain::ScenarioEnvironmentReactionResource>().agentsById.at(entities.front().index);
+    SC_EXPECT_TRUE(firstReaction.hazardAware);
+    SC_EXPECT_EQ(firstReaction.hazardKey, std::string{"expired-fire"});
+
+    auto& clock = runtime.world().resources().get<safecrowd::domain::ScenarioSimulationClockResource>();
+    clock.elapsedSeconds = 1.0;
+    stepScenarioRuntime(runtime, 0.1);
+
+    const auto& secondReaction =
+        runtime.world().resources().get<safecrowd::domain::ScenarioEnvironmentReactionResource>().agentsById.at(entities.front().index);
+    const auto& route = runtime.world().query().get<safecrowd::domain::EvacuationRoute>(entities.front());
+    SC_EXPECT_TRUE(!secondReaction.hazardInRange);
+    SC_EXPECT_EQ(secondReaction.hazardKey, std::string{"expired-fire"});
+    SC_EXPECT_TRUE(route.followsGuidance);
+    SC_EXPECT_EQ(route.destinationZoneId, std::string{"near-exit"});
+}
+
+SC_TEST(ScenarioSimulationMotionSystem_ReplansStalledHazardOpposedRouteToSameExit) {
+    safecrowd::domain::ScenarioAgentSeed seed{
+        .position = {.value = {.x = 5.0, .y = 5.0}},
+        .agent = {
+            .radius = 0.25f,
+            .maxSpeed = 1.0f,
+            .hazardSensitivity = 2.0,
+            .reactionDelaySeconds = 0.0,
+        },
+        .velocity = {.value = {}},
+        .route = {
+            .waypoints = {{.x = 5.0, .y = 6.0}},
+            .waypointPassages = {{{.x = 5.0, .y = 6.0}, {.x = 5.0, .y = 6.0}}},
+            .nextWaypointIndex = 0,
+            .currentSegmentStart = {.x = 5.0, .y = 5.0},
+            .previousDistanceToWaypoint = 1.0,
+            .stalledSeconds = 1.0,
+            .destinationZoneId = "right-exit",
+            .originalDestinationZoneId = "right-exit",
+        },
+        .status = {},
+    };
+
+    auto fire = hazardDraft(
+        "overhead-fire",
+        safecrowd::domain::EnvironmentHazardKind::Fire,
+        safecrowd::domain::ScenarioElementSeverity::Low,
+        {.x = 5.0, .y = 8.1},
+        "room");
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 0.1,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 127,
+    });
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(
+        std::vector<safecrowd::domain::ScenarioAgentSeed>{seed},
+        10.0));
+    addHazardMotionSystems(runtime, rightExitHazardDetourLayout(), {fire});
+
+    runtime.play();
+    stepScenarioRuntime(runtime, 0.1);
+
+    const auto entities = runtime.world().query().view<
+        safecrowd::domain::Position,
+        safecrowd::domain::Agent,
+        safecrowd::domain::Velocity,
+        safecrowd::domain::AvoidanceState,
+        safecrowd::domain::EvacuationRoute,
+        safecrowd::domain::EvacuationStatus>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{1});
+
+    const auto& route = runtime.world().query().get<safecrowd::domain::EvacuationRoute>(entities.front());
+    const auto& reaction =
+        runtime.world().resources().get<safecrowd::domain::ScenarioEnvironmentReactionResource>().agentsById.at(entities.front().index);
+    SC_EXPECT_TRUE(reaction.hazardAware);
+    SC_EXPECT_EQ(route.destinationZoneId, std::string{"right-exit"});
+    SC_EXPECT_TRUE(std::find(
+        route.waypointConnectionIds.begin(),
+        route.waypointConnectionIds.end(),
+        "room-right-exit") != route.waypointConnectionIds.end());
+    SC_EXPECT_TRUE(route.waypoints.front().x > 8.0);
+    SC_EXPECT_NEAR(route.stalledSeconds, 0.0, 1e-9);
 }
 
 SC_TEST(ScenarioSimulationMotionSystem_BudgetsHazardAwareExitReplans) {

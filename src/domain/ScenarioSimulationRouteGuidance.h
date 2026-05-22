@@ -60,6 +60,28 @@ public:
         const std::string& agentFloorId,
         const ScenarioActiveEnvironmentHazardsResource& activeHazards) const;
 
+    ScenarioRoutePlan routePlanToHazardAwareNearestExitExcluding(
+        const ScenarioLayoutCacheResource& layoutCache,
+        const Point2D& start,
+        const std::string& startZoneId,
+        const std::string& agentFloorId,
+        const ScenarioActiveEnvironmentHazardsResource& activeHazards,
+        const std::string& excludedExitZoneId) const;
+
+    double hazardRoutePenalty(
+        const ScenarioLayoutCacheResource& layoutCache,
+        const ScenarioRoutePlan& plan,
+        const Point2D& start,
+        const std::string& startFloorId,
+        const ScenarioActiveEnvironmentHazardsResource& activeHazards) const;
+
+    double remainingRouteHazardPenalty(
+        const ScenarioLayoutCacheResource& layoutCache,
+        const EvacuationRoute& route,
+        const Point2D& position,
+        const std::string& startFloorId,
+        const ScenarioActiveEnvironmentHazardsResource& activeHazards) const;
+
     void replaceRouteWithPlan(EvacuationRoute& route, const ScenarioRoutePlan& plan, const Point2D& start) const;
 
     void apply(

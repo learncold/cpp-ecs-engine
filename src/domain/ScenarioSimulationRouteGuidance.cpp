@@ -466,14 +466,22 @@ public:
         return activeHazards != nullptr && !activeHazards->hazards.empty();
     }
 
-    static bool agentHazardAware(
+    static bool agentAwareOfActiveHazard(
         const ScenarioEnvironmentReactionResource* reactions,
-        engine::Entity entity) {
-        if (reactions == nullptr) {
+        engine::Entity entity,
+        const ScenarioActiveEnvironmentHazardsResource* activeHazards) {
+        if (reactions == nullptr || !hasActiveHazards(activeHazards)) {
             return false;
         }
         const auto it = reactions->agentsById.find(entity.index);
-        return it != reactions->agentsById.end() && it->second.hazardAware;
+        if (it == reactions->agentsById.end()
+            || !it->second.hazardAware
+            || it->second.hazardKey.empty()) {
+            return false;
+        }
+        return std::any_of(activeHazards->hazards.begin(), activeHazards->hazards.end(), [&](const auto& hazard) {
+            return hazard.key == it->second.hazardKey;
+        });
     }
 
     static ScenarioRoutePlan remainingRoutePlan(const EvacuationRoute& route) {
@@ -538,7 +546,8 @@ public:
         const Point2D& start,
         const std::string& startZoneId,
         const std::string& agentFloorId,
-        const std::string& activeHazardSignature) const {
+        const std::string& activeHazardSignature,
+        const std::string& excludedExitZoneId) const {
         return std::to_string(planningCacheRevision_)
             + '\x1f'
             + activeHazardSignature
@@ -546,6 +555,8 @@ public:
             + startZoneId
             + '\x1f'
             + agentFloorId
+            + '\x1f'
+            + excludedExitZoneId
             + '\x1f'
             + pointCachePart(start);
     }
@@ -570,6 +581,25 @@ public:
         const auto penalty = hazardRoutePenalty(layoutCache, plan, start, startFloorId, activeHazards);
         routeHazardPenaltyCache_.emplace(key, penalty);
         return penalty;
+    }
+
+    double remainingRouteHazardPenalty(
+        const ScenarioLayoutCacheResource& layoutCache,
+        const EvacuationRoute& route,
+        const Point2D& position,
+        const std::string& startFloorId,
+        const ScenarioActiveEnvironmentHazardsResource& activeHazards) const {
+        const auto hazardSignature = activeHazardSignature(&activeHazards);
+        if (hazardSignature.empty()) {
+            return 0.0;
+        }
+        return cachedHazardRoutePenalty(
+            layoutCache,
+            remainingRoutePlan(route),
+            position,
+            startFloorId,
+            activeHazards,
+            hazardSignature);
     }
 
     bool remainingRouteHazardSafe(
@@ -831,8 +861,7 @@ public:
             return;
         }
         const auto agentFloorId = !route.displayFloorId.empty() ? route.displayFloorId : route.currentFloorId;
-        const auto useHazardAwareSafety = agentHazardAware(reactions, entity)
-            && hasActiveHazards(activeHazards)
+        const auto useHazardAwareSafety = agentAwareOfActiveHazard(reactions, entity, activeHazards)
             && !activeHazardSignature.empty();
 
         if (activeGuidances.empty()) {
@@ -1595,9 +1624,10 @@ public:
         const Point2D& start,
         const std::string& startZoneId,
         const std::string& agentFloorId,
-        const ScenarioActiveEnvironmentHazardsResource& activeHazards) const {
+        const ScenarioActiveEnvironmentHazardsResource& activeHazards,
+        const std::string& excludedExitZoneId = {}) const {
         const auto hazardSignature = activeHazardSignature(&activeHazards);
-        const auto cacheKey = hazardAwareExitPlanCacheKey(start, startZoneId, agentFloorId, hazardSignature);
+        const auto cacheKey = hazardAwareExitPlanCacheKey(start, startZoneId, agentFloorId, hazardSignature, excludedExitZoneId);
         const auto cachedIt = hazardAwareExitPlanCache_.find(cacheKey);
         if (cachedIt != hazardAwareExitPlanCache_.end()) {
             return cachedIt->second;
@@ -1609,6 +1639,9 @@ public:
 
         for (const auto& zone : layoutCache.layout.zones) {
             if (zone.kind != ZoneKind::Exit) {
+                continue;
+            }
+            if (!excludedExitZoneId.empty() && zone.id == excludedExitZoneId) {
                 continue;
             }
 
@@ -1729,6 +1762,40 @@ ScenarioRoutePlan ScenarioRouteGuidanceController::routePlanToHazardAwareNearest
     const std::string& agentFloorId,
     const ScenarioActiveEnvironmentHazardsResource& activeHazards) const {
     return impl_->routePlanToHazardAwareNearestExit(layoutCache, start, startZoneId, agentFloorId, activeHazards);
+}
+
+ScenarioRoutePlan ScenarioRouteGuidanceController::routePlanToHazardAwareNearestExitExcluding(
+    const ScenarioLayoutCacheResource& layoutCache,
+    const Point2D& start,
+    const std::string& startZoneId,
+    const std::string& agentFloorId,
+    const ScenarioActiveEnvironmentHazardsResource& activeHazards,
+    const std::string& excludedExitZoneId) const {
+    return impl_->routePlanToHazardAwareNearestExit(
+        layoutCache,
+        start,
+        startZoneId,
+        agentFloorId,
+        activeHazards,
+        excludedExitZoneId);
+}
+
+double ScenarioRouteGuidanceController::hazardRoutePenalty(
+    const ScenarioLayoutCacheResource& layoutCache,
+    const ScenarioRoutePlan& plan,
+    const Point2D& start,
+    const std::string& startFloorId,
+    const ScenarioActiveEnvironmentHazardsResource& activeHazards) const {
+    return impl_->hazardRoutePenalty(layoutCache, plan, start, startFloorId, activeHazards);
+}
+
+double ScenarioRouteGuidanceController::remainingRouteHazardPenalty(
+    const ScenarioLayoutCacheResource& layoutCache,
+    const EvacuationRoute& route,
+    const Point2D& position,
+    const std::string& startFloorId,
+    const ScenarioActiveEnvironmentHazardsResource& activeHazards) const {
+    return impl_->remainingRouteHazardPenalty(layoutCache, route, position, startFloorId, activeHazards);
 }
 
 void ScenarioRouteGuidanceController::replaceRouteWithPlan(

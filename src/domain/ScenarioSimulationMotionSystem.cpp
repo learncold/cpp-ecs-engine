@@ -359,6 +359,9 @@ private:
     static constexpr double kSegmentReplanCooldownSeconds = 0.25;
     static constexpr double kFailedSegmentReplanCooldownSeconds = 1.25;
     static constexpr double kClosureApproachSpeedFactor = 0.35;
+    static constexpr double kHazardSafeRoutePenaltyMeters = 1.0;
+    static constexpr double kHazardRoutePenaltyToleranceMeters = 1.0;
+    static constexpr double kHazardRouteOppositionDotThreshold = -0.25;
 
     struct RouteAdvanceResult {
         Point2D position{};
@@ -475,6 +478,61 @@ private:
             1.0);
         const auto kindScale = state.hazardKind == EnvironmentHazardKind::Fire ? 0.85 : 0.65;
         return away * (maxSpeed * kindScale * (0.35 + (0.65 * proximity)));
+    }
+
+    bool hazardAvoidanceOpposesCurrentRoute(
+        const ScenarioLayoutCacheResource& layoutCache,
+        const EvacuationRoute& route,
+        const Agent& agent,
+        const Point2D& position,
+        const ScenarioEnvironmentReactionAgentState& state) const {
+        if (route.nextWaypointIndex >= route.waypoints.size()) {
+            return false;
+        }
+
+        const auto target = movementTargetForCurrentWaypoint(
+            layoutCache,
+            route,
+            position,
+            static_cast<double>(agent.radius));
+        const auto distance = distanceBetween(position, target);
+        if (distance <= kArrivalEpsilon) {
+            return false;
+        }
+
+        const auto routeDirection = (target - position) * (1.0 / distance);
+        const auto away = normalizedOr(position - state.hazardPosition, perpendicularLeft(routeDirection));
+        return dot(away, routeDirection) <= kHazardRouteOppositionDotThreshold;
+    }
+
+    static bool routePlanDiffersFromRoute(const EvacuationRoute& route, const ScenarioRoutePlan& plan) {
+        if (route.destinationZoneId != plan.destinationZoneId) {
+            return true;
+        }
+
+        const auto remainingWaypointCount = route.nextWaypointIndex >= route.waypoints.size()
+            ? std::size_t{0}
+            : route.waypoints.size() - route.nextWaypointIndex;
+        if (remainingWaypointCount != plan.waypoints.size()) {
+            return true;
+        }
+
+        for (std::size_t index = 0; index < plan.waypoints.size(); ++index) {
+            const auto routeIndex = route.nextWaypointIndex + index;
+            if (distanceBetween(route.waypoints[routeIndex], plan.waypoints[index]) > 1e-6) {
+                return true;
+            }
+            const auto routeConnectionId = routeIndex < route.waypointConnectionIds.size()
+                ? route.waypointConnectionIds[routeIndex]
+                : std::string{};
+            const auto planConnectionId = index < plan.waypointConnectionIds.size()
+                ? plan.waypointConnectionIds[index]
+                : std::string{};
+            if (routeConnectionId != planConnectionId) {
+                return true;
+            }
+        }
+        return false;
     }
 
     const Connection2D* findConnectionById(
@@ -1240,6 +1298,7 @@ private:
             }
 
             const auto& position = query.get<Position>(entity);
+            const auto& agent = query.get<Agent>(entity);
             auto& route = query.get<EvacuationRoute>(entity);
             if (elapsedSeconds + 1e-9 < route.nextExitReplanSeconds) {
                 continue;
@@ -1252,13 +1311,60 @@ private:
             }
 
             const auto agentFloorId = !route.displayFloorId.empty() ? route.displayFloorId : route.currentFloorId;
-            const auto plan =
+            const auto currentPenalty = routeGuidance_.remainingRouteHazardPenalty(
+                layoutCache,
+                route,
+                position.value,
+                agentFloorId,
+                *activeHazards);
+            const auto currentRouteDifficult =
+                route.stalledSeconds >= kWaypointStallSeconds
+                && (currentPenalty > kHazardSafeRoutePenaltyMeters
+                    || hazardAvoidanceOpposesCurrentRoute(layoutCache, route, agent, position.value, *hazardState));
+
+            auto plan =
                 routeGuidance_.routePlanToHazardAwareNearestExit(layoutCache, position.value, startZoneId, agentFloorId, *activeHazards);
             if (plan.destinationZoneId.empty()) {
                 route.nextExitReplanSeconds = elapsedSeconds + kExitReplanCooldownSeconds;
                 continue;
             }
+            auto planPenalty = routeGuidance_.hazardRoutePenalty(layoutCache, plan, position.value, agentFloorId, *activeHazards);
+            if (currentRouteDifficult
+                && plan.destinationZoneId == route.destinationZoneId
+                && (!routePlanDiffersFromRoute(route, plan)
+                    || planPenalty > currentPenalty + kHazardRoutePenaltyToleranceMeters)) {
+                auto alternatePlan = routeGuidance_.routePlanToHazardAwareNearestExitExcluding(
+                    layoutCache,
+                    position.value,
+                    startZoneId,
+                    agentFloorId,
+                    *activeHazards,
+                    route.destinationZoneId);
+                if (!alternatePlan.destinationZoneId.empty()) {
+                    const auto alternatePenalty = routeGuidance_.hazardRoutePenalty(
+                        layoutCache,
+                        alternatePlan,
+                        position.value,
+                        agentFloorId,
+                        *activeHazards);
+                    if (alternatePenalty <= currentPenalty + kHazardRoutePenaltyToleranceMeters
+                        || alternatePenalty + kHazardRoutePenaltyToleranceMeters < planPenalty) {
+                        plan = std::move(alternatePlan);
+                        planPenalty = alternatePenalty;
+                    }
+                }
+            }
+
             if (plan.destinationZoneId == route.destinationZoneId && !route.waypoints.empty() && !route.noExitAvailable) {
+                const auto replacesDifficultRoute =
+                    currentRouteDifficult
+                    && routePlanDiffersFromRoute(route, plan)
+                    && planPenalty <= currentPenalty + kHazardRoutePenaltyToleranceMeters;
+                if (replacesDifficultRoute) {
+                    routeGuidance_.replaceRouteWithPlan(route, plan, position.value);
+                    route.nextExitReplanSeconds = elapsedSeconds + kExitReplanCooldownSeconds;
+                    continue;
+                }
                 route.nextExitReplanSeconds = elapsedSeconds + kExitReplanCooldownSeconds;
                 continue;
             }
