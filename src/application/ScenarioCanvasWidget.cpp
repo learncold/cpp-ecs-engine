@@ -1176,7 +1176,7 @@ ScenarioCanvasWidget::ScenarioCanvasWidget(
     currentFloorId_ = defaultFloorIdText(layout_);
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
-    setMinimumSize(520, 360);
+    setMinimumSize(400, 360);
     ui::polishCanvasSurface(this);
     QCoreApplication::instance()->installEventFilter(this);
     setupToolbars();
