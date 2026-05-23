@@ -536,6 +536,9 @@ QJsonObject workspaceStateToJson(const ProjectWorkspaceState& state) {
     if (!state.runningScenarios.empty()) {
         object["runningScenarios"] = scenarioDraftsToJson(state.runningScenarios);
     }
+    if (state.runningScenarioIndex >= 0) {
+        object["runningScenarioIndex"] = state.runningScenarioIndex;
+    }
     if (state.result.has_value()) {
         object["result"] = resultStateToJson(*state.result);
     }
@@ -562,6 +565,7 @@ ProjectWorkspaceState workspaceStateFromJson(const QJsonObject& object) {
     } else if (state.runningScenario.has_value()) {
         state.runningScenarios.push_back(*state.runningScenario);
     }
+    state.runningScenarioIndex = object.value("runningScenarioIndex").toInt(-1);
     if (object.value("result").isObject()) {
         state.result = resultStateFromJson(object.value("result").toObject());
     }

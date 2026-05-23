@@ -9,6 +9,8 @@
 
 namespace safecrowd::domain {
 
+constexpr std::uint32_t kScenarioExecutionMaxRepeatCount = 20;
+
 enum class ScenarioRole {
     Baseline,
     Alternative,

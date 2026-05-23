@@ -65,6 +65,37 @@ SC_TEST(ProjectPersistence_preservesRecommendedScenarioDraftState) {
     SC_EXPECT_NEAR(loadedScenario.draft.control.routeGuidances.front().maxDetourMeters, 20.0, 1e-9);
 }
 
+SC_TEST(ProjectPersistence_preservesRunningScenarioIndex) {
+    QTemporaryDir projectDir;
+    SC_EXPECT_TRUE(projectDir.isValid());
+
+    ScenarioDraft baseline;
+    baseline.scenarioId = "baseline";
+    baseline.name = "Baseline";
+    baseline.execution.repeatCount = 3;
+
+    ProjectWorkspaceState workspace;
+    workspace.activeView = ProjectWorkspaceView::ScenarioRun;
+    workspace.runningScenario = baseline;
+    workspace.runningScenarios = {baseline};
+    workspace.runningScenarioIndex = 2;
+
+    const ProjectMetadata metadata{
+        .name = "Running Index Test",
+        .folderPath = projectDir.path(),
+    };
+
+    QString errorMessage;
+    SC_EXPECT_TRUE(ProjectPersistence::saveProjectWorkspace(metadata, workspace, &errorMessage));
+
+    ProjectWorkspaceState loaded;
+    SC_EXPECT_TRUE(ProjectPersistence::loadProjectWorkspace(metadata, &loaded));
+    SC_EXPECT_TRUE(loaded.activeView == ProjectWorkspaceView::ScenarioRun);
+    SC_EXPECT_EQ(loaded.runningScenarios.size(), std::size_t{1});
+    SC_EXPECT_EQ(loaded.runningScenarioIndex, 2);
+    SC_EXPECT_EQ(loaded.runningScenarios.front().execution.repeatCount, std::uint32_t{3});
+}
+
 SC_TEST(ProjectPersistence_preservesImportArtifactsBesideLayoutReview) {
     QTemporaryDir projectDir;
     SC_EXPECT_TRUE(projectDir.isValid());

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 
 #include "domain/FacilityLayout2D.h"
@@ -19,6 +20,10 @@ struct ScenarioBatchRunState {
     ScenarioRiskSnapshot resultRisk{};
     ScenarioResultArtifacts artifacts{};
     double timeLimitSeconds{0.0};
+    std::size_t sourceScenarioIndex{0};
+    std::uint32_t repeatIndex{1};
+    std::uint32_t repeatCount{1};
+    std::uint32_t runSeed{0};
     bool complete{false};
     bool resultSynced{false};
 };

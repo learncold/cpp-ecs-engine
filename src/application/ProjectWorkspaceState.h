@@ -71,6 +71,7 @@ struct ProjectWorkspaceState {
     std::optional<SavedScenarioAuthoringState> authoring{};
     std::optional<safecrowd::domain::ScenarioDraft> runningScenario{};
     std::vector<safecrowd::domain::ScenarioDraft> runningScenarios{};
+    int runningScenarioIndex{-1};
     std::optional<SavedScenarioResultState> result{};
     std::optional<SavedScenarioBatchResultState> batchResult{};
 };

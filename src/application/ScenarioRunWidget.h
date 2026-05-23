@@ -14,8 +14,10 @@
 #include "domain/ScenarioBatchRunner.h"
 
 class QLabel;
+class QDoubleSpinBox;
 class QProgressBar;
 class QPushButton;
+class QSpinBox;
 class QTimer;
 
 namespace safecrowd::application {
@@ -76,19 +78,26 @@ public:
     const std::optional<ScenarioAuthoringWidget::InitialState>& returnAuthoringState() const noexcept;
     bool hasResultsForSave() const noexcept;
     int selectedRunIndex() const noexcept;
+    void commitRunSettings();
     std::vector<SavedScenarioResultState> resultsForSave();
 
 private:
     QWidget* createRunCanvas();
     QWidget* createRunPanel();
+    void applyRunSettings();
     void cycleFastForwardMode();
+    int firstRunIndexForSource(std::size_t sourceScenarioIndex) const;
     bool hasCachedResults() const noexcept;
+    bool runSettingsChanged() const;
     std::vector<SavedScenarioResultState> completedResults();
+    void rebuildRunCanvas();
     void returnToAuthoring();
     void refreshStatus();
     void selectRun(int index);
+    std::size_t selectedSourceScenarioIndex() const;
     void showResults();
     void stopRun();
+    void syncRunSettingsControls();
     void togglePaused();
 
     QString projectName_{};
@@ -116,13 +125,18 @@ private:
     QLabel* riskLabel_{nullptr};
     QLabel* congestionLabel_{nullptr};
     QLabel* bottleneckLabel_{nullptr};
+    QDoubleSpinBox* timeLimitSpinBox_{nullptr};
+    QDoubleSpinBox* sampleIntervalSpinBox_{nullptr};
+    QSpinBox* repeatCountSpinBox_{nullptr};
+    QSpinBox* baseSeedSpinBox_{nullptr};
+    QPushButton* applySettingsButton_{nullptr};
     QPushButton* pauseButton_{nullptr};
     QPushButton* stopButton_{nullptr};
     QPushButton* fastForwardButton_{nullptr};
     QPushButton* resultButton_{nullptr};
     int selectedRunIndex_{0};
     int playbackSpeedMultiplier_{1};
-    bool paused_{false};
+    bool paused_{true};
 };
 
 }  // namespace safecrowd::application

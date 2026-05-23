@@ -1,5 +1,7 @@
 #include "TestSupport.h"
 
+#include <cstdint>
+
 #include "domain/ScenarioBatchRunner.h"
 
 namespace {
@@ -64,6 +66,59 @@ SC_TEST(ScenarioBatchRunnerAdvancesMultipleScenariosOnSameTick) {
     SC_EXPECT_TRUE(batch.run(1).frame.elapsedSeconds > 0.0);
     SC_EXPECT_EQ(batch.run(0).scenario.scenarioId, std::string{"scenario-1"});
     SC_EXPECT_EQ(batch.run(1).scenario.scenarioId, std::string{"scenario-2"});
+}
+
+SC_TEST(ScenarioBatchRunnerExpandsRepeatCountIntoSeededRuns) {
+    auto repeated = scenarioDraft("scenario-1", "Repeated", 4.0, 1.0);
+    repeated.execution.repeatCount = 3;
+    repeated.execution.baseSeed = 10;
+
+    safecrowd::domain::ScenarioBatchRunner batch(twoRoomExitLayout(), {repeated});
+
+    SC_EXPECT_EQ(batch.size(), std::size_t{3});
+    SC_EXPECT_EQ(batch.run(0).sourceScenarioIndex, std::size_t{0});
+    SC_EXPECT_EQ(batch.run(1).sourceScenarioIndex, std::size_t{0});
+    SC_EXPECT_EQ(batch.run(2).sourceScenarioIndex, std::size_t{0});
+    SC_EXPECT_EQ(batch.run(0).repeatIndex, std::uint32_t{1});
+    SC_EXPECT_EQ(batch.run(1).repeatIndex, std::uint32_t{2});
+    SC_EXPECT_EQ(batch.run(2).repeatIndex, std::uint32_t{3});
+    SC_EXPECT_EQ(batch.run(0).repeatCount, std::uint32_t{3});
+    SC_EXPECT_EQ(batch.run(0).runSeed, std::uint32_t{10});
+    SC_EXPECT_EQ(batch.run(1).runSeed, std::uint32_t{11});
+    SC_EXPECT_EQ(batch.run(2).runSeed, std::uint32_t{12});
+    SC_EXPECT_EQ(batch.run(0).scenario.execution.baseSeed, std::uint32_t{10});
+    SC_EXPECT_EQ(batch.run(1).scenario.execution.baseSeed, std::uint32_t{11});
+    SC_EXPECT_EQ(batch.run(2).scenario.execution.baseSeed, std::uint32_t{12});
+    SC_EXPECT_EQ(batch.run(0).scenario.execution.repeatCount, std::uint32_t{1});
+    SC_EXPECT_EQ(batch.run(0).scenario.scenarioId, std::string{"scenario-1-repeat-1"});
+    SC_EXPECT_TRUE(batch.run(0).scenario.name.find("run 1/3") != std::string::npos);
+}
+
+SC_TEST(ScenarioBatchRunnerKeepsSingleRunIdentityWhenRepeatCountIsOne) {
+    auto single = scenarioDraft("scenario-1", "Single", 4.0, 1.0);
+    single.execution.repeatCount = 1;
+    single.execution.baseSeed = 42;
+
+    safecrowd::domain::ScenarioBatchRunner batch(twoRoomExitLayout(), {single});
+
+    SC_EXPECT_EQ(batch.size(), std::size_t{1});
+    SC_EXPECT_EQ(batch.run(0).scenario.scenarioId, std::string{"scenario-1"});
+    SC_EXPECT_EQ(batch.run(0).scenario.name, std::string{"Single"});
+    SC_EXPECT_EQ(batch.run(0).runSeed, std::uint32_t{42});
+    SC_EXPECT_EQ(batch.run(0).repeatIndex, std::uint32_t{1});
+    SC_EXPECT_EQ(batch.run(0).repeatCount, std::uint32_t{1});
+}
+
+SC_TEST(ScenarioBatchRunnerClampsRepeatCountAtDomainLimit) {
+    auto repeated = scenarioDraft("scenario-1", "Repeated", 4.0, 1.0);
+    repeated.execution.repeatCount = safecrowd::domain::kScenarioExecutionMaxRepeatCount + 5;
+    repeated.execution.baseSeed = 100;
+
+    safecrowd::domain::ScenarioBatchRunner batch(twoRoomExitLayout(), {repeated});
+
+    SC_EXPECT_EQ(batch.size(), static_cast<std::size_t>(safecrowd::domain::kScenarioExecutionMaxRepeatCount));
+    SC_EXPECT_EQ(batch.run(0).repeatCount, safecrowd::domain::kScenarioExecutionMaxRepeatCount);
+    SC_EXPECT_EQ(batch.run(batch.size() - 1).repeatIndex, safecrowd::domain::kScenarioExecutionMaxRepeatCount);
 }
 
 SC_TEST(ScenarioBatchRunnerContinuesUnfinishedRunsAfterOneCompletes) {

@@ -2,11 +2,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <iterator>
 #include <optional>
 #include <utility>
 
 #include <QColor>
+#include <QDoubleSpinBox>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QIcon>
@@ -16,7 +18,9 @@
 #include <QPixmap>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QSizePolicy>
+#include <QSpinBox>
 #include <QTimer>
 #include <QVariant>
 #include <QVBoxLayout>
@@ -33,6 +37,9 @@ namespace {
 
 constexpr double kSimulationDeltaSeconds = 1.0 / 30.0;
 constexpr int kPlaybackTimerIntervalMs = 33;
+constexpr double kDefaultTimeLimitSeconds = 60.0;
+constexpr double kDefaultSampleIntervalSeconds = 1.0;
+constexpr int kMaxUiSeed = 2147483647;
 
 int normalizedRunIndex(int index, std::size_t runCount) {
     if (runCount == 0) {
@@ -138,6 +145,31 @@ int percentValue(double numerator, double denominator) {
     }
     const auto percent = std::clamp((numerator / denominator) * 100.0, 0.0, 100.0);
     return static_cast<int>(std::round(percent));
+}
+
+double normalizedTimeLimitSeconds(const safecrowd::domain::ExecutionConfig& execution) {
+    return execution.timeLimitSeconds > 0.0 ? execution.timeLimitSeconds : kDefaultTimeLimitSeconds;
+}
+
+double normalizedSampleIntervalSeconds(const safecrowd::domain::ExecutionConfig& execution) {
+    return execution.sampleIntervalSeconds > 0.0 ? execution.sampleIntervalSeconds : kDefaultSampleIntervalSeconds;
+}
+
+int normalizedRepeatCount(const safecrowd::domain::ExecutionConfig& execution) {
+    const auto repeatCount = std::min<std::uint32_t>(
+        execution.repeatCount,
+        safecrowd::domain::kScenarioExecutionMaxRepeatCount);
+    return std::max(1, static_cast<int>(repeatCount));
+}
+
+int normalizedSeed(const safecrowd::domain::ExecutionConfig& execution) {
+    if (execution.baseSeed == 0) {
+        return 1;
+    }
+    const auto seed = std::min<std::uint32_t>(
+        execution.baseSeed,
+        static_cast<std::uint32_t>(kMaxUiSeed));
+    return std::max(1, static_cast<int>(seed));
 }
 
 const safecrowd::domain::Zone2D* firstStartZone(const safecrowd::domain::FacilityLayout2D& layout) {
@@ -331,9 +363,11 @@ ScenarioRunWidget::ScenarioRunWidget(
       saveProjectHandler_(std::move(saveProjectHandler)),
       openProjectHandler_(std::move(openProjectHandler)),
       backToLayoutReviewHandler_(std::move(backToLayoutReviewHandler)) {
-    selectedRunIndex_ = normalizedRunIndex(initialSelectedRunIndex, scenarios_.size());
-    if (!scenarios_.empty()) {
-        scenario_ = scenarios_[static_cast<std::size_t>(selectedRunIndex_)];
+    selectedRunIndex_ = normalizedRunIndex(initialSelectedRunIndex, batchRunner_.size());
+    if (!batchRunner_.empty()) {
+        scenario_ = batchRunner_.run(static_cast<std::size_t>(selectedRunIndex_)).scenario;
+    } else if (!scenarios_.empty()) {
+        scenario_ = scenarios_.front();
     }
 
     auto* rootLayout = new QVBoxLayout(this);
@@ -395,6 +429,12 @@ int ScenarioRunWidget::selectedRunIndex() const noexcept {
     return selectedRunIndex_;
 }
 
+void ScenarioRunWidget::commitRunSettings() {
+    if (!batchRunner_.complete() && runSettingsChanged()) {
+        applyRunSettings();
+    }
+}
+
 std::vector<SavedScenarioResultState> ScenarioRunWidget::resultsForSave() {
     if (batchRunner_.complete() && !batchRunner_.empty()) {
         return completedResults();
@@ -420,6 +460,108 @@ std::vector<SavedScenarioResultState> ScenarioRunWidget::completedResults() {
         });
     }
     return results;
+}
+
+std::size_t ScenarioRunWidget::selectedSourceScenarioIndex() const {
+    if (scenarios_.empty()) {
+        return 0;
+    }
+    if (!batchRunner_.empty()
+        && selectedRunIndex_ >= 0
+        && selectedRunIndex_ < static_cast<int>(batchRunner_.size())) {
+        return std::min(
+            batchRunner_.run(static_cast<std::size_t>(selectedRunIndex_)).sourceScenarioIndex,
+            scenarios_.size() - 1);
+    }
+    return static_cast<std::size_t>(normalizedRunIndex(selectedRunIndex_, scenarios_.size()));
+}
+
+int ScenarioRunWidget::firstRunIndexForSource(std::size_t sourceScenarioIndex) const {
+    for (std::size_t index = 0; index < batchRunner_.size(); ++index) {
+        if (batchRunner_.run(index).sourceScenarioIndex == sourceScenarioIndex) {
+            return static_cast<int>(index);
+        }
+    }
+    return normalizedRunIndex(selectedRunIndex_, batchRunner_.size());
+}
+
+void ScenarioRunWidget::syncRunSettingsControls() {
+    if (scenarios_.empty()
+        || timeLimitSpinBox_ == nullptr
+        || sampleIntervalSpinBox_ == nullptr
+        || repeatCountSpinBox_ == nullptr
+        || baseSeedSpinBox_ == nullptr) {
+        return;
+    }
+
+    const auto sourceIndex = selectedSourceScenarioIndex();
+    const auto& execution = scenarios_[sourceIndex].execution;
+
+    const QSignalBlocker timeBlocker(timeLimitSpinBox_);
+    const QSignalBlocker sampleBlocker(sampleIntervalSpinBox_);
+    const QSignalBlocker repeatBlocker(repeatCountSpinBox_);
+    const QSignalBlocker seedBlocker(baseSeedSpinBox_);
+
+    timeLimitSpinBox_->setValue(normalizedTimeLimitSeconds(execution));
+    sampleIntervalSpinBox_->setValue(normalizedSampleIntervalSeconds(execution));
+    repeatCountSpinBox_->setValue(normalizedRepeatCount(execution));
+    baseSeedSpinBox_->setValue(normalizedSeed(execution));
+}
+
+void ScenarioRunWidget::rebuildRunCanvas() {
+    if (shell_ != nullptr) {
+        shell_->setCanvas(createRunCanvas());
+    }
+}
+
+bool ScenarioRunWidget::runSettingsChanged() const {
+    if (scenarios_.empty()
+        || timeLimitSpinBox_ == nullptr
+        || sampleIntervalSpinBox_ == nullptr
+        || repeatCountSpinBox_ == nullptr
+        || baseSeedSpinBox_ == nullptr) {
+        return false;
+    }
+
+    const auto sourceIndex = selectedSourceScenarioIndex();
+    const auto& execution = scenarios_[sourceIndex].execution;
+    return std::fabs(normalizedTimeLimitSeconds(execution) - timeLimitSpinBox_->value()) > 1e-9
+        || std::fabs(normalizedSampleIntervalSeconds(execution) - sampleIntervalSpinBox_->value()) > 1e-9
+        || normalizedRepeatCount(execution) != repeatCountSpinBox_->value()
+        || normalizedSeed(execution) != baseSeedSpinBox_->value();
+}
+
+void ScenarioRunWidget::applyRunSettings() {
+    if (scenarios_.empty()
+        || timeLimitSpinBox_ == nullptr
+        || sampleIntervalSpinBox_ == nullptr
+        || repeatCountSpinBox_ == nullptr
+        || baseSeedSpinBox_ == nullptr) {
+        return;
+    }
+
+    const auto sourceIndex = selectedSourceScenarioIndex();
+    auto& scenario = scenarios_[sourceIndex];
+    scenario.execution.timeLimitSeconds = timeLimitSpinBox_->value();
+    scenario.execution.sampleIntervalSeconds = sampleIntervalSpinBox_->value();
+    scenario.execution.repeatCount = static_cast<std::uint32_t>(repeatCountSpinBox_->value());
+    scenario.execution.baseSeed = static_cast<std::uint32_t>(baseSeedSpinBox_->value());
+
+    cachedResults_.clear();
+    playbackSpeedMultiplier_ = 1;
+    paused_ = true;
+    batchRunner_.reset(layout_, scenarios_);
+    selectedRunIndex_ = firstRunIndexForSource(sourceIndex);
+    if (!batchRunner_.empty()) {
+        scenario_ = batchRunner_.run(static_cast<std::size_t>(selectedRunIndex_)).scenario;
+    } else {
+        scenario_ = {};
+    }
+    rebuildRunCanvas();
+    refreshStatus();
+    if (timer_ != nullptr && !timer_->isActive()) {
+        timer_->start();
+    }
 }
 
 QWidget* ScenarioRunWidget::createRunCanvas() {
@@ -496,6 +638,51 @@ QWidget* ScenarioRunWidget::createRunPanel() {
     layout->setSpacing(12);
 
     layout->addWidget(shell_ != nullptr ? shell_->createPanelHeader("Run", panel, false) : createLabel("Run", panel, ui::FontRole::Title));
+    layout->addWidget(createLabel("Run Settings", panel, ui::FontRole::SectionTitle));
+
+    auto* settingsGrid = new QGridLayout();
+    settingsGrid->setContentsMargins(0, 0, 0, 0);
+    settingsGrid->setHorizontalSpacing(8);
+    settingsGrid->setVerticalSpacing(8);
+
+    timeLimitSpinBox_ = new QDoubleSpinBox(panel);
+    timeLimitSpinBox_->setRange(1.0, 86400.0);
+    timeLimitSpinBox_->setDecimals(0);
+    timeLimitSpinBox_->setSingleStep(30.0);
+    timeLimitSpinBox_->setSuffix(" sec");
+    timeLimitSpinBox_->setToolTip("Time limit");
+
+    sampleIntervalSpinBox_ = new QDoubleSpinBox(panel);
+    sampleIntervalSpinBox_->setRange(0.1, 60.0);
+    sampleIntervalSpinBox_->setDecimals(1);
+    sampleIntervalSpinBox_->setSingleStep(0.5);
+    sampleIntervalSpinBox_->setSuffix(" sec");
+    sampleIntervalSpinBox_->setToolTip("Sample interval");
+
+    repeatCountSpinBox_ = new QSpinBox(panel);
+    repeatCountSpinBox_->setRange(1, static_cast<int>(safecrowd::domain::kScenarioExecutionMaxRepeatCount));
+    repeatCountSpinBox_->setSuffix(" runs");
+    repeatCountSpinBox_->setToolTip("Repeat count");
+
+    baseSeedSpinBox_ = new QSpinBox(panel);
+    baseSeedSpinBox_->setRange(1, kMaxUiSeed);
+    baseSeedSpinBox_->setToolTip("Base random seed");
+
+    settingsGrid->addWidget(createLabel("Time limit", panel, ui::FontRole::Caption), 0, 0);
+    settingsGrid->addWidget(timeLimitSpinBox_, 0, 1);
+    settingsGrid->addWidget(createLabel("Sample", panel, ui::FontRole::Caption), 1, 0);
+    settingsGrid->addWidget(sampleIntervalSpinBox_, 1, 1);
+    settingsGrid->addWidget(createLabel("Repeats", panel, ui::FontRole::Caption), 2, 0);
+    settingsGrid->addWidget(repeatCountSpinBox_, 2, 1);
+    settingsGrid->addWidget(createLabel("Seed", panel, ui::FontRole::Caption), 3, 0);
+    settingsGrid->addWidget(baseSeedSpinBox_, 3, 1);
+    layout->addLayout(settingsGrid);
+
+    applySettingsButton_ = new QPushButton("Apply Settings", panel);
+    applySettingsButton_->setFont(ui::font(ui::FontRole::Body));
+    applySettingsButton_->setStyleSheet(ui::secondaryButtonStyleSheet());
+    layout->addWidget(applySettingsButton_);
+
     scenarioLabel_ = createLabel("", panel);
     scenarioLabel_->setStyleSheet(ui::mutedTextStyleSheet());
     statusLabel_ = createLabel("", panel);
@@ -563,6 +750,11 @@ QWidget* ScenarioRunWidget::createRunPanel() {
     connect(resultButton_, &QPushButton::clicked, this, [this]() {
         showResults();
     });
+    connect(applySettingsButton_, &QPushButton::clicked, this, [this]() {
+        applyRunSettings();
+    });
+
+    syncRunSettingsControls();
 
     return panel;
 }
@@ -572,6 +764,7 @@ void ScenarioRunWidget::returnToAuthoring() {
     if (timer_ != nullptr) {
         timer_->stop();
     }
+    const auto sourceScenarioIndex = selectedSourceScenarioIndex();
 
     auto* rootLayout = qobject_cast<QVBoxLayout*>(layout());
     if (rootLayout == nullptr || shell_ == nullptr) {
@@ -585,15 +778,15 @@ void ScenarioRunWidget::returnToAuthoring() {
         }
         initial.navigationView = ScenarioAuthoringWidget::NavigationView::Layout;
     }
-    if (selectedRunIndex_ >= 0 && selectedRunIndex_ < static_cast<int>(scenarios_.size())) {
-        const auto& selectedScenarioId = scenarios_[static_cast<std::size_t>(selectedRunIndex_)].scenarioId;
+    if (sourceScenarioIndex < scenarios_.size()) {
+        const auto& selectedScenarioId = scenarios_[sourceScenarioIndex].scenarioId;
         const auto selectedIt = std::find_if(initial.scenarios.begin(), initial.scenarios.end(), [&](const auto& scenario) {
             return scenario.draft.scenarioId == selectedScenarioId;
         });
         if (selectedIt != initial.scenarios.end()) {
             initial.currentScenarioIndex = static_cast<int>(std::distance(initial.scenarios.begin(), selectedIt));
-        } else if (selectedRunIndex_ < static_cast<int>(initial.scenarios.size())) {
-            initial.currentScenarioIndex = selectedRunIndex_;
+        } else if (sourceScenarioIndex < initial.scenarios.size()) {
+            initial.currentScenarioIndex = static_cast<int>(sourceScenarioIndex);
         }
     }
     initial.rightPanelMode = ScenarioAuthoringWidget::RightPanelMode::Scenario;
@@ -642,7 +835,14 @@ void ScenarioRunWidget::refreshStatus() {
                 : ui::secondaryButtonStyleSheet());
         }
         if (index < previewStatusLabels_.size() && previewStatusLabels_[index] != nullptr) {
-            previewStatusLabels_[index]->setText(QString("%1  -  %2 / %3 evacuated")
+            const auto repeatText = run.repeatCount > 1
+                ? QString("Run %1/%2  -  Seed %3\n")
+                    .arg(run.repeatIndex)
+                    .arg(run.repeatCount)
+                    .arg(run.runSeed)
+                : QString{};
+            previewStatusLabels_[index]->setText(QString("%1%2  -  %3 / %4 evacuated")
+                .arg(repeatText)
                 .arg(simulationStatusText(run.complete, paused_, playbackSpeedMultiplier_))
                 .arg(static_cast<int>(run.frame.evacuatedAgentCount))
                 .arg(static_cast<int>(run.frame.totalAgentCount)));
@@ -656,7 +856,7 @@ void ScenarioRunWidget::refreshStatus() {
             return run.complete;
         }));
         const auto runCount = static_cast<int>(batchRunner_.size());
-        scenarioLabel_->setText(QString("Running %1 scenario%2\nSelected: %3\nBatch: %4 / %5 complete")
+        scenarioLabel_->setText(QString("Running %1 run%2\nSelected: %3\nBatch: %4 / %5 complete")
             .arg(runCount)
             .arg(runCount == 1 ? "" : "s")
             .arg(QString::fromStdString(selectedRun.scenario.name))
@@ -734,6 +934,22 @@ void ScenarioRunWidget::refreshStatus() {
         resultButton_->setEnabled(
             batchRunner_.complete() && !batchRunner_.empty());
     }
+    const bool settingsEnabled = paused_ && !batchRunner_.complete();
+    if (timeLimitSpinBox_ != nullptr) {
+        timeLimitSpinBox_->setEnabled(settingsEnabled);
+    }
+    if (sampleIntervalSpinBox_ != nullptr) {
+        sampleIntervalSpinBox_->setEnabled(settingsEnabled);
+    }
+    if (repeatCountSpinBox_ != nullptr) {
+        repeatCountSpinBox_->setEnabled(settingsEnabled);
+    }
+    if (baseSeedSpinBox_ != nullptr) {
+        baseSeedSpinBox_->setEnabled(settingsEnabled);
+    }
+    if (applySettingsButton_ != nullptr) {
+        applySettingsButton_->setEnabled(settingsEnabled);
+    }
 }
 
 void ScenarioRunWidget::selectRun(int index) {
@@ -742,6 +958,7 @@ void ScenarioRunWidget::selectRun(int index) {
     }
     selectedRunIndex_ = index;
     scenario_ = batchRunner_.run(static_cast<std::size_t>(selectedRunIndex_)).scenario;
+    syncRunSettingsControls();
     refreshStatus();
 }
 
@@ -754,6 +971,9 @@ void ScenarioRunWidget::cycleFastForwardMode() {
         batchRunner_.syncResultArtifacts();
         refreshStatus();
         return;
+    }
+    if (paused_ && runSettingsChanged()) {
+        applyRunSettings();
     }
     if (playbackSpeedMultiplier_ == 1) {
         playbackSpeedMultiplier_ = 2;
@@ -777,6 +997,10 @@ void ScenarioRunWidget::stopRun() {
         timer_->stop();
     }
     batchRunner_.reset(layout_, scenarios_);
+    selectedRunIndex_ = normalizedRunIndex(selectedRunIndex_, batchRunner_.size());
+    if (!batchRunner_.empty()) {
+        scenario_ = batchRunner_.run(static_cast<std::size_t>(selectedRunIndex_)).scenario;
+    }
     refreshStatus();
     if (timer_ != nullptr) {
         timer_->start();
@@ -854,6 +1078,9 @@ void ScenarioRunWidget::showResults() {
 void ScenarioRunWidget::togglePaused() {
     if (batchRunner_.complete()) {
         return;
+    }
+    if (paused_ && runSettingsChanged()) {
+        applyRunSettings();
     }
     paused_ = !paused_;
     if (!paused_ && timer_ != nullptr && !timer_->isActive()) {

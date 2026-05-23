@@ -584,9 +584,11 @@ void MainWindow::openProject(const ProjectMetadata& metadata) {
             auto returnAuthoringState = workspace.authoring.has_value()
                 ? std::make_optional(initialStateFromSaved(*workspace.authoring, *importResult.layout))
                 : std::optional<ScenarioAuthoringWidget::InitialState>{};
-            const auto initialSelectedRunIndex = selectedRunIndexFor(
-                workspace.runningScenarios,
-                workspace.runningScenario);
+            const auto initialSelectedRunIndex = workspace.runningScenarioIndex >= 0
+                ? workspace.runningScenarioIndex
+                : selectedRunIndexFor(
+                    workspace.runningScenarios,
+                    workspace.runningScenario);
             showScenarioRun(
                 *importResult.layout,
                 std::move(workspace.runningScenarios),
@@ -740,6 +742,7 @@ void MainWindow::saveCurrentProject() {
             .navigationView = resultWidget->currentSavedNavigationView(),
         };
     } else if (activeWorkflowWidget == runWidget) {
+        runWidget->commitRunSettings();
         if (runWidget->returnAuthoringState().has_value()) {
             workspace.authoring = savedStateFromInitial(*runWidget->returnAuthoringState());
         }
@@ -763,6 +766,7 @@ void MainWindow::saveCurrentProject() {
             workspace.activeView = ProjectWorkspaceView::ScenarioRun;
             workspace.runningScenario = runWidget->scenario();
             workspace.runningScenarios = runWidget->scenarios();
+            workspace.runningScenarioIndex = runWidget->selectedRunIndex();
         }
     }
 
