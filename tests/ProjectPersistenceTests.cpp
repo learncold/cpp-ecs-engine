@@ -96,6 +96,72 @@ SC_TEST(ProjectPersistence_preservesRunningScenarioIndex) {
     SC_EXPECT_EQ(loaded.runningScenarios.front().execution.repeatCount, std::uint32_t{3});
 }
 
+SC_TEST(ProjectPersistence_preservesHazardExposureResultArtifacts) {
+    QTemporaryDir projectDir;
+    SC_EXPECT_TRUE(projectDir.isValid());
+
+    ScenarioDraft scenario;
+    scenario.scenarioId = "hazard-result";
+    scenario.name = "Hazard Exposure Result";
+
+    HazardExposureMetric exposure;
+    exposure.hazardId = "fire-a";
+    exposure.hazardName = "Lobby fire";
+    exposure.kind = EnvironmentHazardKind::Fire;
+    exposure.severity = ScenarioElementSeverity::High;
+    exposure.affectedZoneId = "lobby";
+    exposure.floorId = "L1";
+    exposure.position = {.x = 2.0, .y = 3.0};
+    exposure.exposedAgentSeconds = 12.5;
+    exposure.peakExposedAgentCount = 4;
+    exposure.firstExposureSeconds = 1.5;
+    exposure.peakAtSeconds = 3.0;
+    exposure.exposureScore = 25.0;
+
+    ProjectWorkspaceState workspace;
+    workspace.activeView = ProjectWorkspaceView::ScenarioResult;
+    workspace.result = SavedScenarioResultState{
+        .scenario = scenario,
+        .artifacts = {
+            .hazardExposureSummary = {
+                .totalExposureScore = 25.0,
+                .hazards = {exposure},
+            },
+        },
+    };
+
+    const ProjectMetadata metadata{
+        .name = "Hazard Exposure Persistence Test",
+        .folderPath = projectDir.path(),
+    };
+
+    QString errorMessage;
+    SC_EXPECT_TRUE(ProjectPersistence::saveProjectWorkspace(metadata, workspace, &errorMessage));
+
+    ProjectWorkspaceState loaded;
+    SC_EXPECT_TRUE(ProjectPersistence::loadProjectWorkspace(metadata, &loaded));
+    SC_EXPECT_TRUE(loaded.result.has_value());
+    const auto& loadedSummary = loaded.result->artifacts.hazardExposureSummary;
+    SC_EXPECT_NEAR(loadedSummary.totalExposureScore, 25.0, 1e-9);
+    SC_EXPECT_EQ(loadedSummary.hazards.size(), std::size_t{1});
+    const auto& loadedExposure = loadedSummary.hazards.front();
+    SC_EXPECT_EQ(loadedExposure.hazardId, std::string{"fire-a"});
+    SC_EXPECT_EQ(loadedExposure.hazardName, std::string{"Lobby fire"});
+    SC_EXPECT_TRUE(loadedExposure.kind == EnvironmentHazardKind::Fire);
+    SC_EXPECT_TRUE(loadedExposure.severity == ScenarioElementSeverity::High);
+    SC_EXPECT_EQ(loadedExposure.affectedZoneId, std::string{"lobby"});
+    SC_EXPECT_EQ(loadedExposure.floorId, std::string{"L1"});
+    SC_EXPECT_NEAR(loadedExposure.position.x, 2.0, 1e-9);
+    SC_EXPECT_NEAR(loadedExposure.position.y, 3.0, 1e-9);
+    SC_EXPECT_NEAR(loadedExposure.exposedAgentSeconds, 12.5, 1e-9);
+    SC_EXPECT_EQ(loadedExposure.peakExposedAgentCount, std::size_t{4});
+    SC_EXPECT_TRUE(loadedExposure.firstExposureSeconds.has_value());
+    SC_EXPECT_NEAR(*loadedExposure.firstExposureSeconds, 1.5, 1e-9);
+    SC_EXPECT_TRUE(loadedExposure.peakAtSeconds.has_value());
+    SC_EXPECT_NEAR(*loadedExposure.peakAtSeconds, 3.0, 1e-9);
+    SC_EXPECT_NEAR(loadedExposure.exposureScore, 25.0, 1e-9);
+}
+
 SC_TEST(ProjectPersistence_preservesImportArtifactsBesideLayoutReview) {
     QTemporaryDir projectDir;
     SC_EXPECT_TRUE(projectDir.isValid());
