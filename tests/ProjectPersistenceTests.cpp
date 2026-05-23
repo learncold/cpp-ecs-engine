@@ -276,6 +276,79 @@ SC_TEST(ProjectPersistence_preservesPressureResultArtifactsAndRiskSnapshot) {
     SC_EXPECT_NEAR(loadedSummary.criticalEvents.front().detectionFrame->elapsedSeconds, 7.5, 1e-9);
 }
 
+SC_TEST(ProjectPersistence_preservesBatchPressureResultArtifacts) {
+    QTemporaryDir projectDir;
+    SC_EXPECT_TRUE(projectDir.isValid());
+
+    SavedScenarioResultState first;
+    first.scenario.scenarioId = "pressure-batch-low";
+    first.scenario.name = "Pressure Batch Low";
+    first.risk.pressureExposedAgentCount = 1;
+    first.artifacts.pressureSummary.peakPressureScore = 2.5;
+    first.artifacts.pressureSummary.peakExposedAgentCount = 1;
+
+    ScenarioCriticalPressureEvent event{
+        .center = {.x = 8.0, .y = 9.0},
+        .cellMin = {.x = 7.5, .y = 8.5},
+        .cellMax = {.x = 8.5, .y = 9.5},
+        .floorId = "L3",
+        .exposedAgentCount = 7,
+        .criticalAgentCount = 3,
+        .pressureScore = 11.0,
+        .startedAtSeconds = 12.0,
+        .durationSeconds = 2.0,
+        .detectedAtSeconds = 14.0,
+    };
+
+    SavedScenarioResultState second;
+    second.scenario.scenarioId = "pressure-batch-critical";
+    second.scenario.name = "Pressure Batch Critical";
+    second.risk.completionRisk = ScenarioRiskLevel::High;
+    second.risk.pressureExposedAgentCount = 7;
+    second.risk.criticalPressureAgentCount = 3;
+    second.risk.criticalPressureEvents = {event};
+    second.artifacts.pressureSummary.peakPressureScore = 11.0;
+    second.artifacts.pressureSummary.peakExposedAgentCount = 7;
+    second.artifacts.pressureSummary.peakCriticalAgentCount = 3;
+    second.artifacts.pressureSummary.criticalEvents = {event};
+
+    ProjectWorkspaceState workspace;
+    workspace.activeView = ProjectWorkspaceView::ScenarioResult;
+    workspace.batchResult = SavedScenarioBatchResultState{
+        .results = {first, second},
+        .currentResultIndex = 1,
+    };
+
+    const ProjectMetadata metadata{
+        .name = "Pressure Batch Persistence Test",
+        .folderPath = projectDir.path(),
+    };
+
+    QString errorMessage;
+    SC_EXPECT_TRUE(ProjectPersistence::saveProjectWorkspace(metadata, workspace, &errorMessage));
+
+    ProjectWorkspaceState loaded;
+    SC_EXPECT_TRUE(ProjectPersistence::loadProjectWorkspace(metadata, &loaded));
+    SC_EXPECT_TRUE(loaded.batchResult.has_value());
+    SC_EXPECT_EQ(loaded.batchResult->results.size(), std::size_t{2});
+    SC_EXPECT_EQ(loaded.batchResult->currentResultIndex, 1);
+
+    const auto& loadedFirst = loaded.batchResult->results.front();
+    SC_EXPECT_EQ(loadedFirst.scenario.scenarioId, std::string{"pressure-batch-low"});
+    SC_EXPECT_EQ(loadedFirst.risk.pressureExposedAgentCount, std::size_t{1});
+    SC_EXPECT_NEAR(loadedFirst.artifacts.pressureSummary.peakPressureScore, 2.5, 1e-9);
+
+    const auto& loadedSecond = loaded.batchResult->results.back();
+    SC_EXPECT_EQ(loadedSecond.scenario.scenarioId, std::string{"pressure-batch-critical"});
+    SC_EXPECT_TRUE(loadedSecond.risk.completionRisk == ScenarioRiskLevel::High);
+    SC_EXPECT_EQ(loadedSecond.risk.criticalPressureAgentCount, std::size_t{3});
+    SC_EXPECT_EQ(loadedSecond.risk.criticalPressureEvents.size(), std::size_t{1});
+    SC_EXPECT_NEAR(loadedSecond.risk.criticalPressureEvents.front().pressureScore, 11.0, 1e-9);
+    SC_EXPECT_EQ(loadedSecond.artifacts.pressureSummary.peakCriticalAgentCount, std::size_t{3});
+    SC_EXPECT_EQ(loadedSecond.artifacts.pressureSummary.criticalEvents.size(), std::size_t{1});
+    SC_EXPECT_NEAR(loadedSecond.artifacts.pressureSummary.criticalEvents.front().durationSeconds, 2.0, 1e-9);
+}
+
 SC_TEST(ResultArtifactsCodec_readsNumericAgentIdsForLegacyJson) {
     const auto pointJson = [](double x, double y) {
         QJsonArray point;
