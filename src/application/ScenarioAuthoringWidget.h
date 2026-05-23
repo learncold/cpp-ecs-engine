@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <optional>
 #include <vector>
 
 #include <QSet>
@@ -74,6 +75,31 @@ public:
     InitialState currentInitialState() const;
 
 private:
+    struct OperationalEventHistoryEntry {
+        std::vector<safecrowd::domain::OperationalEventDraft> events{};
+        std::vector<safecrowd::domain::ConnectionBlockDraft> connectionBlocks{};
+        std::vector<safecrowd::domain::EnvironmentHazardDraft> hazards{};
+        std::vector<safecrowd::domain::RouteGuidanceDraft> routeGuidances{};
+        QString selectedEventId{};
+    };
+
+    struct ScenarioOperationalEventHistory {
+        QString scenarioId{};
+        std::vector<OperationalEventHistoryEntry> undo{};
+        std::vector<OperationalEventHistoryEntry> redo{};
+    };
+
+    struct CrowdPlacementHistoryEntry {
+        std::vector<ScenarioCrowdPlacement> placements{};
+        QString selectedCrowdId{};
+    };
+
+    struct ScenarioCrowdPlacementHistory {
+        QString scenarioId{};
+        std::vector<CrowdPlacementHistoryEntry> undo{};
+        std::vector<CrowdPlacementHistoryEntry> redo{};
+    };
+
     void initializeUi(bool promptForScenario);
     void addEventDraft(const QString& name, const QString& trigger, const QString& target);
     void createScenarioFromCurrent();
@@ -90,7 +116,10 @@ private:
     void recomputeVariationDiffKeysIfAlternative(ScenarioState& scenario) const;
     void runStagedScenarios();
     void stageCurrentScenario();
-    void updateCurrentScenarioPlacements(const std::vector<ScenarioCrowdPlacement>& placements);
+    void updateCurrentScenarioPlacements(
+        const std::vector<ScenarioCrowdPlacement>& placements,
+        std::optional<CrowdPlacementHistoryEntry> beforeChange = std::nullopt,
+        const QString& selectedCrowdId = {});
     void showEmptyCanvas();
     void showScenarioNameDialog(int sourceIndex);
     QWidget* createRightPanelContainer();
@@ -101,6 +130,22 @@ private:
     void setInspectorSelectionFromCanvas(const ScenarioCanvasSelection& selection);
     void setInspectorSelectionFromEventId(const QString& rawId);
     void setInspectorSelectionNone();
+    bool undoLastScenarioAuthoringEdit();
+    bool redoLastScenarioAuthoringEdit();
+    bool undoLastOperationalEventEdit();
+    bool redoLastOperationalEventEdit();
+    ScenarioOperationalEventHistory* currentOperationalEventHistory();
+    std::optional<OperationalEventHistoryEntry> currentOperationalEventHistoryEntry(const QString& selectedEventId = {}) const;
+    void pushOperationalEventUndoEntry(OperationalEventHistoryEntry entry);
+    void synchronizeOperationalEvents(ScenarioState& scenario);
+    void restoreOperationalEventSelection(const QString& selectedEventId);
+    bool undoLastCrowdPlacementEdit();
+    bool redoLastCrowdPlacementEdit();
+    ScenarioCrowdPlacementHistory* currentCrowdPlacementHistory();
+    std::optional<CrowdPlacementHistoryEntry> currentCrowdPlacementHistoryEntry(const QString& selectedCrowdId = {}) const;
+    void pushCrowdPlacementUndoEntry(CrowdPlacementHistoryEntry entry);
+    void synchronizeCrowdPlacements(ScenarioState& scenario);
+    void restoreCrowdPlacementSelection(const QString& selectedCrowdId);
     ScenarioState* currentScenario();
     const ScenarioState* currentScenario() const;
     std::vector<safecrowd::domain::ScenarioDraft> stagedRunnableScenarios() const;
@@ -145,6 +190,8 @@ private:
     QPushButton* newScenarioButton_{nullptr};
     QPushButton* stageScenarioButton_{nullptr};
     QPushButton* executeRunButton_{nullptr};
+    std::vector<ScenarioOperationalEventHistory> operationalEventHistories_{};
+    std::vector<ScenarioCrowdPlacementHistory> crowdPlacementHistories_{};
 };
 
 }  // namespace safecrowd::application
