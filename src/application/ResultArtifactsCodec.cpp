@@ -311,6 +311,12 @@ QString hazardExposureKindToJson(safecrowd::domain::EnvironmentHazardKind kind) 
 }
 
 safecrowd::domain::EnvironmentHazardKind hazardExposureKindFromJson(const QJsonValue& value) {
+    if (value.isDouble()) {
+        return value.toInt() == static_cast<int>(safecrowd::domain::EnvironmentHazardKind::Smoke)
+            ? safecrowd::domain::EnvironmentHazardKind::Smoke
+            : safecrowd::domain::EnvironmentHazardKind::Fire;
+    }
+
     const auto text = value.toString().trimmed().toLower();
     if (text == "smoke") {
         return safecrowd::domain::EnvironmentHazardKind::Smoke;
@@ -318,7 +324,7 @@ safecrowd::domain::EnvironmentHazardKind hazardExposureKindFromJson(const QJsonV
     if (text == "fire") {
         return safecrowd::domain::EnvironmentHazardKind::Fire;
     }
-    return static_cast<safecrowd::domain::EnvironmentHazardKind>(value.toInt(0));
+    return safecrowd::domain::EnvironmentHazardKind::Fire;
 }
 
 QString hazardExposureSeverityToJson(safecrowd::domain::ScenarioElementSeverity severity) {
@@ -334,6 +340,17 @@ QString hazardExposureSeverityToJson(safecrowd::domain::ScenarioElementSeverity 
 }
 
 safecrowd::domain::ScenarioElementSeverity hazardExposureSeverityFromJson(const QJsonValue& value) {
+    if (value.isDouble()) {
+        const auto raw = value.toInt();
+        if (raw == static_cast<int>(safecrowd::domain::ScenarioElementSeverity::Low)) {
+            return safecrowd::domain::ScenarioElementSeverity::Low;
+        }
+        if (raw == static_cast<int>(safecrowd::domain::ScenarioElementSeverity::High)) {
+            return safecrowd::domain::ScenarioElementSeverity::High;
+        }
+        return safecrowd::domain::ScenarioElementSeverity::Medium;
+    }
+
     const auto text = value.toString().trimmed().toLower();
     if (text == "low") {
         return safecrowd::domain::ScenarioElementSeverity::Low;
@@ -344,7 +361,7 @@ safecrowd::domain::ScenarioElementSeverity hazardExposureSeverityFromJson(const 
     if (text == "medium") {
         return safecrowd::domain::ScenarioElementSeverity::Medium;
     }
-    return static_cast<safecrowd::domain::ScenarioElementSeverity>(value.toInt(1));
+    return safecrowd::domain::ScenarioElementSeverity::Medium;
 }
 
 QJsonObject hazardExposureMetricToJson(const safecrowd::domain::HazardExposureMetric& metric) {

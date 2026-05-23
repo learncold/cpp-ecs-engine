@@ -240,7 +240,7 @@ SC_TEST(ProjectPersistence_preservesBatchHazardExposureResultArtifacts) {
     SC_EXPECT_NEAR(loadedSummary.hazards.back().exposedAgentSeconds, 9.0, 1e-9);
 }
 
-SC_TEST(ResultArtifactsCodec_readsHazardExposureEnumsCaseInsensitively) {
+SC_TEST(ResultArtifactsCodec_readsHazardExposureEnumsDefensively) {
     QJsonArray position;
     position.append(1.0);
     position.append(2.0);
@@ -254,6 +254,20 @@ SC_TEST(ResultArtifactsCodec_readsHazardExposureEnumsCaseInsensitively) {
     QJsonArray hazards;
     hazards.append(hazard);
 
+    QJsonObject numericHazard;
+    numericHazard["hazardId"] = "legacy-numeric";
+    numericHazard["kind"] = static_cast<int>(EnvironmentHazardKind::Smoke);
+    numericHazard["severity"] = static_cast<int>(ScenarioElementSeverity::Low);
+    numericHazard["position"] = position;
+    hazards.append(numericHazard);
+
+    QJsonObject invalidHazard;
+    invalidHazard["hazardId"] = "legacy-invalid";
+    invalidHazard["kind"] = 99;
+    invalidHazard["severity"] = 99;
+    invalidHazard["position"] = position;
+    hazards.append(invalidHazard);
+
     QJsonObject summary;
     summary["hazards"] = hazards;
 
@@ -261,10 +275,13 @@ SC_TEST(ResultArtifactsCodec_readsHazardExposureEnumsCaseInsensitively) {
     artifactsObject["hazardExposureSummary"] = summary;
 
     const auto artifacts = resultArtifactsFromJson(artifactsObject);
-    SC_EXPECT_EQ(artifacts.hazardExposureSummary.hazards.size(), std::size_t{1});
-    const auto& loadedHazard = artifacts.hazardExposureSummary.hazards.front();
-    SC_EXPECT_TRUE(loadedHazard.kind == EnvironmentHazardKind::Smoke);
-    SC_EXPECT_TRUE(loadedHazard.severity == ScenarioElementSeverity::High);
+    SC_EXPECT_EQ(artifacts.hazardExposureSummary.hazards.size(), std::size_t{3});
+    SC_EXPECT_TRUE(artifacts.hazardExposureSummary.hazards[0].kind == EnvironmentHazardKind::Smoke);
+    SC_EXPECT_TRUE(artifacts.hazardExposureSummary.hazards[0].severity == ScenarioElementSeverity::High);
+    SC_EXPECT_TRUE(artifacts.hazardExposureSummary.hazards[1].kind == EnvironmentHazardKind::Smoke);
+    SC_EXPECT_TRUE(artifacts.hazardExposureSummary.hazards[1].severity == ScenarioElementSeverity::Low);
+    SC_EXPECT_TRUE(artifacts.hazardExposureSummary.hazards[2].kind == EnvironmentHazardKind::Fire);
+    SC_EXPECT_TRUE(artifacts.hazardExposureSummary.hazards[2].severity == ScenarioElementSeverity::Medium);
 }
 
 SC_TEST(ProjectPersistence_preservesImportArtifactsBesideLayoutReview) {
