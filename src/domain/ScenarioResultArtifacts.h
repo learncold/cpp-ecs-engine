@@ -113,6 +113,45 @@ struct HazardExposureSummary {
     std::vector<HazardExposureMetric> hazards{};
 };
 
+struct ConnectionUsageMetric {
+    std::string connectionId{};
+    std::string label{};
+    std::string floorId{};
+    std::size_t traversalCount{0};
+    double usageRatio{0.0};
+    std::size_t peakWindowCount{0};
+    std::optional<double> peakAtSeconds{};
+    std::size_t forwardTraversals{0};
+    std::size_t reverseTraversals{0};
+    double queueExposureAgentSeconds{0.0};
+    std::size_t peakQueuedAgents{0};
+    double averageObservedSpeed{0.0};
+    double peakConflictScore{0.0};
+    double longestConflictDurationSeconds{0.0};
+    std::size_t counterflowEventCount{0};
+};
+
+struct OperationalConflictTimelineSample {
+    double timeSeconds{0.0};
+    double peakConflictScore{0.0};
+    std::size_t activeConflictCellCount{0};
+    std::size_t activeConflictConnectionCount{0};
+    std::size_t queuedAgentsNearConnections{0};
+};
+
+struct OperationalConflictSummary {
+    double peakConflictScore{0.0};
+    std::optional<double> peakAtSeconds{};
+    double totalConflictExposureAgentSeconds{0.0};
+    double longestConflictDurationSeconds{0.0};
+    std::size_t counterflowHotspotCount{0};
+    std::size_t conflictConnectionCount{0};
+    double connectionConcentrationIndex{0.0};
+    std::size_t peakQueuedAgents{0};
+    std::string topConflictConnectionId{};
+    std::string topConflictConnectionLabel{};
+};
+
 struct ExitUsageMetric {
     std::string exitZoneId{};
     std::string exitLabel{};
@@ -147,6 +186,9 @@ struct ScenarioResultArtifacts {
     DensitySummary densitySummary{};
     PressureSummary pressureSummary{};
     HazardExposureSummary hazardExposureSummary{};
+    OperationalConflictSummary operationalConflictSummary{};
+    std::vector<ConnectionUsageMetric> connectionUsage{};
+    std::vector<OperationalConflictTimelineSample> operationalConflictTimeline{};
     std::vector<ExitUsageMetric> exitUsage{};
     std::vector<ZoneCompletionMetric> zoneCompletion{};
     std::vector<PlacementCompletionMetric> placementCompletion{};

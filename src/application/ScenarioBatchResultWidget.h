@@ -50,7 +50,8 @@ private:
         Pressure = 1,
         Hotspots = 2,
         Bottlenecks = 3,
-        None = 4,
+        OperationalConflicts = 4,
+        None = 5,
     };
 
     QWidget* createCanvasPanel();

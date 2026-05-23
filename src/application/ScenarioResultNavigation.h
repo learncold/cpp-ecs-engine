@@ -16,6 +16,7 @@ namespace safecrowd::application {
 
 enum class ScenarioResultNavigationView {
     Bottleneck,
+    OperationalConflict,
     Hotspot,
     HazardExposure,
     Zone,
@@ -32,6 +33,8 @@ QWidget* createScenarioResultNavigationPanel(
     const safecrowd::domain::ScenarioRiskSnapshot& risk,
     const safecrowd::domain::ScenarioResultArtifacts& artifacts,
     std::function<void(std::size_t)> bottleneckFocusHandler,
+    std::function<void(std::size_t)> operationalConflictCellFocusHandler,
+    std::function<void(std::size_t)> operationalConflictConnectionFocusHandler,
     std::function<void(std::size_t)> hotspotFocusHandler,
     QWidget* parent);
 

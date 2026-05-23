@@ -137,6 +137,50 @@ struct ScenarioHazardExposureResource {
     std::unordered_map<std::string, HazardExposureMetric> hazardsById{};
 };
 
+struct ScenarioOperationalConflictConnectionState {
+    std::string connectionId{};
+    std::string label{};
+    std::string floorId{};
+    LineSegment2D passage{};
+    std::size_t traversalCount{0};
+    std::size_t forwardTraversals{0};
+    std::size_t reverseTraversals{0};
+    std::size_t peakWindowCount{0};
+    double currentWindowStartSeconds{0.0};
+    std::size_t currentWindowCount{0};
+    std::optional<double> peakWindowAtSeconds{};
+    double queueExposureAgentSeconds{0.0};
+    std::size_t peakQueuedAgents{0};
+    std::size_t currentQueueAgents{0};
+    std::optional<double> peakQueuedAtSeconds{};
+    double observedSpeedSum{0.0};
+    std::size_t observedSpeedSamples{0};
+    double peakConflictScore{0.0};
+    double longestConflictDurationSeconds{0.0};
+    std::size_t counterflowEventCount{0};
+    double counterflowExposureAgentSeconds{0.0};
+    bool conflictActive{false};
+    double conflictStartedAtSeconds{0.0};
+};
+
+struct ScenarioOperationalConflictCellState {
+    double startedAtSeconds{0.0};
+    double exposureAgentSeconds{0.0};
+    double peakConflictScore{0.0};
+    std::size_t peakAgentCount{0};
+    std::string nearestConnectionId{};
+    std::string nearestConnectionLabel{};
+};
+
+struct ScenarioOperationalConflictResource {
+    bool hasPreviousElapsedSeconds{false};
+    double previousElapsedSeconds{0.0};
+    double totalCellConflictExposureAgentSeconds{0.0};
+    double totalConnectionConflictExposureAgentSeconds{0.0};
+    std::unordered_map<long long, ScenarioOperationalConflictCellState> activeCellsByAddress{};
+    std::unordered_map<std::string, ScenarioOperationalConflictConnectionState> connectionsById{};
+};
+
 struct ScenarioResultArtifactsResource {
     ScenarioResultArtifacts artifacts{};
     std::size_t lastRecordedEvacuatedCount{static_cast<std::size_t>(-1)};

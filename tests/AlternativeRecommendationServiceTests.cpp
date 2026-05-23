@@ -206,6 +206,77 @@ ScenarioResultArtifacts makeCrossFloorOpposingFlowArtifacts(double endSeconds = 
     return artifacts;
 }
 
+ScenarioRiskSnapshot makeOperationalConflictRisk() {
+    ScenarioRiskSnapshot risk;
+    risk.completionRisk = ScenarioRiskLevel::Medium;
+    risk.peakConflictScore = 0.78;
+    risk.totalConflictExposureAgentSeconds = 22.5;
+    risk.conflictAgentCount = 7;
+    risk.operationalConflictCells.push_back({
+        .center = {.x = 1.0, .y = 0.5},
+        .cellMin = {.x = 0.0, .y = 0.0},
+        .cellMax = {.x = 2.0, .y = 2.0},
+        .floorId = "L1",
+        .movingAgentCount = 7,
+        .peakAgentCount = 7,
+        .forwardCount = 4,
+        .reverseCount = 3,
+        .counterflowRatio = 3.0 / 7.0,
+        .averageSpeed = 0.55,
+        .speedDropRatio = 0.58,
+        .conflictScore = 0.78,
+        .durationSeconds = 14.0,
+        .exposureAgentSeconds = 22.5,
+        .nearestConnectionId = "door-main",
+        .nearestConnectionLabel = "Main Door",
+    });
+    risk.operationalConflictConnections.push_back({
+        .connectionId = "door-main",
+        .label = "Main Door",
+        .floorId = "L1",
+        .nearbyAgentCount = 7,
+        .movingAgentCount = 7,
+        .queueAgentCount = 3,
+        .forwardCount = 4,
+        .reverseCount = 3,
+        .counterflowRatio = 3.0 / 7.0,
+        .averageSpeed = 0.55,
+        .speedDropRatio = 0.58,
+        .conflictScore = 0.78,
+        .durationSeconds = 14.0,
+        .exposureAgentSeconds = 22.5,
+    });
+    return risk;
+}
+
+ScenarioResultArtifacts makeOperationalConflictArtifacts() {
+    ScenarioResultArtifacts artifacts = makeCompletedArtifacts();
+    artifacts.operationalConflictSummary.peakConflictScore = 0.78;
+    artifacts.operationalConflictSummary.totalConflictExposureAgentSeconds = 22.5;
+    artifacts.operationalConflictSummary.longestConflictDurationSeconds = 14.0;
+    artifacts.operationalConflictSummary.conflictConnectionCount = 1;
+    artifacts.operationalConflictSummary.connectionConcentrationIndex = 0.62;
+    artifacts.operationalConflictSummary.topConflictConnectionId = "door-main";
+    artifacts.operationalConflictSummary.topConflictConnectionLabel = "Main Door";
+    artifacts.connectionUsage.push_back({
+        .connectionId = "door-main",
+        .label = "Main Door",
+        .floorId = "L1",
+        .traversalCount = 10,
+        .usageRatio = 0.62,
+        .peakWindowCount = 5,
+        .forwardTraversals = 6,
+        .reverseTraversals = 4,
+        .queueExposureAgentSeconds = 5.0,
+        .peakQueuedAgents = 3,
+        .averageObservedSpeed = 0.63,
+        .peakConflictScore = 0.78,
+        .longestConflictDurationSeconds = 14.0,
+        .counterflowEventCount = 2,
+    });
+    return artifacts;
+}
+
 ScenarioResultArtifacts makeSingleExitUsageArtifacts(
     std::string exitZoneId,
     std::string exitLabel,
@@ -759,6 +830,25 @@ SC_TEST(AlternativeRecommendationService_detectsSustainedCounterflowConflict) {
     SC_EXPECT_TRUE(it->riskKind.has_value() && *it->riskKind == AlternativeRecommendationRiskKind::CounterflowConflict);
     SC_EXPECT_EQ(it->recommendedScenario.control.events.size(), std::size_t{1});
     SC_EXPECT_TRUE(containsDiffKey(it->recommendedScenario, "control.events"));
+}
+
+SC_TEST(AlternativeRecommendationService_prefersOperationalConflictMetricsOverReplayHeuristics) {
+    const AlternativeRecommendationService service;
+    const auto result = service.recommend({
+        .layout = makeRecommendationLayout(),
+        .sourceScenario = makeScenario(),
+        .risk = makeOperationalConflictRisk(),
+        .artifacts = makeOperationalConflictArtifacts(),
+    });
+
+    const auto it = std::find_if(result.candidates.begin(), result.candidates.end(), [](const auto& candidate) {
+        return candidate.kind == AlternativeRecommendationKind::CounterflowSeparation;
+    });
+    SC_EXPECT_TRUE(hasRiskSignalKind(result, AlternativeRecommendationRiskKind::CounterflowConflict));
+    SC_EXPECT_TRUE(it != result.candidates.end());
+    SC_EXPECT_TRUE(containsEvidenceSource(*it, "ScenarioRiskSnapshot.operationalConflictConnections"));
+    SC_EXPECT_TRUE(containsEvidenceSource(*it, "ScenarioResultArtifacts.operationalConflictSummary"));
+    SC_EXPECT_EQ(it->recommendedScenario.control.events.size(), std::size_t{1});
 }
 
 SC_TEST(AlternativeRecommendationService_ignoresSeparatedOpposingFlows) {

@@ -70,7 +70,11 @@ public:
         if (!resources.contains<ScenarioEnvironmentReactionResource>()) {
             resources.set(ScenarioEnvironmentReactionResource{});
         }
+        if (!resources.contains<ScenarioOperationalConflictResource>()) {
+            resources.set(ScenarioOperationalConflictResource{});
+        }
         auto* reactions = &resources.get<ScenarioEnvironmentReactionResource>();
+        auto* operationalConflict = &resources.get<ScenarioOperationalConflictResource>();
         const auto* activeHazards = resources.contains<ScenarioActiveEnvironmentHazardsResource>()
             ? &resources.get<ScenarioActiveEnvironmentHazardsResource>()
             : nullptr;
@@ -87,9 +91,15 @@ public:
             reactions,
             activeHazards,
             sharedSpatialIndex);
-        advanceRoutesForCurrentZones(query, activeEntities_, layoutCache);
+        advanceRoutesForCurrentZones(query, activeEntities_, layoutCache, operationalConflict, clock.elapsedSeconds);
         replanBlockedExitRoutes(query, activeEntities_, layoutCache, clock.elapsedSeconds, layoutRevision, reactions);
-        advanceRoutesForWaypointProgress(query, 0.0, activeEntities_, layoutCache);
+        advanceRoutesForWaypointProgress(
+            query,
+            0.0,
+            activeEntities_,
+            layoutCache,
+            operationalConflict,
+            clock.elapsedSeconds);
         replanBlockedRouteSegments(query, activeEntities_, layoutCache, clock.elapsedSeconds, layoutRevision);
         replanHazardAwareExitRoutes(query, activeEntities_, layoutCache, clock.elapsedSeconds, reactions, activeHazards);
         updateAgentPhysicsFloorIds(query, layoutCache, activeEntities_);
@@ -209,7 +219,13 @@ public:
                 static_cast<double>(agent.radius));
             const auto distance = distanceBetween(position.value, target);
             if (!verticalTransition && !transitionWaypoint && distance <= kArrivalEpsilon) {
-                const auto advance = advanceRouteWaypoint(layoutCache, route, agent, target);
+                const auto advance = advanceRouteWaypoint(
+                    layoutCache,
+                    route,
+                    agent,
+                    target,
+                    operationalConflict,
+                    clock.elapsedSeconds);
                 position.value = advance.position;
                 velocity.value = {};
                 continue;
@@ -337,14 +353,30 @@ public:
             updateDisplayFloor(route, nextPosition);
         }
 
-        advanceVerticalRoutesAtPortal(query, activeEntities_, layoutCache);
+        advanceVerticalRoutesAtPortal(
+            query,
+            activeEntities_,
+            layoutCache,
+            operationalConflict,
+            clock.elapsedSeconds);
         updateAgentPhysicsFloorIds(query, layoutCache, activeEntities_);
         resolveAgentOverlaps(query, activeEntities_, layoutCache);
-        advanceRoutesForCurrentZones(query, activeEntities_, layoutCache);
-        advanceRoutesForWaypointProgress(query, clampedDelta, activeEntities_, layoutCache);
+        advanceRoutesForCurrentZones(query, activeEntities_, layoutCache, operationalConflict, clock.elapsedSeconds);
+        advanceRoutesForWaypointProgress(
+            query,
+            clampedDelta,
+            activeEntities_,
+            layoutCache,
+            operationalConflict,
+            clock.elapsedSeconds);
         updateAgentPhysicsFloorIds(query, layoutCache, activeEntities_);
         resolveAgentOverlaps(query, activeEntities_, layoutCache);
-        advanceVerticalRoutesAtPortal(query, activeEntities_, layoutCache);
+        advanceVerticalRoutesAtPortal(
+            query,
+            activeEntities_,
+            layoutCache,
+            operationalConflict,
+            clock.elapsedSeconds);
         updateAgentPhysicsFloorIds(query, layoutCache, activeEntities_);
         const auto pendingScheduledSpawns = resources.contains<ScenarioScheduledSpawnResource>()
             ? resources.get<ScenarioScheduledSpawnResource>().pendingCount
@@ -969,16 +1001,90 @@ private:
         return true;
     }
 
+    void recordConnectionTraversal(
+        const ScenarioLayoutCacheResource& layoutCache,
+        const EvacuationRoute& route,
+        std::size_t reachedIndex,
+        ScenarioOperationalConflictResource* operationalConflict,
+        double elapsedSeconds) const {
+        if (operationalConflict == nullptr
+            || reachedIndex >= route.waypointConnectionIds.size()) {
+            return;
+        }
+
+        const auto& connectionId = route.waypointConnectionIds[reachedIndex];
+        if (connectionId.empty()) {
+            return;
+        }
+
+        const auto connectionIndexIt = layoutCache.connectionIndices.find(connectionId);
+        if (connectionIndexIt == layoutCache.connectionIndices.end()
+            || connectionIndexIt->second >= layoutCache.layout.connections.size()) {
+            return;
+        }
+
+        const auto& connection = layoutCache.layout.connections[connectionIndexIt->second];
+        auto& state = operationalConflict->connectionsById[connection.id];
+        state.connectionId = connection.id;
+        state.label = connection.id;
+        const auto* fromZone = findCachedZone(layoutCache, connection.fromZoneId);
+        const auto* toZone = findCachedZone(layoutCache, connection.toZoneId);
+        if (fromZone != nullptr && toZone != nullptr) {
+            const auto fromLabel = fromZone->label.empty() ? fromZone->id : fromZone->label;
+            const auto toLabel = toZone->label.empty() ? toZone->id : toZone->label;
+            state.label = fromLabel + " -> " + toLabel;
+        }
+        state.floorId = !connection.floorId.empty()
+            ? connection.floorId
+            : cachedFloorIdForZone(layoutCache, connection.fromZoneId);
+        state.passage = connection.centerSpan;
+        ++state.traversalCount;
+
+        const auto fromZoneId = reachedIndex < route.waypointFromZoneIds.size()
+            ? route.waypointFromZoneIds[reachedIndex]
+            : std::string{};
+        const auto toZoneId = reachedIndex < route.waypointZoneIds.size()
+            ? route.waypointZoneIds[reachedIndex]
+            : std::string{};
+        if (!fromZoneId.empty() && !toZoneId.empty()) {
+            if (connection.fromZoneId == fromZoneId && connection.toZoneId == toZoneId) {
+                ++state.forwardTraversals;
+            } else if (connection.toZoneId == fromZoneId && connection.fromZoneId == toZoneId) {
+                ++state.reverseTraversals;
+            }
+        }
+
+        if (state.currentWindowCount == 0
+            || elapsedSeconds - state.currentWindowStartSeconds >= kScenarioOperationalConflictWindowSeconds) {
+            state.currentWindowStartSeconds = elapsedSeconds;
+            state.currentWindowCount = 1;
+        } else {
+            ++state.currentWindowCount;
+        }
+        if (state.currentWindowCount >= state.peakWindowCount) {
+            state.peakWindowCount = state.currentWindowCount;
+            state.peakWindowAtSeconds = elapsedSeconds;
+        }
+    }
+
     RouteAdvanceResult advanceRouteWaypoint(
         const ScenarioLayoutCacheResource& layoutCache,
         EvacuationRoute& route,
         const Agent& agent,
-        const Point2D& reachedPoint) const {
+        const Point2D& reachedPoint,
+        ScenarioOperationalConflictResource* operationalConflict,
+        double elapsedSeconds) const {
         if (route.nextWaypointIndex >= route.waypoints.size()) {
             return {.position = reachedPoint, .advanced = false};
         }
 
         const auto reachedIndex = route.nextWaypointIndex;
+        recordConnectionTraversal(
+            layoutCache,
+            route,
+            reachedIndex,
+            operationalConflict,
+            elapsedSeconds);
         const auto transitionStartPoint = route.currentSegmentStart;
         const auto completedVerticalTransition = reachedIndex < route.waypointVerticalTransitions.size()
             && route.waypointVerticalTransitions[reachedIndex];
@@ -1073,7 +1179,9 @@ private:
         engine::WorldQuery& query,
         double deltaSeconds,
         const std::vector<engine::Entity>& entities,
-        const ScenarioLayoutCacheResource& layoutCache) const {
+        const ScenarioLayoutCacheResource& layoutCache,
+        ScenarioOperationalConflictResource* operationalConflict,
+        double elapsedSeconds) const {
         for (const auto entity : entities) {
             const auto& status = query.get<EvacuationStatus>(entity);
             if (status.evacuated) {
@@ -1091,7 +1199,13 @@ private:
                     ? verticalPassageCrossed(layoutCache, route, position.value, agent.radius)
                     : routePassageCrossed(cachedLayoutForFloor(layoutCache, route.currentFloorId), route, position.value, agent.radius);
                 if (passageCrossed) {
-                    const auto advance = advanceRouteWaypoint(layoutCache, route, agent, position.value);
+                    const auto advance = advanceRouteWaypoint(
+                        layoutCache,
+                        route,
+                        agent,
+                        position.value,
+                        operationalConflict,
+                        elapsedSeconds);
                     position.value = advance.position;
                     if (advance.advanced) {
                         continue;
@@ -1105,7 +1219,13 @@ private:
                 const auto distance = distanceToRouteWaypoint(route, position.value);
 
                 if (!verticalTransition && !transitionWaypoint && distance <= kArrivalEpsilon) {
-                    const auto advance = advanceRouteWaypoint(layoutCache, route, agent, target);
+                    const auto advance = advanceRouteWaypoint(
+                        layoutCache,
+                        route,
+                        agent,
+                        target,
+                        operationalConflict,
+                        elapsedSeconds);
                     position.value = advance.position;
                     if (advance.advanced) {
                         continue;
@@ -1118,7 +1238,13 @@ private:
                     if (!verticalTransition
                         && !transitionWaypoint
                         && projection >= segmentLengthSquared - kWaypointCrossingEpsilon) {
-                        const auto advance = advanceRouteWaypoint(layoutCache, route, agent, position.value);
+                        const auto advance = advanceRouteWaypoint(
+                            layoutCache,
+                            route,
+                            agent,
+                            position.value,
+                            operationalConflict,
+                            elapsedSeconds);
                         position.value = advance.position;
                         if (advance.advanced) {
                             continue;
@@ -1132,7 +1258,13 @@ private:
                             segment,
                             segmentLengthSquared,
                             projection)) {
-                        const auto advance = advanceRouteWaypoint(layoutCache, route, agent, position.value);
+                        const auto advance = advanceRouteWaypoint(
+                            layoutCache,
+                            route,
+                            agent,
+                            position.value,
+                            operationalConflict,
+                            elapsedSeconds);
                         position.value = advance.position;
                         if (advance.advanced) {
                             continue;
@@ -1172,7 +1304,13 @@ private:
                     && segmentLengthSquared > 1e-9) {
                     const auto projection = dot(position.value - route.currentSegmentStart, segment);
                     if (projection > segmentLengthSquared * 0.45) {
-                        const auto advance = advanceRouteWaypoint(layoutCache, route, agent, position.value);
+                        const auto advance = advanceRouteWaypoint(
+                            layoutCache,
+                            route,
+                            agent,
+                            position.value,
+                            operationalConflict,
+                            elapsedSeconds);
                         position.value = advance.position;
                         if (advance.advanced) {
                             continue;
@@ -1190,7 +1328,9 @@ private:
     void advanceVerticalRoutesAtPortal(
         engine::WorldQuery& query,
         const std::vector<engine::Entity>& entities,
-        const ScenarioLayoutCacheResource& layoutCache) const {
+        const ScenarioLayoutCacheResource& layoutCache,
+        ScenarioOperationalConflictResource* operationalConflict,
+        double elapsedSeconds) const {
         for (const auto entity : entities) {
             const auto& status = query.get<EvacuationStatus>(entity);
             if (status.evacuated) {
@@ -1205,7 +1345,13 @@ private:
                     break;
                 }
 
-                const auto advance = advanceRouteWaypoint(layoutCache, route, agent, position.value);
+                const auto advance = advanceRouteWaypoint(
+                    layoutCache,
+                    route,
+                    agent,
+                    position.value,
+                    operationalConflict,
+                    elapsedSeconds);
                 position.value = advance.position;
                 if (!advance.advanced) {
                     break;
@@ -1217,7 +1363,9 @@ private:
     void advanceRoutesForCurrentZones(
         engine::WorldQuery& query,
         const std::vector<engine::Entity>& entities,
-        const ScenarioLayoutCacheResource& layoutCache) const {
+        const ScenarioLayoutCacheResource& layoutCache,
+        ScenarioOperationalConflictResource* operationalConflict,
+        double elapsedSeconds) const {
         for (const auto entity : entities) {
             const auto& status = query.get<EvacuationStatus>(entity);
             if (status.evacuated) {
@@ -1253,7 +1401,13 @@ private:
                     break;
                 }
                 while (route.nextWaypointIndex <= matchedIndex && route.nextWaypointIndex < route.waypoints.size()) {
-                    const auto advance = advanceRouteWaypoint(layoutCache, route, agent, position.value);
+                    const auto advance = advanceRouteWaypoint(
+                        layoutCache,
+                        route,
+                        agent,
+                        position.value,
+                        operationalConflict,
+                        elapsedSeconds);
                     position.value = advance.position;
                     if (!advance.advanced) {
                         break;
