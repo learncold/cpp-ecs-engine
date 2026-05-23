@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <cmath>
 #include <utility>
 #include <vector>
@@ -43,6 +44,10 @@ namespace safecrowd::application {
 namespace {
 
 using safecrowd::domain::pointInPolygon;
+
+constexpr double kDefaultRunTimeLimitSeconds = 60.0;
+constexpr double kDefaultRunSampleIntervalSeconds = 1.0;
+constexpr int kMaxUiSeed = 2147483647;
 
 QLabel* createLabel(const QString& text, QWidget* parent, ui::FontRole role = ui::FontRole::Body) {
     auto* label = new QLabel(text, parent);
@@ -419,6 +424,31 @@ int draftOccupantCount(const safecrowd::domain::ScenarioDraft& scenario) {
     return total;
 }
 
+double normalizedRunTimeLimitSeconds(const safecrowd::domain::ExecutionConfig& execution) {
+    return execution.timeLimitSeconds > 0.0 ? execution.timeLimitSeconds : kDefaultRunTimeLimitSeconds;
+}
+
+double normalizedRunSampleIntervalSeconds(const safecrowd::domain::ExecutionConfig& execution) {
+    return execution.sampleIntervalSeconds > 0.0 ? execution.sampleIntervalSeconds : kDefaultRunSampleIntervalSeconds;
+}
+
+int normalizedRunRepeatCount(const safecrowd::domain::ExecutionConfig& execution) {
+    const auto repeatCount = std::min<std::uint32_t>(
+        execution.repeatCount,
+        safecrowd::domain::kScenarioExecutionMaxRepeatCount);
+    return std::max(1, static_cast<int>(repeatCount));
+}
+
+int normalizedRunSeed(const safecrowd::domain::ExecutionConfig& execution) {
+    if (execution.baseSeed == 0) {
+        return 1;
+    }
+    const auto seed = std::min<std::uint32_t>(
+        execution.baseSeed,
+        static_cast<std::uint32_t>(kMaxUiSeed));
+    return std::max(1, static_cast<int>(seed));
+}
+
 QString signedDelta(int delta) {
     return delta > 0 ? QString("+%1").arg(delta) : QString::number(delta);
 }
@@ -623,6 +653,172 @@ QString scenarioRoleLabel(safecrowd::domain::ScenarioRole role) {
 bool scenarioRoleHasBaselineDiff(safecrowd::domain::ScenarioRole role) {
     return role == safecrowd::domain::ScenarioRole::Alternative
         || role == safecrowd::domain::ScenarioRole::Recommended;
+}
+
+struct RunSettingsControls {
+    std::size_t scenarioIndex{0};
+    QDoubleSpinBox* timeLimitSpin{nullptr};
+    QDoubleSpinBox* sampleIntervalSpin{nullptr};
+    QSpinBox* repeatCountSpin{nullptr};
+    QSpinBox* baseSeedSpin{nullptr};
+};
+
+bool editRunSettingsForStagedScenarios(
+    std::vector<ScenarioAuthoringWidget::ScenarioState>* scenarios,
+    const std::vector<std::size_t>& stagedIndexes,
+    QWidget* parent) {
+    if (scenarios == nullptr || stagedIndexes.empty()) {
+        return false;
+    }
+
+    QDialog dialog(parent);
+    dialog.setWindowTitle("Run Settings");
+    dialog.setMinimumWidth(560);
+    dialog.resize(620, std::min(720, 180 + static_cast<int>(stagedIndexes.size()) * 170));
+    dialog.setStyleSheet(
+        "QDialog { background: #f4f7fb; }"
+        "QScrollArea { background: transparent; border: 0; }"
+        "QDoubleSpinBox, QSpinBox {"
+        " background: #ffffff;"
+        " border: 1px solid #c9d5e2;"
+        " border-radius: 10px;"
+        " padding: 6px 8px;"
+        " min-height: 24px;"
+        "}");
+
+    auto* root = new QVBoxLayout(&dialog);
+    root->setContentsMargins(16, 16, 16, 16);
+    root->setSpacing(12);
+
+    auto* title = createLabel("Run Settings", &dialog, ui::FontRole::Title);
+    root->addWidget(title);
+
+    auto* scrollArea = new QScrollArea(&dialog);
+    scrollArea->setWidgetResizable(true);
+    scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+
+    auto* content = new QWidget(scrollArea);
+    auto* contentLayout = new QVBoxLayout(content);
+    contentLayout->setContentsMargins(0, 0, 0, 0);
+    contentLayout->setSpacing(12);
+
+    std::vector<RunSettingsControls> controls;
+    controls.reserve(stagedIndexes.size());
+
+    for (const auto scenarioIndex : stagedIndexes) {
+        if (scenarioIndex >= scenarios->size()) {
+            continue;
+        }
+        const auto& scenario = (*scenarios)[scenarioIndex];
+        const auto& execution = scenario.draft.execution;
+
+        auto* card = createInspectorCard(content);
+        auto* cardLayout = new QVBoxLayout(card);
+        cardLayout->setContentsMargins(12, 12, 12, 12);
+        cardLayout->setSpacing(10);
+
+        auto* headingRow = new QWidget(card);
+        auto* headingLayout = new QHBoxLayout(headingRow);
+        headingLayout->setContentsMargins(0, 0, 0, 0);
+        headingLayout->setSpacing(8);
+
+        auto* nameLabel = createLabel(QString::fromStdString(scenario.draft.name), headingRow, ui::FontRole::SectionTitle);
+        nameLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        headingLayout->addWidget(nameLabel, 1);
+        headingLayout->addWidget(createRoleBadge(
+            scenarioRoleLabel(scenario.draft.role),
+            scenario.draft.role != safecrowd::domain::ScenarioRole::Baseline,
+            headingRow));
+        cardLayout->addWidget(headingRow);
+
+        auto* meta = createLabel(
+            QString("%1 occupants").arg(draftOccupantCount(scenario.draft)),
+            card,
+            ui::FontRole::Caption);
+        meta->setStyleSheet(ui::subtleTextStyleSheet());
+        cardLayout->addWidget(meta);
+
+        auto* form = new QFormLayout();
+        form->setContentsMargins(0, 0, 0, 0);
+        form->setHorizontalSpacing(10);
+        form->setVerticalSpacing(8);
+
+        auto* timeLimitSpin = new QDoubleSpinBox(card);
+        timeLimitSpin->setRange(1.0, 86400.0);
+        timeLimitSpin->setDecimals(0);
+        timeLimitSpin->setSingleStep(30.0);
+        timeLimitSpin->setSuffix(" sec");
+        timeLimitSpin->setToolTip("Time limit");
+        timeLimitSpin->setValue(normalizedRunTimeLimitSeconds(execution));
+
+        auto* sampleIntervalSpin = new QDoubleSpinBox(card);
+        sampleIntervalSpin->setRange(0.1, 60.0);
+        sampleIntervalSpin->setDecimals(1);
+        sampleIntervalSpin->setSingleStep(0.5);
+        sampleIntervalSpin->setSuffix(" sec");
+        sampleIntervalSpin->setToolTip("Sample interval");
+        sampleIntervalSpin->setValue(normalizedRunSampleIntervalSeconds(execution));
+
+        auto* repeatCountSpin = new QSpinBox(card);
+        repeatCountSpin->setRange(1, static_cast<int>(safecrowd::domain::kScenarioExecutionMaxRepeatCount));
+        repeatCountSpin->setSuffix(" runs");
+        repeatCountSpin->setToolTip("Repeat count");
+        repeatCountSpin->setValue(normalizedRunRepeatCount(execution));
+
+        auto* baseSeedSpin = new QSpinBox(card);
+        baseSeedSpin->setRange(1, kMaxUiSeed);
+        baseSeedSpin->setToolTip("Base random seed");
+        baseSeedSpin->setValue(normalizedRunSeed(execution));
+
+        form->addRow("Time limit", timeLimitSpin);
+        form->addRow("Sample interval", sampleIntervalSpin);
+        form->addRow("Repeats", repeatCountSpin);
+        form->addRow("Seed", baseSeedSpin);
+        cardLayout->addLayout(form);
+
+        controls.push_back({
+            .scenarioIndex = scenarioIndex,
+            .timeLimitSpin = timeLimitSpin,
+            .sampleIntervalSpin = sampleIntervalSpin,
+            .repeatCountSpin = repeatCountSpin,
+            .baseSeedSpin = baseSeedSpin,
+        });
+        contentLayout->addWidget(card);
+    }
+
+    contentLayout->addStretch(1);
+    scrollArea->setWidget(content);
+    root->addWidget(scrollArea, 1);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    if (auto* runButton = buttons->button(QDialogButtonBox::Ok); runButton != nullptr) {
+        runButton->setText("Run");
+        runButton->setFont(ui::font(ui::FontRole::Body));
+        runButton->setStyleSheet(ui::primaryButtonStyleSheet());
+    }
+    if (auto* cancelButton = buttons->button(QDialogButtonBox::Cancel); cancelButton != nullptr) {
+        cancelButton->setFont(ui::font(ui::FontRole::Body));
+        cancelButton->setStyleSheet(ui::secondaryButtonStyleSheet());
+    }
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    root->addWidget(buttons);
+
+    if (dialog.exec() != QDialog::Accepted) {
+        return false;
+    }
+
+    for (const auto& control : controls) {
+        if (control.scenarioIndex >= scenarios->size()) {
+            continue;
+        }
+        auto& execution = (*scenarios)[control.scenarioIndex].draft.execution;
+        execution.timeLimitSeconds = control.timeLimitSpin->value();
+        execution.sampleIntervalSeconds = control.sampleIntervalSpin->value();
+        execution.repeatCount = static_cast<std::uint32_t>(control.repeatCountSpin->value());
+        execution.baseSeed = static_cast<std::uint32_t>(control.baseSeedSpin->value());
+    }
+    return true;
 }
 
 void addMetaRow(QVBoxLayout* layout, const QString& label, const QString& value, QWidget* parent) {
@@ -2999,8 +3195,14 @@ void ScenarioAuthoringWidget::setInspectorSelectionFromEventId(const QString& ra
 }
 
 void ScenarioAuthoringWidget::runStagedScenarios() {
-    auto scenarios = stagedRunnableScenarios();
-    if (scenarios.empty()) {
+    std::vector<std::size_t> stagedIndexes;
+    for (std::size_t index = 0; index < scenarios_.size(); ++index) {
+        const auto& scenario = scenarios_[index];
+        if (scenario.stagedForRun && scenarioHasOccupants(scenario)) {
+            stagedIndexes.push_back(index);
+        }
+    }
+    if (stagedIndexes.empty()) {
         if (stagedScenariosLabel_ != nullptr) {
             stagedScenariosLabel_->setText(stagedScenariosLabel_->text()
                 + "\n\nNo staged scenario is ready to run.");
@@ -3013,6 +3215,16 @@ void ScenarioAuthoringWidget::runStagedScenarios() {
         return;
     }
 
+    if (!editRunSettingsForStagedScenarios(&scenarios_, stagedIndexes, this)) {
+        return;
+    }
+    for (const auto index : stagedIndexes) {
+        if (index < scenarios_.size()) {
+            recomputeDiffKeysAfterScenarioChanged(scenarios_[index]);
+        }
+    }
+
+    auto scenarios = stagedRunnableScenarios();
     auto* runWidget = new ScenarioRunWidget(
         projectName_,
         layout_,

@@ -742,7 +742,6 @@ void MainWindow::saveCurrentProject() {
             .navigationView = resultWidget->currentSavedNavigationView(),
         };
     } else if (activeWorkflowWidget == runWidget) {
-        runWidget->commitRunSettings();
         if (runWidget->returnAuthoringState().has_value()) {
             workspace.authoring = savedStateFromInitial(*runWidget->returnAuthoringState());
         }
