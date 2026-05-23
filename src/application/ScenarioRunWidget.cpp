@@ -839,16 +839,8 @@ void ScenarioRunWidget::showResults() {
             result.frame,
             result.risk,
             result.artifacts,
-            [this]() {
-                if (saveProjectHandler_) {
-                    saveProjectHandler_();
-                }
-            },
-            [this]() {
-                if (openProjectHandler_) {
-                    openProjectHandler_();
-                }
-            },
+            saveProjectHandler_,
+            openProjectHandler_,
             backToLayoutReviewHandler_,
             SavedResultNavigationView::Bottleneck,
             returnAuthoringState_,
@@ -858,16 +850,8 @@ void ScenarioRunWidget::showResults() {
             projectName_,
             layout_,
             std::move(results),
-            [this]() {
-                if (saveProjectHandler_) {
-                    saveProjectHandler_();
-                }
-            },
-            [this]() {
-                if (openProjectHandler_) {
-                    openProjectHandler_();
-                }
-            },
+            saveProjectHandler_,
+            openProjectHandler_,
             backToLayoutReviewHandler_,
             returnAuthoringState_,
             selectedRunIndex_,

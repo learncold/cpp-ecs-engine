@@ -13,6 +13,7 @@
 #include <QPixmap>
 #include <QPushButton>
 #include <QSizePolicy>
+#include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -355,7 +356,7 @@ void WorkspaceShell::setBackHandler(std::function<void()> handler) {
 
 QPushButton* WorkspaceShell::createBackButton(QWidget* parent) const {
     auto* button = createPanelBackButton(parent);
-    connect(button, &QPushButton::clicked, button, [this]() {
+    connect(button, &QPushButton::clicked, this, [this]() {
         if (backHandler_) {
             backHandler_();
         }
@@ -399,14 +400,20 @@ void WorkspaceShell::rebuildTopBar() {
             auto* menu = new QMenu(button);
             openProjectAction_ = menu->addAction("Open Project");
             connect(openProjectAction_, &QAction::triggered, this, [this]() {
-                if (openProjectHandler_) {
-                    openProjectHandler_();
+                const auto handler = openProjectHandler_;
+                if (handler) {
+                    QTimer::singleShot(0, this, [handler]() {
+                        handler();
+                    });
                 }
             });
             saveProjectAction_ = menu->addAction("Save Project");
             connect(saveProjectAction_, &QAction::triggered, this, [this]() {
-                if (saveProjectHandler_) {
-                    saveProjectHandler_();
+                const auto handler = saveProjectHandler_;
+                if (handler) {
+                    QTimer::singleShot(0, this, [handler]() {
+                        handler();
+                    });
                 }
             });
             button->setMenu(menu);

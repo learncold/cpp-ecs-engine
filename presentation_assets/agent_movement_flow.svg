@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="650" viewBox="0 0 1600 650">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#1f2937"/>
+    </marker>
+    <style>
+      .label {
+        font-family: "Malgun Gothic", "Pretendard", "Noto Sans CJK KR", Arial, sans-serif;
+        font-size: 30px;
+        font-weight: 700;
+        fill: #111827;
+        text-anchor: middle;
+        dominant-baseline: middle;
+      }
+      .edge {
+        font-family: "Malgun Gothic", "Pretendard", Arial, sans-serif;
+        font-size: 22px;
+        font-weight: 700;
+        fill: #374151;
+        text-anchor: middle;
+      }
+      .start {
+        fill: #dbeafe;
+        stroke: #1f2937;
+        stroke-width: 3;
+        rx: 10;
+      }
+      .process {
+        fill: #ecfdf5;
+        stroke: #1f2937;
+        stroke-width: 3;
+        rx: 10;
+      }
+      .decision {
+        fill: #fef3c7;
+        stroke: #1f2937;
+        stroke-width: 3;
+      }
+      .waiting {
+        fill: #f8fafc;
+        stroke: #1f2937;
+        stroke-width: 3;
+        rx: 10;
+      }
+      .result {
+        fill: #f3e8ff;
+        stroke: #1f2937;
+        stroke-width: 3;
+        rx: 10;
+      }
+      .line {
+        fill: none;
+        stroke: #1f2937;
+        stroke-width: 4;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        marker-end: url(#arrow);
+      }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1600" height="650" fill="#ffffff"/>
+
+  <rect class="start" x="55" y="285" width="135" height="70"/>
+  <text class="label" x="122.5" y="321">Tick</text>
+
+  <rect class="process" x="250" y="255" width="250" height="130"/>
+  <text class="label" x="375" y="300">환경/경로</text>
+  <text class="label" x="375" y="340">상태 갱신</text>
+
+  <polygon class="decision" points="640,220 760,320 640,420 520,320"/>
+  <text class="label" x="640" y="304">목적지</text>
+  <text class="label" x="640" y="344">도달?</text>
+
+  <rect class="result" x="790" y="95" width="180" height="75"/>
+  <text class="label" x="880" y="133">탈출 처리</text>
+
+  <polygon class="decision" points="920,220 1040,320 920,420 800,320"/>
+  <text class="label" x="920" y="304">이동 경로</text>
+  <text class="label" x="920" y="344">있음?</text>
+
+  <rect class="waiting" x="1070" y="450" width="170" height="75"/>
+  <text class="label" x="1155" y="488">대기/정체</text>
+
+  <rect class="process" x="1070" y="275" width="180" height="90"/>
+  <text class="label" x="1160" y="320">이동 계산</text>
+
+  <rect class="process" x="1300" y="255" width="230" height="130"/>
+  <text class="label" x="1415" y="300">회피 및</text>
+  <text class="label" x="1415" y="340">충돌 보정</text>
+
+  <rect class="process" x="1300" y="450" width="230" height="75"/>
+  <text class="label" x="1415" y="488">경로 진행</text>
+
+  <rect class="result" x="1245" y="85" width="250" height="95"/>
+  <text class="label" x="1370" y="117">상태/시간</text>
+  <text class="label" x="1370" y="154">갱신</text>
+
+  <path class="line" d="M 190 320 L 250 320"/>
+  <path class="line" d="M 500 320 L 520 320"/>
+
+  <path class="line" d="M 640 220 C 665 130 725 132 790 132"/>
+  <text class="edge" x="714" y="122">Yes</text>
+
+  <path class="line" d="M 760 320 L 800 320"/>
+  <text class="edge" x="780" y="300">No</text>
+
+  <path class="line" d="M 1040 320 L 1070 320"/>
+  <text class="edge" x="1055" y="300">Yes</text>
+
+  <path class="line" d="M 920 420 C 950 485 1000 488 1070 488"/>
+  <text class="edge" x="1000" y="470">No</text>
+
+  <path class="line" d="M 1250 320 L 1300 320"/>
+  <path class="line" d="M 1415 385 L 1415 450"/>
+
+  <path class="line" d="M 970 132 L 1245 132"/>
+  <path class="line" d="M 1240 488 C 1305 488 1370 420 1370 180"/>
+  <path class="line" d="M 1530 488 C 1585 488 1585 132 1495 132"/>
+
+  <path class="line" d="M 1370 85 L 1370 45 L 122 45 L 122 285"/>
+</svg>
