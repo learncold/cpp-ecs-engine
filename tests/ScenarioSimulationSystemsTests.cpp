@@ -231,6 +231,91 @@ public:
     }
 };
 
+class ConfigureOperationalConflictArtifactsSystem final : public safecrowd::engine::EngineSystem {
+public:
+    void configure(safecrowd::engine::EngineWorld& world) override {
+        world.resources().set(safecrowd::domain::ScenarioSimulationClockResource{
+            .elapsedSeconds = 12.0,
+            .timeLimitSeconds = 30.0,
+            .complete = false,
+        });
+
+        safecrowd::domain::ScenarioRiskMetricsResource metrics;
+        metrics.snapshot.peakConflictScore = 0.72;
+        metrics.snapshot.operationalConflictCells.push_back({
+            .center = {.x = 1.0, .y = 1.0},
+            .cellMin = {.x = 0.0, .y = 0.0},
+            .cellMax = {.x = 2.0, .y = 2.0},
+            .floorId = "L1",
+            .movingAgentCount = 6,
+            .peakAgentCount = 6,
+            .forwardCount = 3,
+            .reverseCount = 3,
+            .counterflowRatio = 0.5,
+            .averageSpeed = 0.6,
+            .speedDropRatio = 0.54,
+            .conflictScore = 0.72,
+            .durationSeconds = 11.0,
+            .exposureAgentSeconds = 18.0,
+            .nearestConnectionId = "door-main",
+            .nearestConnectionLabel = "Main Door",
+            .detectedAtSeconds = 12.0,
+        });
+        metrics.snapshot.operationalConflictConnections.push_back({
+            .connectionId = "door-main",
+            .label = "Main Door",
+            .floorId = "L1",
+            .passage = {{.x = 1.0, .y = 0.0}, {.x = 1.0, .y = 2.0}},
+            .nearbyAgentCount = 6,
+            .movingAgentCount = 6,
+            .queueAgentCount = 2,
+            .forwardCount = 3,
+            .reverseCount = 3,
+            .counterflowRatio = 0.5,
+            .averageSpeed = 0.6,
+            .speedDropRatio = 0.54,
+            .conflictScore = 0.72,
+            .durationSeconds = 11.0,
+            .exposureAgentSeconds = 18.0,
+            .detectedAtSeconds = 12.0,
+        });
+        metrics.peakSnapshot = metrics.snapshot;
+        metrics.peakSnapshot.totalConflictExposureAgentSeconds = 18.0;
+        world.resources().set(std::move(metrics));
+
+        safecrowd::domain::ScenarioOperationalConflictResource conflicts;
+        conflicts.connectionsById.emplace("door-main", safecrowd::domain::ScenarioOperationalConflictConnectionState{
+            .connectionId = "door-main",
+            .label = "Main Door",
+            .floorId = "L1",
+            .passage = {{.x = 1.0, .y = 0.0}, {.x = 1.0, .y = 2.0}},
+            .traversalCount = 10,
+            .forwardTraversals = 6,
+            .reverseTraversals = 4,
+            .peakWindowCount = 5,
+            .currentWindowStartSeconds = 10.0,
+            .currentWindowCount = 3,
+            .peakWindowAtSeconds = 12.0,
+            .queueExposureAgentSeconds = 4.5,
+            .peakQueuedAgents = 3,
+            .currentQueueAgents = 2,
+            .peakQueuedAtSeconds = 12.0,
+            .observedSpeedSum = 6.0,
+            .observedSpeedSamples = 10,
+            .peakConflictScore = 0.72,
+            .longestConflictDurationSeconds = 11.0,
+            .counterflowEventCount = 2,
+            .counterflowExposureAgentSeconds = 18.0,
+            .conflictActive = true,
+            .conflictStartedAtSeconds = 1.0,
+        });
+        world.resources().set(std::move(conflicts));
+    }
+
+    void update(safecrowd::engine::EngineWorld&, const safecrowd::engine::EngineStepContext&) override {
+    }
+};
+
 class ConfigureQuietAgentWithPriorPressureFeedbackSystem final : public safecrowd::engine::EngineSystem {
 public:
     void configure(safecrowd::engine::EngineWorld& world) override {
@@ -4233,6 +4318,36 @@ SC_TEST(ScenarioResultArtifactsSystem_AccumulatesPressurePeakFieldByFloorAndCell
     });
     SC_EXPECT_TRUE(hasL1Cell);
     SC_EXPECT_TRUE(hasL2Cell);
+}
+
+SC_TEST(ScenarioResultArtifactsSystem_PublishesOperationalConflictSummary) {
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 52,
+    });
+    runtime.addSystem(std::make_unique<ConfigureOperationalConflictArtifactsSystem>());
+    runtime.addSystem(
+        std::make_unique<safecrowd::domain::ScenarioResultArtifactsSystem>(1.0),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(0.0);
+
+    const auto& artifacts =
+        runtime.world().resources().get<safecrowd::domain::ScenarioResultArtifactsResource>().artifacts;
+    SC_EXPECT_NEAR(artifacts.operationalConflictSummary.peakConflictScore, 0.72, 1e-9);
+    SC_EXPECT_NEAR(artifacts.operationalConflictSummary.totalConflictExposureAgentSeconds, 18.0, 1e-9);
+    SC_EXPECT_NEAR(artifacts.operationalConflictSummary.longestConflictDurationSeconds, 11.0, 1e-9);
+    SC_EXPECT_EQ(artifacts.operationalConflictSummary.conflictConnectionCount, std::size_t{1});
+    SC_EXPECT_EQ(artifacts.operationalConflictSummary.topConflictConnectionId, std::string{"door-main"});
+    SC_EXPECT_EQ(artifacts.connectionUsage.size(), std::size_t{1});
+    SC_EXPECT_EQ(artifacts.connectionUsage.front().traversalCount, std::size_t{10});
+    SC_EXPECT_EQ(artifacts.connectionUsage.front().counterflowEventCount, std::size_t{2});
+    SC_EXPECT_EQ(artifacts.operationalConflictTimeline.size(), std::size_t{1});
+    SC_EXPECT_EQ(artifacts.operationalConflictTimeline.front().activeConflictCellCount, std::size_t{1});
+    SC_EXPECT_EQ(artifacts.operationalConflictTimeline.front().queuedAgentsNearConnections, std::size_t{2});
 }
 
 SC_TEST(ScenarioRoutePassageCrossed_UsesDoorPlaneNearEndpoint) {

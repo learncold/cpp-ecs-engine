@@ -34,6 +34,10 @@ QString formatOptionalSeconds(const std::optional<double>& seconds) {
     return seconds.has_value() ? QString("%1 sec").arg(*seconds, 0, 'f', 1) : QString("Pending");
 }
 
+QString formatPercent(double ratio) {
+    return QString("%1%").arg(std::clamp(ratio, 0.0, 1.0) * 100.0, 0, 'f', 0);
+}
+
 QLabel* createReportSectionHeader(const QString& text, QWidget* parent) {
     auto* label = createLabel(text, parent, ui::FontRole::SectionTitle);
     label->setStyleSheet(ui::mutedTextStyleSheet());
@@ -127,6 +131,62 @@ QPushButton* createHotspotRowButton(
     return button;
 }
 
+QPushButton* createOperationalConflictCellRowButton(
+    const safecrowd::domain::ScenarioOperationalConflictCellMetric& cell,
+    std::size_t index,
+    QWidget* parent) {
+    QStringList lines{
+        QString("%1. Conflict score %2")
+            .arg(static_cast<int>(index + 1))
+            .arg(cell.conflictScore, 0, 'f', 2),
+        QString("Counterflow %1  |  %2 vs %3 movers")
+            .arg(formatPercent(cell.counterflowRatio))
+            .arg(static_cast<int>(cell.forwardCount))
+            .arg(static_cast<int>(cell.reverseCount)),
+        QString("Duration %1 sec  |  Speed %2 m/s")
+            .arg(cell.durationSeconds, 0, 'f', 1)
+            .arg(cell.averageSpeed, 0, 'f', 2),
+    };
+    if (!cell.nearestConnectionLabel.empty() || !cell.nearestConnectionId.empty()) {
+        lines.push_back(QString("Nearest connection: %1")
+            .arg(QString::fromStdString(
+                !cell.nearestConnectionLabel.empty() ? cell.nearestConnectionLabel : cell.nearestConnectionId)));
+    }
+    if (!cell.floorId.empty()) {
+        lines.push_back(QString("Floor: %1").arg(QString::fromStdString(cell.floorId)));
+    }
+    auto* button = createReportRowButton(lines, parent);
+    button->setToolTip(QString("%1\nClick to focus this conflict hotspot on the canvas.")
+        .arg(safecrowd::domain::scenarioOperationalConflictDefinition()));
+    return button;
+}
+
+QPushButton* createOperationalConflictConnectionRowButton(
+    const safecrowd::domain::ScenarioOperationalConflictConnectionMetric& connection,
+    std::size_t index,
+    QWidget* parent) {
+    QStringList lines{
+        QString("%1. %2")
+            .arg(static_cast<int>(index + 1))
+            .arg(QString::fromStdString(
+                !connection.label.empty() ? connection.label : connection.connectionId)),
+        QString("Score %1  |  Counterflow %2")
+            .arg(connection.conflictScore, 0, 'f', 2)
+            .arg(formatPercent(connection.counterflowRatio)),
+        QString("Queue %1  |  Duration %2 sec  |  Speed %3 m/s")
+            .arg(static_cast<int>(connection.queueAgentCount))
+            .arg(connection.durationSeconds, 0, 'f', 1)
+            .arg(connection.averageSpeed, 0, 'f', 2),
+    };
+    if (!connection.floorId.empty()) {
+        lines.push_back(QString("Floor: %1").arg(QString::fromStdString(connection.floorId)));
+    }
+    auto* button = createReportRowButton(lines, parent);
+    button->setToolTip(QString("%1\nClick to focus this conflict connection on the canvas.")
+        .arg(safecrowd::domain::scenarioOperationalConflictDefinition()));
+    return button;
+}
+
 QFrame* createLegendSwatch(const QColor& color, QWidget* parent) {
     auto* swatch = new QFrame(parent);
     swatch->setFixedSize(22, 12);
@@ -170,6 +230,15 @@ QIcon makeResultNavigationIcon(const QString& tabId, const QColor& color) {
         painter.drawLine(QPointF(12, 32), QPointF(20, 23));
         painter.drawLine(QPointF(32, 12), QPointF(24, 21));
         painter.drawLine(QPointF(32, 32), QPointF(24, 23));
+        painter.setBrush(color);
+        painter.drawEllipse(QPointF(22, 22), 2.8, 2.8);
+    } else if (tabId == "operational-conflict") {
+        painter.drawLine(QPointF(12, 22), QPointF(32, 22));
+        painter.drawLine(QPointF(22, 12), QPointF(22, 32));
+        painter.drawLine(QPointF(17, 17), QPointF(13, 13));
+        painter.drawLine(QPointF(17, 17), QPointF(13, 21));
+        painter.drawLine(QPointF(27, 27), QPointF(31, 23));
+        painter.drawLine(QPointF(27, 27), QPointF(31, 31));
         painter.setBrush(color);
         painter.drawEllipse(QPointF(22, 22), 2.8, 2.8);
     } else if (tabId == "hotspot") {
@@ -342,6 +411,91 @@ QWidget* createGroupsReportPanel(const safecrowd::domain::ScenarioResultArtifact
     return parts.panel;
 }
 
+QWidget* createOperationalConflictReportPanel(
+    const safecrowd::domain::ScenarioRiskSnapshot& risk,
+    const safecrowd::domain::ScenarioResultArtifacts& artifacts,
+    std::function<void(std::size_t)> operationalConflictCellFocusHandler,
+    std::function<void(std::size_t)> operationalConflictConnectionFocusHandler,
+    QWidget* parent) {
+    auto parts = createResultReportPanel("Operational Conflict", "Counterflow and concentrated connector load", parent);
+    auto* summaryHeader = createReportSectionHeader("Summary", parts.content);
+    summaryHeader->setToolTip(safecrowd::domain::scenarioOperationalConflictDefinition());
+    parts.contentLayout->addWidget(summaryHeader);
+    parts.contentLayout->addWidget(createReportInfoRow({
+        QString("Peak conflict score: %1")
+            .arg(artifacts.operationalConflictSummary.peakConflictScore, 0, 'f', 2),
+        QString("Total exposure: %1 agent-sec")
+            .arg(artifacts.operationalConflictSummary.totalConflictExposureAgentSeconds, 0, 'f', 1),
+        QString("Longest duration: %1 sec")
+            .arg(artifacts.operationalConflictSummary.longestConflictDurationSeconds, 0, 'f', 1),
+        QString("Conflict connections: %1  |  Peak queued: %2")
+            .arg(static_cast<int>(artifacts.operationalConflictSummary.conflictConnectionCount))
+            .arg(static_cast<int>(artifacts.operationalConflictSummary.peakQueuedAgents)),
+        QString("Connection concentration: %1")
+            .arg(artifacts.operationalConflictSummary.connectionConcentrationIndex, 0, 'f', 2),
+    }, parts.content));
+
+    auto* cellHeader = createReportSectionHeader("Conflict Cells", parts.content);
+    parts.contentLayout->addWidget(cellHeader);
+    if (risk.operationalConflictCells.empty()) {
+        auto* empty = createLabel("None detected", parts.content);
+        empty->setStyleSheet(ui::mutedTextStyleSheet());
+        parts.contentLayout->addWidget(empty);
+    } else {
+        for (std::size_t index = 0; index < risk.operationalConflictCells.size(); ++index) {
+            auto* row = createOperationalConflictCellRowButton(risk.operationalConflictCells[index], index, parts.content);
+            QObject::connect(row, &QPushButton::clicked, parts.content, [operationalConflictCellFocusHandler, index]() {
+                if (operationalConflictCellFocusHandler) {
+                    operationalConflictCellFocusHandler(index);
+                }
+            });
+            parts.contentLayout->addWidget(row);
+        }
+    }
+
+    auto* connectionHeader = createReportSectionHeader("Conflict Connections", parts.content);
+    parts.contentLayout->addWidget(connectionHeader);
+    if (risk.operationalConflictConnections.empty()) {
+        auto* empty = createLabel("None detected", parts.content);
+        empty->setStyleSheet(ui::mutedTextStyleSheet());
+        parts.contentLayout->addWidget(empty);
+    } else {
+        for (std::size_t index = 0; index < risk.operationalConflictConnections.size(); ++index) {
+            auto* row = createOperationalConflictConnectionRowButton(
+                risk.operationalConflictConnections[index],
+                index,
+                parts.content);
+            QObject::connect(row, &QPushButton::clicked, parts.content, [operationalConflictConnectionFocusHandler, index]() {
+                if (operationalConflictConnectionFocusHandler) {
+                    operationalConflictConnectionFocusHandler(index);
+                }
+            });
+            parts.contentLayout->addWidget(row);
+        }
+    }
+
+    if (!artifacts.connectionUsage.empty()) {
+        auto* usageHeader = createReportSectionHeader("Top Connection Load", parts.content);
+        parts.contentLayout->addWidget(usageHeader);
+        const auto usageCount = std::min<std::size_t>(3, artifacts.connectionUsage.size());
+        for (std::size_t index = 0; index < usageCount; ++index) {
+            const auto& metric = artifacts.connectionUsage[index];
+            parts.contentLayout->addWidget(createReportInfoRow({
+                QString::fromStdString(!metric.label.empty() ? metric.label : metric.connectionId),
+                QString("Traversals %1  |  Share %2")
+                    .arg(static_cast<int>(metric.traversalCount))
+                    .arg(formatPercent(metric.usageRatio)),
+                QString("Peak window %1  |  Queue exposure %2 agent-sec")
+                    .arg(static_cast<int>(metric.peakWindowCount))
+                    .arg(metric.queueExposureAgentSeconds, 0, 'f', 1),
+            }, parts.content));
+        }
+    }
+
+    parts.contentLayout->addStretch(1);
+    return parts.panel;
+}
+
 bool shouldShowRecommendationEvidence(const safecrowd::domain::AlternativeRecommendationEvidence& item) {
     const auto label = QString::fromStdString(item.label);
     return !label.startsWith("Risk ") && label != "Critical pressure events";
@@ -355,6 +509,11 @@ std::vector<WorkspaceNavigationTab> scenarioResultNavigationTabs() {
             .id = "bottleneck",
             .label = "Bottleneck",
             .icon = makeResultNavigationIcon("bottleneck", QColor("#1f5fae")),
+        },
+        {
+            .id = "operational-conflict",
+            .label = "Operational Conflict",
+            .icon = makeResultNavigationIcon("operational-conflict", QColor("#1f5fae")),
         },
         {
             .id = "hotspot",
@@ -381,6 +540,8 @@ std::vector<WorkspaceNavigationTab> scenarioResultNavigationTabs() {
 
 QString scenarioResultNavigationTabId(ScenarioResultNavigationView view) {
     switch (view) {
+    case ScenarioResultNavigationView::OperationalConflict:
+        return "operational-conflict";
     case ScenarioResultNavigationView::Hotspot:
         return "hotspot";
     case ScenarioResultNavigationView::Zone:
@@ -396,6 +557,9 @@ QString scenarioResultNavigationTabId(ScenarioResultNavigationView view) {
 }
 
 ScenarioResultNavigationView scenarioResultNavigationViewFromTabId(const QString& tabId) {
+    if (tabId == "operational-conflict") {
+        return ScenarioResultNavigationView::OperationalConflict;
+    }
     if (tabId == "hotspot") {
         return ScenarioResultNavigationView::Hotspot;
     }
@@ -416,9 +580,18 @@ QWidget* createScenarioResultNavigationPanel(
     const safecrowd::domain::ScenarioRiskSnapshot& risk,
     const safecrowd::domain::ScenarioResultArtifacts& artifacts,
     std::function<void(std::size_t)> bottleneckFocusHandler,
+    std::function<void(std::size_t)> operationalConflictCellFocusHandler,
+    std::function<void(std::size_t)> operationalConflictConnectionFocusHandler,
     std::function<void(std::size_t)> hotspotFocusHandler,
     QWidget* parent) {
     switch (view) {
+    case ScenarioResultNavigationView::OperationalConflict:
+        return createOperationalConflictReportPanel(
+            risk,
+            artifacts,
+            std::move(operationalConflictCellFocusHandler),
+            std::move(operationalConflictConnectionFocusHandler),
+            parent);
     case ScenarioResultNavigationView::Hotspot:
         return createHotspotReportPanel(risk, std::move(hotspotFocusHandler), parent);
     case ScenarioResultNavigationView::Zone:

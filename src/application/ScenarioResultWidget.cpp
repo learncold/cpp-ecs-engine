@@ -567,6 +567,7 @@ QString resultCriteriaTooltip(const safecrowd::domain::ScenarioResultArtifacts& 
             .arg(artifacts.pressureSummary.hotspotScoreThreshold, 0, 'f', 1),
         safecrowd::domain::scenarioStalledDefinition(),
         safecrowd::domain::scenarioBottleneckDefinition(),
+        safecrowd::domain::scenarioOperationalConflictDefinition(),
     }.join("\n\n");
 }
 
@@ -912,6 +913,7 @@ QWidget* createResultCanvasPanel(
     overlayCombo->addItem("Peak Density", static_cast<int>(ResultOverlayMode::Density));
     overlayCombo->addItem("Pressure", static_cast<int>(ResultOverlayMode::Pressure));
     overlayCombo->addItem("Bottlenecks", static_cast<int>(ResultOverlayMode::Bottlenecks));
+    overlayCombo->addItem("Operational Conflicts", static_cast<int>(ResultOverlayMode::OperationalConflicts));
     overlayCombo->addItem("Hotspots", static_cast<int>(ResultOverlayMode::Hotspots));
     overlayCombo->addItem("None", static_cast<int>(ResultOverlayMode::None));
     overlayCombo->setToolTip("Switch between result map overlays.");
@@ -1175,6 +1177,18 @@ QWidget* createResultPanel(
     const auto slowestGroup = artifacts.placementCompletion.empty()
         ? QString("Pending")
         : QString::fromStdString(artifacts.placementCompletion.front().placementId);
+    const bool hasOperationalConflict =
+        artifacts.operationalConflictSummary.peakConflictScore > 0.0
+        || artifacts.operationalConflictSummary.totalConflictExposureAgentSeconds > 0.0
+        || artifacts.operationalConflictSummary.conflictConnectionCount > 0;
+    const auto topConflictFull = !hasOperationalConflict
+        ? QString("None")
+        : (artifacts.operationalConflictSummary.topConflictConnectionLabel.empty()
+            ? (artifacts.operationalConflictSummary.topConflictConnectionId.empty()
+                ? QString("None")
+                : QString::fromStdString(artifacts.operationalConflictSummary.topConflictConnectionId))
+            : QString::fromStdString(artifacts.operationalConflictSummary.topConflictConnectionLabel));
+    const auto topConflict = compactBottleneckLabel(topConflictFull);
     const auto peakPressureTooltip = QString(
         "Highest pressure hotspot score observed during the run.%1%2")
         .arg(artifacts.pressureSummary.peakAtSeconds.has_value()
@@ -1183,6 +1197,12 @@ QWidget* createResultPanel(
         .arg(artifacts.pressureSummary.peakCell.has_value()
             ? QString("\nCell floor: %1").arg(QString::fromStdString(artifacts.pressureSummary.peakCell->floorId))
             : QString());
+    const auto conflictTooltip = QString(
+        "%1\n\nPeak score: %2\nExposure: %3 agent-sec\nLongest duration: %4 sec")
+        .arg(safecrowd::domain::scenarioOperationalConflictDefinition())
+        .arg(artifacts.operationalConflictSummary.peakConflictScore, 0, 'f', 2)
+        .arg(artifacts.operationalConflictSummary.totalConflictExposureAgentSeconds, 0, 'f', 1)
+        .arg(artifacts.operationalConflictSummary.longestConflictDurationSeconds, 0, 'f', 1);
     metricsGrid->addWidget(createMetricCard(
         "Completion",
         formatSecondsValue(completionTime),
@@ -1251,6 +1271,23 @@ QWidget* createResultPanel(
         panel,
         QString("Peak simultaneously critical agents during the run.\nExposed peak: %1 agents.")
             .arg(static_cast<int>(artifacts.pressureSummary.peakExposedAgentCount))), 6, 0);
+    metricsGrid->addWidget(createMetricCard(
+        "Peak Conflict",
+        QString::number(artifacts.operationalConflictSummary.peakConflictScore, 'f', 2),
+        panel,
+        conflictTooltip), 6, 1);
+    metricsGrid->addWidget(createMetricCard(
+        "Conflict Exposure",
+        QString("%1 agent-sec").arg(artifacts.operationalConflictSummary.totalConflictExposureAgentSeconds, 0, 'f', 1),
+        panel,
+        conflictTooltip), 7, 0);
+    metricsGrid->addWidget(createMetricCard(
+        "Top Conflict",
+        topConflict,
+        panel,
+        QString("%1\n\nTop connection: %2")
+            .arg(conflictTooltip)
+            .arg(topConflictFull)), 7, 1);
     layout->addLayout(metricsGrid);
     layout->addStretch(1);
 
@@ -1285,6 +1322,8 @@ QWidget* createResultPanel(
 
 ScenarioResultNavigationView resultNavigationViewFromSaved(SavedResultNavigationView view) {
     switch (view) {
+    case SavedResultNavigationView::OperationalConflict:
+        return ScenarioResultNavigationView::OperationalConflict;
     case SavedResultNavigationView::Hotspot:
         return ScenarioResultNavigationView::Hotspot;
     case SavedResultNavigationView::Zone:
@@ -1301,6 +1340,8 @@ ScenarioResultNavigationView resultNavigationViewFromSaved(SavedResultNavigation
 
 SavedResultNavigationView savedResultNavigationView(ScenarioResultNavigationView view) {
     switch (view) {
+    case ScenarioResultNavigationView::OperationalConflict:
+        return SavedResultNavigationView::OperationalConflict;
     case ScenarioResultNavigationView::Hotspot:
         return SavedResultNavigationView::Hotspot;
     case ScenarioResultNavigationView::Zone:
@@ -1365,6 +1406,7 @@ ScenarioResultWidget::ScenarioResultWidget(
     canvas->setEnvironmentHazards(scenario_.environment.hazards);
     canvas->setHotspotOverlay(risk_.hotspots);
     canvas->setBottleneckOverlay(risk_.bottlenecks);
+    canvas->setOperationalConflictOverlay(risk_.operationalConflictCells, risk_.operationalConflictConnections);
     ResultReplayControls* replayControls = nullptr;
     std::function<void(ResultOverlayMode)> applyResultOverlayMode;
     shell_->setCanvas(createResultCanvasPanel(
@@ -1389,6 +1431,38 @@ ScenarioResultWidget::ScenarioResultWidget(
             canvas->setResultOverlayMode(ResultOverlayMode::Bottlenecks);
         }
         canvas->focusBottleneck(index);
+    };
+    operationalConflictCellFocusHandler_ = [this, canvas, replayControls, applyResultOverlayMode](std::size_t index) {
+        if (index < risk_.operationalConflictCells.size() && replayControls != nullptr) {
+            const auto& cell = risk_.operationalConflictCells[index];
+            if (cell.detectionFrame.has_value()) {
+                replayControls->showFrame(*cell.detectionFrame);
+            } else if (cell.detectedAtSeconds.has_value()) {
+                replayControls->showClosestFrameAtSeconds(*cell.detectedAtSeconds);
+            }
+        }
+        if (applyResultOverlayMode) {
+            applyResultOverlayMode(ResultOverlayMode::OperationalConflicts);
+        } else {
+            canvas->setResultOverlayMode(ResultOverlayMode::OperationalConflicts);
+        }
+        canvas->focusOperationalConflictCell(index);
+    };
+    operationalConflictConnectionFocusHandler_ = [this, canvas, replayControls, applyResultOverlayMode](std::size_t index) {
+        if (index < risk_.operationalConflictConnections.size() && replayControls != nullptr) {
+            const auto& connection = risk_.operationalConflictConnections[index];
+            if (connection.detectionFrame.has_value()) {
+                replayControls->showFrame(*connection.detectionFrame);
+            } else if (connection.detectedAtSeconds.has_value()) {
+                replayControls->showClosestFrameAtSeconds(*connection.detectedAtSeconds);
+            }
+        }
+        if (applyResultOverlayMode) {
+            applyResultOverlayMode(ResultOverlayMode::OperationalConflicts);
+        } else {
+            canvas->setResultOverlayMode(ResultOverlayMode::OperationalConflicts);
+        }
+        canvas->focusOperationalConflictConnection(index);
     };
     hotspotFocusHandler_ = [this, canvas, replayControls, applyResultOverlayMode](std::size_t index) {
         if (index < risk_.hotspots.size() && replayControls != nullptr) {
@@ -1460,6 +1534,8 @@ void ScenarioResultWidget::refreshResultNavigationPanel() {
         risk_,
         artifacts_,
         bottleneckFocusHandler_,
+        operationalConflictCellFocusHandler_,
+        operationalConflictConnectionFocusHandler_,
         hotspotFocusHandler_,
         shell_));
 }

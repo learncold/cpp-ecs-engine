@@ -36,6 +36,7 @@ enum class SavedResultNavigationView {
     Zone,
     Groups,
     Recommendations,
+    OperationalConflict,
 };
 
 struct SavedScenarioState {

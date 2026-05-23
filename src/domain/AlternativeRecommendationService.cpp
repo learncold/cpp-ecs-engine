@@ -834,6 +834,85 @@ std::optional<SustainedCounterflowObservation> sustainedCounterflowConflict(
 
 std::optional<AlternativeRecommendationRiskSignal> makeCounterflowRiskSignal(
     const AlternativeRecommendationInput& request) {
+    if (!request.risk.operationalConflictConnections.empty()
+        || !request.risk.operationalConflictCells.empty()
+        || request.artifacts.operationalConflictSummary.peakConflictScore > 0.0) {
+        AlternativeRecommendationRiskSignal signal;
+        signal.kind = AlternativeRecommendationRiskKind::CounterflowConflict;
+        signal.summary = "Operational conflict detected from counterflow and connector-load metrics.";
+
+        double severity = request.artifacts.operationalConflictSummary.peakConflictScore * 100.0;
+        severity += request.artifacts.operationalConflictSummary.longestConflictDurationSeconds * 4.0;
+        severity += request.artifacts.operationalConflictSummary.totalConflictExposureAgentSeconds * 0.2;
+        severity += static_cast<double>(request.artifacts.operationalConflictSummary.conflictConnectionCount * 10U);
+
+        if (!request.risk.operationalConflictConnections.empty()) {
+            const auto& connection = request.risk.operationalConflictConnections.front();
+            severity += static_cast<double>(connection.forwardCount + connection.reverseCount);
+            signal.evidence.push_back(evidence(
+                "Conflict connection",
+                connectionName(request.layout, connection.connectionId),
+                "ScenarioRiskSnapshot.operationalConflictConnections"));
+            signal.evidence.push_back(evidence(
+                "Opposing flow",
+                std::to_string(connection.forwardCount) + " vs "
+                    + std::to_string(connection.reverseCount) + " agents",
+                "ScenarioRiskSnapshot.operationalConflictConnections"));
+            signal.evidence.push_back(evidence(
+                "Conflict duration",
+                fixed(connection.durationSeconds, 1) + " sec",
+                "ScenarioRiskSnapshot.operationalConflictConnections"));
+            signal.evidence.push_back(evidence(
+                "Average speed",
+                fixed(connection.averageSpeed, 2) + " m/s",
+                "ScenarioRiskSnapshot.operationalConflictConnections"));
+        } else if (!request.risk.operationalConflictCells.empty()) {
+            const auto& cell = request.risk.operationalConflictCells.front();
+            severity += static_cast<double>(cell.forwardCount + cell.reverseCount);
+            signal.evidence.push_back(evidence(
+                "Opposing flow",
+                std::to_string(cell.forwardCount) + " vs "
+                    + std::to_string(cell.reverseCount) + " agents",
+                "ScenarioRiskSnapshot.operationalConflictCells"));
+            signal.evidence.push_back(evidence(
+                "Conflict duration",
+                fixed(cell.durationSeconds, 1) + " sec",
+                "ScenarioRiskSnapshot.operationalConflictCells"));
+            signal.evidence.push_back(evidence(
+                "Average speed",
+                fixed(cell.averageSpeed, 2) + " m/s",
+                "ScenarioRiskSnapshot.operationalConflictCells"));
+            if (!cell.nearestConnectionId.empty()) {
+                signal.evidence.push_back(evidence(
+                    "Nearest connection",
+                    connectionName(request.layout, cell.nearestConnectionId),
+                    "ScenarioRiskSnapshot.operationalConflictCells"));
+            }
+        }
+
+        signal.evidence.push_back(evidence(
+            "Peak conflict score",
+            fixed(request.artifacts.operationalConflictSummary.peakConflictScore, 2),
+            "ScenarioResultArtifacts.operationalConflictSummary"));
+        signal.evidence.push_back(evidence(
+            "Conflict exposure",
+            fixed(request.artifacts.operationalConflictSummary.totalConflictExposureAgentSeconds, 1) + " agent-sec",
+            "ScenarioResultArtifacts.operationalConflictSummary"));
+        signal.evidence.push_back(evidence(
+            "Conflict connections",
+            std::to_string(request.artifacts.operationalConflictSummary.conflictConnectionCount),
+            "ScenarioResultArtifacts.operationalConflictSummary"));
+        if (!request.artifacts.connectionUsage.empty()) {
+            signal.evidence.push_back(evidence(
+                "Connection concentration",
+                fixed(request.artifacts.operationalConflictSummary.connectionConcentrationIndex, 2),
+                "ScenarioResultArtifacts.connectionUsage"));
+        }
+
+        signal.severity = static_cast<int>(std::round(severity));
+        return signal;
+    }
+
     const auto observation = sustainedCounterflowConflict(request.artifacts.replayFrames);
     if (!observation.has_value()) {
         return std::nullopt;
@@ -1209,7 +1288,7 @@ std::optional<AlternativeRecommendationCandidate> makeCounterflowCandidate(
     draft.control.events.push_back(makeOperationalEvent(
         eventId,
         "Separate counterflow movements",
-        "Sustained opposing movement detected in replay frames",
+        signal->summary,
         "Use lane separation, time-separated entry, or exit-before-entry operation."));
     finalizeDiffKeys(request, draft);
 
@@ -1221,7 +1300,7 @@ std::optional<AlternativeRecommendationCandidate> makeCounterflowCandidate(
     candidate.title = "Separate counterflow movements";
     candidate.summary = "Record a lane separation or time-separated entry operation.";
     candidate.expectedImprovement = "Reduces head-on movement conflict and lets the revised operation be compared by rerun.";
-    candidate.artifactSource = "AlternativeRecommendationRiskSignal + ScenarioResultArtifacts.replayFrames";
+    candidate.artifactSource = "AlternativeRecommendationRiskSignal + operational conflict metrics";
     candidate.evidence = signal->evidence;
     candidate.recommendedScenario = std::move(draft);
     return candidate;

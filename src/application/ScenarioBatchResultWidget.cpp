@@ -831,6 +831,8 @@ std::optional<int> existingScenarioIndexBySourceTemplate(
 
 ScenarioResultNavigationView resultNavigationViewFromSaved(SavedResultNavigationView view) {
     switch (view) {
+    case SavedResultNavigationView::OperationalConflict:
+        return ScenarioResultNavigationView::OperationalConflict;
     case SavedResultNavigationView::Hotspot:
         return ScenarioResultNavigationView::Hotspot;
     case SavedResultNavigationView::Zone:
@@ -847,6 +849,8 @@ ScenarioResultNavigationView resultNavigationViewFromSaved(SavedResultNavigation
 
 SavedResultNavigationView savedResultNavigationView(ScenarioResultNavigationView view) {
     switch (view) {
+    case ScenarioResultNavigationView::OperationalConflict:
+        return SavedResultNavigationView::OperationalConflict;
     case ScenarioResultNavigationView::Hotspot:
         return SavedResultNavigationView::Hotspot;
     case ScenarioResultNavigationView::Zone:
@@ -968,6 +972,7 @@ QWidget* ScenarioBatchResultWidget::createCanvasPanel() {
     overlayCombo_->addItem("Pressure", static_cast<int>(OverlayMode::Pressure));
     overlayCombo_->addItem("Hotspots", static_cast<int>(OverlayMode::Hotspots));
     overlayCombo_->addItem("Bottlenecks", static_cast<int>(OverlayMode::Bottlenecks));
+    overlayCombo_->addItem("Operational Conflicts", static_cast<int>(OverlayMode::OperationalConflicts));
     overlayCombo_->addItem("None", static_cast<int>(OverlayMode::None));
     overlayCombo_->setCurrentIndex(0);
     selectorLayout->addWidget(overlayCombo_);
@@ -1377,6 +1382,9 @@ void ScenarioBatchResultWidget::applySelectedResultStaticCanvasState() {
     canvas_->setEnvironmentHazards(result.scenario.environment.hazards);
     canvas_->setHotspotOverlay(result.risk.hotspots);
     canvas_->setBottleneckOverlay(result.risk.bottlenecks);
+    canvas_->setOperationalConflictOverlay(
+        result.risk.operationalConflictCells,
+        result.risk.operationalConflictConnections);
     canvas_->setDensityOverlay(
         result.artifacts.densitySummary.peakField.cells.empty()
             ? result.artifacts.densitySummary.peakCells
@@ -1405,6 +1413,9 @@ void ScenarioBatchResultWidget::applyOverlayModeToCanvas() {
         break;
     case OverlayMode::Bottlenecks:
         canvas_->setResultOverlayMode(ResultOverlayMode::Bottlenecks);
+        break;
+    case OverlayMode::OperationalConflicts:
+        canvas_->setResultOverlayMode(ResultOverlayMode::OperationalConflicts);
         break;
     case OverlayMode::None:
         canvas_->setResultOverlayMode(ResultOverlayMode::None);
@@ -1844,6 +1855,42 @@ void ScenarioBatchResultWidget::refreshResultNavigationPanel() {
             canvas_->focusBottleneck(index);
         }
     };
+    auto operationalConflictCellFocusHandler = [this](std::size_t index) {
+        if (results_.empty() || currentResultIndex_ < 0 || currentResultIndex_ >= static_cast<int>(results_.size())) {
+            return;
+        }
+        const auto& selected = results_[static_cast<std::size_t>(currentResultIndex_)];
+        if (index < selected.risk.operationalConflictCells.size()) {
+            setOverlayMode(OverlayMode::OperationalConflicts);
+            const auto& cell = selected.risk.operationalConflictCells[index];
+            if (cell.detectionFrame.has_value()) {
+                showReplayFrame(*cell.detectionFrame);
+            } else if (cell.detectedAtSeconds.has_value()) {
+                showClosestReplayFrameAtSeconds(*cell.detectedAtSeconds);
+            }
+        }
+        if (canvas_ != nullptr) {
+            canvas_->focusOperationalConflictCell(index);
+        }
+    };
+    auto operationalConflictConnectionFocusHandler = [this](std::size_t index) {
+        if (results_.empty() || currentResultIndex_ < 0 || currentResultIndex_ >= static_cast<int>(results_.size())) {
+            return;
+        }
+        const auto& selected = results_[static_cast<std::size_t>(currentResultIndex_)];
+        if (index < selected.risk.operationalConflictConnections.size()) {
+            setOverlayMode(OverlayMode::OperationalConflicts);
+            const auto& connection = selected.risk.operationalConflictConnections[index];
+            if (connection.detectionFrame.has_value()) {
+                showReplayFrame(*connection.detectionFrame);
+            } else if (connection.detectedAtSeconds.has_value()) {
+                showClosestReplayFrameAtSeconds(*connection.detectedAtSeconds);
+            }
+        }
+        if (canvas_ != nullptr) {
+            canvas_->focusOperationalConflictConnection(index);
+        }
+    };
     auto hotspotFocusHandler = [this](std::size_t index) {
         if (results_.empty() || currentResultIndex_ < 0 || currentResultIndex_ >= static_cast<int>(results_.size())) {
             return;
@@ -1868,6 +1915,8 @@ void ScenarioBatchResultWidget::refreshResultNavigationPanel() {
         result.risk,
         result.artifacts,
         std::move(bottleneckFocusHandler),
+        std::move(operationalConflictCellFocusHandler),
+        std::move(operationalConflictConnectionFocusHandler),
         std::move(hotspotFocusHandler),
         shell_));
 }
@@ -1918,7 +1967,21 @@ void ScenarioBatchResultWidget::refreshSelectedResult() {
             .arg(formatPressureScore(result.artifacts.pressureSummary.peakPressureScore))
             .arg(formatSeconds(result.artifacts.pressureSummary.peakAtSeconds))
             .arg(formatSeconds(result.artifacts.timingSummary.t90Seconds))
-            .arg(formatSeconds(result.artifacts.timingSummary.t95Seconds)));
+            .arg(formatSeconds(result.artifacts.timingSummary.t95Seconds))
+            + QString("\nOperational conflict: %1 score / %2 connections / HHI %3")
+                .arg(result.artifacts.operationalConflictSummary.peakConflictScore, 0, 'f', 2)
+                .arg(static_cast<int>(result.artifacts.operationalConflictSummary.conflictConnectionCount))
+                .arg(result.artifacts.operationalConflictSummary.connectionConcentrationIndex, 0, 'f', 2)
+            + QString("\nConflict exposure: %1 agent-sec  |  Top connection: %2")
+                .arg(result.artifacts.operationalConflictSummary.totalConflictExposureAgentSeconds, 0, 'f', 1)
+                .arg((result.artifacts.operationalConflictSummary.peakConflictScore <= 0.0
+                        && result.artifacts.operationalConflictSummary.totalConflictExposureAgentSeconds <= 0.0
+                        && result.artifacts.operationalConflictSummary.conflictConnectionCount == 0)
+                    ? QString("None")
+                    : QString::fromStdString(
+                        result.artifacts.operationalConflictSummary.topConflictConnectionLabel.empty()
+                            ? result.artifacts.operationalConflictSummary.topConflictConnectionId
+                            : result.artifacts.operationalConflictSummary.topConflictConnectionLabel)));
     }
 }
 
