@@ -1,7 +1,10 @@
 #include "TestSupport.h"
 #include "application/ProjectPersistence.h"
+#include "application/ResultArtifactsCodec.h"
 
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QTemporaryDir>
 
 using namespace safecrowd::application;
@@ -128,6 +131,7 @@ SC_TEST(ProjectPersistence_preservesHazardExposureResultArtifacts) {
                 .hazards = {exposure},
             },
         },
+        .navigationView = SavedResultNavigationView::HazardExposure,
     };
 
     const ProjectMetadata metadata{
@@ -141,6 +145,7 @@ SC_TEST(ProjectPersistence_preservesHazardExposureResultArtifacts) {
     ProjectWorkspaceState loaded;
     SC_EXPECT_TRUE(ProjectPersistence::loadProjectWorkspace(metadata, &loaded));
     SC_EXPECT_TRUE(loaded.result.has_value());
+    SC_EXPECT_TRUE(loaded.result->navigationView == SavedResultNavigationView::HazardExposure);
     const auto& loadedSummary = loaded.result->artifacts.hazardExposureSummary;
     SC_EXPECT_NEAR(loadedSummary.totalExposureScore, 25.0, 1e-9);
     SC_EXPECT_EQ(loadedSummary.hazards.size(), std::size_t{1});
@@ -160,6 +165,106 @@ SC_TEST(ProjectPersistence_preservesHazardExposureResultArtifacts) {
     SC_EXPECT_TRUE(loadedExposure.peakAtSeconds.has_value());
     SC_EXPECT_NEAR(*loadedExposure.peakAtSeconds, 3.0, 1e-9);
     SC_EXPECT_NEAR(loadedExposure.exposureScore, 25.0, 1e-9);
+}
+
+SC_TEST(ProjectPersistence_preservesBatchHazardExposureResultArtifacts) {
+    QTemporaryDir projectDir;
+    SC_EXPECT_TRUE(projectDir.isValid());
+
+    HazardExposureMetric fireExposure;
+    fireExposure.hazardId = "fire-b";
+    fireExposure.hazardName = "Atrium fire";
+    fireExposure.kind = EnvironmentHazardKind::Fire;
+    fireExposure.severity = ScenarioElementSeverity::High;
+    fireExposure.exposedAgentSeconds = 18.0;
+    fireExposure.peakExposedAgentCount = 6;
+    fireExposure.peakAtSeconds = 4.5;
+    fireExposure.exposureScore = 36.0;
+
+    HazardExposureMetric smokeExposure;
+    smokeExposure.hazardId = "smoke-b";
+    smokeExposure.hazardName = "Upper smoke";
+    smokeExposure.kind = EnvironmentHazardKind::Smoke;
+    smokeExposure.severity = ScenarioElementSeverity::Medium;
+    smokeExposure.exposedAgentSeconds = 9.0;
+    smokeExposure.peakExposedAgentCount = 3;
+    smokeExposure.peakAtSeconds = 6.0;
+    smokeExposure.exposureScore = 13.5;
+
+    SavedScenarioResultState baseline;
+    baseline.scenario.scenarioId = "hazard-batch-baseline";
+    baseline.scenario.name = "Hazard Batch Baseline";
+    baseline.artifacts.hazardExposureSummary = {
+        .totalExposureScore = 36.0,
+        .hazards = {fireExposure},
+    };
+
+    SavedScenarioResultState alternative;
+    alternative.scenario.scenarioId = "hazard-batch-alternative";
+    alternative.scenario.name = "Hazard Batch Alternative";
+    alternative.navigationView = SavedResultNavigationView::HazardExposure;
+    alternative.artifacts.hazardExposureSummary = {
+        .totalExposureScore = 49.5,
+        .hazards = {fireExposure, smokeExposure},
+    };
+
+    ProjectWorkspaceState workspace;
+    workspace.activeView = ProjectWorkspaceView::ScenarioResult;
+    workspace.batchResult = SavedScenarioBatchResultState{
+        .results = {baseline, alternative},
+        .currentResultIndex = 1,
+    };
+
+    const ProjectMetadata metadata{
+        .name = "Hazard Batch Persistence Test",
+        .folderPath = projectDir.path(),
+    };
+
+    QString errorMessage;
+    SC_EXPECT_TRUE(ProjectPersistence::saveProjectWorkspace(metadata, workspace, &errorMessage));
+
+    ProjectWorkspaceState loaded;
+    SC_EXPECT_TRUE(ProjectPersistence::loadProjectWorkspace(metadata, &loaded));
+    SC_EXPECT_TRUE(loaded.batchResult.has_value());
+    SC_EXPECT_EQ(loaded.batchResult->results.size(), std::size_t{2});
+    SC_EXPECT_EQ(loaded.batchResult->currentResultIndex, 1);
+
+    const auto& loadedAlternative = loaded.batchResult->results.back();
+    SC_EXPECT_EQ(loadedAlternative.scenario.scenarioId, std::string{"hazard-batch-alternative"});
+    SC_EXPECT_TRUE(loadedAlternative.navigationView == SavedResultNavigationView::HazardExposure);
+    const auto& loadedSummary = loadedAlternative.artifacts.hazardExposureSummary;
+    SC_EXPECT_NEAR(loadedSummary.totalExposureScore, 49.5, 1e-9);
+    SC_EXPECT_EQ(loadedSummary.hazards.size(), std::size_t{2});
+    SC_EXPECT_TRUE(loadedSummary.hazards.back().kind == EnvironmentHazardKind::Smoke);
+    SC_EXPECT_TRUE(loadedSummary.hazards.back().severity == ScenarioElementSeverity::Medium);
+    SC_EXPECT_NEAR(loadedSummary.hazards.back().exposedAgentSeconds, 9.0, 1e-9);
+}
+
+SC_TEST(ResultArtifactsCodec_readsHazardExposureEnumsCaseInsensitively) {
+    QJsonArray position;
+    position.append(1.0);
+    position.append(2.0);
+
+    QJsonObject hazard;
+    hazard["hazardId"] = "legacy-smoke";
+    hazard["kind"] = "Smoke";
+    hazard["severity"] = "High";
+    hazard["position"] = position;
+
+    QJsonArray hazards;
+    hazards.append(hazard);
+
+    QJsonObject summary;
+    summary["hazards"] = hazards;
+
+    QJsonObject artifactsObject;
+    artifactsObject["hazardExposureSummary"] = summary;
+
+    const auto artifacts = resultArtifactsFromJson(artifactsObject);
+    SC_EXPECT_EQ(artifacts.hazardExposureSummary.hazards.size(), std::size_t{1});
+    const auto& loadedHazard = artifacts.hazardExposureSummary.hazards.front();
+    SC_EXPECT_TRUE(loadedHazard.kind == EnvironmentHazardKind::Smoke);
+    SC_EXPECT_TRUE(loadedHazard.severity == ScenarioElementSeverity::High);
 }
 
 SC_TEST(ProjectPersistence_preservesImportArtifactsBesideLayoutReview) {

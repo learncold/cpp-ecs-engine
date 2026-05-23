@@ -311,7 +311,7 @@ QString hazardExposureKindToJson(safecrowd::domain::EnvironmentHazardKind kind) 
 }
 
 safecrowd::domain::EnvironmentHazardKind hazardExposureKindFromJson(const QJsonValue& value) {
-    const auto text = value.toString();
+    const auto text = value.toString().trimmed().toLower();
     if (text == "smoke") {
         return safecrowd::domain::EnvironmentHazardKind::Smoke;
     }
@@ -334,7 +334,7 @@ QString hazardExposureSeverityToJson(safecrowd::domain::ScenarioElementSeverity 
 }
 
 safecrowd::domain::ScenarioElementSeverity hazardExposureSeverityFromJson(const QJsonValue& value) {
-    const auto text = value.toString();
+    const auto text = value.toString().trimmed().toLower();
     if (text == "low") {
         return safecrowd::domain::ScenarioElementSeverity::Low;
     }
