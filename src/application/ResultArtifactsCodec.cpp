@@ -1,6 +1,7 @@
 #include "application/ResultArtifactsCodec.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 
 #include <QJsonArray>
@@ -9,6 +10,19 @@
 #include "application/ProjectPersistenceJson.h"
 
 namespace safecrowd::application {
+namespace {
+
+std::uint64_t unsignedIntegerFromJson(const QJsonValue& value) {
+    if (value.isString()) {
+        return value.toString().toULongLong();
+    }
+
+    const auto integer = value.toInteger();
+    return integer < 0 ? 0 : static_cast<std::uint64_t>(integer);
+}
+
+}  // namespace
+
 QJsonObject simulationAgentFrameToJson(const safecrowd::domain::SimulationAgentFrame& agent) {
     QJsonObject object;
     object["id"] = QString::number(static_cast<qulonglong>(agent.id));
@@ -22,7 +36,7 @@ QJsonObject simulationAgentFrameToJson(const safecrowd::domain::SimulationAgentF
 
 safecrowd::domain::SimulationAgentFrame simulationAgentFrameFromJson(const QJsonObject& object) {
     return {
-        .id = object.value("id").toString().toULongLong(),
+        .id = unsignedIntegerFromJson(object.value("id")),
         .position = pointFromJson(object.value("position")),
         .velocity = pointFromJson(object.value("velocity")),
         .radius = object.value("radius").toDouble(0.25),
@@ -167,7 +181,7 @@ QJsonObject pressureAgentMetricToJson(const safecrowd::domain::ScenarioPressureA
 
 safecrowd::domain::ScenarioPressureAgentMetric pressureAgentMetricFromJson(const QJsonObject& object) {
     safecrowd::domain::ScenarioPressureAgentMetric agent;
-    agent.agentId = object.value("agentId").toString().toULongLong();
+    agent.agentId = unsignedIntegerFromJson(object.value("agentId"));
     agent.position = pointFromJson(object.value("position"));
     agent.floorId = object.value("floorId").toString().toStdString();
     agent.compressionForce = object.value("compressionForce").toDouble();

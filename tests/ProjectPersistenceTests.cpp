@@ -1,7 +1,10 @@
 #include "TestSupport.h"
 #include "application/ProjectPersistence.h"
+#include "application/ResultArtifactsCodec.h"
 
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QTemporaryDir>
 
 using namespace safecrowd::application;
@@ -238,7 +241,13 @@ SC_TEST(ProjectPersistence_preservesPressureResultArtifactsAndRiskSnapshot) {
     SC_EXPECT_TRUE(loadedRisk.pressureHotspots.front().detectionFrame.has_value());
     SC_EXPECT_EQ(loadedRisk.pressureAgents.front().agentId, std::uint64_t{42});
     SC_EXPECT_TRUE(loadedRisk.pressureAgents.front().critical);
+    SC_EXPECT_NEAR(loadedRisk.pressureAgents.front().position.x, 4.2, 1e-9);
+    SC_EXPECT_NEAR(loadedRisk.pressureAgents.front().compressionForce, 1.2, 1e-9);
+    SC_EXPECT_NEAR(loadedRisk.pressureAgents.front().exposureSeconds, 2.5, 1e-9);
     SC_EXPECT_NEAR(loadedRisk.criticalPressureEvents.front().durationSeconds, 1.5, 1e-9);
+    SC_EXPECT_TRUE(loadedRisk.criticalPressureEvents.front().detectionFrame.has_value());
+    SC_EXPECT_EQ(loadedRisk.criticalPressureEvents.front().detectionFrame->agents.size(), std::size_t{1});
+    SC_EXPECT_EQ(loadedRisk.criticalPressureEvents.front().detectionFrame->agents.front().id, std::uint64_t{42});
 
     const auto& loadedSummary = loaded.result->artifacts.pressureSummary;
     SC_EXPECT_NEAR(loadedSummary.cellSizeMeters, 1.5, 1e-9);
@@ -252,15 +261,71 @@ SC_TEST(ProjectPersistence_preservesPressureResultArtifactsAndRiskSnapshot) {
     SC_EXPECT_NEAR(*loadedSummary.peakAtSeconds, 7.5, 1e-9);
     SC_EXPECT_TRUE(loadedSummary.peakCell.has_value());
     SC_EXPECT_NEAR(loadedSummary.peakCell->center.x, 4.5, 1e-9);
+    SC_EXPECT_NEAR(loadedSummary.peakCell->densityPeoplePerSquareMeter, 3.8, 1e-9);
+    SC_EXPECT_EQ(loadedSummary.peakCell->intrudingPairCount, std::size_t{3});
     SC_EXPECT_EQ(loadedSummary.peakExposedAgentCount, std::size_t{5});
     SC_EXPECT_EQ(loadedSummary.peakCriticalAgentCount, std::size_t{2});
     SC_EXPECT_EQ(loadedSummary.peakCells.size(), std::size_t{1});
     SC_EXPECT_EQ(loadedSummary.peakField.cells.size(), std::size_t{1});
+    SC_EXPECT_NEAR(loadedSummary.peakField.timeSeconds, 7.5, 1e-9);
+    SC_EXPECT_NEAR(loadedSummary.peakField.cells.front().pressureScore, 5.4, 1e-9);
     SC_EXPECT_EQ(loadedSummary.peakHotspots.size(), std::size_t{1});
     SC_EXPECT_EQ(loadedSummary.peakAgents.size(), std::size_t{1});
     SC_EXPECT_EQ(loadedSummary.criticalEvents.size(), std::size_t{1});
     SC_EXPECT_TRUE(loadedSummary.criticalEvents.front().detectionFrame.has_value());
     SC_EXPECT_NEAR(loadedSummary.criticalEvents.front().detectionFrame->elapsedSeconds, 7.5, 1e-9);
+}
+
+SC_TEST(ResultArtifactsCodec_readsNumericAgentIdsForLegacyJson) {
+    const auto pointJson = [](double x, double y) {
+        QJsonArray point;
+        point.append(x);
+        point.append(y);
+        return point;
+    };
+
+    QJsonObject frameAgent;
+    frameAgent["id"] = 77;
+    frameAgent["position"] = pointJson(1.0, 2.0);
+    frameAgent["velocity"] = pointJson(0.1, 0.2);
+    frameAgent["radius"] = 0.25;
+    frameAgent["floorId"] = "L1";
+    frameAgent["stalled"] = false;
+
+    QJsonArray frameAgents;
+    frameAgents.append(frameAgent);
+
+    QJsonObject frameObject;
+    frameObject["elapsedSeconds"] = 1.0;
+    frameObject["complete"] = false;
+    frameObject["totalAgentCount"] = 1;
+    frameObject["evacuatedAgentCount"] = 0;
+    frameObject["agents"] = frameAgents;
+
+    const auto frame = simulationFrameFromJson(frameObject);
+    SC_EXPECT_EQ(frame.agents.size(), std::size_t{1});
+    SC_EXPECT_EQ(frame.agents.front().id, std::uint64_t{77});
+
+    QJsonObject pressureAgent;
+    pressureAgent["agentId"] = 88;
+    pressureAgent["position"] = pointJson(3.0, 4.0);
+    pressureAgent["floorId"] = "L2";
+    pressureAgent["compressionForce"] = 1.25;
+    pressureAgent["exposureSeconds"] = 2.5;
+    pressureAgent["critical"] = true;
+
+    QJsonArray pressureAgents;
+    pressureAgents.append(pressureAgent);
+
+    QJsonObject riskObject;
+    riskObject["completionRisk"] = static_cast<int>(ScenarioRiskLevel::Medium);
+    riskObject["stalledAgentCount"] = 0;
+    riskObject["pressureAgents"] = pressureAgents;
+
+    const auto risk = riskSnapshotFromJson(riskObject);
+    SC_EXPECT_EQ(risk.pressureAgents.size(), std::size_t{1});
+    SC_EXPECT_EQ(risk.pressureAgents.front().agentId, std::uint64_t{88});
+    SC_EXPECT_TRUE(risk.pressureAgents.front().critical);
 }
 
 SC_TEST(ProjectPersistence_preservesImportArtifactsBesideLayoutReview) {
