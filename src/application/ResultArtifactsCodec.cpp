@@ -119,15 +119,126 @@ safecrowd::domain::ScenarioBottleneckMetric bottleneckFromJson(const QJsonObject
     return bottleneck;
 }
 
+QJsonObject pressureHotspotToJson(const safecrowd::domain::ScenarioPressureHotspot& hotspot) {
+    QJsonObject object;
+    object["center"] = pointArray(hotspot.center);
+    object["cellMin"] = pointArray(hotspot.cellMin);
+    object["cellMax"] = pointArray(hotspot.cellMax);
+    object["floorId"] = QString::fromStdString(hotspot.floorId);
+    object["agentCount"] = static_cast<qint64>(hotspot.agentCount);
+    object["intrudingPairCount"] = static_cast<qint64>(hotspot.intrudingPairCount);
+    object["densityPeoplePerSquareMeter"] = hotspot.densityPeoplePerSquareMeter;
+    object["pressureScore"] = hotspot.pressureScore;
+    object["detectedAtSeconds"] = optionalDoubleToJson(hotspot.detectedAtSeconds);
+    if (hotspot.detectionFrame.has_value()) {
+        object["detectionFrame"] = simulationFrameToJson(*hotspot.detectionFrame);
+    }
+    return object;
+}
+
+safecrowd::domain::ScenarioPressureHotspot pressureHotspotFromJson(const QJsonObject& object) {
+    safecrowd::domain::ScenarioPressureHotspot hotspot{
+        .center = pointFromJson(object.value("center")),
+        .cellMin = pointFromJson(object.value("cellMin")),
+        .cellMax = pointFromJson(object.value("cellMax")),
+        .floorId = object.value("floorId").toString().toStdString(),
+        .agentCount = static_cast<std::size_t>(object.value("agentCount").toInteger()),
+        .intrudingPairCount = static_cast<std::size_t>(object.value("intrudingPairCount").toInteger()),
+        .densityPeoplePerSquareMeter = object.value("densityPeoplePerSquareMeter").toDouble(),
+        .pressureScore = object.value("pressureScore").toDouble(),
+    };
+    hotspot.detectedAtSeconds = optionalDoubleFromJson(object.value("detectedAtSeconds"));
+    if (object.value("detectionFrame").isObject()) {
+        hotspot.detectionFrame = simulationFrameFromJson(object.value("detectionFrame").toObject());
+    }
+    return hotspot;
+}
+
+QJsonObject pressureAgentMetricToJson(const safecrowd::domain::ScenarioPressureAgentMetric& agent) {
+    QJsonObject object;
+    object["agentId"] = QString::number(static_cast<qulonglong>(agent.agentId));
+    object["position"] = pointArray(agent.position);
+    object["floorId"] = QString::fromStdString(agent.floorId);
+    object["compressionForce"] = agent.compressionForce;
+    object["exposureSeconds"] = agent.exposureSeconds;
+    object["critical"] = agent.critical;
+    return object;
+}
+
+safecrowd::domain::ScenarioPressureAgentMetric pressureAgentMetricFromJson(const QJsonObject& object) {
+    safecrowd::domain::ScenarioPressureAgentMetric agent;
+    agent.agentId = object.value("agentId").toString().toULongLong();
+    agent.position = pointFromJson(object.value("position"));
+    agent.floorId = object.value("floorId").toString().toStdString();
+    agent.compressionForce = object.value("compressionForce").toDouble();
+    agent.exposureSeconds = object.value("exposureSeconds").toDouble();
+    agent.critical = object.value("critical").toBool(false);
+    return agent;
+}
+
+QJsonObject criticalPressureEventToJson(const safecrowd::domain::ScenarioCriticalPressureEvent& event) {
+    QJsonObject object;
+    object["center"] = pointArray(event.center);
+    object["cellMin"] = pointArray(event.cellMin);
+    object["cellMax"] = pointArray(event.cellMax);
+    object["floorId"] = QString::fromStdString(event.floorId);
+    object["exposedAgentCount"] = static_cast<qint64>(event.exposedAgentCount);
+    object["criticalAgentCount"] = static_cast<qint64>(event.criticalAgentCount);
+    object["pressureScore"] = event.pressureScore;
+    object["startedAtSeconds"] = event.startedAtSeconds;
+    object["durationSeconds"] = event.durationSeconds;
+    object["detectedAtSeconds"] = optionalDoubleToJson(event.detectedAtSeconds);
+    if (event.detectionFrame.has_value()) {
+        object["detectionFrame"] = simulationFrameToJson(*event.detectionFrame);
+    }
+    return object;
+}
+
+safecrowd::domain::ScenarioCriticalPressureEvent criticalPressureEventFromJson(const QJsonObject& object) {
+    safecrowd::domain::ScenarioCriticalPressureEvent event{
+        .center = pointFromJson(object.value("center")),
+        .cellMin = pointFromJson(object.value("cellMin")),
+        .cellMax = pointFromJson(object.value("cellMax")),
+        .floorId = object.value("floorId").toString().toStdString(),
+        .exposedAgentCount = static_cast<std::size_t>(object.value("exposedAgentCount").toInteger()),
+        .criticalAgentCount = static_cast<std::size_t>(object.value("criticalAgentCount").toInteger()),
+        .pressureScore = object.value("pressureScore").toDouble(),
+        .startedAtSeconds = object.value("startedAtSeconds").toDouble(),
+        .durationSeconds = object.value("durationSeconds").toDouble(),
+    };
+    event.detectedAtSeconds = optionalDoubleFromJson(object.value("detectedAtSeconds"));
+    if (object.value("detectionFrame").isObject()) {
+        event.detectionFrame = simulationFrameFromJson(object.value("detectionFrame").toObject());
+    }
+    return event;
+}
+
 QJsonObject riskSnapshotToJson(const safecrowd::domain::ScenarioRiskSnapshot& risk) {
     QJsonObject object;
     object["completionRisk"] = static_cast<int>(risk.completionRisk);
     object["stalledAgentCount"] = static_cast<qint64>(risk.stalledAgentCount);
+    object["pressureExposedAgentCount"] = static_cast<qint64>(risk.pressureExposedAgentCount);
+    object["criticalPressureAgentCount"] = static_cast<qint64>(risk.criticalPressureAgentCount);
     QJsonArray hotspots;
     for (const auto& hotspot : risk.hotspots) {
         hotspots.append(hotspotToJson(hotspot));
     }
     object["hotspots"] = hotspots;
+    QJsonArray pressureHotspots;
+    for (const auto& hotspot : risk.pressureHotspots) {
+        pressureHotspots.append(pressureHotspotToJson(hotspot));
+    }
+    object["pressureHotspots"] = pressureHotspots;
+    QJsonArray pressureAgents;
+    for (const auto& agent : risk.pressureAgents) {
+        pressureAgents.append(pressureAgentMetricToJson(agent));
+    }
+    object["pressureAgents"] = pressureAgents;
+    QJsonArray criticalPressureEvents;
+    for (const auto& event : risk.criticalPressureEvents) {
+        criticalPressureEvents.append(criticalPressureEventToJson(event));
+    }
+    object["criticalPressureEvents"] = criticalPressureEvents;
     QJsonArray bottlenecks;
     for (const auto& bottleneck : risk.bottlenecks) {
         bottlenecks.append(bottleneckToJson(bottleneck));
@@ -140,8 +251,21 @@ safecrowd::domain::ScenarioRiskSnapshot riskSnapshotFromJson(const QJsonObject& 
     safecrowd::domain::ScenarioRiskSnapshot risk;
     risk.completionRisk = static_cast<safecrowd::domain::ScenarioRiskLevel>(object.value("completionRisk").toInt());
     risk.stalledAgentCount = static_cast<std::size_t>(object.value("stalledAgentCount").toInteger());
+    risk.pressureExposedAgentCount =
+        static_cast<std::size_t>(object.value("pressureExposedAgentCount").toInteger());
+    risk.criticalPressureAgentCount =
+        static_cast<std::size_t>(object.value("criticalPressureAgentCount").toInteger());
     for (const auto& value : object.value("hotspots").toArray()) {
         risk.hotspots.push_back(hotspotFromJson(value.toObject()));
+    }
+    for (const auto& value : object.value("pressureHotspots").toArray()) {
+        risk.pressureHotspots.push_back(pressureHotspotFromJson(value.toObject()));
+    }
+    for (const auto& value : object.value("pressureAgents").toArray()) {
+        risk.pressureAgents.push_back(pressureAgentMetricFromJson(value.toObject()));
+    }
+    for (const auto& value : object.value("criticalPressureEvents").toArray()) {
+        risk.criticalPressureEvents.push_back(criticalPressureEventFromJson(value.toObject()));
     }
     for (const auto& value : object.value("bottlenecks").toArray()) {
         risk.bottlenecks.push_back(bottleneckFromJson(value.toObject()));
@@ -230,6 +354,129 @@ safecrowd::domain::DensitySummary densitySummaryFromJson(const QJsonObject& obje
     }
     if (object.value("peakField").isObject()) {
         summary.peakField = densityFieldSnapshotFromJson(object.value("peakField").toObject());
+    }
+    return summary;
+}
+
+QJsonObject pressureCellMetricToJson(const safecrowd::domain::PressureCellMetric& cell) {
+    QJsonObject object;
+    object["center"] = pointArray(cell.center);
+    object["cellMin"] = pointArray(cell.cellMin);
+    object["cellMax"] = pointArray(cell.cellMax);
+    object["floorId"] = QString::fromStdString(cell.floorId);
+    object["agentCount"] = static_cast<qint64>(cell.agentCount);
+    object["intrudingPairCount"] = static_cast<qint64>(cell.intrudingPairCount);
+    object["densityPeoplePerSquareMeter"] = cell.densityPeoplePerSquareMeter;
+    object["pressureScore"] = cell.pressureScore;
+    return object;
+}
+
+safecrowd::domain::PressureCellMetric pressureCellMetricFromJson(const QJsonObject& object) {
+    return {
+        .center = pointFromJson(object.value("center")),
+        .cellMin = pointFromJson(object.value("cellMin")),
+        .cellMax = pointFromJson(object.value("cellMax")),
+        .floorId = object.value("floorId").toString().toStdString(),
+        .agentCount = static_cast<std::size_t>(object.value("agentCount").toInteger()),
+        .intrudingPairCount = static_cast<std::size_t>(object.value("intrudingPairCount").toInteger()),
+        .densityPeoplePerSquareMeter = object.value("densityPeoplePerSquareMeter").toDouble(),
+        .pressureScore = object.value("pressureScore").toDouble(),
+    };
+}
+
+QJsonObject pressureFieldSnapshotToJson(const safecrowd::domain::PressureFieldSnapshot& snapshot) {
+    QJsonObject object;
+    object["timeSeconds"] = snapshot.timeSeconds;
+    object["cellSizeMeters"] = snapshot.cellSizeMeters;
+    QJsonArray cells;
+    for (const auto& cell : snapshot.cells) {
+        cells.append(pressureCellMetricToJson(cell));
+    }
+    object["cells"] = cells;
+    return object;
+}
+
+safecrowd::domain::PressureFieldSnapshot pressureFieldSnapshotFromJson(const QJsonObject& object) {
+    safecrowd::domain::PressureFieldSnapshot snapshot;
+    snapshot.timeSeconds = object.value("timeSeconds").toDouble();
+    snapshot.cellSizeMeters = object.value("cellSizeMeters").toDouble();
+    for (const auto& value : object.value("cells").toArray()) {
+        snapshot.cells.push_back(pressureCellMetricFromJson(value.toObject()));
+    }
+    return snapshot;
+}
+
+QJsonObject pressureSummaryToJson(const safecrowd::domain::PressureSummary& summary) {
+    QJsonObject object;
+    object["cellSizeMeters"] = summary.cellSizeMeters;
+    object["hotspotScoreThreshold"] = summary.hotspotScoreThreshold;
+    object["criticalCompressionForceThreshold"] = summary.criticalCompressionForceThreshold;
+    object["criticalExposureThresholdSeconds"] = summary.criticalExposureThresholdSeconds;
+    object["criticalEventDurationThresholdSeconds"] = summary.criticalEventDurationThresholdSeconds;
+    object["criticalEventAgentThreshold"] = static_cast<qint64>(summary.criticalEventAgentThreshold);
+    object["peakPressureScore"] = summary.peakPressureScore;
+    object["peakAtSeconds"] = optionalDoubleToJson(summary.peakAtSeconds);
+    if (summary.peakCell.has_value()) {
+        object["peakCell"] = pressureCellMetricToJson(*summary.peakCell);
+    }
+    object["peakExposedAgentCount"] = static_cast<qint64>(summary.peakExposedAgentCount);
+    object["peakCriticalAgentCount"] = static_cast<qint64>(summary.peakCriticalAgentCount);
+    QJsonArray peakCells;
+    for (const auto& cell : summary.peakCells) {
+        peakCells.append(pressureCellMetricToJson(cell));
+    }
+    object["peakCells"] = peakCells;
+    object["peakField"] = pressureFieldSnapshotToJson(summary.peakField);
+    QJsonArray peakHotspots;
+    for (const auto& hotspot : summary.peakHotspots) {
+        peakHotspots.append(pressureHotspotToJson(hotspot));
+    }
+    object["peakHotspots"] = peakHotspots;
+    QJsonArray peakAgents;
+    for (const auto& agent : summary.peakAgents) {
+        peakAgents.append(pressureAgentMetricToJson(agent));
+    }
+    object["peakAgents"] = peakAgents;
+    QJsonArray criticalEvents;
+    for (const auto& event : summary.criticalEvents) {
+        criticalEvents.append(criticalPressureEventToJson(event));
+    }
+    object["criticalEvents"] = criticalEvents;
+    return object;
+}
+
+safecrowd::domain::PressureSummary pressureSummaryFromJson(const QJsonObject& object) {
+    safecrowd::domain::PressureSummary summary;
+    summary.cellSizeMeters = object.value("cellSizeMeters").toDouble();
+    summary.hotspotScoreThreshold = object.value("hotspotScoreThreshold").toDouble();
+    summary.criticalCompressionForceThreshold = object.value("criticalCompressionForceThreshold").toDouble();
+    summary.criticalExposureThresholdSeconds = object.value("criticalExposureThresholdSeconds").toDouble();
+    summary.criticalEventDurationThresholdSeconds = object.value("criticalEventDurationThresholdSeconds").toDouble();
+    summary.criticalEventAgentThreshold =
+        static_cast<std::size_t>(object.value("criticalEventAgentThreshold").toInteger());
+    summary.peakPressureScore = object.value("peakPressureScore").toDouble();
+    summary.peakAtSeconds = optionalDoubleFromJson(object.value("peakAtSeconds"));
+    if (object.value("peakCell").isObject()) {
+        summary.peakCell = pressureCellMetricFromJson(object.value("peakCell").toObject());
+    }
+    summary.peakExposedAgentCount =
+        static_cast<std::size_t>(object.value("peakExposedAgentCount").toInteger());
+    summary.peakCriticalAgentCount =
+        static_cast<std::size_t>(object.value("peakCriticalAgentCount").toInteger());
+    for (const auto& value : object.value("peakCells").toArray()) {
+        summary.peakCells.push_back(pressureCellMetricFromJson(value.toObject()));
+    }
+    if (object.value("peakField").isObject()) {
+        summary.peakField = pressureFieldSnapshotFromJson(object.value("peakField").toObject());
+    }
+    for (const auto& value : object.value("peakHotspots").toArray()) {
+        summary.peakHotspots.push_back(pressureHotspotFromJson(value.toObject()));
+    }
+    for (const auto& value : object.value("peakAgents").toArray()) {
+        summary.peakAgents.push_back(pressureAgentMetricFromJson(value.toObject()));
+    }
+    for (const auto& value : object.value("criticalEvents").toArray()) {
+        summary.criticalEvents.push_back(criticalPressureEventFromJson(value.toObject()));
     }
     return summary;
 }
@@ -335,6 +582,7 @@ QJsonObject resultArtifactsToJson(const safecrowd::domain::ScenarioResultArtifac
     object["timingSummary"] = timing;
 
     object["densitySummary"] = densitySummaryToJson(artifacts.densitySummary);
+    object["pressureSummary"] = pressureSummaryToJson(artifacts.pressureSummary);
 
     QJsonArray exitUsage;
     for (const auto& exit : artifacts.exitUsage) {
@@ -388,6 +636,9 @@ safecrowd::domain::ScenarioResultArtifacts resultArtifactsFromJson(const QJsonOb
 
     if (object.value("densitySummary").isObject()) {
         artifacts.densitySummary = densitySummaryFromJson(object.value("densitySummary").toObject());
+    }
+    if (object.value("pressureSummary").isObject()) {
+        artifacts.pressureSummary = pressureSummaryFromJson(object.value("pressureSummary").toObject());
     }
     for (const auto& value : object.value("exitUsage").toArray()) {
         artifacts.exitUsage.push_back(exitUsageMetricFromJson(value.toObject()));
