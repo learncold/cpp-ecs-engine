@@ -561,6 +561,124 @@ safecrowd::domain::PlacementCompletionMetric placementCompletionMetricFromJson(c
     return placement;
 }
 
+QString hazardExposureKindToJson(safecrowd::domain::EnvironmentHazardKind kind) {
+    switch (kind) {
+    case safecrowd::domain::EnvironmentHazardKind::Smoke:
+        return "smoke";
+    case safecrowd::domain::EnvironmentHazardKind::Fire:
+    default:
+        return "fire";
+    }
+}
+
+safecrowd::domain::EnvironmentHazardKind hazardExposureKindFromJson(const QJsonValue& value) {
+    if (value.isDouble()) {
+        return value.toInt() == static_cast<int>(safecrowd::domain::EnvironmentHazardKind::Smoke)
+            ? safecrowd::domain::EnvironmentHazardKind::Smoke
+            : safecrowd::domain::EnvironmentHazardKind::Fire;
+    }
+
+    const auto text = value.toString().trimmed().toLower();
+    if (text == "smoke") {
+        return safecrowd::domain::EnvironmentHazardKind::Smoke;
+    }
+    if (text == "fire") {
+        return safecrowd::domain::EnvironmentHazardKind::Fire;
+    }
+    return safecrowd::domain::EnvironmentHazardKind::Fire;
+}
+
+QString hazardExposureSeverityToJson(safecrowd::domain::ScenarioElementSeverity severity) {
+    switch (severity) {
+    case safecrowd::domain::ScenarioElementSeverity::Low:
+        return "low";
+    case safecrowd::domain::ScenarioElementSeverity::High:
+        return "high";
+    case safecrowd::domain::ScenarioElementSeverity::Medium:
+    default:
+        return "medium";
+    }
+}
+
+safecrowd::domain::ScenarioElementSeverity hazardExposureSeverityFromJson(const QJsonValue& value) {
+    if (value.isDouble()) {
+        const auto raw = value.toInt();
+        if (raw == static_cast<int>(safecrowd::domain::ScenarioElementSeverity::Low)) {
+            return safecrowd::domain::ScenarioElementSeverity::Low;
+        }
+        if (raw == static_cast<int>(safecrowd::domain::ScenarioElementSeverity::High)) {
+            return safecrowd::domain::ScenarioElementSeverity::High;
+        }
+        return safecrowd::domain::ScenarioElementSeverity::Medium;
+    }
+
+    const auto text = value.toString().trimmed().toLower();
+    if (text == "low") {
+        return safecrowd::domain::ScenarioElementSeverity::Low;
+    }
+    if (text == "high") {
+        return safecrowd::domain::ScenarioElementSeverity::High;
+    }
+    if (text == "medium") {
+        return safecrowd::domain::ScenarioElementSeverity::Medium;
+    }
+    return safecrowd::domain::ScenarioElementSeverity::Medium;
+}
+
+QJsonObject hazardExposureMetricToJson(const safecrowd::domain::HazardExposureMetric& metric) {
+    QJsonObject object;
+    object["hazardId"] = QString::fromStdString(metric.hazardId);
+    object["hazardName"] = QString::fromStdString(metric.hazardName);
+    object["kind"] = hazardExposureKindToJson(metric.kind);
+    object["severity"] = hazardExposureSeverityToJson(metric.severity);
+    object["affectedZoneId"] = QString::fromStdString(metric.affectedZoneId);
+    object["floorId"] = QString::fromStdString(metric.floorId);
+    object["position"] = pointArray(metric.position);
+    object["exposedAgentSeconds"] = metric.exposedAgentSeconds;
+    object["peakExposedAgentCount"] = static_cast<qint64>(metric.peakExposedAgentCount);
+    object["firstExposureSeconds"] = optionalDoubleToJson(metric.firstExposureSeconds);
+    object["peakAtSeconds"] = optionalDoubleToJson(metric.peakAtSeconds);
+    object["exposureScore"] = metric.exposureScore;
+    return object;
+}
+
+safecrowd::domain::HazardExposureMetric hazardExposureMetricFromJson(const QJsonObject& object) {
+    safecrowd::domain::HazardExposureMetric metric;
+    metric.hazardId = object.value("hazardId").toString().toStdString();
+    metric.hazardName = object.value("hazardName").toString().toStdString();
+    metric.kind = hazardExposureKindFromJson(object.value("kind"));
+    metric.severity = hazardExposureSeverityFromJson(object.value("severity"));
+    metric.affectedZoneId = object.value("affectedZoneId").toString().toStdString();
+    metric.floorId = object.value("floorId").toString().toStdString();
+    metric.position = pointFromJson(object.value("position"));
+    metric.exposedAgentSeconds = object.value("exposedAgentSeconds").toDouble();
+    metric.peakExposedAgentCount = static_cast<std::size_t>(object.value("peakExposedAgentCount").toInteger());
+    metric.firstExposureSeconds = optionalDoubleFromJson(object.value("firstExposureSeconds"));
+    metric.peakAtSeconds = optionalDoubleFromJson(object.value("peakAtSeconds"));
+    metric.exposureScore = object.value("exposureScore").toDouble();
+    return metric;
+}
+
+QJsonObject hazardExposureSummaryToJson(const safecrowd::domain::HazardExposureSummary& summary) {
+    QJsonObject object;
+    object["totalExposureScore"] = summary.totalExposureScore;
+    QJsonArray hazards;
+    for (const auto& metric : summary.hazards) {
+        hazards.append(hazardExposureMetricToJson(metric));
+    }
+    object["hazards"] = hazards;
+    return object;
+}
+
+safecrowd::domain::HazardExposureSummary hazardExposureSummaryFromJson(const QJsonObject& object) {
+    safecrowd::domain::HazardExposureSummary summary;
+    summary.totalExposureScore = object.value("totalExposureScore").toDouble();
+    for (const auto& value : object.value("hazards").toArray()) {
+        summary.hazards.push_back(hazardExposureMetricFromJson(value.toObject()));
+    }
+    return summary;
+}
+
 QJsonObject resultArtifactsToJson(const safecrowd::domain::ScenarioResultArtifacts& artifacts) {
     QJsonObject object;
     QJsonArray progress;
@@ -597,6 +715,7 @@ QJsonObject resultArtifactsToJson(const safecrowd::domain::ScenarioResultArtifac
 
     object["densitySummary"] = densitySummaryToJson(artifacts.densitySummary);
     object["pressureSummary"] = pressureSummaryToJson(artifacts.pressureSummary);
+    object["hazardExposureSummary"] = hazardExposureSummaryToJson(artifacts.hazardExposureSummary);
 
     QJsonArray exitUsage;
     for (const auto& exit : artifacts.exitUsage) {
@@ -653,6 +772,10 @@ safecrowd::domain::ScenarioResultArtifacts resultArtifactsFromJson(const QJsonOb
     }
     if (object.value("pressureSummary").isObject()) {
         artifacts.pressureSummary = pressureSummaryFromJson(object.value("pressureSummary").toObject());
+    }
+    if (object.value("hazardExposureSummary").isObject()) {
+        artifacts.hazardExposureSummary =
+            hazardExposureSummaryFromJson(object.value("hazardExposureSummary").toObject());
     }
     for (const auto& value : object.value("exitUsage").toArray()) {
         artifacts.exitUsage.push_back(exitUsageMetricFromJson(value.toObject()));

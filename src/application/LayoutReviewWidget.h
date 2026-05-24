@@ -32,6 +32,7 @@ public:
 
     const safecrowd::domain::ImportResult& currentImportResult() const noexcept;
     bool undoLastEdit();
+    bool redoLastUndo();
 
 private:
     enum class NavigationView {
@@ -61,6 +62,7 @@ private:
     std::function<void(const safecrowd::domain::ImportResult&)> approvalHandler_{};
     std::function<void(const safecrowd::domain::ImportResult&)> reimportHandler_{};
     std::vector<safecrowd::domain::FacilityLayout2D> undoHistory_{};
+    std::vector<safecrowd::domain::FacilityLayout2D> redoHistory_{};
     WorkspaceShell* shell_{nullptr};
     LayoutPreviewWidget* preview_{nullptr};
     QLabel* inspectorTitleLabel_{nullptr};

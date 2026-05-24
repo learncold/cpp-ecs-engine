@@ -17,6 +17,7 @@ namespace safecrowd::application {
 enum class ScenarioResultNavigationView {
     Bottleneck,
     Hotspot,
+    HazardExposure,
     Zone,
     Groups,
     Recommendations,

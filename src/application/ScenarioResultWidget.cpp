@@ -11,6 +11,7 @@
 #include <QColor>
 #include <QComboBox>
 #include <QFrame>
+#include <QFontMetrics>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -76,6 +77,80 @@ QString formatDensity(double density) {
 
 QString formatPressureScore(double score) {
     return QString::number(score, 'f', 1);
+}
+
+QString formatExposureScore(double score) {
+    return QString::number(score, 'f', 1);
+}
+
+QString formatExposureSeconds(double seconds) {
+    return QString("%1 agent-sec").arg(seconds, 0, 'f', 1);
+}
+
+QString hazardKindLabel(safecrowd::domain::EnvironmentHazardKind kind) {
+    switch (kind) {
+    case safecrowd::domain::EnvironmentHazardKind::Smoke:
+        return "Smoke";
+    case safecrowd::domain::EnvironmentHazardKind::Fire:
+    default:
+        return "Fire";
+    }
+}
+
+QString hazardSeverityLabel(safecrowd::domain::ScenarioElementSeverity severity) {
+    switch (severity) {
+    case safecrowd::domain::ScenarioElementSeverity::Low:
+        return "Low";
+    case safecrowd::domain::ScenarioElementSeverity::High:
+        return "High";
+    case safecrowd::domain::ScenarioElementSeverity::Medium:
+    default:
+        return "Medium";
+    }
+}
+
+QString hazardExposureLabel(const safecrowd::domain::HazardExposureMetric& metric) {
+    if (!metric.hazardName.empty()) {
+        return QString::fromStdString(metric.hazardName);
+    }
+    if (!metric.hazardId.empty()) {
+        return QString::fromStdString(metric.hazardId);
+    }
+    return hazardKindLabel(metric.kind);
+}
+
+double hazardExposureSecondsForKind(
+    const safecrowd::domain::HazardExposureSummary& summary,
+    safecrowd::domain::EnvironmentHazardKind kind) {
+    double total = 0.0;
+    for (const auto& metric : summary.hazards) {
+        if (metric.kind == kind) {
+            total += metric.exposedAgentSeconds;
+        }
+    }
+    return total;
+}
+
+double totalHazardExposureSeconds(const safecrowd::domain::HazardExposureSummary& summary) {
+    double total = 0.0;
+    for (const auto& metric : summary.hazards) {
+        total += metric.exposedAgentSeconds;
+    }
+    return total;
+}
+
+const safecrowd::domain::HazardExposureMetric* peakHazardExposureMetric(
+    const safecrowd::domain::HazardExposureSummary& summary) {
+    const safecrowd::domain::HazardExposureMetric* best = nullptr;
+    for (const auto& metric : summary.hazards) {
+        if (best == nullptr
+            || metric.peakExposedAgentCount > best->peakExposedAgentCount
+            || (metric.peakExposedAgentCount == best->peakExposedAgentCount
+                && metric.exposedAgentSeconds > best->exposedAgentSeconds)) {
+            best = &metric;
+        }
+    }
+    return best;
 }
 
 QString simplifyLocationLabel(QString text) {
@@ -565,6 +640,7 @@ QString resultCriteriaTooltip(const safecrowd::domain::ScenarioResultArtifacts& 
             .arg(artifacts.densitySummary.highDensityThresholdPeoplePerSquareMeter, 0, 'f', 1),
         QString("Pressure hotspot: score %1 or higher in a crowded cell.")
             .arg(artifacts.pressureSummary.hotspotScoreThreshold, 0, 'f', 1),
+        "Hazard exposure: accumulated agent-seconds inside fire and smoke influence areas.",
         safecrowd::domain::scenarioStalledDefinition(),
         safecrowd::domain::scenarioBottleneckDefinition(),
     }.join("\n\n");
@@ -647,6 +723,57 @@ QWidget* createExitUsageTable(const safecrowd::domain::ScenarioResultArtifacts& 
         table->setItem(row, 1, tableItem(QString::number(static_cast<int>(exit.evacuatedCount))));
         table->setItem(row, 2, tableItem(formatPercent(exit.usageRatio)));
         table->setItem(row, 3, tableItem(formatOptionalSeconds(exit.lastExitTimeSeconds)));
+    }
+    table->resizeRowsToContents();
+    layout->addWidget(table);
+    return container;
+}
+
+QWidget* createHazardExposureTable(const safecrowd::domain::ScenarioResultArtifacts& artifacts, QWidget* parent) {
+    auto* container = new QWidget(parent);
+    auto* layout = new QVBoxLayout(container);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(8);
+
+    const auto& summary = artifacts.hazardExposureSummary;
+    auto* total = createLabel(
+        QString("Exposure: %1    Fire: %2    Smoke: %3")
+            .arg(formatExposureSeconds(totalHazardExposureSeconds(summary)))
+            .arg(formatExposureSeconds(hazardExposureSecondsForKind(
+                summary,
+                safecrowd::domain::EnvironmentHazardKind::Fire)))
+            .arg(formatExposureSeconds(hazardExposureSecondsForKind(
+                summary,
+                safecrowd::domain::EnvironmentHazardKind::Smoke))),
+        container,
+        ui::FontRole::Caption);
+    total->setStyleSheet(ui::mutedTextStyleSheet());
+    total->setToolTip(QString("Accumulated exposed agent-seconds around fire and smoke hazards.\nSeverity-weighted score: %1")
+        .arg(formatExposureScore(summary.totalExposureScore)));
+    layout->addWidget(total);
+
+    if (summary.hazards.empty()) {
+        auto* empty = createLabel("No hazard exposure data", container);
+        empty->setStyleSheet(ui::mutedTextStyleSheet());
+        layout->addWidget(empty);
+        layout->addStretch(1);
+        return container;
+    }
+
+    auto* table = createResultTable(
+        {"Hazard", "Kind", "Exposure", "Peak", "First", "Peak at"},
+        static_cast<int>(summary.hazards.size()),
+        container);
+    for (int row = 0; row < static_cast<int>(summary.hazards.size()); ++row) {
+        const auto& hazard = summary.hazards[static_cast<std::size_t>(row)];
+        table->setItem(row, 0, tableItem(hazardExposureLabel(hazard)));
+        table->setItem(row, 1, tableItem(QString("%1 / %2")
+            .arg(hazardKindLabel(hazard.kind), hazardSeverityLabel(hazard.severity))));
+        table->setItem(row, 2, tableItem(QString("%1 agent-sec")
+            .arg(hazard.exposedAgentSeconds, 0, 'f', 1)));
+        table->setItem(row, 3, tableItem(QString::number(static_cast<int>(hazard.peakExposedAgentCount))));
+        table->setItem(row, 4, tableItem(formatOptionalSeconds(hazard.firstExposureSeconds)));
+        table->setItem(row, 5, tableItem(formatOptionalSeconds(hazard.peakAtSeconds)));
     }
     table->resizeRowsToContents();
     layout->addWidget(table);
@@ -874,6 +1001,7 @@ QWidget* createResultGraphPanel(
     remainingLayout->addWidget(timing);
     tabs->addTab(remainingTab, "Remaining");
     tabs->addTab(createExitUsageTable(artifacts, tabs), "Exits");
+    tabs->addTab(createHazardExposureTable(artifacts, tabs), "Exposure");
     layout->addWidget(tabs, 1);
 
     QObject::connect(toggleButton, &QPushButton::clicked, panel, [panel, tabs, toggleButton]() {
@@ -1175,6 +1303,23 @@ QWidget* createResultPanel(
     const auto slowestGroup = artifacts.placementCompletion.empty()
         ? QString("Pending")
         : QString::fromStdString(artifacts.placementCompletion.front().placementId);
+    const auto totalHazardExposure = totalHazardExposureSeconds(artifacts.hazardExposureSummary);
+    const auto fireHazardExposure = hazardExposureSecondsForKind(
+        artifacts.hazardExposureSummary,
+        safecrowd::domain::EnvironmentHazardKind::Fire);
+    const auto smokeHazardExposure = hazardExposureSecondsForKind(
+        artifacts.hazardExposureSummary,
+        safecrowd::domain::EnvironmentHazardKind::Smoke);
+    const auto* peakHazardExposure = peakHazardExposureMetric(artifacts.hazardExposureSummary);
+    const auto topHazard = peakHazardExposure == nullptr
+        ? QString("No hazard exposure recorded.")
+        : QString("Peak hazard: %1 (%2)\nExposure: %3\nPeak exposed: %4 people\nPeak at: %5\nFirst exposure: %6")
+            .arg(hazardExposureLabel(*peakHazardExposure))
+            .arg(hazardKindLabel(peakHazardExposure->kind))
+            .arg(formatExposureSeconds(peakHazardExposure->exposedAgentSeconds))
+            .arg(static_cast<int>(peakHazardExposure->peakExposedAgentCount))
+            .arg(formatOptionalSeconds(peakHazardExposure->peakAtSeconds))
+            .arg(formatOptionalSeconds(peakHazardExposure->firstExposureSeconds));
     const auto peakPressureTooltip = QString(
         "Highest pressure hotspot score observed during the run.%1%2")
         .arg(artifacts.pressureSummary.peakAtSeconds.has_value()
@@ -1251,6 +1396,30 @@ QWidget* createResultPanel(
         panel,
         QString("Peak simultaneously critical agents during the run.\nExposed peak: %1 agents.")
             .arg(static_cast<int>(artifacts.pressureSummary.peakExposedAgentCount))), 6, 0);
+    metricsGrid->addWidget(createMetricCard(
+        "Hazard Exposure",
+        formatExposureSeconds(totalHazardExposure),
+        panel,
+        QString("Total occupant dwell time inside fire and smoke influence areas.\nSeverity-weighted score: %1\n\n%2")
+            .arg(formatExposureScore(artifacts.hazardExposureSummary.totalExposureScore))
+            .arg(topHazard)), 6, 1);
+    metricsGrid->addWidget(createMetricCard(
+        "Fire Exposure",
+        formatExposureSeconds(fireHazardExposure),
+        panel,
+        "Accumulated occupant dwell time inside fire influence areas."), 7, 0);
+    metricsGrid->addWidget(createMetricCard(
+        "Smoke Exposure",
+        formatExposureSeconds(smokeHazardExposure),
+        panel,
+        "Accumulated occupant dwell time inside smoke influence areas."), 7, 1);
+    metricsGrid->addWidget(createMetricCard(
+        "Hazard Peak",
+        peakHazardExposure == nullptr
+            ? QString("None")
+            : QString("%1 people").arg(static_cast<int>(peakHazardExposure->peakExposedAgentCount)),
+        panel,
+        topHazard), 8, 0);
     layout->addLayout(metricsGrid);
     layout->addStretch(1);
 
@@ -1287,6 +1456,8 @@ ScenarioResultNavigationView resultNavigationViewFromSaved(SavedResultNavigation
     switch (view) {
     case SavedResultNavigationView::Hotspot:
         return ScenarioResultNavigationView::Hotspot;
+    case SavedResultNavigationView::HazardExposure:
+        return ScenarioResultNavigationView::HazardExposure;
     case SavedResultNavigationView::Zone:
         return ScenarioResultNavigationView::Zone;
     case SavedResultNavigationView::Groups:
@@ -1303,6 +1474,8 @@ SavedResultNavigationView savedResultNavigationView(ScenarioResultNavigationView
     switch (view) {
     case ScenarioResultNavigationView::Hotspot:
         return SavedResultNavigationView::Hotspot;
+    case ScenarioResultNavigationView::HazardExposure:
+        return SavedResultNavigationView::HazardExposure;
     case ScenarioResultNavigationView::Zone:
         return SavedResultNavigationView::Zone;
     case ScenarioResultNavigationView::Groups:
