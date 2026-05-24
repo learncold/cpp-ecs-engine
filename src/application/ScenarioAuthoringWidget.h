@@ -83,21 +83,26 @@ private:
         QString selectedEventId{};
     };
 
-    struct ScenarioOperationalEventHistory {
-        QString scenarioId{};
-        std::vector<OperationalEventHistoryEntry> undo{};
-        std::vector<OperationalEventHistoryEntry> redo{};
-    };
-
     struct CrowdPlacementHistoryEntry {
         std::vector<ScenarioCrowdPlacement> placements{};
         QString selectedCrowdId{};
     };
 
-    struct ScenarioCrowdPlacementHistory {
+    enum class ScenarioHistoryEntryKind {
+        CrowdPlacement,
+        OperationalEvent,
+    };
+
+    struct ScenarioHistoryEntry {
+        ScenarioHistoryEntryKind kind{ScenarioHistoryEntryKind::CrowdPlacement};
+        CrowdPlacementHistoryEntry crowdPlacement{};
+        OperationalEventHistoryEntry operationalEvent{};
+    };
+
+    struct ScenarioHistory {
         QString scenarioId{};
-        std::vector<CrowdPlacementHistoryEntry> undo{};
-        std::vector<CrowdPlacementHistoryEntry> redo{};
+        std::vector<ScenarioHistoryEntry> undo{};
+        std::vector<ScenarioHistoryEntry> redo{};
     };
 
     void initializeUi(bool promptForScenario);
@@ -132,20 +137,17 @@ private:
     void setInspectorSelectionNone();
     bool undoLastScenarioAuthoringEdit();
     bool redoLastScenarioAuthoringEdit();
-    bool undoLastOperationalEventEdit();
-    bool redoLastOperationalEventEdit();
-    ScenarioOperationalEventHistory* currentOperationalEventHistory();
     std::optional<OperationalEventHistoryEntry> currentOperationalEventHistoryEntry(const QString& selectedEventId = {}) const;
     void pushOperationalEventUndoEntry(OperationalEventHistoryEntry entry);
     void synchronizeOperationalEvents(ScenarioState& scenario);
     void restoreOperationalEventSelection(const QString& selectedEventId);
-    bool undoLastCrowdPlacementEdit();
-    bool redoLastCrowdPlacementEdit();
-    ScenarioCrowdPlacementHistory* currentCrowdPlacementHistory();
+    bool restoreOperationalEventHistoryEntry(const OperationalEventHistoryEntry& entry);
+    ScenarioHistory* currentScenarioHistory();
     std::optional<CrowdPlacementHistoryEntry> currentCrowdPlacementHistoryEntry(const QString& selectedCrowdId = {}) const;
     void pushCrowdPlacementUndoEntry(CrowdPlacementHistoryEntry entry);
     void synchronizeCrowdPlacements(ScenarioState& scenario);
     void restoreCrowdPlacementSelection(const QString& selectedCrowdId);
+    bool restoreCrowdPlacementHistoryEntry(const CrowdPlacementHistoryEntry& entry);
     ScenarioState* currentScenario();
     const ScenarioState* currentScenario() const;
     std::vector<safecrowd::domain::ScenarioDraft> stagedRunnableScenarios() const;
@@ -190,8 +192,7 @@ private:
     QPushButton* newScenarioButton_{nullptr};
     QPushButton* stageScenarioButton_{nullptr};
     QPushButton* executeRunButton_{nullptr};
-    std::vector<ScenarioOperationalEventHistory> operationalEventHistories_{};
-    std::vector<ScenarioCrowdPlacementHistory> crowdPlacementHistories_{};
+    std::vector<ScenarioHistory> scenarioHistories_{};
 };
 
 }  // namespace safecrowd::application

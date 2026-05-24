@@ -1938,90 +1938,72 @@ ScenarioAuthoringWidget::InitialState ScenarioAuthoringWidget::currentInitialSta
 }
 
 bool ScenarioAuthoringWidget::undoLastScenarioAuthoringEdit() {
-    const bool crowdContext = inspectorSelectionKind_ == InspectorSelectionKind::Crowd
-        || navigationView_ == NavigationView::Crowd;
-    const bool eventsContext = inspectorSelectionKind_ == InspectorSelectionKind::OperationalEvent
-        || inspectorSelectionKind_ == InspectorSelectionKind::ConnectionBlock
-        || inspectorSelectionKind_ == InspectorSelectionKind::EnvironmentHazard
-        || inspectorSelectionKind_ == InspectorSelectionKind::RouteGuidance
-        || navigationView_ == NavigationView::Events;
-
-    if (crowdContext) {
-        return undoLastCrowdPlacementEdit() || undoLastOperationalEventEdit();
-    }
-    if (eventsContext) {
-        return undoLastOperationalEventEdit() || undoLastCrowdPlacementEdit();
-    }
-    return undoLastCrowdPlacementEdit() || undoLastOperationalEventEdit();
-}
-
-bool ScenarioAuthoringWidget::redoLastScenarioAuthoringEdit() {
-    const bool crowdContext = inspectorSelectionKind_ == InspectorSelectionKind::Crowd
-        || navigationView_ == NavigationView::Crowd;
-    const bool eventsContext = inspectorSelectionKind_ == InspectorSelectionKind::OperationalEvent
-        || inspectorSelectionKind_ == InspectorSelectionKind::ConnectionBlock
-        || inspectorSelectionKind_ == InspectorSelectionKind::EnvironmentHazard
-        || inspectorSelectionKind_ == InspectorSelectionKind::RouteGuidance
-        || navigationView_ == NavigationView::Events;
-
-    if (crowdContext) {
-        return redoLastCrowdPlacementEdit() || redoLastOperationalEventEdit();
-    }
-    if (eventsContext) {
-        return redoLastOperationalEventEdit() || redoLastCrowdPlacementEdit();
-    }
-    return redoLastCrowdPlacementEdit() || redoLastOperationalEventEdit();
-}
-
-bool ScenarioAuthoringWidget::undoLastCrowdPlacementEdit() {
-    auto* history = currentCrowdPlacementHistory();
+    auto* history = currentScenarioHistory();
     if (history == nullptr || history->undo.empty()) {
         return false;
     }
 
-    const auto currentEntry = currentCrowdPlacementHistoryEntry();
+    const auto entry = history->undo.back();
+    std::optional<ScenarioHistoryEntry> currentEntry;
+    if (entry.kind == ScenarioHistoryEntryKind::CrowdPlacement) {
+        if (const auto current = currentCrowdPlacementHistoryEntry(entry.crowdPlacement.selectedCrowdId); current.has_value()) {
+            currentEntry = ScenarioHistoryEntry{
+                .kind = ScenarioHistoryEntryKind::CrowdPlacement,
+                .crowdPlacement = *current,
+            };
+        }
+    } else if (const auto current = currentOperationalEventHistoryEntry(entry.operationalEvent.selectedEventId); current.has_value()) {
+        currentEntry = ScenarioHistoryEntry{
+            .kind = ScenarioHistoryEntryKind::OperationalEvent,
+            .operationalEvent = *current,
+        };
+    }
     if (!currentEntry.has_value()) {
         return false;
     }
 
-    history->redo.push_back(*currentEntry);
-    const auto entry = history->undo.back();
     history->undo.pop_back();
-
-    auto* scenario = currentScenario();
-    if (scenario == nullptr) {
-        return false;
+    history->redo.push_back(std::move(*currentEntry));
+    if (entry.kind == ScenarioHistoryEntryKind::CrowdPlacement) {
+        return restoreCrowdPlacementHistoryEntry(entry.crowdPlacement);
     }
-
-    scenario->crowdPlacements = entry.placements;
-    synchronizeCrowdPlacements(*scenario);
-    restoreCrowdPlacementSelection(entry.selectedCrowdId);
-    if (canvas_ != nullptr) {
-        canvas_->setPlacements(scenario->crowdPlacements);
-        if (!entry.selectedCrowdId.isEmpty()) {
-            canvas_->focusPlacement(entry.selectedCrowdId);
-        }
-    }
-    refreshNavigationPanel();
-    refreshInspector();
-    return true;
+    return restoreOperationalEventHistoryEntry(entry.operationalEvent);
 }
 
-bool ScenarioAuthoringWidget::redoLastCrowdPlacementEdit() {
-    auto* history = currentCrowdPlacementHistory();
+bool ScenarioAuthoringWidget::redoLastScenarioAuthoringEdit() {
+    auto* history = currentScenarioHistory();
     if (history == nullptr || history->redo.empty()) {
         return false;
     }
 
-    const auto currentEntry = currentCrowdPlacementHistoryEntry();
+    const auto entry = history->redo.back();
+    std::optional<ScenarioHistoryEntry> currentEntry;
+    if (entry.kind == ScenarioHistoryEntryKind::CrowdPlacement) {
+        if (const auto current = currentCrowdPlacementHistoryEntry(entry.crowdPlacement.selectedCrowdId); current.has_value()) {
+            currentEntry = ScenarioHistoryEntry{
+                .kind = ScenarioHistoryEntryKind::CrowdPlacement,
+                .crowdPlacement = *current,
+            };
+        }
+    } else if (const auto current = currentOperationalEventHistoryEntry(entry.operationalEvent.selectedEventId); current.has_value()) {
+        currentEntry = ScenarioHistoryEntry{
+            .kind = ScenarioHistoryEntryKind::OperationalEvent,
+            .operationalEvent = *current,
+        };
+    }
     if (!currentEntry.has_value()) {
         return false;
     }
 
-    history->undo.push_back(*currentEntry);
-    const auto entry = history->redo.back();
     history->redo.pop_back();
+    history->undo.push_back(std::move(*currentEntry));
+    if (entry.kind == ScenarioHistoryEntryKind::CrowdPlacement) {
+        return restoreCrowdPlacementHistoryEntry(entry.crowdPlacement);
+    }
+    return restoreOperationalEventHistoryEntry(entry.operationalEvent);
+}
 
+bool ScenarioAuthoringWidget::restoreCrowdPlacementHistoryEntry(const CrowdPlacementHistoryEntry& entry) {
     auto* scenario = currentScenario();
     if (scenario == nullptr) {
         return false;
@@ -2041,24 +2023,24 @@ bool ScenarioAuthoringWidget::redoLastCrowdPlacementEdit() {
     return true;
 }
 
-ScenarioAuthoringWidget::ScenarioCrowdPlacementHistory* ScenarioAuthoringWidget::currentCrowdPlacementHistory() {
+ScenarioAuthoringWidget::ScenarioHistory* ScenarioAuthoringWidget::currentScenarioHistory() {
     const auto* scenario = currentScenario();
     if (scenario == nullptr) {
         return nullptr;
     }
 
     const auto scenarioId = QString::fromStdString(scenario->draft.scenarioId);
-    auto it = std::find_if(crowdPlacementHistories_.begin(), crowdPlacementHistories_.end(), [&](const auto& history) {
+    auto it = std::find_if(scenarioHistories_.begin(), scenarioHistories_.end(), [&](const auto& history) {
         return history.scenarioId == scenarioId;
     });
-    if (it != crowdPlacementHistories_.end()) {
+    if (it != scenarioHistories_.end()) {
         return &(*it);
     }
 
-    crowdPlacementHistories_.push_back({
+    scenarioHistories_.push_back({
         .scenarioId = scenarioId,
     });
-    return &crowdPlacementHistories_.back();
+    return &scenarioHistories_.back();
 }
 
 std::optional<ScenarioAuthoringWidget::CrowdPlacementHistoryEntry> ScenarioAuthoringWidget::currentCrowdPlacementHistoryEntry(
@@ -2088,12 +2070,15 @@ std::optional<ScenarioAuthoringWidget::CrowdPlacementHistoryEntry> ScenarioAutho
 }
 
 void ScenarioAuthoringWidget::pushCrowdPlacementUndoEntry(CrowdPlacementHistoryEntry entry) {
-    auto* history = currentCrowdPlacementHistory();
+    auto* history = currentScenarioHistory();
     if (history == nullptr) {
         return;
     }
 
-    history->undo.push_back(std::move(entry));
+    history->undo.push_back(ScenarioHistoryEntry{
+        .kind = ScenarioHistoryEntryKind::CrowdPlacement,
+        .crowdPlacement = std::move(entry),
+    });
     history->redo.clear();
 }
 
@@ -2163,98 +2148,6 @@ void ScenarioAuthoringWidget::restoreCrowdPlacementSelection(const QString& sele
     inspectorSelectionId_ = rootId;
 }
 
-bool ScenarioAuthoringWidget::undoLastOperationalEventEdit() {
-    auto* history = currentOperationalEventHistory();
-    if (history == nullptr || history->undo.empty()) {
-        return false;
-    }
-
-    const auto currentEntry = currentOperationalEventHistoryEntry();
-    if (!currentEntry.has_value()) {
-        return false;
-    }
-
-    history->redo.push_back(*currentEntry);
-    const auto entry = history->undo.back();
-    history->undo.pop_back();
-
-    auto* scenario = currentScenario();
-    if (scenario == nullptr) {
-        return false;
-    }
-
-    scenario->events = entry.events;
-    scenario->draft.control.connectionBlocks = entry.connectionBlocks;
-    scenario->draft.environment.hazards = entry.hazards;
-    scenario->draft.control.routeGuidances = entry.routeGuidances;
-    synchronizeOperationalEvents(*scenario);
-    restoreOperationalEventSelection(entry.selectedEventId);
-    if (canvas_ != nullptr) {
-        canvas_->setConnectionBlocks(scenario->draft.control.connectionBlocks);
-        canvas_->setEnvironmentHazards(scenario->draft.environment.hazards);
-        canvas_->setRouteGuidances(scenario->draft.control.routeGuidances);
-    }
-    refreshNavigationPanel();
-    refreshInspector();
-    return true;
-}
-
-bool ScenarioAuthoringWidget::redoLastOperationalEventEdit() {
-    auto* history = currentOperationalEventHistory();
-    if (history == nullptr || history->redo.empty()) {
-        return false;
-    }
-
-    const auto currentEntry = currentOperationalEventHistoryEntry();
-    if (!currentEntry.has_value()) {
-        return false;
-    }
-
-    history->undo.push_back(*currentEntry);
-    const auto entry = history->redo.back();
-    history->redo.pop_back();
-
-    auto* scenario = currentScenario();
-    if (scenario == nullptr) {
-        return false;
-    }
-
-    scenario->events = entry.events;
-    scenario->draft.control.connectionBlocks = entry.connectionBlocks;
-    scenario->draft.environment.hazards = entry.hazards;
-    scenario->draft.control.routeGuidances = entry.routeGuidances;
-    synchronizeOperationalEvents(*scenario);
-    restoreOperationalEventSelection(entry.selectedEventId);
-    if (canvas_ != nullptr) {
-        canvas_->setConnectionBlocks(scenario->draft.control.connectionBlocks);
-        canvas_->setEnvironmentHazards(scenario->draft.environment.hazards);
-        canvas_->setRouteGuidances(scenario->draft.control.routeGuidances);
-    }
-    refreshNavigationPanel();
-    refreshInspector();
-    return true;
-}
-
-ScenarioAuthoringWidget::ScenarioOperationalEventHistory* ScenarioAuthoringWidget::currentOperationalEventHistory() {
-    const auto* scenario = currentScenario();
-    if (scenario == nullptr) {
-        return nullptr;
-    }
-
-    const auto scenarioId = QString::fromStdString(scenario->draft.scenarioId);
-    auto it = std::find_if(operationalEventHistories_.begin(), operationalEventHistories_.end(), [&](const auto& history) {
-        return history.scenarioId == scenarioId;
-    });
-    if (it != operationalEventHistories_.end()) {
-        return &(*it);
-    }
-
-    operationalEventHistories_.push_back({
-        .scenarioId = scenarioId,
-    });
-    return &operationalEventHistories_.back();
-}
-
 std::optional<ScenarioAuthoringWidget::OperationalEventHistoryEntry> ScenarioAuthoringWidget::currentOperationalEventHistoryEntry(
     const QString& selectedEventId) const {
     const auto* scenario = currentScenario();
@@ -2297,12 +2190,15 @@ std::optional<ScenarioAuthoringWidget::OperationalEventHistoryEntry> ScenarioAut
 }
 
 void ScenarioAuthoringWidget::pushOperationalEventUndoEntry(OperationalEventHistoryEntry entry) {
-    auto* history = currentOperationalEventHistory();
+    auto* history = currentScenarioHistory();
     if (history == nullptr) {
         return;
     }
 
-    history->undo.push_back(std::move(entry));
+    history->undo.push_back(ScenarioHistoryEntry{
+        .kind = ScenarioHistoryEntryKind::OperationalEvent,
+        .operationalEvent = std::move(entry),
+    });
     history->redo.clear();
 }
 
@@ -2352,6 +2248,28 @@ void ScenarioAuthoringWidget::restoreOperationalEventSelection(const QString& se
     } else {
         inspectorSelectionKind_ = InspectorSelectionKind::ConnectionBlock;
     }
+}
+
+bool ScenarioAuthoringWidget::restoreOperationalEventHistoryEntry(const OperationalEventHistoryEntry& entry) {
+    auto* scenario = currentScenario();
+    if (scenario == nullptr) {
+        return false;
+    }
+
+    scenario->events = entry.events;
+    scenario->draft.control.connectionBlocks = entry.connectionBlocks;
+    scenario->draft.environment.hazards = entry.hazards;
+    scenario->draft.control.routeGuidances = entry.routeGuidances;
+    synchronizeOperationalEvents(*scenario);
+    restoreOperationalEventSelection(entry.selectedEventId);
+    if (canvas_ != nullptr) {
+        canvas_->setConnectionBlocks(scenario->draft.control.connectionBlocks);
+        canvas_->setEnvironmentHazards(scenario->draft.environment.hazards);
+        canvas_->setRouteGuidances(scenario->draft.control.routeGuidances);
+    }
+    refreshNavigationPanel();
+    refreshInspector();
+    return true;
 }
 
 void ScenarioAuthoringWidget::addEventDraft(const QString& name, const QString& trigger, const QString& target) {
