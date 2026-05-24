@@ -433,6 +433,10 @@ LayoutReviewWidget::LayoutReviewWidget(
     connect(undoShortcut, &QShortcut::activated, this, [this]() {
         undoLastEdit();
     });
+    auto* redoShortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+Z")), this);
+    connect(redoShortcut, &QShortcut::activated, this, [this]() {
+        redoLastUndo();
+    });
 
     applyImportResultState();
 
@@ -444,12 +448,26 @@ const safecrowd::domain::ImportResult& LayoutReviewWidget::currentImportResult()
 }
 
 bool LayoutReviewWidget::undoLastEdit() {
-    if (undoHistory_.empty()) {
+    if (undoHistory_.empty() || !importResult_.layout.has_value()) {
         return false;
     }
 
+    redoHistory_.push_back(*importResult_.layout);
     importResult_.layout = undoHistory_.back();
     undoHistory_.pop_back();
+    importResult_.reviewStatus = safecrowd::domain::ImportReviewStatus::Pending;
+    applyImportResultState();
+    return true;
+}
+
+bool LayoutReviewWidget::redoLastUndo() {
+    if (redoHistory_.empty() || !importResult_.layout.has_value()) {
+        return false;
+    }
+
+    undoHistory_.push_back(*importResult_.layout);
+    importResult_.layout = redoHistory_.back();
+    redoHistory_.pop_back();
     importResult_.reviewStatus = safecrowd::domain::ImportReviewStatus::Pending;
     applyImportResultState();
     return true;
@@ -480,6 +498,7 @@ void LayoutReviewWidget::handleLayoutEdited(const safecrowd::domain::FacilityLay
     if (importResult_.layout.has_value()) {
         undoHistory_.push_back(*importResult_.layout);
     }
+    redoHistory_.clear();
     importResult_.layout = layout;
     importResult_.reviewStatus = safecrowd::domain::ImportReviewStatus::Pending;
     applyImportResultState();
