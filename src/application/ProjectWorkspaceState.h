@@ -31,11 +31,12 @@ enum class SavedRightPanelMode {
 };
 
 enum class SavedResultNavigationView {
-    Bottleneck,
-    Hotspot,
-    Zone,
-    Groups,
-    Recommendations,
+    Bottleneck = 0,
+    Hotspot = 1,
+    Zone = 2,
+    Groups = 3,
+    Recommendations = 4,
+    HazardExposure = 5,
 };
 
 struct SavedScenarioState {

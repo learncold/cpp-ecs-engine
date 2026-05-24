@@ -90,6 +90,48 @@ QString formatPressureScore(double score) {
     return QString::number(score, 'f', 1);
 }
 
+QString formatExposureScore(double score) {
+    return QString::number(score, 'f', 1);
+}
+
+QString formatExposureSeconds(double seconds) {
+    return QString("%1 agent-sec").arg(seconds, 0, 'f', 1);
+}
+
+double hazardExposureSecondsForKind(
+    const safecrowd::domain::HazardExposureSummary& summary,
+    safecrowd::domain::EnvironmentHazardKind kind) {
+    double total = 0.0;
+    for (const auto& metric : summary.hazards) {
+        if (metric.kind == kind) {
+            total += metric.exposedAgentSeconds;
+        }
+    }
+    return total;
+}
+
+double totalHazardExposureSeconds(const safecrowd::domain::HazardExposureSummary& summary) {
+    double total = 0.0;
+    for (const auto& metric : summary.hazards) {
+        total += metric.exposedAgentSeconds;
+    }
+    return total;
+}
+
+const safecrowd::domain::HazardExposureMetric* peakHazardExposureMetric(
+    const safecrowd::domain::HazardExposureSummary& summary) {
+    const safecrowd::domain::HazardExposureMetric* best = nullptr;
+    for (const auto& metric : summary.hazards) {
+        if (best == nullptr
+            || metric.peakExposedAgentCount > best->peakExposedAgentCount
+            || (metric.peakExposedAgentCount == best->peakExposedAgentCount
+                && metric.exposedAgentSeconds > best->exposedAgentSeconds)) {
+            best = &metric;
+        }
+    }
+    return best;
+}
+
 QTableWidget* createComparisonTable(const QStringList& headers, QWidget* parent) {
     auto* table = new QTableWidget(0, headers.size(), parent);
     table->setHorizontalHeaderLabels(headers);
@@ -833,6 +875,8 @@ ScenarioResultNavigationView resultNavigationViewFromSaved(SavedResultNavigation
     switch (view) {
     case SavedResultNavigationView::Hotspot:
         return ScenarioResultNavigationView::Hotspot;
+    case SavedResultNavigationView::HazardExposure:
+        return ScenarioResultNavigationView::HazardExposure;
     case SavedResultNavigationView::Zone:
         return ScenarioResultNavigationView::Zone;
     case SavedResultNavigationView::Groups:
@@ -849,6 +893,8 @@ SavedResultNavigationView savedResultNavigationView(ScenarioResultNavigationView
     switch (view) {
     case ScenarioResultNavigationView::Hotspot:
         return SavedResultNavigationView::Hotspot;
+    case ScenarioResultNavigationView::HazardExposure:
+        return SavedResultNavigationView::HazardExposure;
     case ScenarioResultNavigationView::Zone:
         return SavedResultNavigationView::Zone;
     case ScenarioResultNavigationView::Groups:
@@ -1012,6 +1058,7 @@ QWidget* ScenarioBatchResultWidget::createCanvasPanel() {
     auto* tabs = new QTabWidget(graphPanel);
     remainingChart_ = new ComparisonGraphWidget(ComparisonGraphMode::Remaining, tabs);
     exitsChart_ = new ComparisonGraphWidget(ComparisonGraphMode::Exits, tabs);
+    exposureTable_ = createComparisonTable({"Scenario", "Total", "Fire", "Smoke", "Peak", "Peak at"}, tabs);
     pressureTable_ = createComparisonTable({"Scenario", "Peak score", "Exposed / Critical", "Hotspots", "Events", "Peak at"}, tabs);
     static_cast<ComparisonGraphWidget*>(remainingChart_)->setResults(results_, selectedCompareIndices_, currentResultIndex_);
     static_cast<ComparisonGraphWidget*>(exitsChart_)->setResults(results_, selectedCompareIndices_, currentResultIndex_);
@@ -1020,6 +1067,7 @@ QWidget* ScenarioBatchResultWidget::createCanvasPanel() {
     });
     tabs->addTab(remainingChart_, "Remaining");
     tabs->addTab(exitsChart_, "Exits");
+    tabs->addTab(exposureTable_, "Exposure");
     tabs->addTab(pressureTable_, "Pressure");
     graphLayout->addWidget(tabs, 1);
     layout->addWidget(graphPanel, 1);
@@ -1087,7 +1135,7 @@ QWidget* ScenarioBatchResultWidget::createSummaryPanel() {
     layout->setContentsMargins(0, 0, 10, 0);
     layout->setSpacing(12);
 
-    auto* intro = createLabel("Choose which completed scenarios appear together in the comparison graphs and pressure summary table.", content, ui::FontRole::Caption);
+    auto* intro = createLabel("Choose which completed scenarios appear together in the comparison graphs and risk summary tables.", content, ui::FontRole::Caption);
     intro->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     intro->setStyleSheet(ui::mutedTextStyleSheet());
     layout->addWidget(intro);
@@ -1517,6 +1565,7 @@ void ScenarioBatchResultWidget::refreshComparisonSelection() {
         static_cast<ComparisonGraphWidget*>(exitsChart_)->setResults(results_, selectedCompareIndices_, currentResultIndex_);
     }
     refreshComparisonCountLabel();
+    refreshExposureComparisonTable();
     refreshPressureComparisonTable();
 }
 
@@ -1527,6 +1576,53 @@ void ScenarioBatchResultWidget::refreshComparisonCountLabel() {
     comparisonCountLabel_->setText(QString("Comparing %1 / %2 scenarios")
         .arg(static_cast<int>(selectedCompareIndices_.size()))
         .arg(static_cast<int>(results_.size())));
+}
+
+void ScenarioBatchResultWidget::refreshExposureComparisonTable() {
+    if (exposureTable_ == nullptr) {
+        return;
+    }
+
+    const std::vector<int> visibleIndices = selectedCompareIndices_;
+    exposureTable_->setRowCount(static_cast<int>(visibleIndices.size()));
+    for (int row = 0; row < static_cast<int>(visibleIndices.size()); ++row) {
+        const auto index = visibleIndices[static_cast<std::size_t>(row)];
+        if (index < 0 || index >= static_cast<int>(results_.size())) {
+            continue;
+        }
+
+        const auto& result = results_[static_cast<std::size_t>(index)];
+        const auto& summary = result.artifacts.hazardExposureSummary;
+        const bool emphasized = index == currentResultIndex_;
+        const auto* peakHazard = peakHazardExposureMetric(summary);
+        exposureTable_->setItem(row, 0, tableItem(QString::fromStdString(result.scenario.name), emphasized));
+        exposureTable_->setItem(row, 1, tableItem(formatExposureSeconds(totalHazardExposureSeconds(summary)), emphasized));
+        exposureTable_->setItem(
+            row,
+            2,
+            tableItem(formatExposureSeconds(hazardExposureSecondsForKind(
+                summary,
+                safecrowd::domain::EnvironmentHazardKind::Fire)), emphasized));
+        exposureTable_->setItem(
+            row,
+            3,
+            tableItem(formatExposureSeconds(hazardExposureSecondsForKind(
+                summary,
+                safecrowd::domain::EnvironmentHazardKind::Smoke)), emphasized));
+        exposureTable_->setItem(
+            row,
+            4,
+            tableItem(
+                peakHazard == nullptr
+                    ? QString("0 people")
+                    : QString("%1 people").arg(static_cast<int>(peakHazard->peakExposedAgentCount)),
+                emphasized));
+        exposureTable_->setItem(
+            row,
+            5,
+            tableItem(peakHazard == nullptr ? QString("Pending") : formatSeconds(peakHazard->peakAtSeconds), emphasized));
+    }
+    exposureTable_->resizeRowsToContents();
 }
 
 void ScenarioBatchResultWidget::refreshPressureComparisonTable() {
@@ -1610,6 +1706,7 @@ void ScenarioBatchResultWidget::setComparisonSelection(std::vector<int> indices)
         static_cast<ComparisonGraphWidget*>(exitsChart_)->setResults(results_, selectedCompareIndices_, currentResultIndex_);
     }
     refreshComparisonCountLabel();
+    refreshExposureComparisonTable();
     refreshPressureComparisonTable();
 }
 
@@ -1892,6 +1989,7 @@ void ScenarioBatchResultWidget::refreshSelectedResult() {
     if (exitsChart_ != nullptr) {
         static_cast<ComparisonGraphWidget*>(exitsChart_)->setResults(results_, selectedCompareIndices_, currentResultIndex_);
     }
+    refreshExposureComparisonTable();
     refreshPressureComparisonTable();
     refreshResultNavigationPanel();
     if (detailLabel_ != nullptr) {
@@ -1901,7 +1999,9 @@ void ScenarioBatchResultWidget::refreshSelectedResult() {
                 ? QString("Baseline")
                 : formatDeltaSeconds(selectedFinalSeconds - finalSeconds(results_[static_cast<std::size_t>(baselineIndex)])))
             : QString("No baseline");
-        detailLabel_->setText(QString("%1 (%2)\nFinal: %3\nDelta vs baseline: %4\nEvacuated: %5 / %6 (%7)\nRisk: %8\nHotspots: %9\nBottlenecks: %10\nPressure hotspots: %11\nCritical pressure: %12 agents / %13 events\nPeak pressure: %14 at %15\nT90 / T95: %16 / %17")
+        const auto& exposureSummary = result.artifacts.hazardExposureSummary;
+        const auto* peakHazard = peakHazardExposureMetric(exposureSummary);
+        detailLabel_->setText(QString("%1 (%2)\nFinal: %3\nDelta vs baseline: %4\nEvacuated: %5 / %6 (%7)\nRisk: %8\nHotspots: %9\nBottlenecks: %10\nHazard exposure: %11 (fire %12 / smoke %13)\nHazard peak: %14 at %15; score %16\nPressure hotspots: %17\nCritical pressure: %18 agents / %19 events\nPeak pressure: %20 at %21\nT90 / T95: %22 / %23")
             .arg(QString::fromStdString(result.scenario.name))
             .arg(scenarioRoleLabel(result.scenario.role))
             .arg(formatSeconds(selectedFinalSeconds))
@@ -1912,6 +2012,18 @@ void ScenarioBatchResultWidget::refreshSelectedResult() {
             .arg(safecrowd::domain::scenarioRiskLevelLabel(result.risk.completionRisk))
             .arg(static_cast<int>(result.risk.hotspots.size()))
             .arg(static_cast<int>(result.risk.bottlenecks.size()))
+            .arg(formatExposureSeconds(totalHazardExposureSeconds(exposureSummary)))
+            .arg(formatExposureSeconds(hazardExposureSecondsForKind(
+                exposureSummary,
+                safecrowd::domain::EnvironmentHazardKind::Fire)))
+            .arg(formatExposureSeconds(hazardExposureSecondsForKind(
+                exposureSummary,
+                safecrowd::domain::EnvironmentHazardKind::Smoke)))
+            .arg(peakHazard == nullptr
+                ? QString("0 people")
+                : QString("%1 people").arg(static_cast<int>(peakHazard->peakExposedAgentCount)))
+            .arg(peakHazard == nullptr ? QString("Pending") : formatSeconds(peakHazard->peakAtSeconds))
+            .arg(formatExposureScore(exposureSummary.totalExposureScore))
             .arg(static_cast<int>(result.artifacts.pressureSummary.peakHotspots.size()))
             .arg(static_cast<int>(result.artifacts.pressureSummary.peakCriticalAgentCount))
             .arg(static_cast<int>(result.artifacts.pressureSummary.criticalEvents.size()))

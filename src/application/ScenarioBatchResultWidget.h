@@ -67,6 +67,7 @@ private:
     void pauseReplay();
     void refreshComparisonSelection();
     void refreshComparisonCountLabel();
+    void refreshExposureComparisonTable();
     void refreshPressureComparisonTable();
     void refreshResultNavigationPanel();
     void refreshSelectedResult();
@@ -107,6 +108,7 @@ private:
     QLabel* replayTimeLabel_{nullptr};
     QLabel* detailLabel_{nullptr};
     QLabel* comparisonCountLabel_{nullptr};
+    QTableWidget* exposureTable_{nullptr};
     QTableWidget* pressureTable_{nullptr};
     std::vector<QCheckBox*> compareCheckBoxes_{};
     QWidget* remainingChart_{nullptr};
