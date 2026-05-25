@@ -1,7 +1,6 @@
 #include "domain/AlternativeRecommendationService.h"
 
 #include <algorithm>
-#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstddef>
@@ -10,7 +9,6 @@
 #include <optional>
 #include <sstream>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -20,13 +18,6 @@ namespace safecrowd::domain {
 namespace {
 
 constexpr double kExitImbalanceThreshold = 0.25;
-constexpr double kCounterflowCosineThreshold = -0.5;
-constexpr double kCounterflowSideRatioThreshold = 0.30;
-constexpr double kCounterflowAverageSpeedThreshold = 0.7;
-constexpr double kCounterflowSustainedSecondsThreshold = 10.0;
-constexpr double kCounterflowCellSizeMeters = 4.0;
-constexpr std::size_t kCounterflowDirectionBinCount = 16;
-constexpr double kPi = 3.14159265358979323846;
 constexpr std::size_t kStagedEvacuationAgentsPerSpawn = 10;
 constexpr double kStagedEvacuationIntervalSeconds = 5.0;
 constexpr double kDefaultGuidanceCompliance = 0.5;
@@ -594,348 +585,54 @@ const SimulationFrame* finalFrameForRequest(const AlternativeRecommendationInput
     return nullptr;
 }
 
-double speedOf(Point2D velocity) {
-    return std::sqrt(velocity.x * velocity.x + velocity.y * velocity.y);
-}
-
-double dot(Point2D lhs, Point2D rhs) {
-    return lhs.x * rhs.x + lhs.y * rhs.y;
-}
-
-struct FrameCounterflowObservation {
-    std::size_t forwardCount{0};
-    std::size_t oppositeCount{0};
-    std::size_t movingCount{0};
-    double averageSpeed{0.0};
-};
-
-struct CounterflowCellKey {
-    std::string floorId{};
-    SpatialCell cell{};
-
-    bool operator==(const CounterflowCellKey& other) const noexcept {
-        return floorId == other.floorId && cell.x == other.cell.x && cell.y == other.cell.y;
-    }
-};
-
-struct CounterflowCellKeyHash {
-    std::size_t operator()(const CounterflowCellKey& key) const noexcept {
-        auto seed = std::hash<std::string>{}(key.floorId);
-        const auto combine = [&](std::size_t value) {
-            seed ^= value + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
-        };
-        combine(std::hash<long long>{}(spatialKey(key.cell)));
-        return seed;
-    }
-};
-
-struct CounterflowCellBucket {
-    std::array<std::size_t, kCounterflowDirectionBinCount> directionCounts{};
-    std::size_t movingCount{0};
-    double speedSum{0.0};
-};
-
-CounterflowCellKey counterflowCellKey(const SimulationAgentFrame& agent) {
-    return {
-        .floorId = agent.floorId,
-        .cell = spatialCellFor(agent.position, kCounterflowCellSizeMeters),
-    };
-}
-
-std::size_t directionBinForVelocity(Point2D velocity) {
-    auto angle = std::atan2(velocity.y, velocity.x);
-    if (angle < 0.0) {
-        angle += kPi * 2.0;
-    }
-    const auto bin = static_cast<std::size_t>(
-        std::floor(angle / ((kPi * 2.0) / static_cast<double>(kCounterflowDirectionBinCount))));
-    return std::min(kCounterflowDirectionBinCount - 1, bin);
-}
-
-std::array<Point2D, kCounterflowDirectionBinCount> makeDirectionBinVectors() {
-    std::array<Point2D, kCounterflowDirectionBinCount> vectors{};
-    for (std::size_t index = 0; index < vectors.size(); ++index) {
-        const auto angle = ((static_cast<double>(index) + 0.5)
-            / static_cast<double>(kCounterflowDirectionBinCount)) * kPi * 2.0;
-        vectors[index] = {
-            .x = std::cos(angle),
-            .y = std::sin(angle),
-        };
-    }
-    return vectors;
-}
-
-double directionBinCosine(std::size_t lhs, std::size_t rhs) {
-    static const auto directions = makeDirectionBinVectors();
-    return dot(directions[lhs], directions[rhs]);
-}
-
-CounterflowCellBucket aggregateCounterflowNeighborhood(
-    const std::unordered_map<CounterflowCellKey, CounterflowCellBucket, CounterflowCellKeyHash>& cells,
-    const CounterflowCellKey& center) {
-    CounterflowCellBucket aggregate;
-    for (int dx = -1; dx <= 1; ++dx) {
-        for (int dy = -1; dy <= 1; ++dy) {
-            const CounterflowCellKey key{
-                .floorId = center.floorId,
-                .cell = {.x = center.cell.x + dx, .y = center.cell.y + dy},
-            };
-            const auto it = cells.find(key);
-            if (it == cells.end()) {
-                continue;
-            }
-            const auto& bucket = it->second;
-            aggregate.movingCount += bucket.movingCount;
-            aggregate.speedSum += bucket.speedSum;
-            for (std::size_t bin = 0; bin < kCounterflowDirectionBinCount; ++bin) {
-                aggregate.directionCounts[bin] += bucket.directionCounts[bin];
-            }
-        }
-    }
-    return aggregate;
-}
-
-std::optional<FrameCounterflowObservation> counterflowInBucket(const CounterflowCellBucket& bucket) {
-    if (bucket.movingCount < 2) {
-        return std::nullopt;
-    }
-
-    const auto averageSpeed = bucket.speedSum / static_cast<double>(bucket.movingCount);
-    if (averageSpeed > kCounterflowAverageSpeedThreshold) {
-        return std::nullopt;
-    }
-
-    FrameCounterflowObservation best;
-    for (std::size_t anchorBin = 0; anchorBin < kCounterflowDirectionBinCount; ++anchorBin) {
-        if (bucket.directionCounts[anchorBin] == 0) {
-            continue;
-        }
-
-        FrameCounterflowObservation candidate;
-        candidate.movingCount = bucket.movingCount;
-        candidate.averageSpeed = averageSpeed;
-        for (std::size_t bin = 0; bin < kCounterflowDirectionBinCount; ++bin) {
-            if (bucket.directionCounts[bin] == 0) {
-                continue;
-            }
-            const auto cosine = directionBinCosine(anchorBin, bin);
-            if (cosine >= 0.5) {
-                candidate.forwardCount += bucket.directionCounts[bin];
-            } else if (cosine <= kCounterflowCosineThreshold) {
-                candidate.oppositeCount += bucket.directionCounts[bin];
-            }
-        }
-
-        const auto forwardRatio = static_cast<double>(candidate.forwardCount) / static_cast<double>(candidate.movingCount);
-        const auto oppositeRatio = static_cast<double>(candidate.oppositeCount) / static_cast<double>(candidate.movingCount);
-        if (forwardRatio >= kCounterflowSideRatioThreshold
-            && oppositeRatio >= kCounterflowSideRatioThreshold
-            && candidate.forwardCount + candidate.oppositeCount > best.forwardCount + best.oppositeCount) {
-            best = candidate;
-        }
-    }
-
-    return best.movingCount == 0 ? std::nullopt : std::optional<FrameCounterflowObservation>{best};
-}
-
-std::optional<FrameCounterflowObservation> counterflowAtFrame(const SimulationFrame& frame) {
-    std::unordered_map<CounterflowCellKey, CounterflowCellBucket, CounterflowCellKeyHash> cells;
-    cells.reserve(frame.agents.size());
-    std::vector<CounterflowCellKey> cellKeys;
-    cellKeys.reserve(frame.agents.size());
-
-    for (const auto& agent : frame.agents) {
-        const auto speed = speedOf(agent.velocity);
-        if (speed <= 0.05) {
-            continue;
-        }
-
-        const auto key = counterflowCellKey(agent);
-        auto [it, inserted] = cells.try_emplace(key);
-        if (inserted) {
-            cellKeys.push_back(key);
-        }
-        auto& bucket = it->second;
-        ++bucket.movingCount;
-        bucket.speedSum += speed;
-        ++bucket.directionCounts[directionBinForVelocity(agent.velocity)];
-    }
-
-    std::optional<FrameCounterflowObservation> best;
-    for (const auto& key : cellKeys) {
-        const auto observation = counterflowInBucket(aggregateCounterflowNeighborhood(cells, key));
-        if (!observation.has_value()) {
-            continue;
-        }
-        if (!best.has_value()
-            || observation->forwardCount + observation->oppositeCount > best->forwardCount + best->oppositeCount) {
-            best = observation;
-        }
-    }
-
-    if (best.has_value()) {
-        return best;
-    }
-
-    return std::nullopt;
-}
-
-struct SustainedCounterflowObservation {
-    FrameCounterflowObservation frame{};
-    double durationSeconds{0.0};
-    double startedAtSeconds{0.0};
-    double endedAtSeconds{0.0};
-};
-
-std::optional<SustainedCounterflowObservation> sustainedCounterflowConflict(
-    const std::vector<SimulationFrame>& frames) {
-    if (frames.size() < 2) {
-        return std::nullopt;
-    }
-
-    std::optional<SustainedCounterflowObservation> current;
-    std::optional<SustainedCounterflowObservation> best;
-    double previousTimeSeconds = frames.front().elapsedSeconds;
-    bool previousWasConflict = false;
-    for (const auto& frame : frames) {
-        const auto observation = counterflowAtFrame(frame);
-        if (observation.has_value()) {
-            if (!current.has_value() || !previousWasConflict) {
-                current = SustainedCounterflowObservation{
-                    .frame = *observation,
-                    .durationSeconds = 0.0,
-                    .startedAtSeconds = frame.elapsedSeconds,
-                    .endedAtSeconds = frame.elapsedSeconds,
-                };
-            } else {
-                current->durationSeconds += std::max(0.0, frame.elapsedSeconds - previousTimeSeconds);
-                current->endedAtSeconds = frame.elapsedSeconds;
-                if (observation->forwardCount + observation->oppositeCount
-                    > current->frame.forwardCount + current->frame.oppositeCount) {
-                    current->frame = *observation;
-                }
-            }
-            if (!best.has_value() || current->durationSeconds > best->durationSeconds) {
-                best = current;
-            }
-            previousWasConflict = true;
-        } else {
-            previousWasConflict = false;
-            current.reset();
-        }
-        previousTimeSeconds = frame.elapsedSeconds;
-    }
-
-    if (best.has_value() && best->durationSeconds >= kCounterflowSustainedSecondsThreshold) {
-        return best;
-    }
-    return std::nullopt;
-}
-
-std::optional<AlternativeRecommendationRiskSignal> makeCounterflowRiskSignal(
+std::optional<AlternativeRecommendationRiskSignal> makeCrossFlowRiskSignal(
     const AlternativeRecommendationInput& request) {
-    if (!request.risk.operationalConflictConnections.empty()
-        || !request.risk.operationalConflictCells.empty()
-        || request.artifacts.operationalConflictSummary.peakConflictScore > 0.0) {
-        AlternativeRecommendationRiskSignal signal;
-        signal.kind = AlternativeRecommendationRiskKind::CounterflowConflict;
-        signal.summary = "Operational conflict detected from counterflow and connector-load metrics.";
-
-        double severity = request.artifacts.operationalConflictSummary.peakConflictScore * 100.0;
-        severity += request.artifacts.operationalConflictSummary.longestConflictDurationSeconds * 4.0;
-        severity += request.artifacts.operationalConflictSummary.totalConflictExposureAgentSeconds * 0.2;
-        severity += static_cast<double>(request.artifacts.operationalConflictSummary.conflictConnectionCount * 10U);
-
-        if (!request.risk.operationalConflictConnections.empty()) {
-            const auto& connection = request.risk.operationalConflictConnections.front();
-            severity += static_cast<double>(connection.forwardCount + connection.reverseCount);
-            signal.evidence.push_back(evidence(
-                "Conflict connection",
-                connectionName(request.layout, connection.connectionId),
-                "ScenarioRiskSnapshot.operationalConflictConnections"));
-            signal.evidence.push_back(evidence(
-                "Opposing flow",
-                std::to_string(connection.forwardCount) + " vs "
-                    + std::to_string(connection.reverseCount) + " agents",
-                "ScenarioRiskSnapshot.operationalConflictConnections"));
-            signal.evidence.push_back(evidence(
-                "Conflict duration",
-                fixed(connection.durationSeconds, 1) + " sec",
-                "ScenarioRiskSnapshot.operationalConflictConnections"));
-            signal.evidence.push_back(evidence(
-                "Average speed",
-                fixed(connection.averageSpeed, 2) + " m/s",
-                "ScenarioRiskSnapshot.operationalConflictConnections"));
-        } else if (!request.risk.operationalConflictCells.empty()) {
-            const auto& cell = request.risk.operationalConflictCells.front();
-            severity += static_cast<double>(cell.forwardCount + cell.reverseCount);
-            signal.evidence.push_back(evidence(
-                "Opposing flow",
-                std::to_string(cell.forwardCount) + " vs "
-                    + std::to_string(cell.reverseCount) + " agents",
-                "ScenarioRiskSnapshot.operationalConflictCells"));
-            signal.evidence.push_back(evidence(
-                "Conflict duration",
-                fixed(cell.durationSeconds, 1) + " sec",
-                "ScenarioRiskSnapshot.operationalConflictCells"));
-            signal.evidence.push_back(evidence(
-                "Average speed",
-                fixed(cell.averageSpeed, 2) + " m/s",
-                "ScenarioRiskSnapshot.operationalConflictCells"));
-            if (!cell.nearestConnectionId.empty()) {
-                signal.evidence.push_back(evidence(
-                    "Nearest connection",
-                    connectionName(request.layout, cell.nearestConnectionId),
-                    "ScenarioRiskSnapshot.operationalConflictCells"));
-            }
-        }
-
-        signal.evidence.push_back(evidence(
-            "Peak conflict score",
-            fixed(request.artifacts.operationalConflictSummary.peakConflictScore, 2),
-            "ScenarioResultArtifacts.operationalConflictSummary"));
-        signal.evidence.push_back(evidence(
-            "Conflict exposure",
-            fixed(request.artifacts.operationalConflictSummary.totalConflictExposureAgentSeconds, 1) + " agent-sec",
-            "ScenarioResultArtifacts.operationalConflictSummary"));
-        signal.evidence.push_back(evidence(
-            "Conflict connections",
-            std::to_string(request.artifacts.operationalConflictSummary.conflictConnectionCount),
-            "ScenarioResultArtifacts.operationalConflictSummary"));
-        if (!request.artifacts.connectionUsage.empty()) {
-            signal.evidence.push_back(evidence(
-                "Connection concentration",
-                fixed(request.artifacts.operationalConflictSummary.connectionConcentrationIndex, 2),
-                "ScenarioResultArtifacts.connectionUsage"));
-        }
-
-        signal.severity = static_cast<int>(std::round(severity));
-        return signal;
-    }
-
-    const auto observation = sustainedCounterflowConflict(request.artifacts.replayFrames);
-    if (!observation.has_value()) {
+    if (request.risk.crossFlowCells.empty()
+        && request.artifacts.crossFlowSummary.peakCrossFlowScore <= 0.0) {
         return std::nullopt;
     }
 
     AlternativeRecommendationRiskSignal signal;
-    signal.kind = AlternativeRecommendationRiskKind::CounterflowConflict;
-    signal.severity = static_cast<int>(observation->durationSeconds * 10.0)
-        + static_cast<int>(observation->frame.forwardCount + observation->frame.oppositeCount);
-    signal.summary = "Sustained counterflow conflict detected from replay frames.";
+    signal.kind = AlternativeRecommendationRiskKind::CrossFlow;
+    signal.summary = "Cross flow detected from non-aligned movement streams.";
+
+    double severity = request.artifacts.crossFlowSummary.peakCrossFlowScore * 100.0;
+    severity += request.artifacts.crossFlowSummary.longestCrossFlowDurationSeconds * 4.0;
+    severity += request.artifacts.crossFlowSummary.totalCrossFlowExposureAgentSeconds * 0.2;
+    severity += static_cast<double>(request.artifacts.crossFlowSummary.crossFlowHotspotCount * 8U);
+
+    if (!request.risk.crossFlowCells.empty()) {
+        const auto& cell = request.risk.crossFlowCells.front();
+        severity += static_cast<double>(cell.primaryFlowCount + cell.crossFlowCount);
+        signal.evidence.push_back(evidence(
+            "Cross flow",
+            std::to_string(cell.primaryFlowCount) + " primary / "
+                + std::to_string(cell.crossFlowCount) + " crossing movers",
+            "ScenarioRiskSnapshot.crossFlowCells"));
+        signal.evidence.push_back(evidence(
+            "Cross-flow duration",
+            fixed(cell.durationSeconds, 1) + " sec",
+            "ScenarioRiskSnapshot.crossFlowCells"));
+        signal.evidence.push_back(evidence(
+            "Average speed",
+            fixed(cell.averageSpeed, 2) + " m/s",
+            "ScenarioRiskSnapshot.crossFlowCells"));
+    }
+
     signal.evidence.push_back(evidence(
-        "Opposing flow",
-        std::to_string(observation->frame.forwardCount) + " vs "
-            + std::to_string(observation->frame.oppositeCount) + " agents",
-        "ScenarioResultArtifacts.replayFrames"));
+        "Peak cross-flow score",
+        fixed(request.artifacts.crossFlowSummary.peakCrossFlowScore, 2),
+        "ScenarioResultArtifacts.crossFlowSummary"));
     signal.evidence.push_back(evidence(
-        "Average speed",
-        fixed(observation->frame.averageSpeed, 2) + " m/s",
-        "ScenarioResultArtifacts.replayFrames"));
+        "Cross-flow exposure",
+        fixed(request.artifacts.crossFlowSummary.totalCrossFlowExposureAgentSeconds, 1) + " agent-sec",
+        "ScenarioResultArtifacts.crossFlowSummary"));
     signal.evidence.push_back(evidence(
-        "Sustained duration",
-        fixed(observation->durationSeconds, 1) + " sec",
-        "ScenarioResultArtifacts.replayFrames"));
+        "Cross-flow hotspots",
+        std::to_string(request.artifacts.crossFlowSummary.crossFlowHotspotCount),
+        "ScenarioResultArtifacts.crossFlowSummary"));
+
+    signal.severity = static_cast<int>(std::round(severity));
     return signal;
 }
 
@@ -1006,8 +703,8 @@ std::vector<AlternativeRecommendationRiskSignal> detectRiskSignals(
         bottleneck.has_value()) {
         signals.push_back(makeBottleneckRiskSignal(request, *bottleneck, AlternativeRecommendationRiskKind::CorridorBottleneck));
     }
-    if (const auto counterflow = makeCounterflowRiskSignal(request); counterflow.has_value()) {
-        signals.push_back(*counterflow);
+    if (const auto crossFlow = makeCrossFlowRiskSignal(request); crossFlow.has_value()) {
+        signals.push_back(*crossFlow);
     }
     if (const auto timeLimit = makeTimeLimitRiskSignal(request); timeLimit.has_value()) {
         signals.push_back(*timeLimit);
@@ -1268,39 +965,39 @@ std::optional<AlternativeRecommendationCandidate> makePressureHotspotCandidate(
     return candidate;
 }
 
-std::optional<AlternativeRecommendationCandidate> makeCounterflowCandidate(
+std::optional<AlternativeRecommendationCandidate> makeCrossFlowCandidate(
     const AlternativeRecommendationInput& request,
     const std::vector<AlternativeRecommendationRiskSignal>& riskSignals) {
-    const auto* signal = findRiskSignal(riskSignals, AlternativeRecommendationRiskKind::CounterflowConflict);
+    const auto* signal = findRiskSignal(riskSignals, AlternativeRecommendationRiskKind::CrossFlow);
     if (signal == nullptr) {
         return std::nullopt;
     }
 
-    const std::string eventId = "recommendation-counterflow-separation";
+    const std::string eventId = "recommendation-cross-flow-separation";
     if (hasOperationalEvent(request.sourceScenario, eventId)) {
         return std::nullopt;
     }
 
     auto draft = makeRecommendedDraft(
         request,
-        AlternativeRecommendationKind::CounterflowSeparation,
-        "Recommended: separate counterflow movements");
+        AlternativeRecommendationKind::CrossFlowSeparation,
+        "Recommended: separate cross-flow movements");
     draft.control.events.push_back(makeOperationalEvent(
         eventId,
-        "Separate counterflow movements",
+        "Separate cross-flow movements",
         signal->summary,
         "Use lane separation, time-separated entry, or exit-before-entry operation."));
     finalizeDiffKeys(request, draft);
 
     AlternativeRecommendationCandidate candidate;
-    candidate.kind = AlternativeRecommendationKind::CounterflowSeparation;
-    candidate.riskKind = AlternativeRecommendationRiskKind::CounterflowConflict;
-    candidate.id = "separate-counterflow";
+    candidate.kind = AlternativeRecommendationKind::CrossFlowSeparation;
+    candidate.riskKind = AlternativeRecommendationRiskKind::CrossFlow;
+    candidate.id = "separate-cross-flow";
     candidate.priority = 35;
-    candidate.title = "Separate counterflow movements";
+    candidate.title = "Separate cross-flow movements";
     candidate.summary = "Record a lane separation or time-separated entry operation.";
-    candidate.expectedImprovement = "Reduces head-on movement conflict and lets the revised operation be compared by rerun.";
-    candidate.artifactSource = "AlternativeRecommendationRiskSignal + operational conflict metrics";
+    candidate.expectedImprovement = "Reduces crossing movement interference and lets the revised operation be compared by rerun.";
+    candidate.artifactSource = "AlternativeRecommendationRiskSignal + cross-flow metrics";
     candidate.evidence = signal->evidence;
     candidate.recommendedScenario = std::move(draft);
     return candidate;
@@ -1387,8 +1084,8 @@ const char* alternativeRecommendationKindId(AlternativeRecommendationKind kind) 
         return "pressure-hotspot-relief";
     case AlternativeRecommendationKind::CorridorOneWayFlow:
         return "corridor-one-way-flow";
-    case AlternativeRecommendationKind::CounterflowSeparation:
-        return "counterflow-separation";
+    case AlternativeRecommendationKind::CrossFlowSeparation:
+        return "cross-flow-separation";
     case AlternativeRecommendationKind::StagedEvacuation:
         return "staged-evacuation";
     }
@@ -1401,8 +1098,8 @@ const char* alternativeRecommendationRiskKindId(AlternativeRecommendationRiskKin
         return "exit-bottleneck";
     case AlternativeRecommendationRiskKind::CorridorBottleneck:
         return "corridor-bottleneck";
-    case AlternativeRecommendationRiskKind::CounterflowConflict:
-        return "counterflow-conflict";
+    case AlternativeRecommendationRiskKind::CrossFlow:
+        return "cross-flow";
     case AlternativeRecommendationRiskKind::TimeLimitMissed:
         return "time-limit-missed";
     case AlternativeRecommendationRiskKind::PressureHotspot:
@@ -1432,7 +1129,7 @@ AlternativeRecommendationResult recommendFromInput(const AlternativeRecommendati
     if (const auto candidate = makeExitBalancingCandidate(request); candidate.has_value()) {
         result.candidates.push_back(*candidate);
     }
-    if (const auto candidate = makeCounterflowCandidate(request, result.riskSignals); candidate.has_value()) {
+    if (const auto candidate = makeCrossFlowCandidate(request, result.riskSignals); candidate.has_value()) {
         result.candidates.push_back(*candidate);
     }
     if (const auto candidate = makePressureHotspotCandidate(request); candidate.has_value()) {

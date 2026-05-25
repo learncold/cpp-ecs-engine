@@ -59,8 +59,7 @@ private:
     std::function<void()> openProjectHandler_{};
     std::function<void()> backToLayoutReviewHandler_{};
     std::function<void(std::size_t)> bottleneckFocusHandler_{};
-    std::function<void(std::size_t)> operationalConflictCellFocusHandler_{};
-    std::function<void(std::size_t)> operationalConflictConnectionFocusHandler_{};
+    std::function<void(std::size_t)> crossFlowCellFocusHandler_{};
     std::function<void(std::size_t)> hotspotFocusHandler_{};
     ScenarioResultNavigationView resultNavigationView_{ScenarioResultNavigationView::Bottleneck};
     WorkspaceShell* shell_{nullptr};

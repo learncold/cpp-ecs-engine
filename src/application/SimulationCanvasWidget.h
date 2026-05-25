@@ -33,7 +33,7 @@ enum class ResultOverlayMode {
     Pressure,
     Hotspots,
     Bottlenecks,
-    OperationalConflicts,
+    CrossFlow,
 };
 
 class SimulationCanvasWidget : public QWidget {
@@ -53,14 +53,11 @@ public:
         double scaleMaxPressureScore = 1.0);
     void setHotspotOverlay(std::vector<safecrowd::domain::ScenarioCongestionHotspot> hotspots);
     void setBottleneckOverlay(std::vector<safecrowd::domain::ScenarioBottleneckMetric> bottlenecks);
-    void setOperationalConflictOverlay(
-        std::vector<safecrowd::domain::ScenarioOperationalConflictCellMetric> cells,
-        std::vector<safecrowd::domain::ScenarioOperationalConflictConnectionMetric> connections);
+    void setCrossFlowOverlay(std::vector<safecrowd::domain::ScenarioCrossFlowCellMetric> cells);
     void setResultOverlayMode(ResultOverlayMode mode);
     void focusHotspot(std::size_t index);
     void focusBottleneck(std::size_t index);
-    void focusOperationalConflictCell(std::size_t index);
-    void focusOperationalConflictConnection(std::size_t index);
+    void focusCrossFlowCell(std::size_t index);
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -90,7 +87,7 @@ private:
     void drawPressureOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawHotspotOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawBottleneckOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
-    void drawOperationalConflictOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
+    void drawCrossFlowOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     bool switchFloorByWheel(QWheelEvent* event);
     void setCurrentFloorId(std::string floorId, bool manualSelection);
     void setupFloorSelector();
@@ -107,13 +104,11 @@ private:
     double pressureScaleMaxScore_{1.0};
     std::vector<safecrowd::domain::ScenarioCongestionHotspot> hotspotOverlay_{};
     std::vector<safecrowd::domain::ScenarioBottleneckMetric> bottleneckOverlay_{};
-    std::vector<safecrowd::domain::ScenarioOperationalConflictCellMetric> operationalConflictCellOverlay_{};
-    std::vector<safecrowd::domain::ScenarioOperationalConflictConnectionMetric> operationalConflictConnectionOverlay_{};
+    std::vector<safecrowd::domain::ScenarioCrossFlowCellMetric> crossFlowCellOverlay_{};
     ResultOverlayMode overlayMode_{ResultOverlayMode::None};
     std::optional<std::size_t> focusedHotspotIndex_{};
     std::optional<std::size_t> focusedBottleneckIndex_{};
-    std::optional<std::size_t> focusedOperationalConflictCellIndex_{};
-    std::optional<std::size_t> focusedOperationalConflictConnectionIndex_{};
+    std::optional<std::size_t> focusedCrossFlowCellIndex_{};
     LayoutCanvasCamera camera_{};
     std::optional<LayoutCanvasBounds> layoutBounds_{};
     std::string currentFloorId_{};

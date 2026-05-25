@@ -17,10 +17,11 @@ const char* scenarioRiskLevelLabel(ScenarioRiskLevel level) noexcept {
 const char* scenarioRiskDefinition() noexcept {
     return "Low when evacuation is complete or no active risk is detected. "
            "Medium when elapsed time reaches 50% of the limit, stalled active agents reach 15%, "
-           "any hotspot/pressure hotspot/bottleneck/operational conflict is detected, or any active agent reaches "
+           "any hotspot/pressure hotspot/bottleneck/cross-flow hotspot is detected, or any active agent reaches "
            "critical pressure exposure. "
            "High when elapsed time reaches 80% of the limit, stalled active agents reach 35%, "
-           "a critical pressure event is sustained, or two or more bottlenecks are detected.";
+           "a critical pressure event is sustained, two or more bottlenecks are detected, "
+           "or peak cross-flow score reaches 0.75.";
 }
 
 const char* scenarioStalledDefinition() noexcept {
@@ -42,10 +43,10 @@ const char* scenarioBottleneckDefinition() noexcept {
            "are within 1.25 m and at least one is stalled or average speed is low.";
 }
 
-const char* scenarioOperationalConflictDefinition() noexcept {
-    return "Operational conflict highlights counterflow and connector concentration. "
-           "Conflict cells use a 2.0 m grid derived from Pathfinder's 4 m^2 measurement-region "
-           "influence area, connect to passages within 1.41 m, and compare observed speed against "
+const char* scenarioCrossFlowDefinition() noexcept {
+    return "Cross flow highlights non-aligned movement streams sharing the same space while slowed down. "
+           "Cross-flow cells use a 2.0 m grid derived from Pathfinder's 4 m^2 measurement-region "
+           "influence area and compare observed speed against "
            "Pathfinder's 1.30 m/s mean and 0.97 m/s minimum walking speeds.";
 }
 

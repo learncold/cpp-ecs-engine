@@ -227,7 +227,7 @@ safecrowd::domain::ScenarioCriticalPressureEvent criticalPressureEventFromJson(c
     return event;
 }
 
-QJsonObject operationalConflictCellToJson(const safecrowd::domain::ScenarioOperationalConflictCellMetric& cell) {
+QJsonObject crossFlowCellToJson(const safecrowd::domain::ScenarioCrossFlowCellMetric& cell) {
     QJsonObject object;
     object["center"] = pointArray(cell.center);
     object["cellMin"] = pointArray(cell.cellMin);
@@ -235,16 +235,14 @@ QJsonObject operationalConflictCellToJson(const safecrowd::domain::ScenarioOpera
     object["floorId"] = QString::fromStdString(cell.floorId);
     object["movingAgentCount"] = static_cast<qint64>(cell.movingAgentCount);
     object["peakAgentCount"] = static_cast<qint64>(cell.peakAgentCount);
-    object["forwardCount"] = static_cast<qint64>(cell.forwardCount);
-    object["reverseCount"] = static_cast<qint64>(cell.reverseCount);
-    object["counterflowRatio"] = cell.counterflowRatio;
+    object["primaryFlowCount"] = static_cast<qint64>(cell.primaryFlowCount);
+    object["crossFlowCount"] = static_cast<qint64>(cell.crossFlowCount);
+    object["crossFlowRatio"] = cell.crossFlowRatio;
     object["averageSpeed"] = cell.averageSpeed;
     object["speedDropRatio"] = cell.speedDropRatio;
-    object["conflictScore"] = cell.conflictScore;
+    object["crossFlowScore"] = cell.crossFlowScore;
     object["durationSeconds"] = cell.durationSeconds;
     object["exposureAgentSeconds"] = cell.exposureAgentSeconds;
-    object["nearestConnectionId"] = QString::fromStdString(cell.nearestConnectionId);
-    object["nearestConnectionLabel"] = QString::fromStdString(cell.nearestConnectionLabel);
     object["detectedAtSeconds"] = optionalDoubleToJson(cell.detectedAtSeconds);
     if (cell.detectionFrame.has_value()) {
         object["detectionFrame"] = simulationFrameToJson(*cell.detectionFrame);
@@ -252,24 +250,22 @@ QJsonObject operationalConflictCellToJson(const safecrowd::domain::ScenarioOpera
     return object;
 }
 
-safecrowd::domain::ScenarioOperationalConflictCellMetric operationalConflictCellFromJson(const QJsonObject& object) {
-    safecrowd::domain::ScenarioOperationalConflictCellMetric cell{
+safecrowd::domain::ScenarioCrossFlowCellMetric crossFlowCellFromJson(const QJsonObject& object) {
+    safecrowd::domain::ScenarioCrossFlowCellMetric cell{
         .center = pointFromJson(object.value("center")),
         .cellMin = pointFromJson(object.value("cellMin")),
         .cellMax = pointFromJson(object.value("cellMax")),
         .floorId = object.value("floorId").toString().toStdString(),
         .movingAgentCount = static_cast<std::size_t>(object.value("movingAgentCount").toInteger()),
         .peakAgentCount = static_cast<std::size_t>(object.value("peakAgentCount").toInteger()),
-        .forwardCount = static_cast<std::size_t>(object.value("forwardCount").toInteger()),
-        .reverseCount = static_cast<std::size_t>(object.value("reverseCount").toInteger()),
-        .counterflowRatio = object.value("counterflowRatio").toDouble(),
+        .primaryFlowCount = static_cast<std::size_t>(object.value("primaryFlowCount").toInteger()),
+        .crossFlowCount = static_cast<std::size_t>(object.value("crossFlowCount").toInteger()),
+        .crossFlowRatio = object.value("crossFlowRatio").toDouble(),
         .averageSpeed = object.value("averageSpeed").toDouble(),
         .speedDropRatio = object.value("speedDropRatio").toDouble(),
-        .conflictScore = object.value("conflictScore").toDouble(),
+        .crossFlowScore = object.value("crossFlowScore").toDouble(),
         .durationSeconds = object.value("durationSeconds").toDouble(),
         .exposureAgentSeconds = object.value("exposureAgentSeconds").toDouble(),
-        .nearestConnectionId = object.value("nearestConnectionId").toString().toStdString(),
-        .nearestConnectionLabel = object.value("nearestConnectionLabel").toString().toStdString(),
     };
     cell.detectedAtSeconds = optionalDoubleFromJson(object.value("detectedAtSeconds"));
     if (object.value("detectionFrame").isObject()) {
@@ -278,142 +274,39 @@ safecrowd::domain::ScenarioOperationalConflictCellMetric operationalConflictCell
     return cell;
 }
 
-QJsonObject operationalConflictConnectionToJson(const safecrowd::domain::ScenarioOperationalConflictConnectionMetric& connection) {
-    QJsonObject object;
-    object["connectionId"] = QString::fromStdString(connection.connectionId);
-    object["label"] = QString::fromStdString(connection.label);
-    object["floorId"] = QString::fromStdString(connection.floorId);
-    object["passage"] = lineToJson(connection.passage);
-    object["nearbyAgentCount"] = static_cast<qint64>(connection.nearbyAgentCount);
-    object["movingAgentCount"] = static_cast<qint64>(connection.movingAgentCount);
-    object["queueAgentCount"] = static_cast<qint64>(connection.queueAgentCount);
-    object["forwardCount"] = static_cast<qint64>(connection.forwardCount);
-    object["reverseCount"] = static_cast<qint64>(connection.reverseCount);
-    object["counterflowRatio"] = connection.counterflowRatio;
-    object["averageSpeed"] = connection.averageSpeed;
-    object["speedDropRatio"] = connection.speedDropRatio;
-    object["conflictScore"] = connection.conflictScore;
-    object["durationSeconds"] = connection.durationSeconds;
-    object["exposureAgentSeconds"] = connection.exposureAgentSeconds;
-    object["detectedAtSeconds"] = optionalDoubleToJson(connection.detectedAtSeconds);
-    if (connection.detectionFrame.has_value()) {
-        object["detectionFrame"] = simulationFrameToJson(*connection.detectionFrame);
-    }
-    return object;
-}
-
-safecrowd::domain::ScenarioOperationalConflictConnectionMetric operationalConflictConnectionFromJson(const QJsonObject& object) {
-    safecrowd::domain::ScenarioOperationalConflictConnectionMetric connection{
-        .connectionId = object.value("connectionId").toString().toStdString(),
-        .label = object.value("label").toString().toStdString(),
-        .floorId = object.value("floorId").toString().toStdString(),
-        .passage = lineFromJson(object.value("passage").toObject()),
-        .nearbyAgentCount = static_cast<std::size_t>(object.value("nearbyAgentCount").toInteger()),
-        .movingAgentCount = static_cast<std::size_t>(object.value("movingAgentCount").toInteger()),
-        .queueAgentCount = static_cast<std::size_t>(object.value("queueAgentCount").toInteger()),
-        .forwardCount = static_cast<std::size_t>(object.value("forwardCount").toInteger()),
-        .reverseCount = static_cast<std::size_t>(object.value("reverseCount").toInteger()),
-        .counterflowRatio = object.value("counterflowRatio").toDouble(),
-        .averageSpeed = object.value("averageSpeed").toDouble(),
-        .speedDropRatio = object.value("speedDropRatio").toDouble(),
-        .conflictScore = object.value("conflictScore").toDouble(),
-        .durationSeconds = object.value("durationSeconds").toDouble(),
-        .exposureAgentSeconds = object.value("exposureAgentSeconds").toDouble(),
-    };
-    connection.detectedAtSeconds = optionalDoubleFromJson(object.value("detectedAtSeconds"));
-    if (object.value("detectionFrame").isObject()) {
-        connection.detectionFrame = simulationFrameFromJson(object.value("detectionFrame").toObject());
-    }
-    return connection;
-}
-
-QJsonObject connectionUsageMetricToJson(const safecrowd::domain::ConnectionUsageMetric& connection) {
-    QJsonObject object;
-    object["connectionId"] = QString::fromStdString(connection.connectionId);
-    object["label"] = QString::fromStdString(connection.label);
-    object["floorId"] = QString::fromStdString(connection.floorId);
-    object["traversalCount"] = static_cast<qint64>(connection.traversalCount);
-    object["usageRatio"] = connection.usageRatio;
-    object["peakWindowCount"] = static_cast<qint64>(connection.peakWindowCount);
-    object["peakAtSeconds"] = optionalDoubleToJson(connection.peakAtSeconds);
-    object["forwardTraversals"] = static_cast<qint64>(connection.forwardTraversals);
-    object["reverseTraversals"] = static_cast<qint64>(connection.reverseTraversals);
-    object["queueExposureAgentSeconds"] = connection.queueExposureAgentSeconds;
-    object["peakQueuedAgents"] = static_cast<qint64>(connection.peakQueuedAgents);
-    object["averageObservedSpeed"] = connection.averageObservedSpeed;
-    object["peakConflictScore"] = connection.peakConflictScore;
-    object["longestConflictDurationSeconds"] = connection.longestConflictDurationSeconds;
-    object["counterflowEventCount"] = static_cast<qint64>(connection.counterflowEventCount);
-    return object;
-}
-
-safecrowd::domain::ConnectionUsageMetric connectionUsageMetricFromJson(const QJsonObject& object) {
-    safecrowd::domain::ConnectionUsageMetric connection;
-    connection.connectionId = object.value("connectionId").toString().toStdString();
-    connection.label = object.value("label").toString().toStdString();
-    connection.floorId = object.value("floorId").toString().toStdString();
-    connection.traversalCount = static_cast<std::size_t>(object.value("traversalCount").toInteger());
-    connection.usageRatio = object.value("usageRatio").toDouble();
-    connection.peakWindowCount = static_cast<std::size_t>(object.value("peakWindowCount").toInteger());
-    connection.peakAtSeconds = optionalDoubleFromJson(object.value("peakAtSeconds"));
-    connection.forwardTraversals = static_cast<std::size_t>(object.value("forwardTraversals").toInteger());
-    connection.reverseTraversals = static_cast<std::size_t>(object.value("reverseTraversals").toInteger());
-    connection.queueExposureAgentSeconds = object.value("queueExposureAgentSeconds").toDouble();
-    connection.peakQueuedAgents = static_cast<std::size_t>(object.value("peakQueuedAgents").toInteger());
-    connection.averageObservedSpeed = object.value("averageObservedSpeed").toDouble();
-    connection.peakConflictScore = object.value("peakConflictScore").toDouble();
-    connection.longestConflictDurationSeconds = object.value("longestConflictDurationSeconds").toDouble();
-    connection.counterflowEventCount = static_cast<std::size_t>(object.value("counterflowEventCount").toInteger());
-    return connection;
-}
-
-QJsonObject operationalConflictTimelineSampleToJson(const safecrowd::domain::OperationalConflictTimelineSample& sample) {
+QJsonObject crossFlowTimelineSampleToJson(const safecrowd::domain::CrossFlowTimelineSample& sample) {
     QJsonObject object;
     object["timeSeconds"] = sample.timeSeconds;
-    object["peakConflictScore"] = sample.peakConflictScore;
-    object["activeConflictCellCount"] = static_cast<qint64>(sample.activeConflictCellCount);
-    object["activeConflictConnectionCount"] = static_cast<qint64>(sample.activeConflictConnectionCount);
-    object["queuedAgentsNearConnections"] = static_cast<qint64>(sample.queuedAgentsNearConnections);
+    object["peakCrossFlowScore"] = sample.peakCrossFlowScore;
+    object["activeCrossFlowCellCount"] = static_cast<qint64>(sample.activeCrossFlowCellCount);
     return object;
 }
 
-safecrowd::domain::OperationalConflictTimelineSample operationalConflictTimelineSampleFromJson(const QJsonObject& object) {
+safecrowd::domain::CrossFlowTimelineSample crossFlowTimelineSampleFromJson(const QJsonObject& object) {
     return {
         .timeSeconds = object.value("timeSeconds").toDouble(),
-        .peakConflictScore = object.value("peakConflictScore").toDouble(),
-        .activeConflictCellCount = static_cast<std::size_t>(object.value("activeConflictCellCount").toInteger()),
-        .activeConflictConnectionCount = static_cast<std::size_t>(object.value("activeConflictConnectionCount").toInteger()),
-        .queuedAgentsNearConnections = static_cast<std::size_t>(object.value("queuedAgentsNearConnections").toInteger()),
+        .peakCrossFlowScore = object.value("peakCrossFlowScore").toDouble(),
+        .activeCrossFlowCellCount = static_cast<std::size_t>(object.value("activeCrossFlowCellCount").toInteger()),
     };
 }
 
-QJsonObject operationalConflictSummaryToJson(const safecrowd::domain::OperationalConflictSummary& summary) {
+QJsonObject crossFlowSummaryToJson(const safecrowd::domain::CrossFlowSummary& summary) {
     QJsonObject object;
-    object["peakConflictScore"] = summary.peakConflictScore;
+    object["peakCrossFlowScore"] = summary.peakCrossFlowScore;
     object["peakAtSeconds"] = optionalDoubleToJson(summary.peakAtSeconds);
-    object["totalConflictExposureAgentSeconds"] = summary.totalConflictExposureAgentSeconds;
-    object["longestConflictDurationSeconds"] = summary.longestConflictDurationSeconds;
-    object["counterflowHotspotCount"] = static_cast<qint64>(summary.counterflowHotspotCount);
-    object["conflictConnectionCount"] = static_cast<qint64>(summary.conflictConnectionCount);
-    object["connectionConcentrationIndex"] = summary.connectionConcentrationIndex;
-    object["peakQueuedAgents"] = static_cast<qint64>(summary.peakQueuedAgents);
-    object["topConflictConnectionId"] = QString::fromStdString(summary.topConflictConnectionId);
-    object["topConflictConnectionLabel"] = QString::fromStdString(summary.topConflictConnectionLabel);
+    object["totalCrossFlowExposureAgentSeconds"] = summary.totalCrossFlowExposureAgentSeconds;
+    object["longestCrossFlowDurationSeconds"] = summary.longestCrossFlowDurationSeconds;
+    object["crossFlowHotspotCount"] = static_cast<qint64>(summary.crossFlowHotspotCount);
     return object;
 }
 
-safecrowd::domain::OperationalConflictSummary operationalConflictSummaryFromJson(const QJsonObject& object) {
-    safecrowd::domain::OperationalConflictSummary summary;
-    summary.peakConflictScore = object.value("peakConflictScore").toDouble();
+safecrowd::domain::CrossFlowSummary crossFlowSummaryFromJson(const QJsonObject& object) {
+    safecrowd::domain::CrossFlowSummary summary;
+    summary.peakCrossFlowScore = object.value("peakCrossFlowScore").toDouble();
     summary.peakAtSeconds = optionalDoubleFromJson(object.value("peakAtSeconds"));
-    summary.totalConflictExposureAgentSeconds = object.value("totalConflictExposureAgentSeconds").toDouble();
-    summary.longestConflictDurationSeconds = object.value("longestConflictDurationSeconds").toDouble();
-    summary.counterflowHotspotCount = static_cast<std::size_t>(object.value("counterflowHotspotCount").toInteger());
-    summary.conflictConnectionCount = static_cast<std::size_t>(object.value("conflictConnectionCount").toInteger());
-    summary.connectionConcentrationIndex = object.value("connectionConcentrationIndex").toDouble();
-    summary.peakQueuedAgents = static_cast<std::size_t>(object.value("peakQueuedAgents").toInteger());
-    summary.topConflictConnectionId = object.value("topConflictConnectionId").toString().toStdString();
-    summary.topConflictConnectionLabel = object.value("topConflictConnectionLabel").toString().toStdString();
+    summary.totalCrossFlowExposureAgentSeconds = object.value("totalCrossFlowExposureAgentSeconds").toDouble();
+    summary.longestCrossFlowDurationSeconds = object.value("longestCrossFlowDurationSeconds").toDouble();
+    summary.crossFlowHotspotCount = static_cast<std::size_t>(object.value("crossFlowHotspotCount").toInteger());
     return summary;
 }
 
@@ -423,9 +316,9 @@ QJsonObject riskSnapshotToJson(const safecrowd::domain::ScenarioRiskSnapshot& ri
     object["stalledAgentCount"] = static_cast<qint64>(risk.stalledAgentCount);
     object["pressureExposedAgentCount"] = static_cast<qint64>(risk.pressureExposedAgentCount);
     object["criticalPressureAgentCount"] = static_cast<qint64>(risk.criticalPressureAgentCount);
-    object["conflictAgentCount"] = static_cast<qint64>(risk.conflictAgentCount);
-    object["peakConflictScore"] = risk.peakConflictScore;
-    object["totalConflictExposureAgentSeconds"] = risk.totalConflictExposureAgentSeconds;
+    object["crossFlowAgentCount"] = static_cast<qint64>(risk.crossFlowAgentCount);
+    object["peakCrossFlowScore"] = risk.peakCrossFlowScore;
+    object["totalCrossFlowExposureAgentSeconds"] = risk.totalCrossFlowExposureAgentSeconds;
     QJsonArray hotspots;
     for (const auto& hotspot : risk.hotspots) {
         hotspots.append(hotspotToJson(hotspot));
@@ -451,16 +344,11 @@ QJsonObject riskSnapshotToJson(const safecrowd::domain::ScenarioRiskSnapshot& ri
         bottlenecks.append(bottleneckToJson(bottleneck));
     }
     object["bottlenecks"] = bottlenecks;
-    QJsonArray operationalConflictCells;
-    for (const auto& cell : risk.operationalConflictCells) {
-        operationalConflictCells.append(operationalConflictCellToJson(cell));
+    QJsonArray crossFlowCells;
+    for (const auto& cell : risk.crossFlowCells) {
+        crossFlowCells.append(crossFlowCellToJson(cell));
     }
-    object["operationalConflictCells"] = operationalConflictCells;
-    QJsonArray operationalConflictConnections;
-    for (const auto& connection : risk.operationalConflictConnections) {
-        operationalConflictConnections.append(operationalConflictConnectionToJson(connection));
-    }
-    object["operationalConflictConnections"] = operationalConflictConnections;
+    object["crossFlowCells"] = crossFlowCells;
     return object;
 }
 
@@ -472,9 +360,9 @@ safecrowd::domain::ScenarioRiskSnapshot riskSnapshotFromJson(const QJsonObject& 
         static_cast<std::size_t>(object.value("pressureExposedAgentCount").toInteger());
     risk.criticalPressureAgentCount =
         static_cast<std::size_t>(object.value("criticalPressureAgentCount").toInteger());
-    risk.conflictAgentCount = static_cast<std::size_t>(object.value("conflictAgentCount").toInteger());
-    risk.peakConflictScore = object.value("peakConflictScore").toDouble();
-    risk.totalConflictExposureAgentSeconds = object.value("totalConflictExposureAgentSeconds").toDouble();
+    risk.crossFlowAgentCount = static_cast<std::size_t>(object.value("crossFlowAgentCount").toInteger());
+    risk.peakCrossFlowScore = object.value("peakCrossFlowScore").toDouble();
+    risk.totalCrossFlowExposureAgentSeconds = object.value("totalCrossFlowExposureAgentSeconds").toDouble();
     for (const auto& value : object.value("hotspots").toArray()) {
         risk.hotspots.push_back(hotspotFromJson(value.toObject()));
     }
@@ -490,11 +378,8 @@ safecrowd::domain::ScenarioRiskSnapshot riskSnapshotFromJson(const QJsonObject& 
     for (const auto& value : object.value("bottlenecks").toArray()) {
         risk.bottlenecks.push_back(bottleneckFromJson(value.toObject()));
     }
-    for (const auto& value : object.value("operationalConflictCells").toArray()) {
-        risk.operationalConflictCells.push_back(operationalConflictCellFromJson(value.toObject()));
-    }
-    for (const auto& value : object.value("operationalConflictConnections").toArray()) {
-        risk.operationalConflictConnections.push_back(operationalConflictConnectionFromJson(value.toObject()));
+    for (const auto& value : object.value("crossFlowCells").toArray()) {
+        risk.crossFlowCells.push_back(crossFlowCellFromJson(value.toObject()));
     }
     return risk;
 }
@@ -928,7 +813,7 @@ QJsonObject resultArtifactsToJson(const safecrowd::domain::ScenarioResultArtifac
     object["densitySummary"] = densitySummaryToJson(artifacts.densitySummary);
     object["pressureSummary"] = pressureSummaryToJson(artifacts.pressureSummary);
     object["hazardExposureSummary"] = hazardExposureSummaryToJson(artifacts.hazardExposureSummary);
-    object["operationalConflictSummary"] = operationalConflictSummaryToJson(artifacts.operationalConflictSummary);
+    object["crossFlowSummary"] = crossFlowSummaryToJson(artifacts.crossFlowSummary);
 
     QJsonArray exitUsage;
     for (const auto& exit : artifacts.exitUsage) {
@@ -948,17 +833,11 @@ QJsonObject resultArtifactsToJson(const safecrowd::domain::ScenarioResultArtifac
     }
     object["placementCompletion"] = placementCompletion;
 
-    QJsonArray connectionUsage;
-    for (const auto& connection : artifacts.connectionUsage) {
-        connectionUsage.append(connectionUsageMetricToJson(connection));
+    QJsonArray crossFlowTimeline;
+    for (const auto& sample : artifacts.crossFlowTimeline) {
+        crossFlowTimeline.append(crossFlowTimelineSampleToJson(sample));
     }
-    object["connectionUsage"] = connectionUsage;
-
-    QJsonArray operationalConflictTimeline;
-    for (const auto& sample : artifacts.operationalConflictTimeline) {
-        operationalConflictTimeline.append(operationalConflictTimelineSampleToJson(sample));
-    }
-    object["operationalConflictTimeline"] = operationalConflictTimeline;
+    object["crossFlowTimeline"] = crossFlowTimeline;
 
     return object;
 }
@@ -1002,9 +881,9 @@ safecrowd::domain::ScenarioResultArtifacts resultArtifactsFromJson(const QJsonOb
         artifacts.hazardExposureSummary =
             hazardExposureSummaryFromJson(object.value("hazardExposureSummary").toObject());
     }
-    if (object.value("operationalConflictSummary").isObject()) {
-        artifacts.operationalConflictSummary =
-            operationalConflictSummaryFromJson(object.value("operationalConflictSummary").toObject());
+    if (object.value("crossFlowSummary").isObject()) {
+        artifacts.crossFlowSummary =
+            crossFlowSummaryFromJson(object.value("crossFlowSummary").toObject());
     }
     for (const auto& value : object.value("exitUsage").toArray()) {
         artifacts.exitUsage.push_back(exitUsageMetricFromJson(value.toObject()));
@@ -1015,12 +894,9 @@ safecrowd::domain::ScenarioResultArtifacts resultArtifactsFromJson(const QJsonOb
     for (const auto& value : object.value("placementCompletion").toArray()) {
         artifacts.placementCompletion.push_back(placementCompletionMetricFromJson(value.toObject()));
     }
-    for (const auto& value : object.value("connectionUsage").toArray()) {
-        artifacts.connectionUsage.push_back(connectionUsageMetricFromJson(value.toObject()));
-    }
-    for (const auto& value : object.value("operationalConflictTimeline").toArray()) {
-        artifacts.operationalConflictTimeline.push_back(
-            operationalConflictTimelineSampleFromJson(value.toObject()));
+    for (const auto& value : object.value("crossFlowTimeline").toArray()) {
+        artifacts.crossFlowTimeline.push_back(
+            crossFlowTimelineSampleFromJson(value.toObject()));
     }
 
     return artifacts;

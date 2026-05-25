@@ -2,7 +2,6 @@
 #include "domain/AlternativeRecommendationService.h"
 
 #include <algorithm>
-#include <cstdint>
 #include <utility>
 
 using namespace safecrowd::domain;
@@ -128,152 +127,37 @@ ScenarioResultArtifacts makeExitUsageArtifacts(double mainRatio = 0.85, double e
     return artifacts;
 }
 
-ScenarioResultArtifacts makeCounterflowArtifacts(double endSeconds = 10.0) {
-    ScenarioResultArtifacts artifacts = makeCompletedArtifacts();
-    for (int second = 0; second <= static_cast<int>(endSeconds); ++second) {
-        SimulationFrame frame;
-        frame.elapsedSeconds = static_cast<double>(second);
-        frame.totalAgentCount = 6;
-        frame.evacuatedAgentCount = 0;
-        for (std::uint64_t index = 0; index < 3; ++index) {
-            frame.agents.push_back({
-                .id = index + 1,
-                .position = {static_cast<double>(index), 0.0},
-                .velocity = {0.3, 0.0},
-                .floorId = "L1",
-            });
-            frame.agents.push_back({
-                .id = index + 10,
-                .position = {static_cast<double>(index), 1.0},
-                .velocity = {-0.3, 0.0},
-                .floorId = "L1",
-            });
-        }
-        artifacts.replayFrames.push_back(std::move(frame));
-    }
-    return artifacts;
-}
-
-ScenarioResultArtifacts makeSeparatedOpposingFlowArtifacts(double endSeconds = 10.0) {
-    ScenarioResultArtifacts artifacts = makeCompletedArtifacts();
-    for (int second = 0; second <= static_cast<int>(endSeconds); ++second) {
-        SimulationFrame frame;
-        frame.elapsedSeconds = static_cast<double>(second);
-        frame.totalAgentCount = 6;
-        frame.evacuatedAgentCount = 0;
-        for (std::uint64_t index = 0; index < 3; ++index) {
-            frame.agents.push_back({
-                .id = index + 1,
-                .position = {static_cast<double>(index), 0.0},
-                .velocity = {0.3, 0.0},
-                .floorId = "L1",
-            });
-            frame.agents.push_back({
-                .id = index + 10,
-                .position = {100.0 + static_cast<double>(index), 0.0},
-                .velocity = {-0.3, 0.0},
-                .floorId = "L1",
-            });
-        }
-        artifacts.replayFrames.push_back(std::move(frame));
-    }
-    return artifacts;
-}
-
-ScenarioResultArtifacts makeCrossFloorOpposingFlowArtifacts(double endSeconds = 10.0) {
-    ScenarioResultArtifacts artifacts = makeCompletedArtifacts();
-    for (int second = 0; second <= static_cast<int>(endSeconds); ++second) {
-        SimulationFrame frame;
-        frame.elapsedSeconds = static_cast<double>(second);
-        frame.totalAgentCount = 6;
-        frame.evacuatedAgentCount = 0;
-        for (std::uint64_t index = 0; index < 3; ++index) {
-            frame.agents.push_back({
-                .id = index + 1,
-                .position = {static_cast<double>(index), 0.0},
-                .velocity = {0.3, 0.0},
-                .floorId = "L1",
-            });
-            frame.agents.push_back({
-                .id = index + 10,
-                .position = {static_cast<double>(index), 0.0},
-                .velocity = {-0.3, 0.0},
-                .floorId = "L2",
-            });
-        }
-        artifacts.replayFrames.push_back(std::move(frame));
-    }
-    return artifacts;
-}
-
-ScenarioRiskSnapshot makeOperationalConflictRisk() {
+ScenarioRiskSnapshot makeCrossFlowRisk() {
     ScenarioRiskSnapshot risk;
     risk.completionRisk = ScenarioRiskLevel::Medium;
-    risk.peakConflictScore = 0.78;
-    risk.totalConflictExposureAgentSeconds = 22.5;
-    risk.conflictAgentCount = 7;
-    risk.operationalConflictCells.push_back({
+    risk.peakCrossFlowScore = 0.78;
+    risk.totalCrossFlowExposureAgentSeconds = 22.5;
+    risk.crossFlowAgentCount = 7;
+    risk.crossFlowCells.push_back({
         .center = {.x = 1.0, .y = 0.5},
         .cellMin = {.x = 0.0, .y = 0.0},
         .cellMax = {.x = 2.0, .y = 2.0},
         .floorId = "L1",
         .movingAgentCount = 7,
         .peakAgentCount = 7,
-        .forwardCount = 4,
-        .reverseCount = 3,
-        .counterflowRatio = 3.0 / 7.0,
+        .primaryFlowCount = 4,
+        .crossFlowCount = 3,
+        .crossFlowRatio = 3.0 / 7.0,
         .averageSpeed = 0.55,
         .speedDropRatio = 0.58,
-        .conflictScore = 0.78,
-        .durationSeconds = 14.0,
-        .exposureAgentSeconds = 22.5,
-        .nearestConnectionId = "door-main",
-        .nearestConnectionLabel = "Main Door",
-    });
-    risk.operationalConflictConnections.push_back({
-        .connectionId = "door-main",
-        .label = "Main Door",
-        .floorId = "L1",
-        .nearbyAgentCount = 7,
-        .movingAgentCount = 7,
-        .queueAgentCount = 3,
-        .forwardCount = 4,
-        .reverseCount = 3,
-        .counterflowRatio = 3.0 / 7.0,
-        .averageSpeed = 0.55,
-        .speedDropRatio = 0.58,
-        .conflictScore = 0.78,
+        .crossFlowScore = 0.78,
         .durationSeconds = 14.0,
         .exposureAgentSeconds = 22.5,
     });
     return risk;
 }
 
-ScenarioResultArtifacts makeOperationalConflictArtifacts() {
+ScenarioResultArtifacts makeCrossFlowArtifacts() {
     ScenarioResultArtifacts artifacts = makeCompletedArtifacts();
-    artifacts.operationalConflictSummary.peakConflictScore = 0.78;
-    artifacts.operationalConflictSummary.totalConflictExposureAgentSeconds = 22.5;
-    artifacts.operationalConflictSummary.longestConflictDurationSeconds = 14.0;
-    artifacts.operationalConflictSummary.conflictConnectionCount = 1;
-    artifacts.operationalConflictSummary.connectionConcentrationIndex = 0.62;
-    artifacts.operationalConflictSummary.topConflictConnectionId = "door-main";
-    artifacts.operationalConflictSummary.topConflictConnectionLabel = "Main Door";
-    artifacts.connectionUsage.push_back({
-        .connectionId = "door-main",
-        .label = "Main Door",
-        .floorId = "L1",
-        .traversalCount = 10,
-        .usageRatio = 0.62,
-        .peakWindowCount = 5,
-        .forwardTraversals = 6,
-        .reverseTraversals = 4,
-        .queueExposureAgentSeconds = 5.0,
-        .peakQueuedAgents = 3,
-        .averageObservedSpeed = 0.63,
-        .peakConflictScore = 0.78,
-        .longestConflictDurationSeconds = 14.0,
-        .counterflowEventCount = 2,
-    });
+    artifacts.crossFlowSummary.peakCrossFlowScore = 0.78;
+    artifacts.crossFlowSummary.totalCrossFlowExposureAgentSeconds = 22.5;
+    artifacts.crossFlowSummary.longestCrossFlowDurationSeconds = 14.0;
+    artifacts.crossFlowSummary.crossFlowHotspotCount = 1;
     return artifacts;
 }
 
@@ -801,90 +685,38 @@ SC_TEST(AlternativeRecommendationService_doesNotAddOneWayOperationForCorridorBot
     SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::CorridorOneWayFlow));
 }
 
-SC_TEST(AlternativeRecommendationService_suppressesOneWayOperationForCounterflowConflict) {
+SC_TEST(AlternativeRecommendationService_suppressesOneWayOperationForCrossFlow) {
     const AlternativeRecommendationService service;
     const auto result = service.recommend({
         .layout = makeRecommendationLayout(),
         .sourceScenario = makeScenario(),
-        .artifacts = makeCounterflowArtifacts(),
+        .risk = makeCrossFlowRisk(),
+        .artifacts = makeCrossFlowArtifacts(),
     });
 
-    SC_EXPECT_TRUE(hasRiskSignalKind(result, AlternativeRecommendationRiskKind::CounterflowConflict));
+    SC_EXPECT_TRUE(hasRiskSignalKind(result, AlternativeRecommendationRiskKind::CrossFlow));
     SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::CorridorOneWayFlow));
-    SC_EXPECT_TRUE(hasCandidateKind(result, AlternativeRecommendationKind::CounterflowSeparation));
+    SC_EXPECT_TRUE(hasCandidateKind(result, AlternativeRecommendationKind::CrossFlowSeparation));
 }
 
-SC_TEST(AlternativeRecommendationService_detectsSustainedCounterflowConflict) {
+SC_TEST(AlternativeRecommendationService_usesCrossFlowMetrics) {
     const AlternativeRecommendationService service;
     const auto result = service.recommend({
         .layout = makeRecommendationLayout(),
         .sourceScenario = makeScenario(),
-        .artifacts = makeCounterflowArtifacts(),
+        .risk = makeCrossFlowRisk(),
+        .artifacts = makeCrossFlowArtifacts(),
     });
 
     const auto it = std::find_if(result.candidates.begin(), result.candidates.end(), [](const auto& candidate) {
-        return candidate.kind == AlternativeRecommendationKind::CounterflowSeparation;
+        return candidate.kind == AlternativeRecommendationKind::CrossFlowSeparation;
     });
-    SC_EXPECT_TRUE(hasRiskSignalKind(result, AlternativeRecommendationRiskKind::CounterflowConflict));
+    SC_EXPECT_TRUE(hasRiskSignalKind(result, AlternativeRecommendationRiskKind::CrossFlow));
     SC_EXPECT_TRUE(it != result.candidates.end());
-    SC_EXPECT_TRUE(it->riskKind.has_value() && *it->riskKind == AlternativeRecommendationRiskKind::CounterflowConflict);
+    SC_EXPECT_TRUE(containsEvidenceSource(*it, "ScenarioRiskSnapshot.crossFlowCells"));
+    SC_EXPECT_TRUE(containsEvidenceSource(*it, "ScenarioResultArtifacts.crossFlowSummary"));
     SC_EXPECT_EQ(it->recommendedScenario.control.events.size(), std::size_t{1});
     SC_EXPECT_TRUE(containsDiffKey(it->recommendedScenario, "control.events"));
-}
-
-SC_TEST(AlternativeRecommendationService_prefersOperationalConflictMetricsOverReplayHeuristics) {
-    const AlternativeRecommendationService service;
-    const auto result = service.recommend({
-        .layout = makeRecommendationLayout(),
-        .sourceScenario = makeScenario(),
-        .risk = makeOperationalConflictRisk(),
-        .artifacts = makeOperationalConflictArtifacts(),
-    });
-
-    const auto it = std::find_if(result.candidates.begin(), result.candidates.end(), [](const auto& candidate) {
-        return candidate.kind == AlternativeRecommendationKind::CounterflowSeparation;
-    });
-    SC_EXPECT_TRUE(hasRiskSignalKind(result, AlternativeRecommendationRiskKind::CounterflowConflict));
-    SC_EXPECT_TRUE(it != result.candidates.end());
-    SC_EXPECT_TRUE(containsEvidenceSource(*it, "ScenarioRiskSnapshot.operationalConflictConnections"));
-    SC_EXPECT_TRUE(containsEvidenceSource(*it, "ScenarioResultArtifacts.operationalConflictSummary"));
-    SC_EXPECT_EQ(it->recommendedScenario.control.events.size(), std::size_t{1});
-}
-
-SC_TEST(AlternativeRecommendationService_ignoresSeparatedOpposingFlows) {
-    const AlternativeRecommendationService service;
-    const auto result = service.recommend({
-        .layout = makeRecommendationLayout(),
-        .sourceScenario = makeScenario(),
-        .artifacts = makeSeparatedOpposingFlowArtifacts(),
-    });
-
-    SC_EXPECT_TRUE(!hasRiskSignalKind(result, AlternativeRecommendationRiskKind::CounterflowConflict));
-    SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::CounterflowSeparation));
-}
-
-SC_TEST(AlternativeRecommendationService_ignoresCrossFloorOpposingFlows) {
-    const AlternativeRecommendationService service;
-    const auto result = service.recommend({
-        .layout = makeRecommendationLayout(),
-        .sourceScenario = makeScenario(),
-        .artifacts = makeCrossFloorOpposingFlowArtifacts(),
-    });
-
-    SC_EXPECT_TRUE(!hasRiskSignalKind(result, AlternativeRecommendationRiskKind::CounterflowConflict));
-    SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::CounterflowSeparation));
-}
-
-SC_TEST(AlternativeRecommendationService_ignoresTransientCounterflowConflict) {
-    const AlternativeRecommendationService service;
-    const auto result = service.recommend({
-        .layout = makeRecommendationLayout(),
-        .sourceScenario = makeScenario(),
-        .artifacts = makeCounterflowArtifacts(5.0),
-    });
-
-    SC_EXPECT_TRUE(!hasRiskSignalKind(result, AlternativeRecommendationRiskKind::CounterflowConflict));
-    SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::CounterflowSeparation));
 }
 
 SC_TEST(AlternativeRecommendationService_addsStagedEvacuationForMissedTimeLimit) {

@@ -1630,157 +1630,51 @@ void ScenarioResultArtifactsSystem::update(engine::EngineWorld& world, const eng
             });
     }
 
-    result.artifacts.operationalConflictSummary = {};
-    result.artifacts.connectionUsage.clear();
-    if (resources.contains<ScenarioOperationalConflictResource>()) {
-        const auto& operationalConflict = resources.get<ScenarioOperationalConflictResource>();
-        std::size_t totalTraversals = 0;
-        for (const auto& [_, state] : operationalConflict.connectionsById) {
-            totalTraversals += state.traversalCount;
-        }
-
-        result.artifacts.connectionUsage.reserve(operationalConflict.connectionsById.size());
-        for (const auto& [_, state] : operationalConflict.connectionsById) {
-            ConnectionUsageMetric metric;
-            metric.connectionId = state.connectionId;
-            metric.label = state.label;
-            metric.floorId = state.floorId;
-            metric.traversalCount = state.traversalCount;
-            metric.usageRatio = totalTraversals == 0
-                ? 0.0
-                : static_cast<double>(state.traversalCount) / static_cast<double>(totalTraversals);
-            metric.peakWindowCount = state.peakWindowCount;
-            metric.peakAtSeconds = state.peakWindowAtSeconds;
-            metric.forwardTraversals = state.forwardTraversals;
-            metric.reverseTraversals = state.reverseTraversals;
-            metric.queueExposureAgentSeconds = state.queueExposureAgentSeconds;
-            metric.peakQueuedAgents = state.peakQueuedAgents;
-            metric.averageObservedSpeed = state.observedSpeedSamples == 0
-                ? 0.0
-                : state.observedSpeedSum / static_cast<double>(state.observedSpeedSamples);
-            metric.peakConflictScore = state.peakConflictScore;
-            metric.longestConflictDurationSeconds = state.longestConflictDurationSeconds;
-            metric.counterflowEventCount = state.counterflowEventCount;
-            result.artifacts.connectionUsage.push_back(std::move(metric));
-        }
-        std::sort(result.artifacts.connectionUsage.begin(), result.artifacts.connectionUsage.end(), [](const auto& lhs, const auto& rhs) {
-            if (std::fabs(lhs.peakConflictScore - rhs.peakConflictScore) > 1e-9) {
-                return lhs.peakConflictScore > rhs.peakConflictScore;
-            }
-            if (lhs.traversalCount != rhs.traversalCount) {
-                return lhs.traversalCount > rhs.traversalCount;
-            }
-            return lhs.connectionId < rhs.connectionId;
-        });
-
-        auto& summary = result.artifacts.operationalConflictSummary;
-        double concentrationIndex = 0.0;
-        for (const auto& metric : result.artifacts.connectionUsage) {
-            concentrationIndex += metric.usageRatio * metric.usageRatio;
-            summary.longestConflictDurationSeconds =
-                std::max(summary.longestConflictDurationSeconds, metric.longestConflictDurationSeconds);
-            summary.peakQueuedAgents = std::max(summary.peakQueuedAgents, metric.peakQueuedAgents);
-        }
-        summary.connectionConcentrationIndex = concentrationIndex;
-        summary.conflictConnectionCount = static_cast<std::size_t>(std::count_if(
-            result.artifacts.connectionUsage.begin(),
-            result.artifacts.connectionUsage.end(),
-            [](const auto& metric) {
-                return metric.peakConflictScore > 0.0 || metric.counterflowEventCount > 0;
-            }));
-
-        const auto topConflictIt = std::max_element(
-            result.artifacts.connectionUsage.begin(),
-            result.artifacts.connectionUsage.end(),
-            [](const auto& lhs, const auto& rhs) {
-                if (std::fabs(lhs.peakConflictScore - rhs.peakConflictScore) > 1e-9) {
-                    return lhs.peakConflictScore < rhs.peakConflictScore;
-                }
-                return lhs.longestConflictDurationSeconds < rhs.longestConflictDurationSeconds;
-            });
-        if (topConflictIt != result.artifacts.connectionUsage.end()) {
-            summary.topConflictConnectionId = topConflictIt->connectionId;
-            summary.topConflictConnectionLabel = topConflictIt->label;
-            summary.peakConflictScore = topConflictIt->peakConflictScore;
-        }
-        summary.totalConflictExposureAgentSeconds = std::max(
-            operationalConflict.totalCellConflictExposureAgentSeconds,
-            operationalConflict.totalConnectionConflictExposureAgentSeconds);
+    result.artifacts.crossFlowSummary = {};
+    if (resources.contains<ScenarioCrossFlowResource>()) {
+        const auto& crossFlow = resources.get<ScenarioCrossFlowResource>();
+        result.artifacts.crossFlowSummary.totalCrossFlowExposureAgentSeconds =
+            crossFlow.totalCrossFlowExposureAgentSeconds;
     }
 
     if (resources.contains<ScenarioRiskMetricsResource>()) {
         const auto& metrics = resources.get<ScenarioRiskMetricsResource>();
-        result.artifacts.operationalConflictSummary.peakConflictScore =
+        auto& summary = result.artifacts.crossFlowSummary;
+        summary.peakCrossFlowScore =
             std::max(
-                result.artifacts.operationalConflictSummary.peakConflictScore,
-                metrics.peakSnapshot.peakConflictScore);
-        result.artifacts.operationalConflictSummary.totalConflictExposureAgentSeconds =
+                summary.peakCrossFlowScore,
+                metrics.peakSnapshot.peakCrossFlowScore);
+        summary.totalCrossFlowExposureAgentSeconds =
             std::max(
-                result.artifacts.operationalConflictSummary.totalConflictExposureAgentSeconds,
-                metrics.peakSnapshot.totalConflictExposureAgentSeconds);
-        result.artifacts.operationalConflictSummary.counterflowHotspotCount =
+                summary.totalCrossFlowExposureAgentSeconds,
+                metrics.peakSnapshot.totalCrossFlowExposureAgentSeconds);
+        summary.crossFlowHotspotCount =
             std::max(
-                result.artifacts.operationalConflictSummary.counterflowHotspotCount,
-                metrics.peakSnapshot.operationalConflictCells.size());
+                summary.crossFlowHotspotCount,
+                metrics.peakSnapshot.crossFlowCells.size());
 
-        std::optional<double> peakConflictScore;
-        std::optional<double> peakConflictAtSeconds;
-        std::string peakConflictConnectionId;
-        std::string peakConflictConnectionLabel;
-        auto considerPeakConflict = [&](
-            double score,
-            const std::optional<double>& detectedAtSeconds,
-            const std::string& connectionId,
-            const std::string& connectionLabel) {
-            if (!peakConflictScore.has_value()
-                || score > *peakConflictScore + 1e-9) {
-                peakConflictScore = score;
-                peakConflictAtSeconds = detectedAtSeconds;
-                peakConflictConnectionId = connectionId;
-                peakConflictConnectionLabel = connectionLabel;
-            }
-        };
-        for (const auto& cell : metrics.peakSnapshot.operationalConflictCells) {
-            considerPeakConflict(
-                cell.conflictScore,
-                cell.detectedAtSeconds,
-                cell.nearestConnectionId,
-                cell.nearestConnectionLabel);
-        }
-        for (const auto& connection : metrics.peakSnapshot.operationalConflictConnections) {
-            considerPeakConflict(
-                connection.conflictScore,
-                connection.detectedAtSeconds,
-                connection.connectionId,
-                connection.label);
-        }
-        if (peakConflictScore.has_value()) {
-            result.artifacts.operationalConflictSummary.peakAtSeconds =
-                peakConflictAtSeconds;
-            if (result.artifacts.operationalConflictSummary.topConflictConnectionId.empty()) {
-                result.artifacts.operationalConflictSummary.topConflictConnectionId =
-                    peakConflictConnectionId;
-                result.artifacts.operationalConflictSummary.topConflictConnectionLabel =
-                    peakConflictConnectionLabel;
+        std::optional<double> peakCrossFlowScore;
+        std::optional<double> peakCrossFlowAtSeconds;
+        for (const auto& cell : metrics.peakSnapshot.crossFlowCells) {
+            summary.longestCrossFlowDurationSeconds =
+                std::max(summary.longestCrossFlowDurationSeconds, cell.durationSeconds);
+            if (!peakCrossFlowScore.has_value()
+                || cell.crossFlowScore > *peakCrossFlowScore + 1e-9) {
+                peakCrossFlowScore = cell.crossFlowScore;
+                peakCrossFlowAtSeconds = cell.detectedAtSeconds;
             }
         }
+        if (peakCrossFlowScore.has_value()) {
+            summary.peakAtSeconds = peakCrossFlowAtSeconds;
+        }
 
-        if (result.artifacts.operationalConflictTimeline.empty()
+        if (result.artifacts.crossFlowTimeline.empty()
             || std::abs(
-                result.artifacts.operationalConflictTimeline.back().timeSeconds - elapsedSeconds) > 1e-9) {
-            std::size_t queuedAgents = 0;
-            if (resources.contains<ScenarioOperationalConflictResource>()) {
-                const auto& operationalConflict = resources.get<ScenarioOperationalConflictResource>();
-                for (const auto& [_, state] : operationalConflict.connectionsById) {
-                    queuedAgents += state.currentQueueAgents;
-                }
-            }
-            result.artifacts.operationalConflictTimeline.push_back({
+                result.artifacts.crossFlowTimeline.back().timeSeconds - elapsedSeconds) > 1e-9) {
+            result.artifacts.crossFlowTimeline.push_back({
                 .timeSeconds = elapsedSeconds,
-                .peakConflictScore = metrics.snapshot.peakConflictScore,
-                .activeConflictCellCount = metrics.snapshot.operationalConflictCells.size(),
-                .activeConflictConnectionCount = metrics.snapshot.operationalConflictConnections.size(),
-                .queuedAgentsNearConnections = queuedAgents,
+                .peakCrossFlowScore = metrics.snapshot.peakCrossFlowScore,
+                .activeCrossFlowCellCount = metrics.snapshot.crossFlowCells.size(),
             });
         }
     }

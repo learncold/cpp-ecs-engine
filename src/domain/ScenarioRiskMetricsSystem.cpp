@@ -25,9 +25,8 @@ constexpr std::size_t kMaxReportedPressureHotspots = 5;
 constexpr std::size_t kMaxReportedPressureAgents = 5;
 constexpr std::size_t kMaxReportedCriticalPressureEvents = 5;
 constexpr std::size_t kMaxReportedBottlenecks = 5;
-constexpr std::size_t kMaxReportedOperationalConflictCells = 5;
-constexpr std::size_t kMaxReportedOperationalConflictConnections = 5;
-constexpr double kOperationalConflictDirectionEpsilon = 1e-6;
+constexpr std::size_t kMaxReportedCrossFlowCells = 5;
+constexpr double kCrossFlowDirectionEpsilon = 1e-6;
 
 template <typename T, typename Compare>
 void sortAndTrimTop(std::vector<T>& values, std::size_t maxCount, Compare compare) {
@@ -50,14 +49,14 @@ struct RiskCellAccumulator {
     std::vector<engine::Entity> entities{};
 };
 
-struct OperationalConflictCellAccumulator {
+struct CrossFlowCellAccumulator {
     Point2D positionSum{};
     Point2D cellMin{};
     Point2D cellMax{};
     std::string floorId{};
     std::size_t movingAgentCount{0};
     double speedSum{0.0};
-    std::array<std::size_t, kScenarioOperationalConflictDirectionBinCount> directionCounts{};
+    std::array<std::size_t, kScenarioCrossFlowDirectionBinCount> directionCounts{};
 };
 
 struct ActiveAgentContext {
@@ -70,19 +69,19 @@ struct ActiveAgentContext {
     bool stalled{false};
 };
 
-struct OperationalConflictCellAddress {
+struct CrossFlowCellAddress {
     SpatialCell cell{};
     std::string floorId{};
 };
 
-struct OperationalConflictObservation {
+struct CrossFlowObservation {
     std::size_t movingAgentCount{0};
-    std::size_t forwardCount{0};
-    std::size_t reverseCount{0};
+    std::size_t primaryFlowCount{0};
+    std::size_t crossFlowCount{0};
     double averageSpeed{0.0};
-    double counterflowRatio{0.0};
+    double crossFlowRatio{0.0};
     double speedDropRatio{0.0};
-    double conflictScore{0.0};
+    double crossFlowScore{0.0};
 };
 
 struct ActivePressureFeedbackContext {
@@ -135,24 +134,24 @@ Point2D riskCellMax(const RiskCellAddress& cell) {
     return spatialCellMax(cell.cell, kScenarioHotspotCellSize);
 }
 
-OperationalConflictCellAddress operationalConflictCellAddress(const Point2D& point, const std::string& floorId) {
+CrossFlowCellAddress crossFlowCellAddress(const Point2D& point, const std::string& floorId) {
     return {
-        .cell = spatialCellFor(point, kScenarioOperationalConflictCellSize),
+        .cell = spatialCellFor(point, kScenarioCrossFlowCellSize),
         .floorId = floorId,
     };
 }
 
-long long operationalConflictCellKey(const OperationalConflictCellAddress& cell) {
+long long crossFlowCellKey(const CrossFlowCellAddress& cell) {
     const auto cellKey = spatialKey(cell.cell);
     return cellKey ^ (static_cast<long long>(std::hash<std::string>{}(cell.floorId)) << 1);
 }
 
-Point2D operationalConflictCellMin(const OperationalConflictCellAddress& cell) {
-    return spatialCellMin(cell.cell, kScenarioOperationalConflictCellSize);
+Point2D crossFlowCellMin(const CrossFlowCellAddress& cell) {
+    return spatialCellMin(cell.cell, kScenarioCrossFlowCellSize);
 }
 
-Point2D operationalConflictCellMax(const OperationalConflictCellAddress& cell) {
-    return spatialCellMax(cell.cell, kScenarioOperationalConflictCellSize);
+Point2D crossFlowCellMax(const CrossFlowCellAddress& cell) {
+    return spatialCellMax(cell.cell, kScenarioCrossFlowCellSize);
 }
 
 bool isStalled(const Velocity& velocity, const EvacuationRoute& route) {
@@ -267,9 +266,9 @@ bool isBottleneckSetWorse(
     return lhs.averageSpeed < rhs.averageSpeed;
 }
 
-bool isOperationalConflictCellSetWorse(
-    const std::vector<ScenarioOperationalConflictCellMetric>& candidate,
-    const std::vector<ScenarioOperationalConflictCellMetric>& currentPeak) {
+bool isCrossFlowCellSetWorse(
+    const std::vector<ScenarioCrossFlowCellMetric>& candidate,
+    const std::vector<ScenarioCrossFlowCellMetric>& currentPeak) {
     if (candidate.empty()) {
         return false;
     }
@@ -279,34 +278,13 @@ bool isOperationalConflictCellSetWorse(
 
     const auto& lhs = candidate.front();
     const auto& rhs = currentPeak.front();
-    if (std::fabs(lhs.conflictScore - rhs.conflictScore) > 1e-9) {
-        return lhs.conflictScore > rhs.conflictScore;
+    if (std::fabs(lhs.crossFlowScore - rhs.crossFlowScore) > 1e-9) {
+        return lhs.crossFlowScore > rhs.crossFlowScore;
     }
     if (std::fabs(lhs.durationSeconds - rhs.durationSeconds) > 1e-9) {
         return lhs.durationSeconds > rhs.durationSeconds;
     }
     return lhs.movingAgentCount > rhs.movingAgentCount;
-}
-
-bool isOperationalConflictConnectionSetWorse(
-    const std::vector<ScenarioOperationalConflictConnectionMetric>& candidate,
-    const std::vector<ScenarioOperationalConflictConnectionMetric>& currentPeak) {
-    if (candidate.empty()) {
-        return false;
-    }
-    if (currentPeak.empty()) {
-        return true;
-    }
-
-    const auto& lhs = candidate.front();
-    const auto& rhs = currentPeak.front();
-    if (std::fabs(lhs.conflictScore - rhs.conflictScore) > 1e-9) {
-        return lhs.conflictScore > rhs.conflictScore;
-    }
-    if (std::fabs(lhs.durationSeconds - rhs.durationSeconds) > 1e-9) {
-        return lhs.durationSeconds > rhs.durationSeconds;
-    }
-    return lhs.nearbyAgentCount > rhs.nearbyAgentCount;
 }
 
 bool barrierMatchesFloor(const Barrier2D& barrier, const std::string& floorId) {
@@ -396,23 +374,23 @@ double localDensityRatio(std::size_t nearbyCount) {
     return densityPeoplePerSquareMeter / kPressureHighDensityThresholdPeoplePerSquareMeter;
 }
 
-std::size_t operationalConflictDirectionBinForVelocity(Point2D velocity) {
+std::size_t crossFlowDirectionBinForVelocity(Point2D velocity) {
     constexpr double kTau = 6.28318530717958647692;
     auto angle = std::atan2(velocity.y, velocity.x);
     if (angle < 0.0) {
         angle += kTau;
     }
     const auto bin = static_cast<std::size_t>(std::floor(
-        angle / (kTau / static_cast<double>(kScenarioOperationalConflictDirectionBinCount))));
-    return std::min(kScenarioOperationalConflictDirectionBinCount - 1, bin);
+        angle / (kTau / static_cast<double>(kScenarioCrossFlowDirectionBinCount))));
+    return std::min(kScenarioCrossFlowDirectionBinCount - 1, bin);
 }
 
-std::array<Point2D, kScenarioOperationalConflictDirectionBinCount> makeOperationalConflictDirectionVectors() {
+std::array<Point2D, kScenarioCrossFlowDirectionBinCount> makeCrossFlowDirectionVectors() {
     constexpr double kTau = 6.28318530717958647692;
-    std::array<Point2D, kScenarioOperationalConflictDirectionBinCount> vectors{};
+    std::array<Point2D, kScenarioCrossFlowDirectionBinCount> vectors{};
     for (std::size_t index = 0; index < vectors.size(); ++index) {
         const auto angle = ((static_cast<double>(index) + 0.5)
-            / static_cast<double>(kScenarioOperationalConflictDirectionBinCount)) * kTau;
+            / static_cast<double>(kScenarioCrossFlowDirectionBinCount)) * kTau;
         vectors[index] = {
             .x = std::cos(angle),
             .y = std::sin(angle),
@@ -421,77 +399,77 @@ std::array<Point2D, kScenarioOperationalConflictDirectionBinCount> makeOperation
     return vectors;
 }
 
-double operationalConflictDirectionCosine(std::size_t lhs, std::size_t rhs) {
-    static const auto directions = makeOperationalConflictDirectionVectors();
+double crossFlowDirectionCosine(std::size_t lhs, std::size_t rhs) {
+    static const auto directions = makeCrossFlowDirectionVectors();
     return dot(directions[lhs], directions[rhs]);
 }
 
-double operationalConflictSpeedDropRatio(double averageSpeed) {
+double crossFlowSpeedDropRatio(double averageSpeed) {
     return std::clamp(
-        1.0 - (averageSpeed / std::max(1e-9, kScenarioOperationalConflictReferenceSpeedMetersPerSecond)),
+        1.0 - (averageSpeed / std::max(1e-9, kScenarioCrossFlowReferenceSpeedMetersPerSecond)),
         0.0,
         1.0);
 }
 
-double operationalConflictScore(double counterflowRatio, double averageSpeed) {
-    const auto speedDropRatio = operationalConflictSpeedDropRatio(averageSpeed);
-    return std::clamp((counterflowRatio * 0.65) + (speedDropRatio * 0.35), 0.0, 1.0);
+double crossFlowScore(double crossFlowRatio, double averageSpeed) {
+    const auto speedDropRatio = crossFlowSpeedDropRatio(averageSpeed);
+    return std::clamp((crossFlowRatio * 0.65) + (speedDropRatio * 0.35), 0.0, 1.0);
 }
 
-std::optional<OperationalConflictObservation> detectOperationalConflict(
-    const std::array<std::size_t, kScenarioOperationalConflictDirectionBinCount>& directionCounts,
+std::optional<CrossFlowObservation> detectCrossFlow(
+    const std::array<std::size_t, kScenarioCrossFlowDirectionBinCount>& directionCounts,
     std::size_t movingAgentCount,
     double averageSpeed) {
-    if (movingAgentCount < kScenarioOperationalConflictMinMovingAgents) {
+    if (movingAgentCount < kScenarioCrossFlowMinMovingAgents) {
         return std::nullopt;
     }
-    if (averageSpeed > kScenarioOperationalConflictMinimumExpectedSpeedMetersPerSecond + kOperationalConflictDirectionEpsilon) {
+    if (averageSpeed > kScenarioCrossFlowMinimumExpectedSpeedMetersPerSecond + kCrossFlowDirectionEpsilon) {
         return std::nullopt;
     }
 
-    OperationalConflictObservation best;
+    CrossFlowObservation best;
     best.averageSpeed = averageSpeed;
     best.movingAgentCount = movingAgentCount;
-    for (std::size_t anchorBin = 0; anchorBin < kScenarioOperationalConflictDirectionBinCount; ++anchorBin) {
+    for (std::size_t anchorBin = 0; anchorBin < kScenarioCrossFlowDirectionBinCount; ++anchorBin) {
         if (directionCounts[anchorBin] == 0) {
             continue;
         }
 
-        OperationalConflictObservation candidate;
+        CrossFlowObservation candidate;
         candidate.averageSpeed = averageSpeed;
         candidate.movingAgentCount = movingAgentCount;
-        for (std::size_t bin = 0; bin < kScenarioOperationalConflictDirectionBinCount; ++bin) {
+        for (std::size_t bin = 0; bin < kScenarioCrossFlowDirectionBinCount; ++bin) {
             if (directionCounts[bin] == 0) {
                 continue;
             }
-            const auto cosine = operationalConflictDirectionCosine(anchorBin, bin);
-            if (cosine >= 0.5) {
-                candidate.forwardCount += directionCounts[bin];
-            } else if (cosine <= kScenarioOperationalConflictCosineThreshold) {
-                candidate.reverseCount += directionCounts[bin];
+            const auto cosine = crossFlowDirectionCosine(anchorBin, bin);
+            if (cosine > kScenarioCrossFlowCosineThreshold) {
+                candidate.primaryFlowCount += directionCounts[bin];
+            } else {
+                candidate.crossFlowCount += directionCounts[bin];
             }
         }
 
-        const auto forwardRatio = static_cast<double>(candidate.forwardCount)
+        const auto primaryRatio = static_cast<double>(candidate.primaryFlowCount)
             / static_cast<double>(candidate.movingAgentCount);
-        const auto reverseRatio = static_cast<double>(candidate.reverseCount)
+        const auto crossRatio = static_cast<double>(candidate.crossFlowCount)
             / static_cast<double>(candidate.movingAgentCount);
-        if (forwardRatio < kScenarioOperationalConflictSideRatioThreshold
-            || reverseRatio < kScenarioOperationalConflictSideRatioThreshold) {
+        if (primaryRatio < kScenarioCrossFlowSideRatioThreshold
+            || crossRatio < kScenarioCrossFlowSideRatioThreshold) {
             continue;
         }
 
-        candidate.counterflowRatio = std::min(forwardRatio, reverseRatio);
-        candidate.speedDropRatio = operationalConflictSpeedDropRatio(averageSpeed);
-        candidate.conflictScore = operationalConflictScore(candidate.counterflowRatio, averageSpeed);
-        if (candidate.conflictScore > best.conflictScore
-            || (std::fabs(candidate.conflictScore - best.conflictScore) <= 1e-9
-                && candidate.forwardCount + candidate.reverseCount > best.forwardCount + best.reverseCount)) {
+        candidate.crossFlowRatio = std::min(primaryRatio, crossRatio);
+        candidate.speedDropRatio = crossFlowSpeedDropRatio(averageSpeed);
+        candidate.crossFlowScore = crossFlowScore(candidate.crossFlowRatio, averageSpeed);
+        if (candidate.crossFlowScore > best.crossFlowScore
+            || (std::fabs(candidate.crossFlowScore - best.crossFlowScore) <= 1e-9
+                && candidate.primaryFlowCount + candidate.crossFlowCount > best.primaryFlowCount + best.crossFlowCount)) {
             best = candidate;
         }
     }
 
-    return best.conflictScore <= 0.0 ? std::nullopt : std::optional<OperationalConflictObservation>{best};
+    return best.crossFlowScore <= 0.0 ? std::nullopt : std::optional<CrossFlowObservation>{best};
 }
 
 double pressureFeedbackLevel(double compressionForce, double exposureSeconds, bool critical) {
@@ -546,9 +524,8 @@ ScenarioRiskLevel completionRiskLevel(
     std::size_t criticalPressureAgentCount,
     std::size_t criticalPressureEventCount,
     std::size_t bottleneckCount,
-    std::size_t operationalConflictCellCount,
-    std::size_t operationalConflictConnectionCount,
-    double peakConflictScore) {
+    std::size_t crossFlowCellCount,
+    double peakCrossFlowScore) {
     if (totalAgentCount == 0 || evacuatedAgentCount >= totalAgentCount) {
         return ScenarioRiskLevel::Low;
     }
@@ -565,8 +542,7 @@ ScenarioRiskLevel completionRiskLevel(
         || stalledRatio >= 0.35
         || criticalPressureEventCount > 0
         || bottleneckCount >= 2
-        || peakConflictScore >= 0.75
-        || operationalConflictConnectionCount >= 2) {
+        || peakCrossFlowScore >= 0.75) {
         return ScenarioRiskLevel::High;
     }
     if (elapsedRatio >= 0.5
@@ -575,9 +551,8 @@ ScenarioRiskLevel completionRiskLevel(
         || pressureHotspotCount > 0
         || criticalPressureAgentCount > 0
         || bottleneckCount > 0
-        || operationalConflictCellCount > 0
-        || operationalConflictConnectionCount > 0
-        || peakConflictScore >= 0.45) {
+        || crossFlowCellCount > 0
+        || peakCrossFlowScore >= 0.45) {
         return ScenarioRiskLevel::Medium;
     }
     return ScenarioRiskLevel::Low;
@@ -867,7 +842,7 @@ public:
     void configure(engine::EngineWorld& world) override {
         world.resources().set(ScenarioRiskMetricsResource{});
         world.resources().set(ScenarioPressureTrackingResource{});
-        world.resources().set(ScenarioOperationalConflictResource{});
+        world.resources().set(ScenarioCrossFlowResource{});
     }
 
     void update(engine::EngineWorld& world, const engine::EngineStepContext& step) override {
@@ -951,15 +926,12 @@ public:
         collectPressureHotspots(snapshot, query, cells);
         collectCriticalPressureEvents(snapshot, cells, clock.elapsedSeconds, deltaSeconds, pressureTracking);
         collectBottlenecks(snapshot, activeAgents, *pressureIndex, activeLayout);
-        collectOperationalConflicts(
+        collectCrossFlows(
             snapshot,
             activeAgents,
-            *pressureIndex,
-            activeLayout,
-            query,
             clock,
             deltaSeconds,
-            resources.get<ScenarioOperationalConflictResource>());
+            resources.get<ScenarioCrossFlowResource>());
 
         snapshot.completionRisk = completionRiskLevel(
             clock,
@@ -971,15 +943,13 @@ public:
             snapshot.criticalPressureAgentCount,
             snapshot.criticalPressureEvents.size(),
             snapshot.bottlenecks.size(),
-            snapshot.operationalConflictCells.size(),
-            snapshot.operationalConflictConnections.size(),
-            snapshot.peakConflictScore);
+            snapshot.crossFlowCells.size(),
+            snapshot.peakCrossFlowScore);
         if (!snapshot.hotspots.empty()
             || !snapshot.pressureHotspots.empty()
             || !snapshot.criticalPressureEvents.empty()
             || !snapshot.bottlenecks.empty()
-            || !snapshot.operationalConflictCells.empty()
-            || !snapshot.operationalConflictConnections.empty()) {
+            || !snapshot.crossFlowCells.empty()) {
             attachDetectionState(snapshot, captureSimulationFrame(query, clock), clock.elapsedSeconds);
         }
 
@@ -1001,11 +971,11 @@ private:
         peak.stalledAgentCount = std::max(peak.stalledAgentCount, current.stalledAgentCount);
         peak.pressureExposedAgentCount = std::max(peak.pressureExposedAgentCount, current.pressureExposedAgentCount);
         peak.criticalPressureAgentCount = std::max(peak.criticalPressureAgentCount, current.criticalPressureAgentCount);
-        peak.conflictAgentCount = std::max(peak.conflictAgentCount, current.conflictAgentCount);
-        peak.peakConflictScore = std::max(peak.peakConflictScore, current.peakConflictScore);
-        peak.totalConflictExposureAgentSeconds = std::max(
-            peak.totalConflictExposureAgentSeconds,
-            current.totalConflictExposureAgentSeconds);
+        peak.crossFlowAgentCount = std::max(peak.crossFlowAgentCount, current.crossFlowAgentCount);
+        peak.peakCrossFlowScore = std::max(peak.peakCrossFlowScore, current.peakCrossFlowScore);
+        peak.totalCrossFlowExposureAgentSeconds = std::max(
+            peak.totalCrossFlowExposureAgentSeconds,
+            current.totalCrossFlowExposureAgentSeconds);
         if (isHotspotSetWorse(current.hotspots, peak.hotspots)) {
             peak.hotspots = current.hotspots;
         }
@@ -1021,15 +991,10 @@ private:
         if (isBottleneckSetWorse(current.bottlenecks, peak.bottlenecks)) {
             peak.bottlenecks = current.bottlenecks;
         }
-        if (isOperationalConflictCellSetWorse(
-                current.operationalConflictCells,
-                peak.operationalConflictCells)) {
-            peak.operationalConflictCells = current.operationalConflictCells;
-        }
-        if (isOperationalConflictConnectionSetWorse(
-                current.operationalConflictConnections,
-                peak.operationalConflictConnections)) {
-            peak.operationalConflictConnections = current.operationalConflictConnections;
+        if (isCrossFlowCellSetWorse(
+                current.crossFlowCells,
+                peak.crossFlowCells)) {
+            peak.crossFlowCells = current.crossFlowCells;
         }
     }
 
@@ -1053,13 +1018,9 @@ private:
             bottleneck.detectedAtSeconds = elapsedSeconds;
             bottleneck.detectionFrame = frame;
         }
-        for (auto& cell : snapshot.operationalConflictCells) {
+        for (auto& cell : snapshot.crossFlowCells) {
             cell.detectedAtSeconds = elapsedSeconds;
             cell.detectionFrame = frame;
-        }
-        for (auto& connection : snapshot.operationalConflictConnections) {
-            connection.detectedAtSeconds = elapsedSeconds;
-            connection.detectionFrame = frame;
         }
     }
 
@@ -1514,26 +1475,13 @@ private:
         });
     }
 
-    void collectOperationalConflicts(
+    void collectCrossFlows(
         ScenarioRiskSnapshot& snapshot,
         const std::vector<ActiveAgentContext>& activeAgents,
-        const ScenarioAgentSpatialIndexResource& spatialIndex,
-        const FacilityLayout2D& layout,
-        engine::WorldQuery& query,
         const ScenarioSimulationClockResource& clock,
         double deltaSeconds,
-        ScenarioOperationalConflictResource& operationalConflict) const {
-        (void)query;
-        operationalConflict.previousElapsedSeconds = clock.elapsedSeconds;
-        operationalConflict.hasPreviousElapsedSeconds = true;
-
-        std::unordered_map<std::uint64_t, std::size_t> activeAgentIndices;
-        activeAgentIndices.reserve(activeAgents.size());
-        for (std::size_t index = 0; index < activeAgents.size(); ++index) {
-            activeAgentIndices.emplace(activeAgents[index].agentId, index);
-        }
-
-        std::unordered_map<long long, OperationalConflictCellAccumulator> cells;
+        ScenarioCrossFlowResource& crossFlow) const {
+        std::unordered_map<long long, CrossFlowCellAccumulator> cells;
         cells.reserve(activeAgents.size());
         for (const auto& agent : activeAgents) {
             const auto speed = lengthOf(agent.velocity);
@@ -1541,53 +1489,25 @@ private:
                 continue;
             }
 
-            const auto address = operationalConflictCellAddress(agent.position, agent.floorId);
-            auto& cell = cells[operationalConflictCellKey(address)];
+            const auto address = crossFlowCellAddress(agent.position, agent.floorId);
+            auto& cell = cells[crossFlowCellKey(address)];
             if (cell.movingAgentCount == 0) {
-                cell.cellMin = operationalConflictCellMin(address);
-                cell.cellMax = operationalConflictCellMax(address);
+                cell.cellMin = crossFlowCellMin(address);
+                cell.cellMax = crossFlowCellMax(address);
                 cell.floorId = address.floorId;
             }
             cell.positionSum = cell.positionSum + agent.position;
             ++cell.movingAgentCount;
             cell.speedSum += speed;
-            ++cell.directionCounts[operationalConflictDirectionBinForVelocity(agent.velocity)];
+            ++cell.directionCounts[crossFlowDirectionBinForVelocity(agent.velocity)];
         }
-
-        const auto nearestConnectionForPoint =
-            [&](const Point2D& point, const std::string& floorId) -> std::pair<std::string, std::string> {
-                double bestDistance = kScenarioOperationalConflictInfluenceRadius + 1e-9;
-                std::pair<std::string, std::string> best;
-                for (const auto& connection : layout.connections) {
-                    if (connection.directionality == TravelDirection::Closed) {
-                        continue;
-                    }
-                    const auto connectionFloor = connectionFloorId(layout, connection);
-                    if (!matchesFloor(connectionFloor, floorId)) {
-                        continue;
-                    }
-                    const auto distanceToConnection = distanceBetween(
-                        point,
-                        closestPointOnSegment(point, connection.centerSpan.start, connection.centerSpan.end));
-                    if (distanceToConnection > bestDistance) {
-                        continue;
-                    }
-                    bestDistance = distanceToConnection;
-                    best = {
-                        connection.id,
-                        connectionLabel(layout, connection),
-                    };
-                }
-                return best;
-            };
 
         std::unordered_set<long long> activeCellKeys;
         activeCellKeys.reserve(cells.size());
-        snapshot.operationalConflictCells.clear();
-        snapshot.operationalConflictConnections.clear();
-        snapshot.conflictAgentCount = 0;
-        snapshot.peakConflictScore = 0.0;
-        snapshot.totalConflictExposureAgentSeconds = 0.0;
+        snapshot.crossFlowCells.clear();
+        snapshot.crossFlowAgentCount = 0;
+        snapshot.peakCrossFlowScore = 0.0;
+        snapshot.totalCrossFlowExposureAgentSeconds = 0.0;
 
         for (const auto& [cellKey, cell] : cells) {
             if (cell.movingAgentCount == 0) {
@@ -1595,7 +1515,7 @@ private:
             }
 
             const auto averageSpeed = cell.speedSum / static_cast<double>(cell.movingAgentCount);
-            const auto observation = detectOperationalConflict(
+            const auto observation = detectCrossFlow(
                 cell.directionCounts,
                 cell.movingAgentCount,
                 averageSpeed);
@@ -1604,7 +1524,7 @@ private:
             }
 
             activeCellKeys.insert(cellKey);
-            const auto [stateIt, inserted] = operationalConflict.activeCellsByAddress.try_emplace(cellKey);
+            const auto [stateIt, inserted] = crossFlow.activeCellsByAddress.try_emplace(cellKey);
             auto& state = stateIt->second;
             if (inserted) {
                 state.startedAtSeconds = clock.elapsedSeconds;
@@ -1612,8 +1532,8 @@ private:
             const auto exposureDelta =
                 static_cast<double>(observation->movingAgentCount) * std::max(0.0, deltaSeconds);
             state.exposureAgentSeconds += exposureDelta;
-            operationalConflict.totalCellConflictExposureAgentSeconds += exposureDelta;
-            state.peakConflictScore = std::max(state.peakConflictScore, observation->conflictScore);
+            crossFlow.totalCrossFlowExposureAgentSeconds += exposureDelta;
+            state.peakCrossFlowScore = std::max(state.peakCrossFlowScore, observation->crossFlowScore);
             state.peakAgentCount = std::max(state.peakAgentCount, observation->movingAgentCount);
 
             const auto count = static_cast<double>(cell.movingAgentCount);
@@ -1621,211 +1541,47 @@ private:
                 .x = count <= 0.0 ? 0.0 : cell.positionSum.x / count,
                 .y = count <= 0.0 ? 0.0 : cell.positionSum.y / count,
             };
-            if (state.nearestConnectionId.empty()) {
-                const auto nearest = nearestConnectionForPoint(center, cell.floorId);
-                state.nearestConnectionId = nearest.first;
-                state.nearestConnectionLabel = nearest.second;
-            }
 
             const auto durationSeconds = std::max(0.0, (clock.elapsedSeconds - state.startedAtSeconds) + deltaSeconds);
-            snapshot.conflictAgentCount += observation->movingAgentCount;
-            snapshot.peakConflictScore = std::max(snapshot.peakConflictScore, observation->conflictScore);
-            snapshot.operationalConflictCells.push_back({
+            snapshot.crossFlowAgentCount += observation->movingAgentCount;
+            snapshot.peakCrossFlowScore = std::max(snapshot.peakCrossFlowScore, observation->crossFlowScore);
+            snapshot.crossFlowCells.push_back({
                 .center = center,
                 .cellMin = cell.cellMin,
                 .cellMax = cell.cellMax,
                 .floorId = cell.floorId,
                 .movingAgentCount = observation->movingAgentCount,
                 .peakAgentCount = state.peakAgentCount,
-                .forwardCount = observation->forwardCount,
-                .reverseCount = observation->reverseCount,
-                .counterflowRatio = observation->counterflowRatio,
+                .primaryFlowCount = observation->primaryFlowCount,
+                .crossFlowCount = observation->crossFlowCount,
+                .crossFlowRatio = observation->crossFlowRatio,
                 .averageSpeed = observation->averageSpeed,
                 .speedDropRatio = observation->speedDropRatio,
-                .conflictScore = state.peakConflictScore,
+                .crossFlowScore = state.peakCrossFlowScore,
                 .durationSeconds = durationSeconds,
                 .exposureAgentSeconds = state.exposureAgentSeconds,
-                .nearestConnectionId = state.nearestConnectionId,
-                .nearestConnectionLabel = state.nearestConnectionLabel,
             });
         }
 
-        for (auto it = operationalConflict.activeCellsByAddress.begin();
-             it != operationalConflict.activeCellsByAddress.end();) {
+        for (auto it = crossFlow.activeCellsByAddress.begin();
+             it != crossFlow.activeCellsByAddress.end();) {
             if (activeCellKeys.contains(it->first)) {
                 ++it;
                 continue;
             }
-            it = operationalConflict.activeCellsByAddress.erase(it);
+            it = crossFlow.activeCellsByAddress.erase(it);
         }
 
-        auto nearbyEntitiesForConnection = [&](const std::string& floorId, const LineSegment2D& passage) {
-            std::vector<engine::Entity> candidates;
-            std::unordered_set<std::uint64_t> seen;
-            const auto appendFloor = [&](const std::string& candidateFloorId) {
-                const auto floorIt = spatialIndex.displayCellsByFloor.find(candidateFloorId);
-                if (floorIt == spatialIndex.displayCellsByFloor.end()) {
-                    return;
-                }
-                const Point2D minPoint{
-                    .x = std::min(passage.start.x, passage.end.x) - kScenarioOperationalConflictInfluenceRadius,
-                    .y = std::min(passage.start.y, passage.end.y) - kScenarioOperationalConflictInfluenceRadius,
-                };
-                const Point2D maxPoint{
-                    .x = std::max(passage.start.x, passage.end.x) + kScenarioOperationalConflictInfluenceRadius,
-                    .y = std::max(passage.start.y, passage.end.y) + kScenarioOperationalConflictInfluenceRadius,
-                };
-                for (const auto& cell : spatialCellsForBounds(minPoint, maxPoint, spatialIndex.cellSize)) {
-                    const auto cellIt = floorIt->second.find(spatialKey(cell));
-                    if (cellIt == floorIt->second.end()) {
-                        continue;
-                    }
-                    for (const auto entity : cellIt->second) {
-                        const auto packed =
-                            (static_cast<std::uint64_t>(entity.generation) << 32U) | entity.index;
-                        if (seen.insert(packed).second) {
-                            candidates.push_back(entity);
-                        }
-                    }
-                }
-            };
-
-            appendFloor(floorId);
-            if (!floorId.empty()) {
-                appendFloor(std::string{});
-            }
-            return candidates;
-        };
-
-        for (const auto& connection : layout.connections) {
-            if (connection.directionality == TravelDirection::Closed) {
-                continue;
-            }
-
-            auto& state = operationalConflict.connectionsById[connection.id];
-            state.connectionId = connection.id;
-            state.label = connectionLabel(layout, connection);
-            state.floorId = connectionFloorId(layout, connection);
-            state.passage = connection.centerSpan;
-
-            std::size_t nearbyAgentCount = 0;
-            std::size_t queueAgentCount = 0;
-            double speedSum = 0.0;
-            std::array<std::size_t, kScenarioOperationalConflictDirectionBinCount> directionCounts{};
-            std::size_t movingAgentCount = 0;
-            double movingSpeedSum = 0.0;
-
-            for (const auto entity : nearbyEntitiesForConnection(state.floorId, connection.centerSpan)) {
-                const auto activeIt = activeAgentIndices.find(entity.index);
-                if (activeIt == activeAgentIndices.end()) {
-                    continue;
-                }
-                const auto& agent = activeAgents[activeIt->second];
-                if (agent.floorId != state.floorId) {
-                    continue;
-                }
-                const auto distanceToConnection = distanceBetween(
-                    agent.position,
-                    closestPointOnSegment(agent.position, connection.centerSpan.start, connection.centerSpan.end));
-                if (distanceToConnection > kScenarioOperationalConflictInfluenceRadius) {
-                    continue;
-                }
-
-                const auto speed = lengthOf(agent.velocity);
-                ++nearbyAgentCount;
-                speedSum += speed;
-                if (speed <= kScenarioOperationalConflictQueueSpeedThreshold + 1e-9) {
-                    ++queueAgentCount;
-                }
-                if (speed > 0.05) {
-                    ++movingAgentCount;
-                    movingSpeedSum += speed;
-                    ++directionCounts[operationalConflictDirectionBinForVelocity(agent.velocity)];
-                }
-            }
-
-            if (nearbyAgentCount > 0) {
-                state.observedSpeedSum += speedSum / static_cast<double>(nearbyAgentCount);
-                ++state.observedSpeedSamples;
-            }
-            if (queueAgentCount > 0) {
-                state.queueExposureAgentSeconds += static_cast<double>(queueAgentCount) * std::max(0.0, deltaSeconds);
-            }
-            state.currentQueueAgents = queueAgentCount;
-            if (queueAgentCount > state.peakQueuedAgents) {
-                state.peakQueuedAgents = queueAgentCount;
-                state.peakQueuedAtSeconds = clock.elapsedSeconds;
-            }
-
-            std::optional<OperationalConflictObservation> observation;
-            if (movingAgentCount > 0) {
-                observation = detectOperationalConflict(
-                    directionCounts,
-                    movingAgentCount,
-                    movingSpeedSum / static_cast<double>(movingAgentCount));
-            }
-
-            if (!observation.has_value()) {
-                state.conflictActive = false;
-                continue;
-            }
-
-            if (!state.conflictActive) {
-                state.conflictActive = true;
-                state.conflictStartedAtSeconds = clock.elapsedSeconds;
-                ++state.counterflowEventCount;
-            }
-            const auto durationSeconds =
-                std::max(0.0, (clock.elapsedSeconds - state.conflictStartedAtSeconds) + deltaSeconds);
-            state.peakConflictScore = std::max(state.peakConflictScore, observation->conflictScore);
-            state.longestConflictDurationSeconds =
-                std::max(state.longestConflictDurationSeconds, durationSeconds);
-            const auto exposureDelta =
-                static_cast<double>(observation->movingAgentCount) * std::max(0.0, deltaSeconds);
-            state.counterflowExposureAgentSeconds += exposureDelta;
-            operationalConflict.totalConnectionConflictExposureAgentSeconds += exposureDelta;
-
-            snapshot.peakConflictScore = std::max(snapshot.peakConflictScore, observation->conflictScore);
-            snapshot.operationalConflictConnections.push_back({
-                .connectionId = state.connectionId,
-                .label = state.label,
-                .floorId = state.floorId,
-                .passage = state.passage,
-                .nearbyAgentCount = nearbyAgentCount,
-                .movingAgentCount = observation->movingAgentCount,
-                .queueAgentCount = queueAgentCount,
-                .forwardCount = observation->forwardCount,
-                .reverseCount = observation->reverseCount,
-                .counterflowRatio = observation->counterflowRatio,
-                .averageSpeed = observation->averageSpeed,
-                .speedDropRatio = observation->speedDropRatio,
-                .conflictScore = state.peakConflictScore,
-                .durationSeconds = durationSeconds,
-                .exposureAgentSeconds = state.counterflowExposureAgentSeconds,
-            });
-        }
-
-        sortAndTrimTop(snapshot.operationalConflictCells, kMaxReportedOperationalConflictCells, [](const auto& lhs, const auto& rhs) {
-            if (std::fabs(lhs.conflictScore - rhs.conflictScore) > 1e-9) {
-                return lhs.conflictScore > rhs.conflictScore;
+        sortAndTrimTop(snapshot.crossFlowCells, kMaxReportedCrossFlowCells, [](const auto& lhs, const auto& rhs) {
+            if (std::fabs(lhs.crossFlowScore - rhs.crossFlowScore) > 1e-9) {
+                return lhs.crossFlowScore > rhs.crossFlowScore;
             }
             if (std::fabs(lhs.durationSeconds - rhs.durationSeconds) > 1e-9) {
                 return lhs.durationSeconds > rhs.durationSeconds;
             }
             return lhs.movingAgentCount > rhs.movingAgentCount;
         });
-        sortAndTrimTop(snapshot.operationalConflictConnections, kMaxReportedOperationalConflictConnections, [](const auto& lhs, const auto& rhs) {
-            if (std::fabs(lhs.conflictScore - rhs.conflictScore) > 1e-9) {
-                return lhs.conflictScore > rhs.conflictScore;
-            }
-            if (std::fabs(lhs.durationSeconds - rhs.durationSeconds) > 1e-9) {
-                return lhs.durationSeconds > rhs.durationSeconds;
-            }
-            return lhs.nearbyAgentCount > rhs.nearbyAgentCount;
-        });
-        snapshot.totalConflictExposureAgentSeconds = std::max(
-            operationalConflict.totalCellConflictExposureAgentSeconds,
-            operationalConflict.totalConnectionConflictExposureAgentSeconds);
+        snapshot.totalCrossFlowExposureAgentSeconds = crossFlow.totalCrossFlowExposureAgentSeconds;
     }
 
     FacilityLayout2D layout_{};

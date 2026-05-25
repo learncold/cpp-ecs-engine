@@ -37,7 +37,7 @@ enum class SavedResultNavigationView {
     Groups = 3,
     Recommendations = 4,
     HazardExposure = 5,
-    OperationalConflict = 6,
+    CrossFlow = 6,
 };
 
 struct SavedScenarioState {

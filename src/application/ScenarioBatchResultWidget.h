@@ -50,7 +50,7 @@ private:
         Pressure = 1,
         Hotspots = 2,
         Bottlenecks = 3,
-        OperationalConflicts = 4,
+        CrossFlow = 4,
         None = 5,
     };
 

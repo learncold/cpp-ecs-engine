@@ -18,14 +18,14 @@ enum class AlternativeRecommendationKind {
     ExitUsageBalancing,
     PressureHotspotRelief,
     CorridorOneWayFlow,
-    CounterflowSeparation,
+    CrossFlowSeparation,
     StagedEvacuation,
 };
 
 enum class AlternativeRecommendationRiskKind {
     ExitBottleneck,
     CorridorBottleneck,
-    CounterflowConflict,
+    CrossFlow,
     TimeLimitMissed,
     PressureHotspot,
 };

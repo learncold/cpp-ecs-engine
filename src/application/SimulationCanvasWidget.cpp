@@ -31,16 +31,15 @@ constexpr double kAgentMarkerRadius = 5.0;
 constexpr double kDefaultHotspotCellSize = 1.5;
 constexpr double kHotspotFocusZoom = 2.8;
 constexpr double kBottleneckFocusZoom = 2.4;
-constexpr double kOperationalConflictCellFocusZoom = 2.8;
-constexpr double kOperationalConflictConnectionFocusZoom = 2.5;
+constexpr double kCrossFlowCellFocusZoom = 2.8;
 constexpr double kDensityInfluenceRadiusMultiplier = 1.75;
 constexpr double kDensityMinimumScreenRadius = 14.0;
 constexpr double kDefaultDensityScaleMaxPeoplePerSquareMeter = 4.0;
 constexpr double kPressureInfluenceRadiusMultiplier = 1.45;
 constexpr double kPressureMinimumScreenRadius = 12.0;
 constexpr double kDefaultPressureScaleMaxScore = 1.0;
-constexpr double kOperationalConflictInfluenceRadiusMultiplier = 1.3;
-constexpr double kOperationalConflictMinimumScreenRadius = 16.0;
+constexpr double kCrossFlowInfluenceRadiusMultiplier = 1.3;
+constexpr double kCrossFlowMinimumScreenRadius = 16.0;
 constexpr int kHotspotMinCoreAlpha = 72;
 constexpr int kHotspotMaxCoreAlpha = 190;
 constexpr int kFloorSelectorMargin = 14;
@@ -177,7 +176,7 @@ QColor pressureHeatmapColor(double ratio, int alpha) {
     return QColor(153, 27, 27, alpha);
 }
 
-QColor operationalConflictHeatmapColor(double ratio, int alpha) {
+QColor crossFlowHeatmapColor(double ratio, int alpha) {
     const auto t = std::clamp(ratio, 0.0, 1.0);
     if (t < 0.3) {
         return QColor(245, 158, 11, alpha);
@@ -186,13 +185,6 @@ QColor operationalConflictHeatmapColor(double ratio, int alpha) {
         return QColor(249, 115, 22, alpha);
     }
     return QColor(220, 38, 38, alpha);
-}
-
-safecrowd::domain::Point2D lineSegmentCenter(const safecrowd::domain::LineSegment2D& line) {
-    return {
-        .x = (line.start.x + line.end.x) * 0.5,
-        .y = (line.start.y + line.end.y) * 0.5,
-    };
 }
 
 void drawArrowHead(QPainter& painter, const QPointF& tip, const QPointF& tail, const QColor& color, double size) {
@@ -212,20 +204,6 @@ void drawArrowHead(QPainter& painter, const QPointF& tip, const QPointF& tail, c
     painter.drawLine(tip, left);
     painter.drawLine(tip, right);
     painter.restore();
-}
-
-void drawBidirectionalFlowMarker(QPainter& painter, const QPointF& start, const QPointF& end, const QColor& color) {
-    const QLineF segment(start, end);
-    if (segment.length() <= 1e-6) {
-        return;
-    }
-    const auto direction = QPointF(segment.dx() / segment.length(), segment.dy() / segment.length());
-    const auto center = segment.pointAt(0.5);
-    const auto forwardTip = center + (direction * std::min(18.0, segment.length() * 0.28));
-    const auto reverseTip = center - (direction * std::min(18.0, segment.length() * 0.28));
-    const auto markerSize = std::clamp(segment.length() * 0.12, 6.0, 10.0);
-    drawArrowHead(painter, forwardTip, center, color, markerSize);
-    drawArrowHead(painter, reverseTip, center, color, markerSize);
 }
 
 QString formatScheduleTooltip(const safecrowd::domain::ConnectionBlockDraft& block) {
@@ -662,18 +640,11 @@ void SimulationCanvasWidget::setBottleneckOverlay(std::vector<safecrowd::domain:
     update();
 }
 
-void SimulationCanvasWidget::setOperationalConflictOverlay(
-    std::vector<safecrowd::domain::ScenarioOperationalConflictCellMetric> cells,
-    std::vector<safecrowd::domain::ScenarioOperationalConflictConnectionMetric> connections) {
-    operationalConflictCellOverlay_ = std::move(cells);
-    operationalConflictConnectionOverlay_ = std::move(connections);
-    if (focusedOperationalConflictCellIndex_.has_value()
-        && *focusedOperationalConflictCellIndex_ >= operationalConflictCellOverlay_.size()) {
-        focusedOperationalConflictCellIndex_.reset();
-    }
-    if (focusedOperationalConflictConnectionIndex_.has_value()
-        && *focusedOperationalConflictConnectionIndex_ >= operationalConflictConnectionOverlay_.size()) {
-        focusedOperationalConflictConnectionIndex_.reset();
+void SimulationCanvasWidget::setCrossFlowOverlay(std::vector<safecrowd::domain::ScenarioCrossFlowCellMetric> cells) {
+    crossFlowCellOverlay_ = std::move(cells);
+    if (focusedCrossFlowCellIndex_.has_value()
+        && *focusedCrossFlowCellIndex_ >= crossFlowCellOverlay_.size()) {
+        focusedCrossFlowCellIndex_.reset();
     }
     invalidateOverlayCache();
     update();
@@ -698,8 +669,7 @@ void SimulationCanvasWidget::focusHotspot(std::size_t index) {
     }
     focusedHotspotIndex_ = index;
     focusedBottleneckIndex_.reset();
-    focusedOperationalConflictCellIndex_.reset();
-    focusedOperationalConflictConnectionIndex_.reset();
+    focusedCrossFlowCellIndex_.reset();
     invalidateOverlayCache();
     focusWorldPoint(hotspotOverlay_[index].center, std::max(camera_.zoom(), kHotspotFocusZoom));
 }
@@ -715,48 +685,27 @@ void SimulationCanvasWidget::focusBottleneck(std::size_t index) {
     }
     focusedBottleneckIndex_ = index;
     focusedHotspotIndex_.reset();
-    focusedOperationalConflictCellIndex_.reset();
-    focusedOperationalConflictConnectionIndex_.reset();
+    focusedCrossFlowCellIndex_.reset();
     invalidateOverlayCache();
     focusWorldPoint(
         {.x = (passage.start.x + passage.end.x) / 2.0, .y = (passage.start.y + passage.end.y) / 2.0},
         std::max(camera_.zoom(), kBottleneckFocusZoom));
 }
 
-void SimulationCanvasWidget::focusOperationalConflictCell(std::size_t index) {
-    if (index >= operationalConflictCellOverlay_.size()) {
+void SimulationCanvasWidget::focusCrossFlowCell(std::size_t index) {
+    if (index >= crossFlowCellOverlay_.size()) {
         return;
     }
 
-    const auto& cell = operationalConflictCellOverlay_[index];
+    const auto& cell = crossFlowCellOverlay_[index];
     if (!cell.floorId.empty() && cell.floorId != currentFloorId_) {
         setCurrentFloorId(cell.floorId, true);
     }
-    focusedOperationalConflictCellIndex_ = index;
-    focusedOperationalConflictConnectionIndex_.reset();
+    focusedCrossFlowCellIndex_ = index;
     focusedHotspotIndex_.reset();
     focusedBottleneckIndex_.reset();
     invalidateOverlayCache();
-    focusWorldPoint(cell.center, std::max(camera_.zoom(), kOperationalConflictCellFocusZoom));
-}
-
-void SimulationCanvasWidget::focusOperationalConflictConnection(std::size_t index) {
-    if (index >= operationalConflictConnectionOverlay_.size()) {
-        return;
-    }
-
-    const auto& connection = operationalConflictConnectionOverlay_[index];
-    if (!connection.floorId.empty() && connection.floorId != currentFloorId_) {
-        setCurrentFloorId(connection.floorId, true);
-    }
-    focusedOperationalConflictConnectionIndex_ = index;
-    focusedOperationalConflictCellIndex_.reset();
-    focusedHotspotIndex_.reset();
-    focusedBottleneckIndex_.reset();
-    invalidateOverlayCache();
-    focusWorldPoint(
-        lineSegmentCenter(connection.passage),
-        std::max(camera_.zoom(), kOperationalConflictConnectionFocusZoom));
+    focusWorldPoint(cell.center, std::max(camera_.zoom(), kCrossFlowCellFocusZoom));
 }
 
 bool SimulationCanvasWidget::eventFilter(QObject* watched, QEvent* event) {
@@ -1098,8 +1047,8 @@ void SimulationCanvasWidget::refreshOverlayCache(const LayoutCanvasBounds& bound
         drawHotspotOverlay(painter, transform);
     } else if (overlayMode_ == ResultOverlayMode::Bottlenecks) {
         drawBottleneckOverlay(painter, transform);
-    } else if (overlayMode_ == ResultOverlayMode::OperationalConflicts) {
-        drawOperationalConflictOverlay(painter, transform);
+    } else if (overlayMode_ == ResultOverlayMode::CrossFlow) {
+        drawCrossFlowOverlay(painter, transform);
     }
 
     overlayCacheSize_ = currentSize;
@@ -1593,8 +1542,8 @@ void SimulationCanvasWidget::drawBottleneckOverlay(QPainter& painter, const Layo
     painter.restore();
 }
 
-void SimulationCanvasWidget::drawOperationalConflictOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const {
-    if (operationalConflictCellOverlay_.empty() && operationalConflictConnectionOverlay_.empty()) {
+void SimulationCanvasWidget::drawCrossFlowOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const {
+    if (crossFlowCellOverlay_.empty()) {
         return;
     }
 
@@ -1613,20 +1562,20 @@ void SimulationCanvasWidget::drawOperationalConflictOverlay(QPainter& painter, c
         painter.setClipPath(walkableClip);
     }
 
-    std::vector<const safecrowd::domain::ScenarioOperationalConflictCellMetric*> visibleCells;
-    visibleCells.reserve(operationalConflictCellOverlay_.size());
-    for (const auto& cell : operationalConflictCellOverlay_) {
+    std::vector<const safecrowd::domain::ScenarioCrossFlowCellMetric*> visibleCells;
+    visibleCells.reserve(crossFlowCellOverlay_.size());
+    for (const auto& cell : crossFlowCellOverlay_) {
         if (!matchesFloor(cell.floorId, currentFloorId_)) {
             continue;
         }
-        if (cell.conflictScore <= 0.0) {
+        if (cell.crossFlowScore <= 0.0) {
             continue;
         }
         visibleCells.push_back(&cell);
     }
     std::sort(visibleCells.begin(), visibleCells.end(), [](const auto* lhs, const auto* rhs) {
-        if (std::fabs(lhs->conflictScore - rhs->conflictScore) > 1e-9) {
-            return lhs->conflictScore < rhs->conflictScore;
+        if (std::fabs(lhs->crossFlowScore - rhs->crossFlowScore) > 1e-9) {
+            return lhs->crossFlowScore < rhs->crossFlowScore;
         }
         return lhs->movingAgentCount < rhs->movingAgentCount;
     });
@@ -1636,68 +1585,36 @@ void SimulationCanvasWidget::drawOperationalConflictOverlay(QPainter& painter, c
         const auto center = transform.map(cell->center);
         const auto cellWidth = cell->cellMax.x > cell->cellMin.x
             ? cell->cellMax.x - cell->cellMin.x
-            : safecrowd::domain::kScenarioOperationalConflictCellSize;
+            : safecrowd::domain::kScenarioCrossFlowCellSize;
         const auto cellHeight = cell->cellMax.y > cell->cellMin.y
             ? cell->cellMax.y - cell->cellMin.y
-            : safecrowd::domain::kScenarioOperationalConflictCellSize;
+            : safecrowd::domain::kScenarioCrossFlowCellSize;
         const auto influenceRadiusWorld =
-            std::max(cellWidth, cellHeight) * kOperationalConflictInfluenceRadiusMultiplier;
+            std::max(cellWidth, cellHeight) * kCrossFlowInfluenceRadiusMultiplier;
         const auto radiusAnchor = transform.map({
             .x = cell->center.x + influenceRadiusWorld,
             .y = cell->center.y,
         });
         const auto radius = std::max(
-            kOperationalConflictMinimumScreenRadius,
+            kCrossFlowMinimumScreenRadius,
             std::hypot(radiusAnchor.x() - center.x(), radiusAnchor.y() - center.y()));
-        const auto intensity = std::clamp(cell->conflictScore, 0.0, 1.0);
+        const auto intensity = std::clamp(cell->crossFlowScore, 0.0, 1.0);
         const auto coreAlpha = 68 + static_cast<int>(144.0 * intensity);
 
         QRadialGradient gradient(center, radius);
-        gradient.setColorAt(0.0, operationalConflictHeatmapColor(intensity, std::clamp(coreAlpha, 68, 212)));
-        gradient.setColorAt(0.4, operationalConflictHeatmapColor(intensity, static_cast<int>(coreAlpha * 0.45)));
-        gradient.setColorAt(1.0, operationalConflictHeatmapColor(intensity, 0));
+        gradient.setColorAt(0.0, crossFlowHeatmapColor(intensity, std::clamp(coreAlpha, 68, 212)));
+        gradient.setColorAt(0.4, crossFlowHeatmapColor(intensity, static_cast<int>(coreAlpha * 0.45)));
+        gradient.setColorAt(1.0, crossFlowHeatmapColor(intensity, 0));
         painter.setBrush(gradient);
         painter.drawEllipse(center, radius, radius);
 
-        if (focusedOperationalConflictCellIndex_.has_value()
-            && *focusedOperationalConflictCellIndex_ < operationalConflictCellOverlay_.size()
-            && cell == &operationalConflictCellOverlay_[*focusedOperationalConflictCellIndex_]) {
+        if (focusedCrossFlowCellIndex_.has_value()
+            && *focusedCrossFlowCellIndex_ < crossFlowCellOverlay_.size()
+            && cell == &crossFlowCellOverlay_[*focusedCrossFlowCellIndex_]) {
             painter.setBrush(Qt::NoBrush);
             painter.setPen(QPen(QColor(120, 53, 15, 230), 2.2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
             painter.drawEllipse(center, radius + 4.0, radius + 4.0);
             painter.setPen(Qt::NoPen);
-        }
-    }
-
-    painter.setClipping(false);
-    painter.setBrush(Qt::NoBrush);
-    for (std::size_t index = 0; index < operationalConflictConnectionOverlay_.size(); ++index) {
-        const auto& connection = operationalConflictConnectionOverlay_[index];
-        if (!matchesFloor(connection.floorId, currentFloorId_)) {
-            continue;
-        }
-        if (connection.conflictScore <= 0.0 && connection.queueAgentCount == 0) {
-            continue;
-        }
-        const auto focused = focusedOperationalConflictConnectionIndex_.has_value()
-            && *focusedOperationalConflictConnectionIndex_ == index;
-        const auto intensity = std::clamp(std::max(connection.conflictScore, connection.speedDropRatio), 0.0, 1.0);
-        const auto color = focused
-            ? QColor(153, 27, 27, 240)
-            : operationalConflictHeatmapColor(intensity, 210);
-        const auto width = focused ? 6.0 : (3.0 + (2.2 * intensity));
-        const auto start = transform.map(connection.passage.start);
-        const auto end = transform.map(connection.passage.end);
-        painter.setPen(QPen(color, width, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-        painter.drawLine(start, end);
-        drawBidirectionalFlowMarker(painter, start, end, color);
-
-        if (connection.queueAgentCount > 0) {
-            const auto center = transform.map(lineSegmentCenter(connection.passage));
-            painter.setPen(Qt::NoPen);
-            painter.setBrush(QColor(120, 53, 15, focused ? 220 : 170));
-            painter.drawEllipse(center, 5.2 + std::min<std::size_t>(connection.queueAgentCount, 4), 5.2 + std::min<std::size_t>(connection.queueAgentCount, 4));
-            painter.setBrush(Qt::NoBrush);
         }
     }
 

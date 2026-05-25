@@ -293,7 +293,7 @@ SC_TEST(computeScenarioDiffKeys_detectsControlEventsChange) {
     auto variant = duplicateScenarioDraft(baseline, "scenario-2", "Variant");
     OperationalEventDraft extra;
     extra.id = "event-extra";
-    extra.name = "Counterflow guidance";
+    extra.name = "Cross-flow guidance";
     variant.control.events.push_back(extra);
 
     const auto keys = computeScenarioDiffKeys(baseline, variant);
