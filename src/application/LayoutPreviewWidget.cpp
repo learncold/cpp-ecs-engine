@@ -181,6 +181,24 @@ bool traceMatches(const safecrowd::domain::ElementProvenance& provenance, const 
     return stringListContains(provenance.sourceIds, targetId) || stringListContains(provenance.canonicalIds, targetId);
 }
 
+bool layoutMatchesTarget(const safecrowd::domain::FacilityLayout2D& layout, const QString& targetId) {
+    return !targetId.isEmpty() && QString::fromStdString(layout.id) == targetId;
+}
+
+bool zoneMatchesTarget(const safecrowd::domain::Zone2D& zone, const QString& targetId) {
+    return !targetId.isEmpty() && (QString::fromStdString(zone.id) == targetId || traceMatches(zone.provenance, targetId));
+}
+
+bool connectionMatchesTarget(const safecrowd::domain::Connection2D& connection, const QString& targetId) {
+    return !targetId.isEmpty()
+        && (QString::fromStdString(connection.id) == targetId || traceMatches(connection.provenance, targetId));
+}
+
+bool barrierMatchesTarget(const safecrowd::domain::Barrier2D& barrier, const QString& targetId) {
+    return !targetId.isEmpty()
+        && (QString::fromStdString(barrier.id) == targetId || traceMatches(barrier.provenance, targetId));
+}
+
 bool traceRefMatches(const safecrowd::domain::ImportResult& importResult, const QString& elementId, const QString& targetId) {
     if (elementId == targetId) {
         return true;
@@ -205,18 +223,19 @@ void includeMatchingGeometryBounds(const safecrowd::domain::ImportResult& import
     }
 
     if (importResult.layout.has_value()) {
+        const bool includeWholeLayout = layoutMatchesTarget(*importResult.layout, targetId);
         for (const auto& zone : importResult.layout->zones) {
-            if (QString::fromStdString(zone.id) == targetId || traceMatches(zone.provenance, targetId)) {
+            if (includeWholeLayout || zoneMatchesTarget(zone, targetId)) {
                 includePolygon(bounds, zone.area);
             }
         }
         for (const auto& connection : importResult.layout->connections) {
-            if (QString::fromStdString(connection.id) == targetId || traceMatches(connection.provenance, targetId)) {
+            if (includeWholeLayout || connectionMatchesTarget(connection, targetId)) {
                 includeLine(bounds, connection.centerSpan);
             }
         }
         for (const auto& barrier : importResult.layout->barriers) {
-            if (QString::fromStdString(barrier.id) == targetId || traceMatches(barrier.provenance, targetId)) {
+            if (includeWholeLayout || barrierMatchesTarget(barrier, targetId)) {
                 includePolyline(bounds, barrier.geometry);
             }
         }
@@ -350,6 +369,86 @@ bool connectionVisibleOnFloor(
     const auto* toZone = findZoneById(layout, connection.toZoneId);
     return (fromZone != nullptr && matchesFloor(fromZone->floorId, floorId))
         || (toZone != nullptr && matchesFloor(toZone->floorId, floorId));
+}
+
+void appendTargetFloorId(QStringList& floorIds, const std::string& floorId) {
+    const auto floorIdText = QString::fromStdString(floorId);
+    if (!floorIdText.isEmpty() && !floorIds.contains(floorIdText)) {
+        floorIds.append(floorIdText);
+    }
+}
+
+void appendTargetConnectionFloorIds(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const safecrowd::domain::Connection2D& connection,
+    QStringList& floorIds) {
+    appendTargetFloorId(floorIds, connection.floorId);
+
+    if (!isVerticalLink(connection)) {
+        return;
+    }
+
+    const auto* fromZone = findZoneById(layout, connection.fromZoneId);
+    const auto* toZone = findZoneById(layout, connection.toZoneId);
+    if (fromZone != nullptr) {
+        appendTargetFloorId(floorIds, fromZone->floorId);
+    }
+    if (toZone != nullptr) {
+        appendTargetFloorId(floorIds, toZone->floorId);
+    }
+}
+
+std::optional<QString> floorIdForIssueTarget(
+    const safecrowd::domain::ImportResult& importResult,
+    const QString& targetId,
+    const QString& preferredFloorId) {
+    if (targetId.isEmpty() || !importResult.layout.has_value()) {
+        return std::nullopt;
+    }
+
+    const auto& layout = *importResult.layout;
+    for (const auto& floor : layout.floors) {
+        if (QString::fromStdString(floor.id) == targetId || traceMatches(floor.provenance, targetId)) {
+            return QString::fromStdString(floor.id);
+        }
+    }
+
+    if (layoutMatchesTarget(layout, targetId)) {
+        return preferredFloorId.isEmpty() ? defaultFloorId(layout) : preferredFloorId;
+    }
+
+    QStringList matchingFloorIds;
+    for (const auto& zone : layout.zones) {
+        if (zoneMatchesTarget(zone, targetId)) {
+            appendTargetFloorId(matchingFloorIds, zone.floorId);
+        }
+    }
+    for (const auto& connection : layout.connections) {
+        if (connectionMatchesTarget(connection, targetId)) {
+            appendTargetConnectionFloorIds(layout, connection, matchingFloorIds);
+        }
+    }
+    for (const auto& barrier : layout.barriers) {
+        if (barrierMatchesTarget(barrier, targetId)) {
+            appendTargetFloorId(matchingFloorIds, barrier.floorId);
+        }
+    }
+    for (const auto& control : layout.controls) {
+        if (QString::fromStdString(control.id) == targetId
+            || QString::fromStdString(control.targetId) == targetId
+            || traceMatches(control.provenance, targetId)) {
+            appendTargetFloorId(matchingFloorIds, control.floorId);
+        }
+    }
+
+    if (matchingFloorIds.contains(preferredFloorId)) {
+        return preferredFloorId;
+    }
+    if (!matchingFloorIds.isEmpty()) {
+        return matchingFloorIds.front();
+    }
+
+    return std::nullopt;
 }
 
 QString zoneTitle(const safecrowd::domain::Zone2D& zone) {
@@ -878,6 +977,12 @@ void LayoutPreviewWidget::focusIssueTarget(const QString& targetId) {
     selectedBarrierIds_.clear();
     focusedTargetId_ = targetId;
 
+    if (const auto targetFloorId = floorIdForIssueTarget(importResult_, targetId, currentFloorId());
+        targetFloorId.has_value() && *targetFloorId != currentFloorId_) {
+        currentFloorId_ = *targetFloorId;
+        refreshFloorSelector();
+    }
+
     Bounds2D targetBounds;
     includeMatchingGeometryBounds(importResult_, targetId, targetBounds);
     const auto worldBounds = collectBounds(importResult_, currentFloorId());
@@ -1400,15 +1505,14 @@ void LayoutPreviewWidget::paintEvent(QPaintEvent* event) {
         painter.setPen(QPen(kSelectionHighlightColor, 2.25, Qt::DashLine));
 
         if (importResult_.layout.has_value()) {
+            const bool focusedLayout = !hasExplicitSelection && layoutMatchesTarget(*importResult_.layout, focusedTargetId_);
             for (const auto& zone : importResult_.layout->zones) {
                 if (!matchesFloor(zone.floorId, currentFloorId())) {
                     continue;
                 }
                 const auto id = QString::fromStdString(zone.id);
                 const bool selected = selectedZoneIds_.contains(id);
-                const bool focused = !hasExplicitSelection
-                    && !focusedTargetId_.isEmpty()
-                    && (id == focusedTargetId_ || traceMatches(zone.provenance, focusedTargetId_));
+                const bool focused = focusedLayout || (!hasExplicitSelection && zoneMatchesTarget(zone, focusedTargetId_));
                 if (selected || focused) {
                     painter.drawPath(polygonPath(zone.area, transform));
                 }
@@ -1419,9 +1523,7 @@ void LayoutPreviewWidget::paintEvent(QPaintEvent* event) {
                 }
                 const auto id = QString::fromStdString(connection.id);
                 const bool selected = selectedConnectionIds_.contains(id);
-                const bool focused = !hasExplicitSelection
-                    && !focusedTargetId_.isEmpty()
-                    && (id == focusedTargetId_ || traceMatches(connection.provenance, focusedTargetId_));
+                const bool focused = focusedLayout || (!hasExplicitSelection && connectionMatchesTarget(connection, focusedTargetId_));
                 if (selected || focused) {
                     drawLine(painter, connection.centerSpan, transform);
                 }
@@ -1432,9 +1534,7 @@ void LayoutPreviewWidget::paintEvent(QPaintEvent* event) {
                 }
                 const auto id = QString::fromStdString(barrier.id);
                 const bool selected = selectedBarrierIds_.contains(id);
-                const bool focused = !hasExplicitSelection
-                    && !focusedTargetId_.isEmpty()
-                    && (id == focusedTargetId_ || traceMatches(barrier.provenance, focusedTargetId_));
+                const bool focused = focusedLayout || (!hasExplicitSelection && barrierMatchesTarget(barrier, focusedTargetId_));
                 if (selected || focused) {
                     drawPolyline(painter, barrier.geometry, transform);
                 }
@@ -2715,6 +2815,7 @@ void LayoutPreviewWidget::setupToolbars() {
     topLayout->addWidget(floorComboBox_);
     addFloorButton_ = makeButton(topToolbar_, topLayout, makeToolIcon("add", QColor("#1f5fae")), "Add Floor");
     addFloorButton_->setCheckable(false);
+    topLayout->addStretch(1);
     gridToolButton_ = makeButton(topToolbar_, topLayout, makeToolIcon("grid", QColor("#1f5fae")), "Grid snap");
     gridToolButton_->setChecked(gridSnapEnabled_);
     gridSpacingComboBox_ = new QComboBox(topToolbar_);
@@ -2726,7 +2827,6 @@ void LayoutPreviewWidget::setupToolbars() {
     gridSpacingComboBox_->setCurrentIndex(1);
     gridSpacingComboBox_->setEnabled(gridSnapEnabled_);
     topLayout->addWidget(gridSpacingComboBox_);
-    topLayout->addStretch(1);
 
     roomToolButton_ = makeButton(sideToolbar_, sideLayout, makeToolIcon("room", QColor("#2f5d8a")), "Draw Room");
     exitToolButton_ = makeButton(sideToolbar_, sideLayout, makeToolIcon("exit", kExitAccentColor), "Draw Exit");
