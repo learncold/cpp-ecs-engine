@@ -7,10 +7,16 @@
 #include <utility>
 
 #include <QColor>
+#include <QCoreApplication>
+#include <QDialog>
+#include <QEventLoop>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QLabel>
+#include <QPainter>
+#include <QPaintEvent>
+#include <QPen>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSizePolicy>
@@ -30,6 +36,7 @@ namespace safecrowd::application {
 namespace {
 
 constexpr double kSimulationDeltaSeconds = 1.0 / 30.0;
+constexpr double kResultCalculationChunkSeconds = 1.0;
 constexpr int kPlaybackTimerIntervalMs = 33;
 
 int normalizedRunIndex(int index, std::size_t runCount) {
@@ -43,6 +50,36 @@ enum class TransportIconKind {
     Play,
     Pause,
     Stop,
+};
+
+class BusySpinnerWidget final : public QWidget {
+public:
+    explicit BusySpinnerWidget(QWidget* parent = nullptr)
+        : QWidget(parent) {
+        setFixedSize(44, 44);
+        timer_.setInterval(16);
+        connect(&timer_, &QTimer::timeout, this, [this]() {
+            angleDegrees_ = (angleDegrees_ + 348) % 360;
+            update();
+        });
+        timer_.start();
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+
+        const QRectF bounds(7, 7, width() - 14, height() - 14);
+        painter.setPen(QPen(QColor("#d8e2ec"), 4, Qt::SolidLine, Qt::RoundCap));
+        painter.drawArc(bounds, 0, 360 * 16);
+        painter.setPen(QPen(QColor("#1f5fae"), 4, Qt::SolidLine, Qt::RoundCap));
+        painter.drawArc(bounds, angleDegrees_ * 16, -115 * 16);
+    }
+
+private:
+    QTimer timer_{this};
+    int angleDegrees_{0};
 };
 
 QLabel* createLabel(const QString& text, QWidget* parent, ui::FontRole role = ui::FontRole::Body) {
@@ -138,6 +175,30 @@ QString runIconButtonStyleSheet() {
         "}");
 }
 
+QString resultButtonStyleSheet(bool complete) {
+    const auto background = complete ? QStringLiteral("#1f7a4d") : QStringLiteral("#b42318");
+    const auto hover = complete ? QStringLiteral("#16643f") : QStringLiteral("#922018");
+    return QString(
+        "QPushButton {"
+        " background: %1;"
+        " border: 1px solid %1;"
+        " border-radius: 12px;"
+        " color: white;"
+        " font-weight: 600;"
+        " padding: 10px 18px;"
+        "}"
+        "QPushButton:hover {"
+        " background: %2;"
+        " border-color: %2;"
+        "}"
+        "QPushButton:disabled {"
+        " background: #c3cfdb;"
+        " border-color: #c3cfdb;"
+        " color: #f7f9fb;"
+        "}"
+    ).arg(background, hover);
+}
+
 void setTransportIcon(QPushButton* button, TransportIconKind kind, const QColor& color) {
     if (button == nullptr) {
         return;
@@ -188,6 +249,49 @@ int percentValue(double numerator, double denominator) {
     }
     const auto percent = std::clamp((numerator / denominator) * 100.0, 0.0, 100.0);
     return static_cast<int>(std::round(percent));
+}
+
+double remainingSimulationSeconds(const safecrowd::domain::ScenarioBatchRunner& batchRunner) {
+    double remainingSeconds = 0.0;
+    for (const auto& run : batchRunner.runs()) {
+        if (!run.complete) {
+            remainingSeconds = std::max(
+                remainingSeconds,
+                std::max(0.0, run.timeLimitSeconds - run.frame.elapsedSeconds));
+        }
+    }
+    return remainingSeconds;
+}
+
+QDialog* createResultCalculationDialog(QWidget* parent) {
+    auto* dialog = new QDialog(parent);
+    dialog->setModal(true);
+    dialog->setWindowModality(Qt::ApplicationModal);
+    dialog->setWindowTitle("Calculating Results");
+    dialog->setWindowFlags(dialog->windowFlags() & ~Qt::WindowContextHelpButtonHint);
+    dialog->setFixedSize(260, 150);
+    dialog->setStyleSheet(
+        "QDialog {"
+        " background: #ffffff;"
+        " border-radius: 12px;"
+        "}"
+        "QLabel {"
+        " color: #16202b;"
+        "}");
+
+    auto* layout = new QVBoxLayout(dialog);
+    layout->setContentsMargins(24, 20, 24, 20);
+    layout->setSpacing(14);
+    layout->setAlignment(Qt::AlignCenter);
+
+    auto* spinner = new BusySpinnerWidget(dialog);
+    layout->addWidget(spinner, 0, Qt::AlignHCenter);
+
+    auto* label = createLabel("Calculating Results...", dialog, ui::FontRole::Body);
+    label->setAlignment(Qt::AlignCenter);
+    layout->addWidget(label);
+
+    return dialog;
 }
 
 const safecrowd::domain::Zone2D* firstStartZone(const safecrowd::domain::FacilityLayout2D& layout) {
@@ -829,8 +933,15 @@ void ScenarioRunWidget::refreshStatus() {
     updateSpeedButton(speed3Button_, 3);
     updateSpeedButton(speed5Button_, 5);
     if (resultButton_ != nullptr) {
-        resultButton_->setEnabled(
-            batchRunner_.complete() && !batchRunner_.empty());
+        const bool hasRuns = !batchRunner_.empty();
+        const bool complete = batchRunner_.complete();
+        resultButton_->setEnabled(hasRuns);
+        resultButton_->setText(complete ? "View Results" : "Skip to Results");
+        resultButton_->setStyleSheet(resultButtonStyleSheet(complete));
+        resultButton_->setToolTip(complete
+            ? "Open simulation results."
+            : "Finish the simulation without playback and open results.");
+        resultButton_->setAccessibleName(resultButton_->toolTip());
     }
 }
 
@@ -894,7 +1005,72 @@ void ScenarioRunWidget::stopRun() {
     }
 }
 
+void ScenarioRunWidget::completeRunsForResults() {
+    if (batchRunner_.empty() || batchRunner_.complete()) {
+        return;
+    }
+
+    const auto wasPaused = paused_;
+    const auto previousPlaybackSpeedMultiplier = playbackSpeedMultiplier_;
+    const bool timerWasActive = timer_ != nullptr && timer_->isActive();
+
+    if (timer_ != nullptr) {
+        timer_->stop();
+    }
+    paused_ = true;
+    playbackSpeedMultiplier_ = 1;
+
+    if (resultButton_ != nullptr) {
+        resultButton_->setEnabled(false);
+        resultButton_->setText("Calculating Results...");
+        resultButton_->repaint();
+    }
+
+    auto* calculationDialog = createResultCalculationDialog(this);
+    calculationDialog->adjustSize();
+    const auto dialogPosition = mapToGlobal(rect().center())
+        - QPoint(calculationDialog->width() / 2, calculationDialog->height() / 2);
+    calculationDialog->move(dialogPosition);
+    calculationDialog->show();
+    calculationDialog->raise();
+    calculationDialog->activateWindow();
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+
+    while (!batchRunner_.complete()) {
+        const auto remainingSeconds = remainingSimulationSeconds(batchRunner_);
+        if (remainingSeconds <= 1e-9) {
+            break;
+        }
+        batchRunner_.step(std::min(remainingSeconds, kResultCalculationChunkSeconds));
+        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    }
+    if (!batchRunner_.complete()) {
+        batchRunner_.step(kSimulationDeltaSeconds);
+        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    }
+    batchRunner_.syncResultArtifacts();
+
+    calculationDialog->close();
+    calculationDialog->deleteLater();
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+
+    if (!batchRunner_.complete()) {
+        paused_ = wasPaused;
+        playbackSpeedMultiplier_ = previousPlaybackSpeedMultiplier;
+        if (timer_ != nullptr && timerWasActive) {
+            timer_->start();
+        }
+        refreshStatus();
+    }
+}
+
 void ScenarioRunWidget::showResults() {
+    if (batchRunner_.empty()) {
+        return;
+    }
+
+    completeRunsForResults();
+
     std::vector<SavedScenarioResultState> results;
     if (batchRunner_.complete() && !batchRunner_.empty()) {
         results = completedResults();

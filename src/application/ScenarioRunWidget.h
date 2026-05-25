@@ -81,6 +81,7 @@ public:
 private:
     QWidget* createRunCanvas();
     QWidget* createRunPanel();
+    void completeRunsForResults();
     void cycleFastForwardMode();
     bool hasCachedResults() const noexcept;
     std::vector<SavedScenarioResultState> completedResults();
