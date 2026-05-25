@@ -987,6 +987,96 @@ LayoutPreviewEditResult deleteSelectedLayoutPreviewElements(
     return selectionResult(clearedSelection);
 }
 
+LayoutPreviewEditResult deleteLayoutPreviewFloor(
+    safecrowd::domain::FacilityLayout2D& layout,
+    const QString& floorId,
+    const QString& currentFloorId) {
+    if (floorId.isEmpty()) {
+        return {};
+    }
+
+    ensureLayoutFloors(layout);
+    const bool deletedLevelId = layout.levelId.empty() || QString::fromStdString(layout.levelId) == floorId;
+    const auto floorIt = std::remove_if(layout.floors.begin(), layout.floors.end(), [&](const auto& floor) {
+        return QString::fromStdString(floor.id) == floorId;
+    });
+    if (floorIt == layout.floors.end()) {
+        return {};
+    }
+    layout.floors.erase(floorIt, layout.floors.end());
+
+    QStringList removedZoneIds;
+    const auto zoneIt = std::remove_if(layout.zones.begin(), layout.zones.end(), [&](const auto& zone) {
+        const bool remove = QString::fromStdString(zone.floorId) == floorId;
+        if (remove) {
+            removedZoneIds.append(QString::fromStdString(zone.id));
+        }
+        return remove;
+    });
+    layout.zones.erase(zoneIt, layout.zones.end());
+
+    QStringList removedConnectionIds;
+    const auto connectionIt = std::remove_if(layout.connections.begin(), layout.connections.end(), [&](const auto& connection) {
+        const bool remove = QString::fromStdString(connection.floorId) == floorId
+            || removedZoneIds.contains(QString::fromStdString(connection.fromZoneId))
+            || removedZoneIds.contains(QString::fromStdString(connection.toZoneId));
+        if (remove) {
+            removedConnectionIds.append(QString::fromStdString(connection.id));
+        }
+        return remove;
+    });
+    layout.connections.erase(connectionIt, layout.connections.end());
+
+    QStringList removedBarrierIds;
+    const auto barrierIt = std::remove_if(layout.barriers.begin(), layout.barriers.end(), [&](const auto& barrier) {
+        const bool remove = QString::fromStdString(barrier.floorId) == floorId;
+        if (remove) {
+            removedBarrierIds.append(QString::fromStdString(barrier.id));
+        }
+        return remove;
+    });
+    layout.barriers.erase(barrierIt, layout.barriers.end());
+
+    const auto controlIt = std::remove_if(layout.controls.begin(), layout.controls.end(), [&](const auto& control) {
+        const auto targetId = QString::fromStdString(control.targetId);
+        return QString::fromStdString(control.floorId) == floorId
+            || removedZoneIds.contains(targetId)
+            || removedConnectionIds.contains(targetId)
+            || removedBarrierIds.contains(targetId);
+    });
+    layout.controls.erase(controlIt, layout.controls.end());
+
+    QString nextCurrentFloorId = currentFloorId;
+    const auto floorExists = [&](const QString& candidate) {
+        return std::any_of(layout.floors.begin(), layout.floors.end(), [&](const auto& floor) {
+            return QString::fromStdString(floor.id) == candidate;
+        });
+    };
+    if (!floorExists(nextCurrentFloorId)) {
+        nextCurrentFloorId = layout.floors.empty() ? QString{} : QString::fromStdString(layout.floors.front().id);
+    }
+
+    if (layout.floors.empty()) {
+        nextCurrentFloorId = QStringLiteral("L1");
+        layout.floors.push_back({
+            .id = nextCurrentFloorId.toStdString(),
+            .label = nextCurrentFloorId.toStdString(),
+        });
+    }
+    if (deletedLevelId) {
+        layout.levelId = nextCurrentFloorId.toStdString();
+    }
+
+    return {
+        .layoutChanged = true,
+        .selectionChanged = true,
+        .floorChanged = true,
+        .floorSelectorChanged = true,
+        .currentFloorId = nextCurrentFloorId,
+        .selection = emptySelectionState(),
+    };
+}
+
 LayoutPreviewEditResult addLayoutPreviewFloor(safecrowd::domain::FacilityLayout2D& layout) {
     ensureLayoutFloors(layout);
     const auto floorId = nextFloorId(layout);

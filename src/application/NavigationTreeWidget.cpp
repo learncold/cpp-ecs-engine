@@ -3,11 +3,13 @@
 #include <QAbstractItemView>
 #include <QColor>
 #include <QFrame>
+#include <QKeySequence>
 #include <QLabel>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QSet>
+#include <QShortcut>
 #include <QStyledItemDelegate>
 #include <QStyleOptionViewItem>
 #include <QTimer>
@@ -233,6 +235,19 @@ QSet<QString> collectExpandedIds(const QTreeWidget* tree) {
     return expandedIds;
 }
 
+QString deletableItemId(const QTreeWidgetItem* item) {
+    if (item == nullptr) {
+        return {};
+    }
+
+    const auto selectable = item->data(0, kSelectableRole).toBool();
+    const auto id = item->data(0, kIdRole).toString();
+    if (!selectable || id.isEmpty()) {
+        return {};
+    }
+    return id;
+}
+
 QTreeWidgetItem* addTreeNode(
     QTreeWidgetItem* parentItem,
     const NavigationTreeNode& node,
@@ -388,9 +403,6 @@ NavigationTreeWidget::NavigationTreeWidget(
                 QAction* deleteAction = nullptr;
                 if (deleteItemHandler) {
                     deleteAction = menu.addAction("Delete");
-                    if (id.startsWith("floor:")) {
-                        deleteAction->setEnabled(false);
-                    }
                 }
 
                 const auto* selectedAction = menu.exec(source->mapToGlobal(pos));
@@ -411,6 +423,17 @@ NavigationTreeWidget::NavigationTreeWidget(
                 showMenu(pos, tree);
             });
         }
+    }
+
+    if (deleteItemHandler) {
+        auto* deleteShortcut = new QShortcut(QKeySequence::Delete, tree);
+        deleteShortcut->setContext(Qt::WidgetWithChildrenShortcut);
+        QObject::connect(deleteShortcut, &QShortcut::activated, tree, [tree, deleteItemHandler]() {
+            const auto id = deletableItemId(tree->currentItem());
+            if (!id.isEmpty()) {
+                deleteItemHandler(id);
+            }
+        });
     }
 
     layout->addWidget(tree, 1);

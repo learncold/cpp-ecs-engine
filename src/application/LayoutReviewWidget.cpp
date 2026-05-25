@@ -8,6 +8,7 @@
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QLabel>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QShortcut>
 #include <QScrollArea>
@@ -83,6 +84,36 @@ QString issueTarget(const safecrowd::domain::ImportIssue& issue) {
         return QString::fromStdString(issue.targetId);
     }
     return QString::fromStdString(issue.sourceId);
+}
+
+bool isFloorElementId(const QString& elementId) {
+    return elementId.startsWith("floor:");
+}
+
+QString floorIdFromElementId(const QString& elementId) {
+    return isFloorElementId(elementId) ? elementId.mid(QString("floor:").size()) : QString{};
+}
+
+bool confirmFloorDeletion(QWidget* parent, const safecrowd::domain::ImportResult& importResult, const QString& elementId) {
+    const auto floorId = floorIdFromElementId(elementId);
+    if (floorId.isEmpty()) {
+        return false;
+    }
+
+    QString message = QString(
+        "Delete floor \"%1\" and all layout elements on it?\n\n"
+        "This removes rooms, exits, stairs, doors, walls, obstructions, and controls assigned to the floor.")
+        .arg(floorId);
+    if (importResult.layout.has_value() && importResult.layout->floors.size() <= 1) {
+        message += "\n\nThis is the only floor, so an empty replacement floor will remain to keep the layout editable.";
+    }
+
+    return QMessageBox::question(
+        parent,
+        "Delete Floor",
+        message,
+        QMessageBox::Yes | QMessageBox::Cancel,
+        QMessageBox::Cancel) == QMessageBox::Yes;
 }
 
 bool isLiveValidationIssue(safecrowd::domain::ImportIssueCode code) {
@@ -380,7 +411,7 @@ LayoutReviewWidget::LayoutReviewWidget(
         &approveButton_,
         shell_);
 
-    shell_->setTools({"Project", "Tool"});
+    shell_->setTools({"Project"});
     shell_->setSaveProjectHandler(std::move(saveProjectHandler));
     shell_->setOpenProjectHandler(openProjectHandler_);
     shell_->setBackHandler(openProjectHandler_);
@@ -559,6 +590,9 @@ void LayoutReviewWidget::refreshNavigationPanel() {
             handleLayoutElementSelected(elementId);
         },
         [this](const QString& elementId) {
+            if (isFloorElementId(elementId) && !confirmFloorDeletion(this, importResult_, elementId)) {
+                return;
+            }
             if (preview_ != nullptr) {
                 preview_->deleteElement(elementId);
             }
@@ -630,6 +664,8 @@ std::optional<std::vector<safecrowd::domain::Point2D>> LayoutReviewWidget::selec
 
     const auto& layout = *importResult_.layout;
     switch (selection.kind) {
+    case PreviewSelectionKind::Floor:
+        break;
     case PreviewSelectionKind::Zone:
         for (const auto& zone : layout.zones) {
             if (QString::fromStdString(zone.id) == selection.id) {

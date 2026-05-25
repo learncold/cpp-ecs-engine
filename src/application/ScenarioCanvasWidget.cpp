@@ -1150,6 +1150,7 @@ void ScenarioCanvasWidget::focusLayoutElement(const QString& elementId) {
         focusedCrowdElementId_.clear();
         focusedPlacementId_.clear();
         selectedPlacementIds_.clear();
+        selectedElement_ = {};
         camera_.reset();
         update();
         return;
@@ -1160,6 +1161,10 @@ void ScenarioCanvasWidget::focusLayoutElement(const QString& elementId) {
     focusedCrowdElementId_.clear();
     focusedPlacementId_.clear();
     selectedPlacementIds_.clear();
+    selectedElement_ = {
+        .kind = elementId.isEmpty() ? ScenarioCanvasSelectionKind::None : ScenarioCanvasSelectionKind::LayoutElement,
+        .id = elementId,
+    };
     update();
 }
 
@@ -1220,6 +1225,10 @@ void ScenarioCanvasWidget::focusPlacement(const QString& placementId) {
     focusedPlacementId_ = placementId.section('/', 0, 0);
     selectedPlacementIds_ = focusedPlacementId_.isEmpty() ? QStringList{} : QStringList{focusedPlacementId_};
     focusedLayoutElementId_.clear();
+    selectedElement_ = {
+        .kind = placementId.isEmpty() ? ScenarioCanvasSelectionKind::None : ScenarioCanvasSelectionKind::CrowdPlacement,
+        .id = placementId,
+    };
     const auto it = std::find_if(placements_.begin(), placements_.end(), [this](const auto& placement) {
         return placement.id == focusedPlacementId_;
     });
@@ -1243,6 +1252,10 @@ bool ScenarioCanvasWidget::deleteConnectionBlockById(const QString& blockId) {
     }
 
     connectionBlocks_.erase(it);
+    if (selectedElement_.kind == ScenarioCanvasSelectionKind::ConnectionBlock
+        && selectedElement_.id.section('/', 0, 0) == blockId) {
+        selectedElement_ = {};
+    }
     emitConnectionBlocksChanged();
     update();
     return true;
@@ -1276,6 +1289,10 @@ bool ScenarioCanvasWidget::deleteEnvironmentHazardById(const QString& hazardId) 
     }
 
     environmentHazards_.erase(it);
+    if (selectedElement_.kind == ScenarioCanvasSelectionKind::EnvironmentHazard
+        && selectedElement_.id.section('/', 0, 0) == hazardId) {
+        selectedElement_ = {};
+    }
     emitEnvironmentHazardsChanged();
     update();
     return true;
@@ -1290,6 +1307,10 @@ bool ScenarioCanvasWidget::deleteRouteGuidanceById(const QString& guidanceId) {
     }
 
     routeGuidances_.erase(it);
+    if (selectedElement_.kind == ScenarioCanvasSelectionKind::RouteGuidance
+        && selectedElement_.id.section('/', 0, 0) == guidanceId) {
+        selectedElement_ = {};
+    }
     emitRouteGuidancesChanged();
     update();
     return true;
@@ -1322,6 +1343,10 @@ bool ScenarioCanvasWidget::eventFilter(QObject* watched, QEvent* event) {
 
 void ScenarioCanvasWidget::keyPressEvent(QKeyEvent* event) {
     if (camera_.handleKeyPress(event)) {
+        return;
+    }
+    if (event->key() == Qt::Key_Delete && deleteSelectedElement()) {
+        event->accept();
         return;
     }
     QWidget::keyPressEvent(event);
@@ -3213,6 +3238,7 @@ bool ScenarioCanvasWidget::deleteCrowdElement(const QString& crowdElementId) {
             focusedCrowdElementId_.clear();
             focusedPlacementId_.clear();
             selectedPlacementIds_.clear();
+            selectedElement_ = {};
             if (crowdSelectionChangedHandler_) {
                 crowdSelectionChangedHandler_({});
             }
@@ -3227,6 +3253,10 @@ bool ScenarioCanvasWidget::deleteCrowdElement(const QString& crowdElementId) {
             focusedCrowdElementId_ = placementId;
             focusedPlacementId_ = placementId;
             selectedPlacementIds_ = QStringList{placementId};
+            selectedElement_ = {
+                .kind = ScenarioCanvasSelectionKind::CrowdPlacement,
+                .id = placementId,
+            };
             if (crowdSelectionChangedHandler_) {
                 crowdSelectionChangedHandler_(placementId);
             }
@@ -3252,6 +3282,7 @@ bool ScenarioCanvasWidget::deleteCrowdElement(const QString& crowdElementId) {
     focusedCrowdElementId_.clear();
     focusedPlacementId_.clear();
     selectedPlacementIds_.clear();
+    selectedElement_ = {};
     if (crowdSelectionChangedHandler_) {
         crowdSelectionChangedHandler_({});
     }
@@ -3260,7 +3291,48 @@ bool ScenarioCanvasWidget::deleteCrowdElement(const QString& crowdElementId) {
     return true;
 }
 
+bool ScenarioCanvasWidget::deleteSelectedElement() {
+    switch (selectedElement_.kind) {
+    case ScenarioCanvasSelectionKind::CrowdPlacement:
+        if (!selectedElement_.id.isEmpty()) {
+            return deleteCrowdElement(selectedElement_.id);
+        }
+        break;
+    case ScenarioCanvasSelectionKind::ConnectionBlock:
+        if (!selectedElement_.id.isEmpty()) {
+            return deleteConnectionBlockById(selectedElement_.id.section('/', 0, 0));
+        }
+        break;
+    case ScenarioCanvasSelectionKind::EnvironmentHazard:
+        if (!selectedElement_.id.isEmpty()) {
+            return deleteEnvironmentHazardById(selectedElement_.id.section('/', 0, 0));
+        }
+        break;
+    case ScenarioCanvasSelectionKind::RouteGuidance:
+        if (!selectedElement_.id.isEmpty()) {
+            return deleteRouteGuidanceById(selectedElement_.id.section('/', 0, 0));
+        }
+        break;
+    case ScenarioCanvasSelectionKind::LayoutElement:
+    case ScenarioCanvasSelectionKind::None:
+        break;
+    }
+
+    if (!focusedCrowdElementId_.isEmpty()) {
+        return deleteCrowdElement(focusedCrowdElementId_);
+    }
+    if (!focusedPlacementId_.isEmpty()) {
+        return deleteCrowdElement(focusedPlacementId_);
+    }
+
+    return false;
+}
+
 void ScenarioCanvasWidget::emitScenarioSelection(ScenarioCanvasSelectionKind kind, const QString& id) {
+    selectedElement_ = {
+        .kind = kind,
+        .id = id,
+    };
     if (scenarioElementSelectionChangedHandler_) {
         scenarioElementSelectionChangedHandler_(ScenarioCanvasSelection{.kind = kind, .id = id});
     }

@@ -731,7 +731,7 @@ QString buildChangeSummaryLine(
 
 QString changeCategoryLabel(const std::string& key) {
     if (key.rfind("population.", 0) == 0) {
-        return "Crowd";
+        return "Occupant";
     }
     if (key == "environment.hazards") {
         return "Hazards";
@@ -1457,12 +1457,12 @@ QWidget* createCrowdPanel(
     const WorkspaceShell* shell,
     QWidget* parent) {
     return new NavigationTreeWidget(
-        "Crowd",
+        "Occupant",
         buildCrowdTree(scenario),
         "No pedestrian placements yet",
         std::move(selectPlacementHandler),
         parent,
-        shell != nullptr ? shell->createPanelHeader("Crowd", parent, false) : nullptr,
+        shell != nullptr ? shell->createPanelHeader("Occupant", parent, false) : nullptr,
         std::move(navigationState),
         std::move(expandedStateChangedHandler),
         std::move(deletePlacementHandler));
@@ -2510,7 +2510,7 @@ void ScenarioAuthoringWidget::refreshInspector() {
                 if (scenarioMutable == nullptr || placementIt == scenarioMutable->crowdPlacements.end()) {
                     addStatusMessage(panelLayout, "Selected crowd placement was not found.", elementInspectorPanel_);
                 } else {
-                    auto* title = createLabel("Crowd", elementInspectorPanel_, ui::FontRole::SectionTitle);
+                    auto* title = createLabel("Occupant", elementInspectorPanel_, ui::FontRole::SectionTitle);
                     panelLayout->addWidget(title);
                     addMetaRow(panelLayout, "ID", placementIt->id, elementInspectorPanel_);
                     addMetaRow(panelLayout, "Type", placementIt->kind == ScenarioCrowdPlacementKind::Source
@@ -3329,7 +3329,7 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
             },
             {
                 .id = "crowd",
-                .label = "Crowd",
+                .label = "Occupant",
                 .icon = scenarioNavigationIcon(QStringLiteral(":/tool-icons/scenario-authoring/crowd.svg"), QColor("#1f5fae")),
             },
             {
@@ -3859,7 +3859,7 @@ void ScenarioAuthoringWidget::showEmptyCanvas() {
     auto* title = createLabel("Create a scenario", canvas, ui::FontRole::Title);
     title->setAlignment(Qt::AlignCenter);
     layout->addWidget(title);
-    auto* detail = createLabel("Name the first scenario to start authoring Layout, Crowd, and Events settings.", canvas);
+    auto* detail = createLabel("Name the first scenario to start authoring Layout, Occupant, and Events settings.", canvas);
     detail->setAlignment(Qt::AlignCenter);
     detail->setStyleSheet(ui::mutedTextStyleSheet());
     layout->addWidget(detail);

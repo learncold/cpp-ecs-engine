@@ -17,7 +17,7 @@
         <file alias="tool-icons/scenario-authoring/individual-occupant.svg">../../assets/tool-icon-candidates/scenario-authoring/user-round.svg</file>
         <file alias="tool-icons/scenario-authoring/add-occupant-group.svg">../../assets/tool-icon-candidates/scenario-authoring/add-occupant-group__01_lucide_users-round.svg</file>
         <file alias="tool-icons/scenario-authoring/crowd.svg">../../assets/tool-icon-candidates/scenario-authoring/add-occupant-group__01_lucide_users-round.svg</file>
-        <file alias="tool-icons/scenario-authoring/events.svg">../../assets/tool-icon-candidates/scenario-authoring/events__01_lucide_waypoints.svg</file>
+        <file alias="tool-icons/scenario-authoring/events.svg">../../assets/tool-icon-candidates/scenario-authoring/events__02_lucide_siren.svg</file>
         <file alias="tool-icons/scenario-authoring/source.svg">../../assets/tool-icon-candidates/scenario-authoring/source__01_lucide_map-pin-plus-inside.svg</file>
         <file alias="tool-icons/scenario-authoring/block-door.svg">../../assets/tool-icon-candidates/scenario-authoring/block-door__01_lucide_door-closed-locked.svg</file>
         <file alias="tool-icons/scenario-authoring/fire-hazard.svg">../../assets/tool-icon-candidates/scenario-authoring/fire-hazard__01_lucide_flame.svg</file>

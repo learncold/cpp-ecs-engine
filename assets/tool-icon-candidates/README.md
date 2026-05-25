@@ -34,7 +34,7 @@ License copies are saved under `licenses/`.
 | Add Individual Occupant | `scenario-authoring/add-individual-occupant__01_lucide_user-round-plus.svg` |
 | Add Occupant Group | `scenario-authoring/add-occupant-group__01_lucide_users-round.svg` |
 | Crowd navigation | `scenario-authoring/add-occupant-group__01_lucide_users-round.svg` |
-| Events navigation | `scenario-authoring/events__01_lucide_waypoints.svg` |
+| Events navigation | `scenario-authoring/events__02_lucide_siren.svg` |
 | Occupant Source | `scenario-authoring/source__01_lucide_map-pin-plus-inside.svg` |
 | Block Door | `scenario-authoring/block-door__01_lucide_door-closed-locked.svg` |
 | Fire Hazard | `scenario-authoring/fire-hazard__01_lucide_flame.svg` |

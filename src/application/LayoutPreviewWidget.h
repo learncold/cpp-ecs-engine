@@ -33,6 +33,7 @@ struct LayoutPreviewSelectionState;
 enum class PreviewSelectionKind {
     None,
     Multiple,
+    Floor,
     Zone,
     Connection,
     Barrier,
@@ -144,6 +145,7 @@ private:
     void selectBarrier(const QString& barrierId);
     void selectConnection(const QString& connectionId);
     void selectElementsInRect(const QRectF& screenRect, const LayoutCanvasTransform& transform);
+    void selectFloor(const QString& floorId);
     void selectFloorForElement(const QString& elementId);
     void selectPrimaryFromLists();
     void selectSingleAt(const QPointF& position, const LayoutCanvasTransform& transform);
@@ -158,6 +160,7 @@ private:
     PreviewSelection currentSelection() const;
 
     safecrowd::domain::ImportResult importResult_{};
+    QString selectedFloorId_{};
     QString selectedBarrierId_{};
     QStringList selectedBarrierIds_{};
     QString focusedTargetId_{};

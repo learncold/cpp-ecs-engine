@@ -119,6 +119,11 @@ LayoutPreviewEditResult deleteSelectedLayoutPreviewElements(
     safecrowd::domain::FacilityLayout2D& layout,
     const LayoutPreviewSelectionState& selection);
 
+LayoutPreviewEditResult deleteLayoutPreviewFloor(
+    safecrowd::domain::FacilityLayout2D& layout,
+    const QString& floorId,
+    const QString& currentFloorId);
+
 LayoutPreviewEditResult addLayoutPreviewFloor(safecrowd::domain::FacilityLayout2D& layout);
 
 }  // namespace safecrowd::application

@@ -354,6 +354,12 @@ bool containsBarrier(const safecrowd::domain::FacilityLayout2D& layout, const QS
     });
 }
 
+bool containsFloor(const safecrowd::domain::FacilityLayout2D& layout, const QString& floorId) {
+    return std::any_of(layout.floors.begin(), layout.floors.end(), [&](const auto& floor) {
+        return QString::fromStdString(floor.id) == floorId;
+    });
+}
+
 bool connectionVisibleOnFloor(
     const safecrowd::domain::FacilityLayout2D& layout,
     const safecrowd::domain::Connection2D& connection,
@@ -463,6 +469,41 @@ QString floorLabelForId(const safecrowd::domain::FacilityLayout2D& layout, const
         return QString::fromStdString(floor.id) == floorId;
     });
     return it == layout.floors.end() ? floorId : floorDisplayLabel(*it);
+}
+
+QString floorDetail(const safecrowd::domain::FacilityLayout2D& layout, const QString& floorId) {
+    int zoneCount = 0;
+    int connectionCount = 0;
+    int barrierCount = 0;
+    int controlCount = 0;
+
+    for (const auto& zone : layout.zones) {
+        if (matchesFloor(zone.floorId, floorId)) {
+            ++zoneCount;
+        }
+    }
+    for (const auto& connection : layout.connections) {
+        if (connectionVisibleOnFloor(layout, connection, floorId)) {
+            ++connectionCount;
+        }
+    }
+    for (const auto& barrier : layout.barriers) {
+        if (matchesFloor(barrier.floorId, floorId)) {
+            ++barrierCount;
+        }
+    }
+    for (const auto& control : layout.controls) {
+        if (matchesFloor(control.floorId, floorId)) {
+            ++controlCount;
+        }
+    }
+
+    return QString("Id: %1\nRooms/exits/stairs: %2\nOpenings/doors: %3\nWalls/obstructions: %4\nControls: %5")
+        .arg(floorId)
+        .arg(zoneCount)
+        .arg(connectionCount)
+        .arg(barrierCount)
+        .arg(controlCount);
 }
 
 QString zoneDetail(const safecrowd::domain::FacilityLayout2D& layout, const safecrowd::domain::Zone2D& zone) {
@@ -909,8 +950,8 @@ void LayoutPreviewWidget::focusElement(const QString& elementId) {
         const auto floorId = elementId.mid(QString("floor:").size());
         if (!floorId.isEmpty()) {
             currentFloorId_ = floorId;
-            clearSelection();
             refreshFloorSelector();
+            selectFloor(floorId);
             camera_.reset();
             update();
         }
@@ -942,8 +983,17 @@ void LayoutPreviewWidget::focusElement(const QString& elementId) {
 }
 
 bool LayoutPreviewWidget::deleteElement(const QString& elementId) {
-    if (!importResult_.layout.has_value() || elementId.isEmpty() || elementId.startsWith("floor:")) {
+    if (!importResult_.layout.has_value() || elementId.isEmpty()) {
         return false;
+    }
+
+    if (elementId.startsWith("floor:")) {
+        const auto floorId = elementId.mid(QString("floor:").size());
+        if (floorId.isEmpty()) {
+            return false;
+        }
+        applyEditResult(deleteLayoutPreviewFloor(*importResult_.layout, floorId, currentFloorId()));
+        return true;
     }
 
     if (containsConnection(*importResult_.layout, elementId)) {
@@ -969,6 +1019,7 @@ bool LayoutPreviewWidget::deleteElement(const QString& elementId) {
 }
 
 void LayoutPreviewWidget::focusIssueTarget(const QString& targetId) {
+    selectedFloorId_.clear();
     selectedZoneId_.clear();
     selectedZoneIds_.clear();
     selectedConnectionId_.clear();
@@ -1122,6 +1173,7 @@ bool LayoutPreviewWidget::updateElementVertices(
             pruneSelection();
         }
         break;
+    case PreviewSelectionKind::Floor:
     case PreviewSelectionKind::None:
     case PreviewSelectionKind::Multiple:
         return false;
@@ -1147,6 +1199,12 @@ bool LayoutPreviewWidget::eventFilter(QObject* watched, QEvent* event) {
 
 void LayoutPreviewWidget::keyPressEvent(QKeyEvent* event) {
     if (camera_.handleKeyPress(event)) {
+        return;
+    }
+
+    if (event->key() == Qt::Key_Delete && hasSelection()) {
+        deleteSelectedElements();
+        event->accept();
         return;
     }
 
@@ -1705,6 +1763,7 @@ void LayoutPreviewWidget::applyToolAt(const QPointF& position) {
 }
 
 void LayoutPreviewWidget::clearSelection() {
+    selectedFloorId_.clear();
     selectedZoneId_.clear();
     selectedZoneIds_.clear();
     selectedConnectionId_.clear();
@@ -1750,6 +1809,7 @@ void LayoutPreviewWidget::applyEditResult(const LayoutPreviewEditResult& result)
     }
 
     if (result.selectionChanged) {
+        selectedFloorId_.clear();
         selectedBarrierId_ = result.selection.selectedBarrierId;
         selectedBarrierIds_ = result.selection.selectedBarrierIds;
         selectedConnectionId_ = result.selection.selectedConnectionId;
@@ -2345,6 +2405,8 @@ bool LayoutPreviewWidget::isSelected(PreviewSelectionKind kind, const QString& i
         return selectedConnectionIds_.contains(id);
     case PreviewSelectionKind::Barrier:
         return selectedBarrierIds_.contains(id);
+    case PreviewSelectionKind::Floor:
+        return id == QString("floor:%1").arg(selectedFloorId_);
     case PreviewSelectionKind::None:
     case PreviewSelectionKind::Multiple:
         return false;
@@ -2359,6 +2421,9 @@ void LayoutPreviewWidget::pruneSelection() {
     }
 
     const auto& layout = *importResult_.layout;
+    if (!selectedFloorId_.isEmpty() && !containsFloor(layout, selectedFloorId_)) {
+        selectedFloorId_.clear();
+    }
     selectedZoneIds_.erase(std::remove_if(selectedZoneIds_.begin(), selectedZoneIds_.end(), [&](const auto& id) {
         return !containsZone(layout, id);
     }), selectedZoneIds_.end());
@@ -2401,6 +2466,7 @@ void LayoutPreviewWidget::repositionToolbars() {
 }
 
 void LayoutPreviewWidget::selectBarrier(const QString& barrierId) {
+    selectedFloorId_.clear();
     selectedBarrierId_ = barrierId;
     selectedBarrierIds_ = QStringList{barrierId};
     selectedZoneId_.clear();
@@ -2413,6 +2479,7 @@ void LayoutPreviewWidget::selectBarrier(const QString& barrierId) {
 }
 
 void LayoutPreviewWidget::selectConnection(const QString& connectionId) {
+    selectedFloorId_.clear();
     selectedConnectionId_ = connectionId;
     selectedConnectionIds_ = QStringList{connectionId};
     selectedZoneId_.clear();
@@ -2433,6 +2500,7 @@ void LayoutPreviewWidget::selectElementsInRect(const QRectF& screenRect, const L
     selectedZoneIds_.clear();
     selectedConnectionIds_.clear();
     selectedBarrierIds_.clear();
+    selectedFloorId_.clear();
 
     const auto& layout = *importResult_.layout;
     const auto floorId = currentFloorId();
@@ -2464,6 +2532,23 @@ void LayoutPreviewWidget::selectElementsInRect(const QRectF& screenRect, const L
 
     focusedTargetId_.clear();
     selectPrimaryFromLists();
+    emitCurrentSelection();
+    update();
+}
+
+void LayoutPreviewWidget::selectFloor(const QString& floorId) {
+    selectedFloorId_ = floorId;
+    selectedZoneId_.clear();
+    selectedZoneIds_.clear();
+    selectedConnectionId_.clear();
+    selectedConnectionIds_.clear();
+    selectedBarrierId_.clear();
+    selectedBarrierIds_.clear();
+    focusedTargetId_.clear();
+    selectionDragging_ = false;
+    selectionMoveDragging_ = false;
+    selectionMoveAttachedBarrierIds_.clear();
+    selectionMoveAnchors_.clear();
     emitCurrentSelection();
     update();
 }
@@ -2547,6 +2632,7 @@ void LayoutPreviewWidget::selectSingleAt(const QPointF& position, const LayoutCa
 }
 
 void LayoutPreviewWidget::selectZone(const QString& zoneId) {
+    selectedFloorId_.clear();
     selectedZoneId_ = zoneId;
     selectedZoneIds_ = QStringList{zoneId};
     selectedConnectionId_.clear();
@@ -2945,6 +3031,15 @@ void LayoutPreviewWidget::refreshPropertyPanel() {
 
 PreviewSelection LayoutPreviewWidget::currentSelection() const {
     PreviewSelection selection;
+
+    if (importResult_.layout.has_value() && !selectedFloorId_.isEmpty()) {
+        const auto& layout = *importResult_.layout;
+        selection.kind = PreviewSelectionKind::Floor;
+        selection.id = QString("floor:%1").arg(selectedFloorId_);
+        selection.title = floorLabelForId(layout, selectedFloorId_);
+        selection.detail = floorDetail(layout, selectedFloorId_);
+        return selection;
+    }
 
     const int selectedCount = selectedZoneIds_.size() + selectedConnectionIds_.size() + selectedBarrierIds_.size();
     if (selectedCount > 1) {

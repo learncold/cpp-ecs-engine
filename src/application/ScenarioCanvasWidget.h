@@ -179,6 +179,7 @@ private:
     void openConnectionBlockScheduleEditor(const QString& blockId, const QPoint& screenPosition);
     bool editOccupantSourceById(const QString& sourceId, const QPoint& screenPosition);
     bool deleteCrowdElement(const QString& crowdElementId);
+    bool deleteSelectedElement();
     void drawFocusedLayoutElement(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawFocusedPlacement(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawConnectionBlocks(QPainter& painter, const LayoutCanvasTransform& transform) const;
@@ -205,6 +206,7 @@ private:
     QString focusedCrowdElementId_{};
     QString focusedPlacementId_{};
     QStringList selectedPlacementIds_{};
+    ScenarioCanvasSelection selectedElement_{};
     ToolMode toolMode_{ToolMode::Select};
     LayoutCanvasCamera camera_{};
     QPointF dragStart_{};
