@@ -9,16 +9,13 @@
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QLabel>
-#include <QPainter>
-#include <QPainterPath>
-#include <QPen>
-#include <QPixmap>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSizePolicy>
 #include <QStringList>
 #include <QVBoxLayout>
 
+#include "application/ToolIconResources.h"
 #include "application/UiStyle.h"
 
 namespace safecrowd::application {
@@ -252,66 +249,30 @@ QWidget* createHotspotLegend(QWidget* parent) {
     return legend;
 }
 
-QIcon makeResultNavigationIcon(const QString& tabId, const QColor& color) {
-    QPixmap pixmap(44, 44);
-    pixmap.fill(Qt::transparent);
-
-    QPainter painter(&pixmap);
-    painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.setPen(QPen(color, 2.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    painter.setBrush(Qt::NoBrush);
-
+QString resultNavigationIconResourcePath(const QString& tabId) {
     if (tabId == "bottleneck") {
-        painter.drawLine(QPointF(12, 12), QPointF(20, 21));
-        painter.drawLine(QPointF(12, 32), QPointF(20, 23));
-        painter.drawLine(QPointF(32, 12), QPointF(24, 21));
-        painter.drawLine(QPointF(32, 32), QPointF(24, 23));
-        painter.setBrush(color);
-        painter.drawEllipse(QPointF(22, 22), 2.8, 2.8);
-    } else if (tabId == "cross-flow") {
-        painter.drawLine(QPointF(12, 22), QPointF(32, 22));
-        painter.drawLine(QPointF(22, 12), QPointF(22, 32));
-        painter.drawLine(QPointF(17, 17), QPointF(13, 13));
-        painter.drawLine(QPointF(17, 17), QPointF(13, 21));
-        painter.drawLine(QPointF(27, 27), QPointF(31, 23));
-        painter.drawLine(QPointF(27, 27), QPointF(31, 31));
-        painter.setBrush(color);
-        painter.drawEllipse(QPointF(22, 22), 2.8, 2.8);
-    } else if (tabId == "hotspot") {
-        painter.drawEllipse(QPointF(22, 22), 12, 12);
-        painter.drawEllipse(QPointF(22, 22), 7, 7);
-        painter.setBrush(color);
-        painter.drawEllipse(QPointF(22, 22), 3, 3);
-    } else if (tabId == "exposure") {
-        QPainterPath flame;
-        flame.moveTo(QPointF(17, 31));
-        flame.cubicTo(QPointF(10, 24), QPointF(15, 15), QPointF(20, 10));
-        flame.cubicTo(QPointF(23, 15), QPointF(30, 20), QPointF(25, 31));
-        painter.drawPath(flame);
-        painter.drawArc(QRectF(23, 14, 12, 10), 20 * 16, 220 * 16);
-        painter.drawArc(QRectF(29, 18, 10, 8), 20 * 16, 220 * 16);
-    } else if (tabId == "zone") {
-        painter.drawRoundedRect(QRectF(11, 11, 22, 22), 4, 4);
-        painter.drawLine(QPointF(22, 11), QPointF(22, 33));
-        painter.drawLine(QPointF(11, 22), QPointF(33, 22));
-    } else if (tabId == "groups") {
-        painter.drawEllipse(QPointF(22, 14), 5, 5);
-        painter.drawEllipse(QPointF(14, 20), 4, 4);
-        painter.drawEllipse(QPointF(30, 20), 4, 4);
-        painter.drawArc(QRectF(12, 22, 20, 14), 20 * 16, 140 * 16);
-        painter.drawArc(QRectF(5, 26, 18, 10), 30 * 16, 120 * 16);
-        painter.drawArc(QRectF(21, 26, 18, 10), 30 * 16, 120 * 16);
-    } else {
-        painter.drawRoundedRect(QRectF(12, 12, 20, 20), 4, 4);
-        painter.drawLine(QPointF(16, 18), QPointF(24, 18));
-        painter.drawLine(QPointF(24, 18), QPointF(21, 15));
-        painter.drawLine(QPointF(24, 18), QPointF(21, 21));
-        painter.drawLine(QPointF(28, 26), QPointF(20, 26));
-        painter.drawLine(QPointF(20, 26), QPointF(23, 23));
-        painter.drawLine(QPointF(20, 26), QPointF(23, 29));
+        return QStringLiteral(":/tool-icons/scenario-result/bottleneck.svg");
     }
+    if (tabId == "cross-flow") {
+        return QStringLiteral(":/tool-icons/scenario-result/cross-flow.svg");
+    }
+    if (tabId == "hotspot") {
+        return QStringLiteral(":/tool-icons/scenario-result/hotspot.svg");
+    }
+    if (tabId == "exposure") {
+        return QStringLiteral(":/tool-icons/scenario-result/exposure.svg");
+    }
+    if (tabId == "zone") {
+        return QStringLiteral(":/tool-icons/scenario-result/zone.svg");
+    }
+    if (tabId == "groups") {
+        return QStringLiteral(":/tool-icons/scenario-result/groups.svg");
+    }
+    return QStringLiteral(":/tool-icons/scenario-result/recommendations.svg");
+}
 
-    return QIcon(pixmap);
+QIcon makeResultNavigationIcon(const QString& tabId, const QColor& color) {
+    return makeSvgToolIcon(resultNavigationIconResourcePath(tabId), color, QSize(22, 22));
 }
 
 struct ResultReportPanelParts {

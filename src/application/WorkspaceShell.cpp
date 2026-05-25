@@ -9,8 +9,6 @@
 #include <QIcon>
 #include <QLabel>
 #include <QMenu>
-#include <QPainter>
-#include <QPixmap>
 #include <QPushButton>
 #include <QSizePolicy>
 #include <QTimer>
@@ -65,21 +63,9 @@ QPushButton* createFlatTopBarButton(QWidget* parent, const QString& text) {
     return button;
 }
 
-QIcon makeBackIcon(const QColor& color) {
-    QPixmap pixmap(32, 32);
-    pixmap.fill(Qt::transparent);
-
-    QPainter painter(&pixmap);
-    painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.setPen(QPen(color, 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    painter.drawLine(QPointF(19, 9), QPointF(11, 16));
-    painter.drawLine(QPointF(11, 16), QPointF(19, 23));
-    return QIcon(pixmap);
-}
-
 QPushButton* createPanelBackButton(QWidget* parent) {
     auto* button = new QPushButton(parent);
-    button->setIcon(makeBackIcon(QColor("#16202b")));
+    button->setIcon(makeSvgToolIcon(QStringLiteral(":/tool-icons/etc/back.svg"), QColor("#16202b"), QSize(22, 22)));
     button->setIconSize(QSize(22, 22));
     button->setFixedSize(32, 32);
     button->setToolTip("Back");
@@ -125,6 +111,9 @@ void WorkspaceShell::initialize(const WorkspaceShellOptions& options) {
     navigationRailWidth_ = options.navigationRailWidth;
     navigationPanelWidth_ = options.navigationPanelWidth;
     reviewPanelWidth_ = options.reviewPanelWidth;
+    reviewPanelToggleVisibleIconPath_ = options.reviewPanelToggleVisibleIconPath;
+    reviewPanelToggleHiddenIconPath_ = options.reviewPanelToggleHiddenIconPath;
+    reviewPanelToggleName_ = options.reviewPanelToggleName;
 
     auto* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
@@ -222,24 +211,25 @@ void WorkspaceShell::initialize(const WorkspaceShellOptions& options) {
         reviewPanelToggleButton_ = new QPushButton(topBar_);
         reviewPanelToggleButton_->setFont(ui::font(ui::FontRole::Body));
         reviewPanelToggleButton_->setCursor(Qt::PointingHandCursor);
-        reviewPanelToggleButton_->setMinimumHeight(32);
-        reviewPanelToggleButton_->setIcon(workspaceShellIcon(
-            QStringLiteral(":/tool-icons/etc/panel-right.svg"),
-            QColor("#16202b"),
-            QSize(20, 20)));
+        reviewPanelToggleButton_->setFocusPolicy(Qt::NoFocus);
+        reviewPanelToggleButton_->setFixedSize(36, 32);
         reviewPanelToggleButton_->setIconSize(QSize(20, 20));
         reviewPanelToggleButton_->setStyleSheet(
             "QPushButton {"
             " background: #ffffff;"
-            " border: 1px solid #d7e0ea;"
+            " border: 0;"
             " border-radius: 8px;"
             " color: #16202b;"
             " font-weight: 600;"
-            " padding: 4px 12px;"
+            " margin: 1px 0px;"
+            " outline: none;"
+            " padding: 4px;"
             "}"
             "QPushButton:hover {"
             " background: #eef3f8;"
-            " border-color: #b8c6d6;"
+            "}"
+            "QPushButton:focus {"
+            " outline: none;"
             "}");
         reviewPanelToggleButton_->setToolTip("Show or hide the right panel.");
         reviewPanelToggleButton_->setAccessibleName("Toggle right panel");
@@ -268,7 +258,15 @@ void WorkspaceShell::updateReviewPanelToggle() {
     if (reviewPanelToggleButton_ == nullptr) {
         return;
     }
-    reviewPanelToggleButton_->setText(reviewPanelVisible_ ? "Hide Panel" : "Show Panel");
+    reviewPanelToggleButton_->setText(QString());
+    reviewPanelToggleButton_->setIcon(workspaceShellIcon(
+        reviewPanelVisible_ ? reviewPanelToggleVisibleIconPath_ : reviewPanelToggleHiddenIconPath_,
+        QColor("#16202b"),
+        QSize(20, 20)));
+    const auto action = reviewPanelVisible_ ? QStringLiteral("Hide %1") : QStringLiteral("Show %1");
+    const auto label = action.arg(reviewPanelToggleName_);
+    reviewPanelToggleButton_->setToolTip(label);
+    reviewPanelToggleButton_->setAccessibleName(label);
 }
 
 QWidget* WorkspaceShell::createDefaultNavigationRail() {

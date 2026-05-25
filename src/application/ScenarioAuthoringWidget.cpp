@@ -24,7 +24,6 @@
 #include <QLineEdit>
 #include <QLayoutItem>
 #include <QMessageBox>
-#include <QPainter>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QShortcut>
@@ -1374,83 +1373,8 @@ const safecrowd::domain::Zone2D* firstDestinationZone(const safecrowd::domain::F
     return layout.zones.empty() ? nullptr : &layout.zones.back();
 }
 
-QIcon makeCrowdIcon(const QColor& color) {
-    QPixmap pixmap(44, 44);
-    pixmap.fill(Qt::transparent);
-    QPainter painter(&pixmap);
-    painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(color);
-    painter.drawEllipse(QPointF(22, 12), 5.5, 5.5);
-    painter.drawEllipse(QPointF(14, 18), 4.6, 4.6);
-    painter.drawEllipse(QPointF(30, 18), 4.6, 4.6);
-    painter.drawRoundedRect(QRectF(12, 24, 20, 8), 4, 4);
-    painter.drawRoundedRect(QRectF(6, 28, 16, 7), 3.5, 3.5);
-    painter.drawRoundedRect(QRectF(22, 28, 16, 7), 3.5, 3.5);
-    return QIcon(pixmap);
-}
-
-QIcon makeEventsIcon(const QColor& color) {
-    QPixmap pixmap(44, 44);
-    pixmap.fill(Qt::transparent);
-    QPainter painter(&pixmap);
-    painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.setPen(QPen(color, 3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    painter.drawLine(QPointF(13, 31), QPointF(22, 12));
-    painter.drawLine(QPointF(22, 12), QPointF(31, 31));
-    painter.drawLine(QPointF(16, 25), QPointF(28, 25));
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(color);
-    painter.drawEllipse(QPointF(22, 12), 4, 4);
-    painter.drawEllipse(QPointF(13, 31), 4, 4);
-    painter.drawEllipse(QPointF(31, 31), 4, 4);
-    return QIcon(pixmap);
-}
-
-QIcon makeLayoutIcon(const QColor& color) {
-    QPixmap pixmap(44, 44);
-    pixmap.fill(Qt::transparent);
-    QPainter painter(&pixmap);
-    painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.setPen(QPen(color, 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    painter.setBrush(Qt::NoBrush);
-    painter.drawRect(QRectF(11, 10, 9, 10));
-    painter.drawRect(QRectF(24, 10, 9, 10));
-    painter.drawRect(QRectF(11, 24, 22, 10));
-    painter.drawLine(QPointF(20, 15), QPointF(24, 15));
-    painter.drawLine(QPointF(22, 20), QPointF(22, 24));
-    return QIcon(pixmap);
-}
-
-QIcon makeInspectorPanelIcon(const QColor& color) {
-    QPixmap pixmap(44, 44);
-    pixmap.fill(Qt::transparent);
-    QPainter painter(&pixmap);
-    painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.setPen(QPen(color, 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    painter.setBrush(Qt::NoBrush);
-    painter.drawRoundedRect(QRectF(11, 9, 22, 26), 4, 4);
-    painter.drawLine(QPointF(16, 17), QPointF(28, 17));
-    painter.drawLine(QPointF(16, 23), QPointF(25, 23));
-    painter.drawLine(QPointF(16, 29), QPointF(28, 29));
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(color);
-    painter.drawEllipse(QPointF(29, 23), 3.0, 3.0);
-    return QIcon(pixmap);
-}
-
-QIcon makeScenarioPanelIcon(const QColor& color) {
-    QPixmap pixmap(44, 44);
-    pixmap.fill(Qt::transparent);
-    QPainter painter(&pixmap);
-    painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.setPen(QPen(color, 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    painter.setBrush(Qt::NoBrush);
-    painter.drawRoundedRect(QRectF(10, 10, 24, 24), 5, 5);
-    painter.drawLine(QPointF(16, 17), QPointF(28, 17));
-    painter.drawLine(QPointF(16, 23), QPointF(28, 23));
-    painter.drawLine(QPointF(16, 29), QPointF(24, 29));
-    return QIcon(pixmap);
+QIcon scenarioNavigationIcon(const QString& resourcePath, const QColor& color) {
+    return makeSvgToolIcon(resourcePath, color, QSize(22, 22));
 }
 
 QIcon crowdTreeIcon(const QString& resourcePath, const QColor& color) {
@@ -1470,33 +1394,7 @@ QIcon groupCrowdTreeIcon() {
 }
 
 QIcon sourceCrowdTreeIcon() {
-    QPixmap pixmap(44, 44);
-    pixmap.fill(Qt::transparent);
-    QPainter painter(&pixmap);
-    painter.setRenderHint(QPainter::Antialiasing, true);
-    const QColor color("#1f5fae");
-    painter.setPen(QPen(color, 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    painter.setBrush(Qt::NoBrush);
-    QPainterPath platform;
-    platform.moveTo(9.0, 35.0);
-    platform.lineTo(30.0, 35.0);
-    platform.lineTo(35.0, 40.0);
-    platform.lineTo(4.0, 40.0);
-    platform.closeSubpath();
-    painter.drawPath(platform);
-
-    painter.drawEllipse(QPointF(18, 12), 6.0, 6.0);
-    QPainterPath body;
-    body.moveTo(10.0, 33.0);
-    body.lineTo(10.0, 25.0);
-    body.cubicTo(10.0, 19.5, 13.5, 17.0, 18.0, 17.0);
-    body.cubicTo(22.5, 17.0, 26.0, 19.5, 26.0, 25.0);
-    body.lineTo(26.0, 33.0);
-    painter.drawPath(body);
-
-    painter.drawLine(QPointF(32.0, 26.0), QPointF(41.0, 26.0));
-    painter.drawLine(QPointF(36.5, 21.5), QPointF(36.5, 30.5));
-    return QIcon(pixmap);
+    return crowdTreeIcon(QStringLiteral(":/tool-icons/scenario-authoring/source.svg"), QColor("#1f5fae"));
 }
 
 std::vector<NavigationTreeNode> buildCrowdTree(const ScenarioAuthoringWidget::ScenarioState* scenario) {
@@ -3427,17 +3325,17 @@ void ScenarioAuthoringWidget::refreshNavigationPanel() {
             {
                 .id = "layout",
                 .label = "Layout",
-                .icon = makeLayoutIcon(QColor("#1f5fae")),
+                .icon = QIcon{},
             },
             {
                 .id = "crowd",
                 .label = "Crowd",
-                .icon = makeCrowdIcon(QColor("#1f5fae")),
+                .icon = scenarioNavigationIcon(QStringLiteral(":/tool-icons/scenario-authoring/crowd.svg"), QColor("#1f5fae")),
             },
             {
                 .id = "events",
                 .label = "Events / Hazards",
-                .icon = makeEventsIcon(QColor("#1f5fae")),
+                .icon = scenarioNavigationIcon(QStringLiteral(":/tool-icons/scenario-authoring/events.svg"), QColor("#1f5fae")),
             },
         },
         activeTabId,
@@ -4009,26 +3907,33 @@ QWidget* ScenarioAuthoringWidget::createPanelToggleBar() {
     const auto buttonStyle = QString(
         "QPushButton {"
         " background: #ffffff;"
-        " border: 1px solid #d7e0ea;"
+        " border: 0;"
         " border-radius: 8px;"
+        " margin: 1px 0px;"
+        " outline: none;"
         " padding: 4px;"
         "}"
         "QPushButton:hover {"
         " background: #eef3f8;"
-        " border-color: #b8c6d6;"
         "}"
         "QPushButton:checked {"
         " background: #e6eef8;"
-        " border-color: #1f5fae;"
+        "}"
+        "QPushButton:focus {"
+        " outline: none;"
         "}");
 
     inspectorPanelToggleButton_ = new QPushButton(bar);
     inspectorPanelToggleButton_->setCheckable(true);
     inspectorPanelToggleButton_->setChecked(inspectorPanelVisible_);
-    inspectorPanelToggleButton_->setIcon(makeInspectorPanelIcon(QColor("#16202b")));
+    inspectorPanelToggleButton_->setIcon(makeSvgToolIcon(
+        QStringLiteral(":/tool-icons/etc/inspector-panel.svg"),
+        QColor("#16202b"),
+        QSize(22, 22)));
     inspectorPanelToggleButton_->setIconSize(QSize(22, 22));
     inspectorPanelToggleButton_->setFixedSize(36, 32);
     inspectorPanelToggleButton_->setCursor(Qt::PointingHandCursor);
+    inspectorPanelToggleButton_->setFocusPolicy(Qt::NoFocus);
     inspectorPanelToggleButton_->setToolTip("Inspector");
     inspectorPanelToggleButton_->setAccessibleName("Toggle Inspector panel");
     inspectorPanelToggleButton_->setStyleSheet(buttonStyle);
@@ -4037,10 +3942,14 @@ QWidget* ScenarioAuthoringWidget::createPanelToggleBar() {
     scenarioPanelToggleButton_ = new QPushButton(bar);
     scenarioPanelToggleButton_->setCheckable(true);
     scenarioPanelToggleButton_->setChecked(scenarioPanelVisible_);
-    scenarioPanelToggleButton_->setIcon(makeScenarioPanelIcon(QColor("#16202b")));
+    scenarioPanelToggleButton_->setIcon(makeSvgToolIcon(
+        QStringLiteral(":/tool-icons/scenario-authoring/scenario-panel.svg"),
+        QColor("#16202b"),
+        QSize(22, 22)));
     scenarioPanelToggleButton_->setIconSize(QSize(22, 22));
     scenarioPanelToggleButton_->setFixedSize(36, 32);
     scenarioPanelToggleButton_->setCursor(Qt::PointingHandCursor);
+    scenarioPanelToggleButton_->setFocusPolicy(Qt::NoFocus);
     scenarioPanelToggleButton_->setToolTip("Scenario");
     scenarioPanelToggleButton_->setAccessibleName("Toggle Scenario panel");
     scenarioPanelToggleButton_->setStyleSheet(buttonStyle);

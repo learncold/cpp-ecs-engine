@@ -18,14 +18,15 @@
 - When touching build files, confirm that referenced source files are actually tracked in Git.
 
 ## Build
-- Configure: `cmake --preset windows-debug`
-- Build: `cmake --build --preset build-debug`
-- Test: `ctest --preset test-debug`
-- Configure without app: `cmake --preset windows-debug-no-app`
-- Build engine only: `cmake --build --preset build-engine-debug`
-- Build engine + domain: `cmake --build --preset build-engine-domain-debug`
-- Build engine + domain + tests without app: `cmake --build --preset build-no-app-debug`
-- Test without app: `ctest --preset test-no-app-debug`
+- Default final app verification: `cmake --build --preset build-release --target safecrowd_app`
+- Expected final app executable: `build/vs2022/windows-release/Release/safecrowd_app.exe`
+- Configure app for release verification: `cmake --preset windows-release`
+- Test release build: `ctest --preset test-release`
+- Configure without app: `cmake --preset windows-release-no-app`
+- Build engine only: `cmake --build --preset build-engine-release`
+- Build engine + domain: `cmake --build --preset build-engine-domain-release`
+- Build engine + domain + tests without app: `cmake --build --preset build-no-app-release`
+- Test without app: `ctest --preset test-no-app-release`
 - App target: `safecrowd_app`
 - UI dependency: Qt6 via `vcpkg.json` (`qtbase`)
 - If configure/build fails, check preset/Visual Studio selection and `vcpkg`/Qt availability before assuming the code change caused it.

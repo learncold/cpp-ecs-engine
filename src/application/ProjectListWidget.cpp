@@ -5,12 +5,11 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLocale>
-#include <QPainter>
-#include <QPixmap>
 #include <QPushButton>
 #include <QSizePolicy>
 #include <QVBoxLayout>
 
+#include "application/ToolIconResources.h"
 #include "application/UiStyle.h"
 
 namespace safecrowd::application {
@@ -25,20 +24,7 @@ QString displaySavedAt(const QString& savedAt) {
 }
 
 QIcon makeTrashIcon(const QColor& color) {
-    QPixmap pixmap(32, 32);
-    pixmap.fill(Qt::transparent);
-
-    QPainter painter(&pixmap);
-    painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.setPen(QPen(color, 2.2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    painter.setBrush(Qt::NoBrush);
-    painter.drawLine(QPointF(10, 11), QPointF(22, 11));
-    painter.drawLine(QPointF(14, 8), QPointF(18, 8));
-    painter.drawLine(QPointF(13, 8), QPointF(19, 8));
-    painter.drawRoundedRect(QRectF(11, 13, 10, 13), 2, 2);
-    painter.drawLine(QPointF(14, 16), QPointF(14, 23));
-    painter.drawLine(QPointF(18, 16), QPointF(18, 23));
-    return QIcon(pixmap);
+    return makeSvgToolIcon(QStringLiteral(":/tool-icons/etc/delete.svg"), color, QSize(24, 24));
 }
 
 }  // namespace

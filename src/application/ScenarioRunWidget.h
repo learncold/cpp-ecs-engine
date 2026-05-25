@@ -89,6 +89,7 @@ private:
     void selectRun(int index);
     std::size_t selectedSourceScenarioIndex() const;
     void showResults();
+    void setPlaybackSpeedMultiplier(int multiplier);
     void stopRun();
     void togglePaused();
 
@@ -120,6 +121,9 @@ private:
     QPushButton* pauseButton_{nullptr};
     QPushButton* stopButton_{nullptr};
     QPushButton* fastForwardButton_{nullptr};
+    QPushButton* speed2Button_{nullptr};
+    QPushButton* speed3Button_{nullptr};
+    QPushButton* speed5Button_{nullptr};
     QPushButton* resultButton_{nullptr};
     int selectedRunIndex_{0};
     int playbackSpeedMultiplier_{1};

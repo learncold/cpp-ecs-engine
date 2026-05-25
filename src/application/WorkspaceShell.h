@@ -31,6 +31,9 @@ struct WorkspaceShellOptions {
     int navigationRailWidth{56};
     int navigationPanelWidth{260};
     int reviewPanelWidth{280};
+    QString reviewPanelToggleVisibleIconPath{QStringLiteral(":/tool-icons/etc/panel-right-close.svg")};
+    QString reviewPanelToggleHiddenIconPath{QStringLiteral(":/tool-icons/etc/panel-right-open.svg")};
+    QString reviewPanelToggleName{QStringLiteral("right panel")};
 };
 
 struct WorkspaceNavigationTab {
@@ -90,6 +93,9 @@ private:
     QFrame* navigationPanel_{nullptr};
     QFrame* reviewPanel_{nullptr};
     QPushButton* reviewPanelToggleButton_{nullptr};
+    QString reviewPanelToggleVisibleIconPath_{QStringLiteral(":/tool-icons/etc/panel-right-close.svg")};
+    QString reviewPanelToggleHiddenIconPath_{QStringLiteral(":/tool-icons/etc/panel-right-open.svg")};
+    QString reviewPanelToggleName_{QStringLiteral("right panel")};
     int navigationRailWidth_{56};
     int navigationPanelWidth_{260};
     int reviewPanelWidth_{280};

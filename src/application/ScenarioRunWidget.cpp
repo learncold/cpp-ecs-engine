@@ -10,10 +10,7 @@
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QIcon>
-#include <QImage>
 #include <QLabel>
-#include <QPainter>
-#include <QPixmap>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSizePolicy>
@@ -25,6 +22,7 @@
 #include "application/ScenarioBatchResultWidget.h"
 #include "application/ScenarioResultWidget.h"
 #include "application/SimulationCanvasWidget.h"
+#include "application/ToolIconResources.h"
 #include "application/UiStyle.h"
 #include "application/WorkspaceShell.h"
 
@@ -79,27 +77,65 @@ QProgressBar* createProgressBar(const QString& tooltip, QWidget* parent) {
 }
 
 QIcon makeTransportIcon(TransportIconKind kind, const QColor& color) {
-    QImage image(QSize(40, 40), QImage::Format_ARGB32_Premultiplied);
-    image.fill(Qt::transparent);
-
-    QPainter painter(&image);
-    painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(color);
-
     if (kind == TransportIconKind::Play) {
-        QPolygonF triangle;
-        triangle << QPointF(16, 12) << QPointF(16, 28) << QPointF(28, 20);
-        painter.drawPolygon(triangle);
-    } else if (kind == TransportIconKind::Pause) {
-        painter.drawRoundedRect(QRectF(13, 11, 5, 18), 1.5, 1.5);
-        painter.drawRoundedRect(QRectF(22, 11, 5, 18), 1.5, 1.5);
-    } else {
-        painter.drawRoundedRect(QRectF(13, 13, 14, 14), 2, 2);
+        return makeSvgToolIcon(QStringLiteral(":/tool-icons/etc/transport-play.svg"), color, QSize(22, 22));
     }
+    if (kind == TransportIconKind::Pause) {
+        return makeSvgToolIcon(QStringLiteral(":/tool-icons/etc/transport-pause.svg"), color, QSize(22, 22));
+    }
+    return makeSvgToolIcon(QStringLiteral(":/tool-icons/etc/transport-stop.svg"), color, QSize(22, 22));
+}
 
-    painter.end();
-    return QIcon(QPixmap::fromImage(image));
+QIcon makeFastForwardIcon(bool active, const QColor& color) {
+    return makeSvgToolIcon(
+        active
+            ? QStringLiteral(":/tool-icons/etc/fast-forward-filled.svg")
+            : QStringLiteral(":/tool-icons/etc/fast-forward.svg"),
+        color,
+        QSize(22, 22));
+}
+
+QString speedIconResourcePath(int multiplier, bool active) {
+    if (multiplier == 2) {
+        return active
+            ? QStringLiteral(":/tool-icons/etc/speed-2-filled.svg")
+            : QStringLiteral(":/tool-icons/etc/speed-2.svg");
+    }
+    if (multiplier == 3) {
+        return active
+            ? QStringLiteral(":/tool-icons/etc/speed-3-filled.svg")
+            : QStringLiteral(":/tool-icons/etc/speed-3.svg");
+    }
+    return active
+        ? QStringLiteral(":/tool-icons/etc/speed-5-filled.svg")
+        : QStringLiteral(":/tool-icons/etc/speed-5.svg");
+}
+
+QIcon makeSpeedIcon(int multiplier, bool active, const QColor& color) {
+    return makeSvgToolIcon(speedIconResourcePath(multiplier, active), color, QSize(22, 22));
+}
+
+QString runIconButtonStyleSheet() {
+    return QStringLiteral(
+        "QPushButton {"
+        " background: transparent;"
+        " border: 0;"
+        " border-radius: 10px;"
+        " outline: none;"
+        " padding: 4px;"
+        "}"
+        "QPushButton:hover {"
+        " background: #eef3f8;"
+        "}"
+        "QPushButton:checked {"
+        " background: #e6eef8;"
+        "}"
+        "QPushButton:focus {"
+        " outline: none;"
+        "}"
+        "QPushButton:disabled {"
+        " background: transparent;"
+        "}");
 }
 
 void setTransportIcon(QPushButton* button, TransportIconKind kind, const QColor& color) {
@@ -120,9 +156,23 @@ QPushButton* createIconButton(TransportIconKind icon, const QString& tooltip, QW
     button->setIconSize(QSize(22, 22));
     button->setToolTip(tooltip);
     button->setAccessibleName(tooltip);
+    button->setFocusPolicy(Qt::NoFocus);
     button->setFixedSize(40, 36);
-    button->setStyleSheet(ui::secondaryButtonStyleSheet());
+    button->setStyleSheet(runIconButtonStyleSheet());
     setTransportIcon(button, icon, QColor("#16202b"));
+    return button;
+}
+
+QPushButton* createToggleIconButton(const QIcon& icon, const QString& tooltip, QWidget* parent) {
+    auto* button = new QPushButton(parent);
+    button->setCheckable(true);
+    button->setIcon(icon);
+    button->setIconSize(QSize(22, 22));
+    button->setToolTip(tooltip);
+    button->setAccessibleName(tooltip);
+    button->setFocusPolicy(Qt::NoFocus);
+    button->setFixedSize(40, 36);
+    button->setStyleSheet(runIconButtonStyleSheet());
     return button;
 }
 
@@ -169,19 +219,10 @@ QString simulationStatusText(bool complete, bool paused, int playbackSpeedMultip
         return "x2 fastforward";
     case 3:
         return "x3 fastforward";
+    case 5:
+        return "x5 fastforward";
     default:
         return "running";
-    }
-}
-
-QString fastForwardButtonText(int playbackSpeedMultiplier) {
-    switch (playbackSpeedMultiplier) {
-    case 2:
-        return "Fast Forward x3";
-    case 3:
-        return "Fast Forward Off";
-    default:
-        return "Fast Forward x2";
     }
 }
 
@@ -367,10 +408,11 @@ ScenarioRunWidget::ScenarioRunWidget(
             for (int step = 0; step < stepsPerTick && !batchRunner_.complete(); ++step) {
                 batchRunner_.step(kSimulationDeltaSeconds);
             }
-            refreshStatus();
             if (batchRunner_.complete()) {
+                playbackSpeedMultiplier_ = 1;
                 timer_->stop();
             }
+            refreshStatus();
         }
     });
     refreshStatus();
@@ -544,23 +586,25 @@ QWidget* ScenarioRunWidget::createRunPanel() {
     layout->addWidget(congestionLabel_);
     layout->addWidget(bottleneckLabel_);
 
+    layout->addStretch(1);
+
     auto* transportLayout = new QHBoxLayout();
     transportLayout->setContentsMargins(0, 0, 0, 0);
     transportLayout->setSpacing(8);
     pauseButton_ = createIconButton(TransportIconKind::Pause, "Pause simulation", panel);
     stopButton_ = createIconButton(TransportIconKind::Stop, "Stop and reset run", panel);
+    fastForwardButton_ = createToggleIconButton(makeFastForwardIcon(false, QColor("#16202b")), "Fast forward", panel);
+    speed2Button_ = createToggleIconButton(makeSpeedIcon(2, false, QColor("#16202b")), "2x speed", panel);
+    speed3Button_ = createToggleIconButton(makeSpeedIcon(3, false, QColor("#16202b")), "3x speed", panel);
+    speed5Button_ = createToggleIconButton(makeSpeedIcon(5, false, QColor("#16202b")), "5x speed", panel);
     transportLayout->addWidget(pauseButton_);
     transportLayout->addWidget(stopButton_);
+    transportLayout->addWidget(fastForwardButton_);
+    transportLayout->addWidget(speed2Button_);
+    transportLayout->addWidget(speed3Button_);
+    transportLayout->addWidget(speed5Button_);
     transportLayout->addStretch(1);
     layout->addLayout(transportLayout);
-
-    layout->addStretch(1);
-
-    fastForwardButton_ = new QPushButton("Fast Forward to Result", panel);
-    fastForwardButton_->setFont(ui::font(ui::FontRole::Body));
-    fastForwardButton_->setStyleSheet(ui::secondaryButtonStyleSheet());
-    fastForwardButton_->setEnabled(false);
-    layout->addWidget(fastForwardButton_);
 
     resultButton_ = new QPushButton("View Results", panel);
     resultButton_->setFont(ui::font(ui::FontRole::Body));
@@ -576,6 +620,15 @@ QWidget* ScenarioRunWidget::createRunPanel() {
     });
     connect(fastForwardButton_, &QPushButton::clicked, this, [this]() {
         cycleFastForwardMode();
+    });
+    connect(speed2Button_, &QPushButton::clicked, this, [this]() {
+        setPlaybackSpeedMultiplier(2);
+    });
+    connect(speed3Button_, &QPushButton::clicked, this, [this]() {
+        setPlaybackSpeedMultiplier(3);
+    });
+    connect(speed5Button_, &QPushButton::clicked, this, [this]() {
+        setPlaybackSpeedMultiplier(5);
     });
     connect(resultButton_, &QPushButton::clicked, this, [this]() {
         showResults();
@@ -749,12 +802,32 @@ void ScenarioRunWidget::refreshStatus() {
     if (stopButton_ != nullptr) {
         stopButton_->setEnabled(frame.totalAgentCount > 0 || hasCachedResults());
     }
+    const bool canFastForward = !batchRunner_.complete() && !batchRunner_.empty();
+    const bool fastForwardActive = playbackSpeedMultiplier_ > 1 && canFastForward;
     if (fastForwardButton_ != nullptr) {
-        fastForwardButton_->setText(fastForwardButtonText(playbackSpeedMultiplier_));
-        fastForwardButton_->setEnabled(
-            !batchRunner_.complete()
-            && !batchRunner_.empty());
+        fastForwardButton_->blockSignals(true);
+        fastForwardButton_->setChecked(fastForwardActive);
+        fastForwardButton_->setIcon(makeFastForwardIcon(fastForwardActive, QColor("#16202b")));
+        fastForwardButton_->blockSignals(false);
+        fastForwardButton_->setToolTip(fastForwardActive ? "Turn off fast forward" : "Fast forward");
+        fastForwardButton_->setAccessibleName(fastForwardButton_->toolTip());
+        fastForwardButton_->setEnabled(canFastForward);
     }
+    const auto updateSpeedButton = [this, canFastForward, fastForwardActive](QPushButton* button, int multiplier) {
+        if (button == nullptr) {
+            return;
+        }
+        const bool selected = fastForwardActive && playbackSpeedMultiplier_ == multiplier;
+        button->blockSignals(true);
+        button->setChecked(selected);
+        button->setIcon(makeSpeedIcon(multiplier, selected, QColor("#16202b")));
+        button->blockSignals(false);
+        button->setVisible(fastForwardActive);
+        button->setEnabled(canFastForward && fastForwardActive);
+    };
+    updateSpeedButton(speed2Button_, 2);
+    updateSpeedButton(speed3Button_, 3);
+    updateSpeedButton(speed5Button_, 5);
     if (resultButton_ != nullptr) {
         resultButton_->setEnabled(
             batchRunner_.complete() && !batchRunner_.empty());
@@ -781,12 +854,21 @@ void ScenarioRunWidget::cycleFastForwardMode() {
         return;
     }
     if (playbackSpeedMultiplier_ == 1) {
-        playbackSpeedMultiplier_ = 2;
-    } else if (playbackSpeedMultiplier_ == 2) {
-        playbackSpeedMultiplier_ = 3;
+        setPlaybackSpeedMultiplier(2);
     } else {
-        playbackSpeedMultiplier_ = 1;
+        setPlaybackSpeedMultiplier(1);
     }
+}
+
+void ScenarioRunWidget::setPlaybackSpeedMultiplier(int multiplier) {
+    if (batchRunner_.empty() || batchRunner_.complete()) {
+        refreshStatus();
+        return;
+    }
+    if (multiplier != 2 && multiplier != 3 && multiplier != 5) {
+        multiplier = 1;
+    }
+    playbackSpeedMultiplier_ = multiplier;
     paused_ = false;
     if (timer_ != nullptr && !timer_->isActive()) {
         timer_->start();

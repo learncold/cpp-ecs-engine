@@ -521,126 +521,24 @@ QString scenarioToolIconResourcePath(const QString& type) {
     if (type == "block") {
         return QStringLiteral(":/tool-icons/scenario-authoring/block-door.svg");
     }
+    if (type == "source") {
+        return QStringLiteral(":/tool-icons/scenario-authoring/source.svg");
+    }
+    if (type == "fire") {
+        return QStringLiteral(":/tool-icons/scenario-authoring/fire-hazard.svg");
+    }
+    if (type == "smoke") {
+        return QStringLiteral(":/tool-icons/scenario-authoring/smoke-hazard.svg");
+    }
+    if (type == "guidance") {
+        return QStringLiteral(":/tool-icons/scenario-authoring/route-guidance.svg");
+    }
     return {};
 }
 
 QIcon makeToolIcon(const QString& type, const QColor& color) {
     const auto resourcePath = scenarioToolIconResourcePath(type);
-    if (!resourcePath.isEmpty()) {
-        const auto icon = makeSvgToolIcon(resourcePath, color, QSize(22, 22));
-        if (!icon.isNull()) {
-            return icon;
-        }
-    }
-
-    QPixmap pixmap(44, 44);
-    pixmap.fill(Qt::transparent);
-    QPainter painter(&pixmap);
-    painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.setPen(QPen(color, 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    painter.setBrush(Qt::NoBrush);
-
-    if (type == "select") {
-        QPolygonF pointer;
-        pointer << QPointF(14, 10) << QPointF(30, 22) << QPointF(22, 25) << QPointF(18, 35);
-        painter.drawPolygon(pointer);
-        return QIcon(pixmap);
-    }
-    if (type == "individual") {
-        painter.setBrush(color);
-        painter.setPen(Qt::NoPen);
-        painter.drawEllipse(QPointF(22, 15), 5.0, 5.0);
-        painter.drawRoundedRect(QRectF(16, 23, 12, 12), 5, 5);
-        return QIcon(pixmap);
-    }
-
-    if (type == "source") {
-        painter.setPen(QPen(color, 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-        painter.setBrush(Qt::NoBrush);
-        QPainterPath platform;
-        platform.moveTo(9.0, 35.0);
-        platform.lineTo(30.0, 35.0);
-        platform.lineTo(35.0, 40.0);
-        platform.lineTo(4.0, 40.0);
-        platform.closeSubpath();
-        painter.drawPath(platform);
-
-        painter.drawEllipse(QPointF(18, 12), 6.0, 6.0);
-        QPainterPath body;
-        body.moveTo(10.0, 33.0);
-        body.lineTo(10.0, 25.0);
-        body.cubicTo(10.0, 19.5, 13.5, 17.0, 18.0, 17.0);
-        body.cubicTo(22.5, 17.0, 26.0, 19.5, 26.0, 25.0);
-        body.lineTo(26.0, 33.0);
-        painter.drawPath(body);
-
-        painter.drawLine(QPointF(32.0, 26.0), QPointF(41.0, 26.0));
-        painter.drawLine(QPointF(36.5, 21.5), QPointF(36.5, 30.5));
-        return QIcon(pixmap);
-    }
-
-    if (type == "block") {
-        painter.setPen(QPen(color, 3.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-        painter.setBrush(Qt::NoBrush);
-        painter.drawEllipse(QPointF(22, 22), 11.5, 11.5);
-        painter.drawLine(QPointF(14.5, 29.5), QPointF(29.5, 14.5));
-        return QIcon(pixmap);
-    }
-
-    if (type == "guidance") {
-        painter.setPen(Qt::NoPen);
-        painter.setBrush(color);
-        painter.save();
-        painter.translate(QPointF(22, 22));
-        painter.rotate(-25.0);
-        painter.translate(QPointF(-22, -22));
-        painter.drawRoundedRect(QRectF(18, 8, 10, 20), 3.0, 3.0);
-        painter.drawRoundedRect(QRectF(19, 28, 8, 9), 2.5, 2.5);
-        painter.restore();
-
-        painter.setPen(QPen(color, 2.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-        painter.drawLine(QPointF(32, 10), QPointF(36, 6));
-        painter.drawLine(QPointF(34, 15), QPointF(39, 13));
-        painter.drawLine(QPointF(29, 7), QPointF(31, 2));
-        return QIcon(pixmap);
-    }
-
-    if (type == "fire") {
-        painter.setBrush(color);
-        painter.setPen(Qt::NoPen);
-        QPainterPath flame;
-        flame.moveTo(22.0, 34.0);
-        flame.cubicTo(13.0, 28.0, 17.0, 17.0, 22.0, 10.0);
-        flame.cubicTo(31.0, 17.0, 31.0, 28.0, 22.0, 34.0);
-        painter.drawPath(flame);
-        painter.setBrush(Qt::white);
-        QPainterPath core;
-        core.moveTo(22.0, 31.0);
-        core.cubicTo(18.0, 27.0, 20.0, 22.0, 23.0, 18.0);
-        core.cubicTo(26.0, 22.0, 26.0, 28.0, 22.0, 31.0);
-        painter.drawPath(core);
-        return QIcon(pixmap);
-    }
-
-    if (type == "smoke") {
-        painter.setPen(QPen(color, 3.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-        painter.drawArc(QRectF(10, 23, 18, 10), 20 * 16, 220 * 16);
-        painter.drawArc(QRectF(18, 17, 17, 10), 20 * 16, 220 * 16);
-        painter.drawArc(QRectF(12, 11, 15, 9), 20 * 16, 220 * 16);
-        return QIcon(pixmap);
-    }
-
-    if (type != "group") {
-        return QIcon(pixmap);
-    }
-
-    painter.setBrush(color);
-    painter.setPen(Qt::NoPen);
-    painter.drawEllipse(QPointF(17, 15), 4.0, 4.0);
-    painter.drawEllipse(QPointF(27, 15), 4.0, 4.0);
-    painter.drawEllipse(QPointF(22, 25), 4.0, 4.0);
-    painter.drawRoundedRect(QRectF(12, 30, 20, 5), 2.5, 2.5);
-    return QIcon(pixmap);
+    return resourcePath.isEmpty() ? QIcon{} : makeSvgToolIcon(resourcePath, color, QSize(22, 22));
 }
 
 double intervalSecondsFrom(int value, const QString& unit) {

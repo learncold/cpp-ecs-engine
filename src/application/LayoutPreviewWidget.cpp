@@ -564,85 +564,9 @@ QString layoutToolIconResourcePath(const QString& glyph) {
     return {};
 }
 
-QIcon makeToolIcon(const QString& glyph, const QColor& color, bool filled = false) {
+QIcon makeToolIcon(const QString& glyph, const QColor& color) {
     const auto resourcePath = layoutToolIconResourcePath(glyph);
-    if (!resourcePath.isEmpty()) {
-        const auto icon = makeSvgToolIcon(resourcePath, color, QSize(24, 24));
-        if (!icon.isNull()) {
-            return icon;
-        }
-    }
-
-    QPixmap pixmap(24, 24);
-    pixmap.fill(Qt::transparent);
-
-    QPainter painter(&pixmap);
-    painter.setRenderHint(QPainter::Antialiasing);
-    painter.setPen(QPen(color, 1.8));
-    if (filled) {
-        painter.setBrush(color);
-    } else {
-        painter.setBrush(Qt::NoBrush);
-    }
-
-    if (glyph == "room") {
-        painter.drawRect(QRectF(4, 5, 16, 14));
-    } else if (glyph == "exit") {
-        painter.drawRect(QRectF(5, 5, 10, 14));
-        painter.drawLine(QPointF(15, 12), QPointF(20, 12));
-        painter.drawLine(QPointF(17, 10), QPointF(20, 12));
-        painter.drawLine(QPointF(17, 14), QPointF(20, 12));
-    } else if (glyph == "wall") {
-        painter.drawLine(QPointF(5, 19), QPointF(19, 5));
-    } else if (glyph == "obstruction") {
-        painter.setBrush(QColor(color.red(), color.green(), color.blue(), 42));
-        painter.drawRect(QRectF(5, 6, 14, 12));
-        painter.drawLine(QPointF(8, 9), QPointF(16, 15));
-        painter.drawLine(QPointF(16, 9), QPointF(8, 15));
-    } else if (glyph == "door") {
-        painter.drawLine(QPointF(5, 18), QPointF(19, 6));
-        painter.drawEllipse(QPointF(5, 18), 1.5, 1.5);
-        painter.drawEllipse(QPointF(19, 6), 1.5, 1.5);
-    } else if (glyph == "stair") {
-        painter.drawRect(QRectF(5, 5, 14, 14));
-        painter.drawLine(QPointF(7, 16), QPointF(17, 16));
-        painter.drawLine(QPointF(7, 12), QPointF(17, 12));
-        painter.drawLine(QPointF(7, 8), QPointF(17, 8));
-        painter.drawLine(QPointF(9, 18), QPointF(17, 6));
-    } else if (glyph == "u-stair") {
-        painter.drawRect(QRectF(5, 5, 14, 14));
-        painter.drawLine(QPointF(12, 5), QPointF(12, 19));
-        painter.drawLine(QPointF(7, 16), QPointF(11, 16));
-        painter.drawLine(QPointF(7, 12), QPointF(11, 12));
-        painter.drawLine(QPointF(13, 8), QPointF(17, 8));
-        painter.drawLine(QPointF(13, 12), QPointF(17, 12));
-        painter.drawLine(QPointF(9, 18), QPointF(15, 6));
-    } else if (glyph == "select") {
-        QPainterPath path;
-        path.moveTo(6, 4);
-        path.lineTo(16, 11);
-        path.lineTo(11.5, 12.2);
-        path.lineTo(13.5, 18.5);
-        path.lineTo(10.7, 19.3);
-        path.lineTo(8.9, 13.3);
-        path.lineTo(5.5, 16.3);
-        path.closeSubpath();
-        painter.drawPath(path);
-    } else if (glyph == "reset") {
-        painter.drawArc(QRectF(5, 5, 14, 14), 40 * 16, 280 * 16);
-        painter.drawLine(QPointF(15, 4), QPointF(19, 5));
-        painter.drawLine(QPointF(15, 4), QPointF(17, 8));
-    } else if (glyph == "add") {
-        painter.drawLine(QPointF(12, 5), QPointF(12, 19));
-        painter.drawLine(QPointF(5, 12), QPointF(19, 12));
-    } else if (glyph == "grid") {
-        for (int coordinate = 6; coordinate <= 18; coordinate += 6) {
-            painter.drawLine(QPointF(coordinate, 5), QPointF(coordinate, 19));
-            painter.drawLine(QPointF(5, coordinate), QPointF(19, coordinate));
-        }
-    }
-
-    return QIcon(pixmap);
+    return resourcePath.isEmpty() ? QIcon{} : makeSvgToolIcon(resourcePath, color, QSize(24, 24));
 }
 
 std::optional<QString> hitTestZone(
