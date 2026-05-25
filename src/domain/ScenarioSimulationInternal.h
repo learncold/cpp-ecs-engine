@@ -104,6 +104,7 @@ struct ZoneRouteResult {
 Bounds boundsOf(const Polygon2D& polygon);
 LayoutBounds boundsOf(const FacilityLayout2D& layout);
 double distanceBetween(const Point2D& lhs, const Point2D& rhs);
+double occupantInteractionPressureScore(double distance, double lhsRadius, double rhsRadius) noexcept;
 Point2D operator+(const Point2D& lhs, const Point2D& rhs);
 Point2D operator-(const Point2D& lhs, const Point2D& rhs);
 Point2D operator*(const Point2D& point, double scalar);

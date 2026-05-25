@@ -17,8 +17,6 @@ inline constexpr double kScenarioStalledSecondsThreshold = 0.75;
 inline constexpr double kScenarioHotspotCellSize = kPressureHotspotCellSizeMeters;
 inline constexpr double kScenarioHotspotDensityThresholdPeoplePerSquareMeter =
     kPressureHighDensityThresholdPeoplePerSquareMeter;
-inline constexpr double kScenarioPressureHotspotDensityThresholdPeoplePerSquareMeter =
-    kPressureHighDensityThresholdPeoplePerSquareMeter;
 inline constexpr double kScenarioPressureScoreThreshold = kPressureCriticalScoreThreshold;
 inline constexpr double kScenarioPressureFeedbackForceThreshold = 0.18;
 inline constexpr double kScenarioPressureFeedbackExposureRecoveryPerSecond = 1.0;

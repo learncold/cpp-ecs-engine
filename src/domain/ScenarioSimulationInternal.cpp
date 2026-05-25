@@ -37,6 +37,15 @@ double distanceBetween(const Point2D& lhs, const Point2D& rhs) {
     return std::hypot(lhs.x - rhs.x, lhs.y - rhs.y);
 }
 
+double occupantInteractionPressureScore(double distance, double lhsRadius, double rhsRadius) noexcept {
+    const auto pressureDistance = std::max(0.0, lhsRadius) + std::max(0.0, rhsRadius) + kPersonalSpaceBuffer;
+    if (distance >= pressureDistance) {
+        return 0.0;
+    }
+
+    return std::clamp((pressureDistance - std::max(0.0, distance)) / kPersonalSpaceBuffer, 0.0, 1.0);
+}
+
 Point2D operator+(const Point2D& lhs, const Point2D& rhs) {
     return {.x = lhs.x + rhs.x, .y = lhs.y + rhs.y};
 }

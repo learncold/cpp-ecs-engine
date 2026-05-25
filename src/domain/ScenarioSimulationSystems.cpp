@@ -273,16 +273,21 @@ PressureCellMetric pressureMetricFromCell(
     for (std::size_t lhsIndex = 0; lhsIndex < cell.entities.size(); ++lhsIndex) {
         const auto lhsEntity = cell.entities[lhsIndex];
         const auto& lhsPosition = query.get<Position>(lhsEntity);
+        const auto& lhsAgent = query.get<Agent>(lhsEntity);
         for (std::size_t rhsIndex = lhsIndex + 1; rhsIndex < cell.entities.size(); ++rhsIndex) {
             const auto rhsEntity = cell.entities[rhsIndex];
             const auto& rhsPosition = query.get<Position>(rhsEntity);
+            const auto& rhsAgent = query.get<Agent>(rhsEntity);
             const auto distance = distanceBetween(lhsPosition.value, rhsPosition.value);
-            if (distance >= kPressureReferenceDistanceMeters) {
+            const auto pressureScore = simulation_internal::occupantInteractionPressureScore(
+                distance,
+                static_cast<double>(lhsAgent.radius),
+                static_cast<double>(rhsAgent.radius));
+            if (pressureScore <= 0.0) {
                 continue;
             }
 
-            metric.pressureScore +=
-                (kPressureReferenceDistanceMeters - distance) / kPressureReferenceDistanceMeters;
+            metric.pressureScore += pressureScore;
             ++metric.intrudingPairCount;
         }
     }

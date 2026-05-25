@@ -34,8 +34,8 @@ const char* scenarioHotspotDefinition() noexcept {
 }
 
 const char* scenarioPressureHotspotDefinition() noexcept {
-    return "A pressure hotspot is a 1.5 m by 1.5 m cell whose density reaches 3.55 occupants "
-           "per square meter and whose 1.0 m interpersonal-pressure score reaches 1.0.";
+    return "A pressure hotspot is a 1.5 m by 1.5 m cell whose occupant interaction pressure score reaches 1.0. "
+           "Pair pressure starts when occupants intrude into each other's radius plus personal-space buffer.";
 }
 
 const char* scenarioBottleneckDefinition() noexcept {

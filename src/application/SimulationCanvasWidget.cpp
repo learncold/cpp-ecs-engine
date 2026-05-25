@@ -35,6 +35,7 @@ constexpr double kCrossFlowCellFocusZoom = 2.8;
 constexpr double kDensityInfluenceRadiusMultiplier = 1.75;
 constexpr double kDensityMinimumScreenRadius = 14.0;
 constexpr double kDefaultDensityScaleMaxPeoplePerSquareMeter = 4.0;
+constexpr int kDensityZeroBaseAlpha = 112;
 constexpr double kPressureInfluenceRadiusMultiplier = 1.45;
 constexpr double kPressureMinimumScreenRadius = 12.0;
 constexpr double kDefaultPressureScaleMaxScore = 1.0;
@@ -1334,6 +1335,8 @@ void SimulationCanvasWidget::drawDensityOverlay(QPainter& painter, const LayoutC
         walkableClip.addPath(layoutCanvasPolygonPath(zone.area, transform));
     }
     if (!walkableClip.isEmpty()) {
+        // Areas without a density sample still represent the zero point of the density scale.
+        painter.fillPath(walkableClip, densityHeatmapColor(0.0, kDensityZeroBaseAlpha));
         painter.setClipPath(walkableClip);
     }
 

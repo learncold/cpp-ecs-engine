@@ -231,6 +231,39 @@ public:
     }
 };
 
+class ConfigureDensePersonalSpaceAgentsSystem final : public safecrowd::engine::EngineSystem {
+public:
+    void configure(safecrowd::engine::EngineWorld& world) override {
+        world.resources().set(safecrowd::domain::ScenarioSimulationClockResource{
+            .elapsedSeconds = 1.0,
+            .timeLimitSeconds = 10.0,
+            .complete = false,
+        });
+        for (int row = 0; row < 3; ++row) {
+            for (int column = 0; column < 3; ++column) {
+                const safecrowd::domain::Point2D position{
+                    .x = 0.10 + (0.60 * static_cast<double>(column)),
+                    .y = 0.10 + (0.60 * static_cast<double>(row)),
+                };
+                world.commands().spawnEntity(
+                    safecrowd::domain::Position{.value = position},
+                    safecrowd::domain::Agent{
+                        .radius = 0.25f,
+                        .maxSpeed = 1.5f,
+                        .sourcePlacementId = "personal-space-grid",
+                        .sourceZoneId = "room-a",
+                    },
+                    safecrowd::domain::Velocity{.value = {}},
+                    safecrowd::domain::EvacuationRoute{.currentFloorId = "L1", .displayFloorId = "L1"},
+                    safecrowd::domain::EvacuationStatus{});
+            }
+        }
+    }
+
+    void update(safecrowd::engine::EngineWorld&, const safecrowd::engine::EngineStepContext&) override {
+    }
+};
+
 class ConfigureCrossFlowArtifactsSystem final : public safecrowd::engine::EngineSystem {
 public:
     void configure(safecrowd::engine::EngineWorld& world) override {
@@ -3808,6 +3841,30 @@ SC_TEST(ScenarioRiskMetricsSystem_DoesNotPublishPressureHotspotsForLooseClusterI
     SC_EXPECT_TRUE(snapshot.pressureHotspots.empty());
 }
 
+SC_TEST(ScenarioRiskMetricsSystem_SeparatesDensityHotspotFromPersonalSpacePressure) {
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 53,
+    });
+    runtime.addSystem(std::make_unique<ConfigureDensePersonalSpaceAgentsSystem>());
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioRiskMetricsSystem(straightExitLayout()),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(0.0);
+
+    const auto& snapshot =
+        runtime.world().resources().get<safecrowd::domain::ScenarioRiskMetricsResource>().snapshot;
+    SC_EXPECT_TRUE(!snapshot.hotspots.empty());
+    SC_EXPECT_TRUE(snapshot.pressureHotspots.empty());
+    SC_EXPECT_TRUE(snapshot.pressureAgents.empty());
+    SC_EXPECT_EQ(snapshot.pressureExposedAgentCount, std::size_t{0});
+    SC_EXPECT_EQ(snapshot.criticalPressureAgentCount, std::size_t{0});
+}
+
 SC_TEST(ScenarioRiskMetricsSystem_AccumulatesCompressionExposureAndCriticalPressureAgents) {
     safecrowd::engine::EngineRuntime runtime({
         .fixedDeltaTime = 1.0 / 30.0,
@@ -3892,7 +3949,21 @@ SC_TEST(ScenarioRiskMetricsSystem_DoesNotMergeHotspotsAcrossFloors) {
     const auto& snapshot =
         runtime.world().resources().get<safecrowd::domain::ScenarioRiskMetricsResource>().snapshot;
     SC_EXPECT_TRUE(snapshot.hotspots.empty());
-    SC_EXPECT_TRUE(snapshot.pressureHotspots.empty());
+    SC_EXPECT_EQ(snapshot.pressureHotspots.size(), std::size_t{2});
+    const auto hasL1PressureHotspot = std::any_of(
+        snapshot.pressureHotspots.begin(),
+        snapshot.pressureHotspots.end(),
+        [](const auto& hotspot) {
+            return hotspot.floorId == "L1" && hotspot.agentCount == 3;
+        });
+    const auto hasL2PressureHotspot = std::any_of(
+        snapshot.pressureHotspots.begin(),
+        snapshot.pressureHotspots.end(),
+        [](const auto& hotspot) {
+            return hotspot.floorId == "L2" && hotspot.agentCount == 3;
+        });
+    SC_EXPECT_TRUE(hasL1PressureHotspot);
+    SC_EXPECT_TRUE(hasL2PressureHotspot);
 }
 
 SC_TEST(ScenarioRiskMetricsSystem_FiltersBottlenecksByConnectionFloor) {
@@ -4224,6 +4295,39 @@ SC_TEST(ScenarioResultArtifactsSystem_PublishesPressureSummary) {
     SC_EXPECT_TRUE(summary.peakCriticalAgentCount > 0);
     SC_EXPECT_TRUE(!summary.criticalEvents.empty());
     SC_EXPECT_TRUE(summary.criticalEvents.front().durationSeconds >= 1.0);
+}
+
+SC_TEST(ScenarioResultArtifactsSystem_PressureSummaryIgnoresDensePersonalSpaceGrid) {
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 54,
+    });
+    runtime.addSystem(std::make_unique<ConfigureDensePersonalSpaceAgentsSystem>());
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioRiskMetricsSystem(straightExitLayout()),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .order = 10,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+    runtime.addSystem(
+        std::make_unique<safecrowd::domain::ScenarioResultArtifactsSystem>(1.0),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .order = 20,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(0.0);
+
+    const auto& artifacts =
+        runtime.world().resources().get<safecrowd::domain::ScenarioResultArtifactsResource>().artifacts;
+    SC_EXPECT_TRUE(artifacts.densitySummary.peakDensityPeoplePerSquareMeter
+        >= artifacts.densitySummary.highDensityThresholdPeoplePerSquareMeter);
+    SC_EXPECT_TRUE(!artifacts.densitySummary.peakField.cells.empty());
+    SC_EXPECT_NEAR(artifacts.pressureSummary.peakPressureScore, 0.0, 1e-9);
+    SC_EXPECT_TRUE(!artifacts.pressureSummary.peakAtSeconds.has_value());
+    SC_EXPECT_TRUE(artifacts.pressureSummary.peakCells.empty());
+    SC_EXPECT_TRUE(artifacts.pressureSummary.peakField.cells.empty());
+    SC_EXPECT_TRUE(artifacts.pressureSummary.peakHotspots.empty());
 }
 
 SC_TEST(ScenarioResultArtifactsSystem_AccumulatesPressurePeakFieldByFloorAndCell) {

@@ -496,7 +496,7 @@ public:
           threshold_(summary.highDensityThresholdPeoplePerSquareMeter),
           peakDensity_(summary.peakDensityPeoplePerSquareMeter) {
         setFixedSize(300, 34);
-        setToolTip("Density heatmap scale uses the high-density threshold in people per square meter.");
+        setToolTip("Density heatmap scale maps zero density to blue and the high-density threshold to red.");
     }
 
 protected:

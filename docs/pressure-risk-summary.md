@@ -53,9 +53,8 @@
 현재 상수는 아래처럼 고정되어 있다.
 
 - hotspot 셀 크기: `1.5 m`
-- pressure hotspot 최소 agent 수: `5`
 - pressure hotspot 최소 score: `1.0`
-- critical compression force threshold: `0.5`
+- critical compression force threshold: `1.0`
 - critical exposure threshold: `2.0 sec`
 - critical event 최소 critical agent 수: `2`
 - critical event 최소 지속시간: `1.0 sec`
@@ -69,22 +68,20 @@
 
 핵심 아이디어:
 - 기존 hotspot과 같은 `1.5m x 1.5m` 셀을 사용
-- 셀 안에 active agent가 5명 미만이면 pressure hotspot 후보에서 제외
 - 셀 내부 모든 agent pair를 검사
 - 두 사람 사이 거리가 `r1 + r2 + 0.08`보다 작으면 개인공간 침범으로 간주
-- 그 침범량을 비율로 합산해서 `pressureScore`를 계산
+- 침범 깊이를 `0.08m` 개인공간 버퍼 기준의 `0..1` pair score로 환산해 `pressureScore`에 합산
 
 개념적으로는 아래와 같다.
 
 ```text
 comfortDistance = agentRadiusA + agentRadiusB + 0.08
 if distance < comfortDistance:
-    pressureScore += (comfortDistance - distance) / comfortDistance
+    pressureScore += clamp((comfortDistance - distance) / 0.08, 0, 1)
 ```
 
 pressure hotspot은 다음 조건을 만족해야 보고됩니다.
 
-- 셀 내 agent 수 >= 5
 - intruding pair 존재
 - pressureScore >= 1.0
 
@@ -116,7 +113,7 @@ compressionForce = sum(pair overlap) + sum(barrier intrusion)
 
 그 다음 exposure는 다음과 같이 누적된다.
 
-- `currentForce > 0.5`일 때만 `exposureSeconds += deltaSeconds`
+- `currentForce >= 1.0`일 때만 `exposureSeconds += deltaSeconds`
 - 감쇠는 아직 없음
 - agent가 active인 동안 누적값 유지
 - evacuate되면 tracking state 제거
@@ -124,11 +121,11 @@ compressionForce = sum(pair overlap) + sum(barrier intrusion)
 현재 snapshot에서 `pressureExposedAgentCount`는 아래 중 하나면 증가한다.
 
 - `exposureSeconds > 0`
-- `currentForce > 0.5`
+- `currentForce >= 1.0`
 
 `critical agent` 조건은 더 강하게 설정했다.
 
-- `currentForce > 0.5`
+- `currentForce >= 1.0`
 - `exposureSeconds >= 2.0`
 
 한때 눌렸던 agent와 지금도 임계 수준으로 눌리는 agent를 구분한다.
@@ -250,6 +247,7 @@ compressionForce = sum(pair overlap) + sum(barrier intrusion)
 검증한 것:
 - 조밀한 군집에서는 pressure hotspot이 검출됨
 - 같은 셀이어도 느슨한 군집이면 pressure hotspot이 검출되지 않음
+- 같은 셀에서 density가 높아도 개인공간 침범이 없으면 pressure field는 비어 있음
 - exposure가 시간에 따라 누적됨
 - critical agent 판정이 정상 작동함
 - sustained critical pressure event가 1초 후에만 생김
@@ -260,7 +258,7 @@ compressionForce = sum(pair overlap) + sum(barrier intrusion)
 - peak pressure field가 floor/cell 기준으로 누적됨
 
 ## 현재 한계
-- pressure는 아직 관측/평가용입니다. movement feedback은 안 걸었습니다.
+- pressure movement feedback은 시뮬레이션 중 agent 이동에 반영되지만, 결과 화면 overlay는 아직 peak field 기준입니다.
 - fire/smoke 리소스를 읽지 않습니다. 완전히 독립입니다.
 - threshold는 아직 하드코딩 상수입니다.
 - project persistence까지는 아직 안 가서, 저장 후 다시 열었을 때 pressure summary 복원은 후속 작업입니다.
