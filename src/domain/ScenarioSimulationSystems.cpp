@@ -255,6 +255,7 @@ DensityCellMetric densityMetricFromCell(
 void accumulateOccupancyHeatmap(
     ScenarioResultArtifactsResource& result,
     engine::WorldQuery& query,
+    const FacilityLayout2D* layout,
     double elapsedSeconds,
     bool forceSample) {
     const bool firstSample = !result.occupancyTrackingInitialized;
@@ -312,6 +313,10 @@ void accumulateOccupancyHeatmap(
                     ((cellCenter.x - position.value.x) * (cellCenter.x - position.value.x))
                     + ((cellCenter.y - position.value.y) * (cellCenter.y - position.value.y));
                 if (distanceSquared > kernelRadius * kernelRadius) {
+                    continue;
+                }
+                if (layout != nullptr
+                    && segmentCrossesMovementBarrier(*layout, position.value, cellCenter, floorId)) {
                     continue;
                 }
 
@@ -1346,7 +1351,7 @@ void ScenarioResultArtifactsSystem::update(engine::EngineWorld& world, const eng
         }
     }
 
-    accumulateOccupancyHeatmap(result, query, elapsedSeconds, complete);
+    accumulateOccupancyHeatmap(result, query, activeLayout, elapsedSeconds, complete);
 
     const auto shouldRecordSample =
         result.artifacts.evacuationProgress.empty()

@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include <QImage>
 #include <QPixmap>
 #include <QWidget>
 
@@ -85,8 +86,8 @@ private:
     void drawConnectionBlockOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawEnvironmentHazardOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawRouteGuidanceOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
-    void drawOccupancyHeatmapOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
-    void drawDensityOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
+    void drawOccupancyHeatmapOverlay(QPainter& painter, const LayoutCanvasTransform& transform);
+    void drawDensityOverlay(QPainter& painter, const LayoutCanvasTransform& transform);
     void drawPressureOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawHotspotOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawBottleneckOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
@@ -95,6 +96,7 @@ private:
     void setCurrentFloorId(std::string floorId, bool manualSelection);
     void setupFloorSelector();
     void repositionFloorSelector();
+    void invalidateHeatmapWorldCache();
 
     safecrowd::domain::FacilityLayout2D layout_{};
     safecrowd::domain::SimulationFrame frame_{};
@@ -133,6 +135,14 @@ private:
     ResultOverlayMode overlayCacheMode_{ResultOverlayMode::None};
     std::string overlayCacheFloorId_{};
     bool overlayCacheValid_{false};
+    QImage heatmapWorldCache_{};
+    LayoutCanvasBounds heatmapWorldCacheBounds_{};
+    double heatmapWorldCachePixelsPerMeterKey_{0.0};
+    ResultOverlayMode heatmapWorldCacheMode_{ResultOverlayMode::None};
+    std::string heatmapWorldCacheFloorId_{};
+    std::size_t heatmapWorldCacheRevision_{0};
+    std::size_t heatmapOverlayRevision_{0};
+    bool heatmapWorldCacheValid_{false};
 
     std::string hoveredConnectionBlockId_{};
     std::string hoveredEnvironmentHazardId_{};

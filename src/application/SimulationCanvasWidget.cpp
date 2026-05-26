@@ -5,6 +5,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <limits>
+#include <optional>
+#include <unordered_map>
 #include <utility>
 
 #include <QCoreApplication>
@@ -19,6 +23,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QRadialGradient>
+#include <QRect>
 #include <QResizeEvent>
 #include <QSignalBlocker>
 #include <QToolTip>
@@ -42,6 +47,11 @@ constexpr double kCrossFlowMinimumScreenRadius = 16.0;
 constexpr int kHotspotMinCoreAlpha = 72;
 constexpr int kHotspotMaxCoreAlpha = 190;
 constexpr int kFloorSelectorMargin = 14;
+constexpr double kHeatmapScreenRasterScale = 0.5;
+constexpr double kHeatmapBarrierIndexCellSizeMeters = 2.0;
+constexpr double kHeatmapMinWorldPixelsPerMeter = 1.0;
+constexpr double kHeatmapMaxWorldPixelsPerMeter = 16.0;
+constexpr int kHeatmapMaxWorldRasterDimension = 4096;
 const QColor kMovingAgentColor("#1f5fae");
 const QColor kStalledAgentColor("#7c3aed");
 
@@ -52,6 +62,41 @@ enum class TimelineVisualState {
 };
 
 using safecrowd::domain::matchesFloor;
+
+struct HeatmapRasterContribution {
+    safecrowd::domain::Point2D center{};
+    QRect rect{};
+};
+
+struct HeatmapWorldSource {
+    safecrowd::domain::Point2D center{};
+    safecrowd::domain::Point2D cellMin{};
+    safecrowd::domain::Point2D cellMax{};
+    double intensity{0.0};
+};
+
+struct HeatmapBarrierSegment {
+    safecrowd::domain::Point2D start{};
+    safecrowd::domain::Point2D end{};
+};
+
+struct HeatmapClosedBarrier {
+    std::vector<safecrowd::domain::Point2D> vertices{};
+};
+
+struct HeatmapBarrierSpatialIndex {
+    double cellSize{kHeatmapBarrierIndexCellSizeMeters};
+    std::vector<HeatmapBarrierSegment> segments{};
+    std::vector<HeatmapClosedBarrier> closedBarriers{};
+    std::unordered_map<long long, std::vector<std::size_t>> segmentIndicesByCell{};
+    std::vector<std::uint32_t> visitMarks{};
+    std::uint32_t visitToken{1};
+};
+
+struct GeneratedHeatmapWorldCache {
+    QImage image{};
+    LayoutCanvasBounds bounds{};
+};
 
 QString hazardKindLabel(safecrowd::domain::EnvironmentHazardKind kind) {
     switch (kind) {
@@ -222,6 +267,396 @@ std::vector<double> boxBlurField(const std::vector<double>& source, int width, i
         }
     }
     return blurred;
+}
+
+double heatmapScreenPixelsPerMeter(const LayoutCanvasTransform& transform) {
+    const safecrowd::domain::Point2D origin{.x = 0.0, .y = 0.0};
+    const safecrowd::domain::Point2D unitX{.x = 1.0, .y = 0.0};
+    return std::abs(transform.map(unitX).x() - transform.map(origin).x());
+}
+
+double heatmapPixelsPerMeterKey(const LayoutCanvasTransform& transform) {
+    auto requested = heatmapScreenPixelsPerMeter(transform) * kHeatmapScreenRasterScale;
+    if (!std::isfinite(requested) || requested <= 0.0) {
+        requested = kHeatmapMinWorldPixelsPerMeter;
+    }
+    requested = std::clamp(
+        requested,
+        kHeatmapMinWorldPixelsPerMeter,
+        kHeatmapMaxWorldPixelsPerMeter);
+
+    double bucket = kHeatmapMinWorldPixelsPerMeter;
+    while (bucket < requested && bucket < kHeatmapMaxWorldPixelsPerMeter) {
+        bucket *= 2.0;
+    }
+    return std::min(bucket, kHeatmapMaxWorldPixelsPerMeter);
+}
+
+void includeHeatmapWorldSource(LayoutCanvasBounds& bounds, const HeatmapWorldSource& source) {
+    includeLayoutCanvasPoint(bounds, source.cellMin);
+    includeLayoutCanvasPoint(bounds, source.cellMax);
+}
+
+LayoutCanvasBounds expandedHeatmapBounds(
+    const LayoutCanvasBounds& bounds,
+    double paddingMeters) {
+    return {
+        .minX = bounds.minX - paddingMeters,
+        .minY = bounds.minY - paddingMeters,
+        .maxX = bounds.maxX + paddingMeters,
+        .maxY = bounds.maxY + paddingMeters,
+    };
+}
+
+int heatmapRasterX(double worldX, const LayoutCanvasBounds& bounds, double pixelsPerMeter) {
+    return static_cast<int>(std::floor((worldX - bounds.minX) * pixelsPerMeter));
+}
+
+int heatmapRasterY(double worldY, const LayoutCanvasBounds& bounds, double pixelsPerMeter) {
+    return static_cast<int>(std::floor((bounds.maxY - worldY) * pixelsPerMeter));
+}
+
+safecrowd::domain::Point2D heatmapWorldPointForRasterPixel(
+    int x,
+    int y,
+    const LayoutCanvasBounds& bounds,
+    double pixelsPerMeter) {
+    return {
+        .x = bounds.minX + ((static_cast<double>(x) + 0.5) / pixelsPerMeter),
+        .y = bounds.maxY - ((static_cast<double>(y) + 0.5) / pixelsPerMeter),
+    };
+}
+
+void appendBarrierSegmentToIndex(
+    HeatmapBarrierSpatialIndex& index,
+    const safecrowd::domain::Point2D& start,
+    const safecrowd::domain::Point2D& end) {
+    const auto segmentIndex = index.segments.size();
+    index.segments.push_back({.start = start, .end = end});
+
+    const safecrowd::domain::Point2D minPoint{
+        .x = std::min(start.x, end.x),
+        .y = std::min(start.y, end.y),
+    };
+    const safecrowd::domain::Point2D maxPoint{
+        .x = std::max(start.x, end.x),
+        .y = std::max(start.y, end.y),
+    };
+    const auto minCell = safecrowd::domain::spatialCellFor(minPoint, index.cellSize);
+    const auto maxCell = safecrowd::domain::spatialCellFor(maxPoint, index.cellSize);
+    for (int y = minCell.y; y <= maxCell.y; ++y) {
+        for (int x = minCell.x; x <= maxCell.x; ++x) {
+            index.segmentIndicesByCell[safecrowd::domain::spatialKey({.x = x, .y = y})].push_back(segmentIndex);
+        }
+    }
+}
+
+HeatmapBarrierSpatialIndex buildHeatmapBarrierSpatialIndex(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const std::string& floorId) {
+    HeatmapBarrierSpatialIndex index;
+    for (const auto& barrier : layout.barriers) {
+        if (!matchesFloor(barrier.floorId, floorId)) {
+            continue;
+        }
+        if (!barrier.blocksMovement || barrier.geometry.vertices.size() < 2) {
+            continue;
+        }
+
+        const auto& vertices = barrier.geometry.vertices;
+        for (std::size_t vertexIndex = 0; vertexIndex + 1 < vertices.size(); ++vertexIndex) {
+            appendBarrierSegmentToIndex(index, vertices[vertexIndex], vertices[vertexIndex + 1]);
+        }
+        if (barrier.geometry.closed) {
+            appendBarrierSegmentToIndex(index, vertices.back(), vertices.front());
+            if (vertices.size() >= 3) {
+                index.closedBarriers.push_back({.vertices = vertices});
+            }
+        }
+    }
+    index.visitMarks.assign(index.segments.size(), 0);
+    return index;
+}
+
+void advanceHeatmapBarrierVisitToken(HeatmapBarrierSpatialIndex& index) {
+    if (index.visitToken == std::numeric_limits<std::uint32_t>::max()) {
+        std::fill(index.visitMarks.begin(), index.visitMarks.end(), 0);
+        index.visitToken = 1;
+        return;
+    }
+    ++index.visitToken;
+}
+
+bool segmentCrossesIndexedMovementBarrier(
+    HeatmapBarrierSpatialIndex& index,
+    const safecrowd::domain::Point2D& from,
+    const safecrowd::domain::Point2D& to) {
+    if (std::hypot(to.x - from.x, to.y - from.y) <= 1e-9) {
+        return false;
+    }
+
+    for (const auto& barrier : index.closedBarriers) {
+        if (safecrowd::domain::pointInRing(barrier.vertices, to)) {
+            return true;
+        }
+    }
+    if (index.segments.empty()) {
+        return false;
+    }
+
+    advanceHeatmapBarrierVisitToken(index);
+    const safecrowd::domain::Point2D minPoint{
+        .x = std::min(from.x, to.x),
+        .y = std::min(from.y, to.y),
+    };
+    const safecrowd::domain::Point2D maxPoint{
+        .x = std::max(from.x, to.x),
+        .y = std::max(from.y, to.y),
+    };
+    const auto minCell = safecrowd::domain::spatialCellFor(minPoint, index.cellSize);
+    const auto maxCell = safecrowd::domain::spatialCellFor(maxPoint, index.cellSize);
+    for (int y = minCell.y; y <= maxCell.y; ++y) {
+        for (int x = minCell.x; x <= maxCell.x; ++x) {
+            const auto bucketIt = index.segmentIndicesByCell.find(
+                safecrowd::domain::spatialKey({.x = x, .y = y}));
+            if (bucketIt == index.segmentIndicesByCell.end()) {
+                continue;
+            }
+            for (const auto segmentIndex : bucketIt->second) {
+                if (segmentIndex >= index.segments.size()) {
+                    continue;
+                }
+                if (index.visitMarks[segmentIndex] == index.visitToken) {
+                    continue;
+                }
+                index.visitMarks[segmentIndex] = index.visitToken;
+                const auto& segment = index.segments[segmentIndex];
+                if (safecrowd::domain::lineSegmentsIntersect(from, to, segment.start, segment.end)) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+void markBarrierAwareHeatmapVisibility(
+    std::vector<unsigned char>& visibility,
+    int width,
+    int height,
+    const LayoutCanvasBounds& bounds,
+    HeatmapBarrierSpatialIndex& barrierIndex,
+    const std::vector<HeatmapRasterContribution>& contributions,
+    double pixelsPerMeter,
+    int radius) {
+    if (visibility.empty() || width <= 0 || height <= 0 || pixelsPerMeter <= 0.0) {
+        return;
+    }
+
+    const auto effectiveRadius = std::max(0, radius);
+    for (const auto& contribution : contributions) {
+        const auto x0 = std::clamp(contribution.rect.left() - effectiveRadius, 0, width - 1);
+        const auto x1 = std::clamp(contribution.rect.right() + effectiveRadius, x0, width - 1);
+        const auto y0 = std::clamp(contribution.rect.top() - effectiveRadius, 0, height - 1);
+        const auto y1 = std::clamp(contribution.rect.bottom() + effectiveRadius, y0, height - 1);
+        for (int y = y0; y <= y1; ++y) {
+            for (int x = x0; x <= x1; ++x) {
+                const auto samplePoint = heatmapWorldPointForRasterPixel(x, y, bounds, pixelsPerMeter);
+                if (segmentCrossesIndexedMovementBarrier(barrierIndex, contribution.center, samplePoint)) {
+                    continue;
+                }
+                visibility[static_cast<std::size_t>(y * width + x)] = 1;
+            }
+        }
+    }
+}
+
+std::optional<GeneratedHeatmapWorldCache> buildHeatmapWorldCacheImage(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const std::string& floorId,
+    const std::vector<HeatmapWorldSource>& sources,
+    double pixelsPerMeterKey,
+    ResultOverlayMode mode) {
+    if (sources.empty() || pixelsPerMeterKey <= 0.0) {
+        return std::nullopt;
+    }
+
+    LayoutCanvasBounds baseBounds;
+    double maxCellWorldWidth = 0.0;
+    for (const auto& source : sources) {
+        includeHeatmapWorldSource(baseBounds, source);
+        maxCellWorldWidth = std::max(
+            maxCellWorldWidth,
+            std::max(
+                std::abs(source.cellMax.x - source.cellMin.x),
+                std::abs(source.cellMax.y - source.cellMin.y)));
+    }
+    if (!baseBounds.valid()) {
+        return std::nullopt;
+    }
+
+    const auto maxBlurRadius = mode == ResultOverlayMode::Density ? 10 : 5;
+    auto pixelsPerMeter = pixelsPerMeterKey;
+    LayoutCanvasBounds imageBounds;
+    int blurRadius = 1;
+    int visibilityRadius = 2;
+    int rasterWidth = 0;
+    int rasterHeight = 0;
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        blurRadius = std::clamp(
+            static_cast<int>(std::ceil(std::max(1.0, maxCellWorldWidth * pixelsPerMeter * 0.5))),
+            1,
+            maxBlurRadius);
+        visibilityRadius = blurRadius + std::max(1, blurRadius / 2);
+        imageBounds = expandedHeatmapBounds(baseBounds, static_cast<double>(visibilityRadius) / pixelsPerMeter);
+        rasterWidth = std::max(1, static_cast<int>(std::ceil((imageBounds.maxX - imageBounds.minX) * pixelsPerMeter)));
+        rasterHeight = std::max(1, static_cast<int>(std::ceil((imageBounds.maxY - imageBounds.minY) * pixelsPerMeter)));
+        if (rasterWidth <= kHeatmapMaxWorldRasterDimension
+            && rasterHeight <= kHeatmapMaxWorldRasterDimension) {
+            break;
+        }
+
+        const auto widthScale = static_cast<double>(kHeatmapMaxWorldRasterDimension) / static_cast<double>(rasterWidth);
+        const auto heightScale = static_cast<double>(kHeatmapMaxWorldRasterDimension) / static_cast<double>(rasterHeight);
+        pixelsPerMeter = std::max(
+            kHeatmapMinWorldPixelsPerMeter,
+            pixelsPerMeter * std::min(widthScale, heightScale));
+    }
+
+    if (rasterWidth <= 0
+        || rasterHeight <= 0
+        || rasterWidth > kHeatmapMaxWorldRasterDimension
+        || rasterHeight > kHeatmapMaxWorldRasterDimension) {
+        return std::nullopt;
+    }
+
+    std::vector<double> field(static_cast<std::size_t>(rasterWidth * rasterHeight), 0.0);
+    std::vector<unsigned char> visibility(field.size(), 0);
+    std::vector<HeatmapRasterContribution> contributions;
+    contributions.reserve(sources.size());
+    auto barrierIndex = buildHeatmapBarrierSpatialIndex(layout, floorId);
+
+    for (const auto& source : sources) {
+        const auto left = std::min(source.cellMin.x, source.cellMax.x);
+        const auto right = std::max(source.cellMin.x, source.cellMax.x);
+        const auto bottom = std::min(source.cellMin.y, source.cellMax.y);
+        const auto top = std::max(source.cellMin.y, source.cellMax.y);
+        const auto x0 = std::clamp(heatmapRasterX(left, imageBounds, pixelsPerMeter), 0, rasterWidth - 1);
+        const auto x1 = std::clamp(
+            static_cast<int>(std::ceil((right - imageBounds.minX) * pixelsPerMeter)),
+            x0,
+            rasterWidth - 1);
+        const auto y0 = std::clamp(heatmapRasterY(top, imageBounds, pixelsPerMeter), 0, rasterHeight - 1);
+        const auto y1 = std::clamp(
+            static_cast<int>(std::ceil((imageBounds.maxY - bottom) * pixelsPerMeter)),
+            y0,
+            rasterHeight - 1);
+
+        bool wroteContribution = false;
+        for (int y = y0; y <= y1; ++y) {
+            for (int x = x0; x <= x1; ++x) {
+                const auto samplePoint = heatmapWorldPointForRasterPixel(x, y, imageBounds, pixelsPerMeter);
+                if (segmentCrossesIndexedMovementBarrier(barrierIndex, source.center, samplePoint)) {
+                    continue;
+                }
+                const auto index = static_cast<std::size_t>(y * rasterWidth + x);
+                field[index] = std::max(field[index], source.intensity);
+                wroteContribution = true;
+            }
+        }
+        if (wroteContribution) {
+            contributions.push_back({
+                .center = source.center,
+                .rect = QRect(x0, y0, x1 - x0 + 1, y1 - y0 + 1),
+            });
+        }
+    }
+
+    markBarrierAwareHeatmapVisibility(
+        visibility,
+        rasterWidth,
+        rasterHeight,
+        imageBounds,
+        barrierIndex,
+        contributions,
+        pixelsPerMeter,
+        visibilityRadius);
+
+    auto blurred = boxBlurField(field, rasterWidth, rasterHeight, blurRadius);
+    blurred = boxBlurField(blurred, rasterWidth, rasterHeight, std::max(1, blurRadius / 2));
+    if (*std::max_element(blurred.begin(), blurred.end()) <= 1e-9) {
+        return std::nullopt;
+    }
+
+    QImage image(rasterWidth, rasterHeight, QImage::Format_ARGB32);
+    image.fill(Qt::transparent);
+    for (int y = 0; y < rasterHeight; ++y) {
+        for (int x = 0; x < rasterWidth; ++x) {
+            const auto index = static_cast<std::size_t>(y * rasterWidth + x);
+            if (visibility[index] == 0) {
+                continue;
+            }
+            const auto value = blurred[index];
+            if (value <= 0.002) {
+                continue;
+            }
+
+            if (mode == ResultOverlayMode::Density) {
+                const auto intensity = std::clamp(std::pow(value, 0.82), 0.0, 1.0);
+                const auto alpha = std::clamp(
+                    52 + static_cast<int>(178.0 * std::sqrt(intensity)),
+                    0,
+                    230);
+                image.setPixelColor(x, y, densityHeatmapColor(intensity, alpha));
+            } else {
+                const auto intensity = std::clamp(std::pow(value, 0.70), 0.0, 1.0);
+                const auto alpha = std::clamp(
+                    44 + static_cast<int>(199.0 * std::sqrt(intensity)),
+                    0,
+                    243);
+                image.setPixelColor(x, y, occupancyHeatmapColor(intensity, alpha));
+            }
+        }
+    }
+
+    return GeneratedHeatmapWorldCache{
+        .image = std::move(image),
+        .bounds = imageBounds,
+    };
+}
+
+void drawHeatmapWorldCacheImage(
+    QPainter& painter,
+    const LayoutCanvasTransform& transform,
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const std::string& floorId,
+    const QImage& image,
+    const LayoutCanvasBounds& bounds) {
+    if (image.isNull() || !bounds.valid()) {
+        return;
+    }
+
+    painter.save();
+    painter.setPen(Qt::NoPen);
+    painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+    QPainterPath walkableClip;
+    for (const auto& zone : layout.zones) {
+        if (!matchesFloor(zone.floorId, floorId)) {
+            continue;
+        }
+        walkableClip.addPath(layoutCanvasPolygonPath(zone.area, transform));
+    }
+    if (!walkableClip.isEmpty()) {
+        painter.setClipPath(walkableClip);
+    }
+
+    const safecrowd::domain::Point2D topLeftWorld{.x = bounds.minX, .y = bounds.maxY};
+    const safecrowd::domain::Point2D bottomRightWorld{.x = bounds.maxX, .y = bounds.minY};
+    const auto topLeft = transform.map(topLeftWorld);
+    const auto bottomRight = transform.map(bottomRightWorld);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    painter.drawImage(QRectF(topLeft, bottomRight), image);
+    painter.restore();
 }
 
 QColor pressureHeatmapColor(double ratio, int alpha) {
@@ -668,12 +1103,16 @@ void SimulationCanvasWidget::setDensityOverlay(
         std::isfinite(scaleMaxPeoplePerSquareMeter) && scaleMaxPeoplePerSquareMeter > 0.0
         ? scaleMaxPeoplePerSquareMeter
         : kDefaultDensityScaleMaxPeoplePerSquareMeter;
+    ++heatmapOverlayRevision_;
+    invalidateHeatmapWorldCache();
     invalidateOverlayCache();
     update();
 }
 
 void SimulationCanvasWidget::setOccupancyHeatmapOverlay(safecrowd::domain::OccupancyHeatmap heatmap) {
     occupancyHeatmapOverlay_ = std::move(heatmap);
+    ++heatmapOverlayRevision_;
+    invalidateHeatmapWorldCache();
     invalidateOverlayCache();
     update();
 }
@@ -977,9 +1416,15 @@ void SimulationCanvasWidget::paintEvent(QPaintEvent* event) {
     painter.drawPixmap(0, 0, layoutCache_);
 
     const auto transform = currentTransform(*bounds);
-    refreshOverlayCache(*bounds);
-    if (!overlayCache_.isNull()) {
-        painter.drawPixmap(0, 0, overlayCache_);
+    if (overlayMode_ == ResultOverlayMode::Occupancy) {
+        drawOccupancyHeatmapOverlay(painter, transform);
+    } else if (overlayMode_ == ResultOverlayMode::Density) {
+        drawDensityOverlay(painter, transform);
+    } else {
+        refreshOverlayCache(*bounds);
+        if (!overlayCache_.isNull()) {
+            painter.drawPixmap(0, 0, overlayCache_);
+        }
     }
     drawEnvironmentHazardOverlay(painter, transform);
     drawConnectionBlockOverlay(painter, transform);
@@ -1075,6 +1520,13 @@ void SimulationCanvasWidget::refreshOverlayCache(const LayoutCanvasBounds& bound
         overlayCacheFloorId_ = currentFloorId_;
         return;
     }
+    if (overlayMode_ == ResultOverlayMode::Occupancy || overlayMode_ == ResultOverlayMode::Density) {
+        overlayCache_ = QPixmap();
+        overlayCacheValid_ = true;
+        overlayCacheMode_ = overlayMode_;
+        overlayCacheFloorId_ = currentFloorId_;
+        return;
+    }
 
     const auto currentSize = size();
     if (currentSize.isEmpty()) {
@@ -1132,6 +1584,11 @@ void SimulationCanvasWidget::refreshOverlayCache(const LayoutCanvasBounds& bound
 
 void SimulationCanvasWidget::invalidateOverlayCache() {
     overlayCacheValid_ = false;
+}
+
+void SimulationCanvasWidget::invalidateHeatmapWorldCache() {
+    heatmapWorldCache_ = QImage();
+    heatmapWorldCacheValid_ = false;
 }
 
 QRectF SimulationCanvasWidget::previewViewport() const {
@@ -1366,224 +1823,118 @@ void SimulationCanvasWidget::drawRouteGuidanceOverlay(QPainter& painter, const L
     painter.restore();
 }
 
-void SimulationCanvasWidget::drawOccupancyHeatmapOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const {
+void SimulationCanvasWidget::drawOccupancyHeatmapOverlay(QPainter& painter, const LayoutCanvasTransform& transform) {
     if (occupancyHeatmapOverlay_.cells.empty()
         || occupancyHeatmapOverlay_.peakAccumulatedAgentSeconds <= 0.0) {
         return;
     }
 
-    std::vector<const safecrowd::domain::OccupancyHeatmapCell*> visibleCells;
-    visibleCells.reserve(occupancyHeatmapOverlay_.cells.size());
-    for (const auto& cell : occupancyHeatmapOverlay_.cells) {
-        if (!matchesFloor(cell.floorId, currentFloorId_)) {
-            continue;
-        }
-        if (cell.normalizedIntensity <= 0.0) {
-            continue;
-        }
-        visibleCells.push_back(&cell);
-    }
-    if (visibleCells.empty()) {
-        return;
-    }
-
-    painter.save();
-    painter.setPen(Qt::NoPen);
-    painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
-    QPainterPath walkableClip;
-    for (const auto& zone : layout_.zones) {
-        if (!matchesFloor(zone.floorId, currentFloorId_)) {
-            continue;
-        }
-        walkableClip.addPath(layoutCanvasPolygonPath(zone.area, transform));
-    }
-    if (!walkableClip.isEmpty()) {
-        painter.setClipPath(walkableClip);
-    }
-
-    const auto logicalSize = size();
-    if (logicalSize.isEmpty()) {
-        painter.restore();
-        return;
-    }
-
-    constexpr double kRasterScale = 0.5;
-    const auto rasterWidth = std::max(1, static_cast<int>(std::ceil(logicalSize.width() * kRasterScale)));
-    const auto rasterHeight = std::max(1, static_cast<int>(std::ceil(logicalSize.height() * kRasterScale)));
-    std::vector<double> field(static_cast<std::size_t>(rasterWidth * rasterHeight), 0.0);
-    double maxCellScreenWidth = 0.0;
-
-    for (const auto* cell : visibleCells) {
-        const auto minPoint = transform.map(cell->cellMin);
-        const auto maxPoint = transform.map(cell->cellMax);
-        const auto left = std::min(minPoint.x(), maxPoint.x());
-        const auto right = std::max(minPoint.x(), maxPoint.x());
-        const auto top = std::min(minPoint.y(), maxPoint.y());
-        const auto bottom = std::max(minPoint.y(), maxPoint.y());
-        if (right < 0.0
-            || left > logicalSize.width()
-            || bottom < 0.0
-            || top > logicalSize.height()) {
-            continue;
-        }
-        maxCellScreenWidth = std::max(maxCellScreenWidth, std::max(right - left, bottom - top));
-
-        const auto x0 = std::clamp(static_cast<int>(std::floor(left * kRasterScale)), 0, rasterWidth - 1);
-        const auto x1 = std::clamp(static_cast<int>(std::ceil(right * kRasterScale)), x0, rasterWidth - 1);
-        const auto y0 = std::clamp(static_cast<int>(std::floor(top * kRasterScale)), 0, rasterHeight - 1);
-        const auto y1 = std::clamp(static_cast<int>(std::ceil(bottom * kRasterScale)), y0, rasterHeight - 1);
-        const auto intensity = std::clamp(cell->normalizedIntensity, 0.0, 1.0);
-        for (int y = y0; y <= y1; ++y) {
-            for (int x = x0; x <= x1; ++x) {
-                auto& value = field[static_cast<std::size_t>(y * rasterWidth + x)];
-                value = std::max(value, intensity);
-            }
-        }
-    }
-
-    const auto blurRadius = std::clamp(
-        static_cast<int>(std::ceil(std::max(1.0, maxCellScreenWidth * kRasterScale * 0.5))),
-        1,
-        5);
-    auto blurred = boxBlurField(field, rasterWidth, rasterHeight, blurRadius);
-    blurred = boxBlurField(blurred, rasterWidth, rasterHeight, std::max(1, blurRadius / 2));
-    if (*std::max_element(blurred.begin(), blurred.end()) <= 1e-9) {
-        painter.restore();
-        return;
-    }
-
-    QImage heatmapImage(rasterWidth, rasterHeight, QImage::Format_ARGB32);
-    heatmapImage.fill(Qt::transparent);
-    for (int y = 0; y < rasterHeight; ++y) {
-        for (int x = 0; x < rasterWidth; ++x) {
-            const auto value = blurred[static_cast<std::size_t>(y * rasterWidth + x)];
-            if (value <= 0.002) {
+    const auto pixelsPerMeterKey = heatmapPixelsPerMeterKey(transform);
+    if (!heatmapWorldCacheValid_
+        || heatmapWorldCacheMode_ != ResultOverlayMode::Occupancy
+        || heatmapWorldCacheFloorId_ != currentFloorId_
+        || heatmapWorldCacheRevision_ != heatmapOverlayRevision_
+        || std::abs(heatmapWorldCachePixelsPerMeterKey_ - pixelsPerMeterKey) > 1e-9) {
+        std::vector<HeatmapWorldSource> sources;
+        sources.reserve(occupancyHeatmapOverlay_.cells.size());
+        for (const auto& cell : occupancyHeatmapOverlay_.cells) {
+            if (!matchesFloor(cell.floorId, currentFloorId_) || cell.normalizedIntensity <= 0.0) {
                 continue;
             }
-            const auto intensity = std::clamp(std::pow(value, 0.70), 0.0, 1.0);
-            const auto alpha = std::clamp(
-                44 + static_cast<int>(199.0 * std::sqrt(intensity)),
-                0,
-                243);
-            heatmapImage.setPixelColor(x, y, occupancyHeatmapColor(intensity, alpha));
+            sources.push_back({
+                .center = cell.center,
+                .cellMin = cell.cellMin,
+                .cellMax = cell.cellMax,
+                .intensity = std::clamp(cell.normalizedIntensity, 0.0, 1.0),
+            });
         }
+
+        heatmapWorldCache_ = QImage();
+        if (auto generated = buildHeatmapWorldCacheImage(
+                layout_,
+                currentFloorId_,
+                sources,
+                pixelsPerMeterKey,
+                ResultOverlayMode::Occupancy);
+            generated.has_value()) {
+            heatmapWorldCache_ = std::move(generated->image);
+            heatmapWorldCacheBounds_ = generated->bounds;
+        }
+        heatmapWorldCachePixelsPerMeterKey_ = pixelsPerMeterKey;
+        heatmapWorldCacheMode_ = ResultOverlayMode::Occupancy;
+        heatmapWorldCacheFloorId_ = currentFloorId_;
+        heatmapWorldCacheRevision_ = heatmapOverlayRevision_;
+        heatmapWorldCacheValid_ = true;
     }
 
-    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
-    painter.drawImage(QRectF(0, 0, logicalSize.width(), logicalSize.height()), heatmapImage);
-    painter.restore();
+    drawHeatmapWorldCacheImage(
+        painter,
+        transform,
+        layout_,
+        currentFloorId_,
+        heatmapWorldCache_,
+        heatmapWorldCacheBounds_);
 }
 
-void SimulationCanvasWidget::drawDensityOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const {
+void SimulationCanvasWidget::drawDensityOverlay(QPainter& painter, const LayoutCanvasTransform& transform) {
     if (densityOverlay_.empty()) {
         return;
     }
 
-    std::vector<const safecrowd::domain::DensityCellMetric*> visibleCells;
-    visibleCells.reserve(densityOverlay_.size());
-    for (const auto& cell : densityOverlay_) {
-        if (!matchesFloor(cell.floorId, currentFloorId_)) {
-            continue;
-        }
-        visibleCells.push_back(&cell);
-    }
-    if (visibleCells.empty()) {
-        return;
-    }
     const auto scaleMax =
         std::isfinite(densityScaleMaxPeoplePerSquareMeter_) && densityScaleMaxPeoplePerSquareMeter_ > 0.0
         ? densityScaleMaxPeoplePerSquareMeter_
         : kDefaultDensityScaleMaxPeoplePerSquareMeter;
 
-    painter.save();
-    painter.setPen(Qt::NoPen);
-    painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
-    QPainterPath walkableClip;
-    for (const auto& zone : layout_.zones) {
-        if (!matchesFloor(zone.floorId, currentFloorId_)) {
-            continue;
-        }
-        walkableClip.addPath(layoutCanvasPolygonPath(zone.area, transform));
-    }
-    if (!walkableClip.isEmpty()) {
-        painter.setClipPath(walkableClip);
-    }
-
-    const auto logicalSize = size();
-    if (logicalSize.isEmpty()) {
-        painter.restore();
-        return;
-    }
-
-    constexpr double kRasterScale = 0.5;
-    const auto rasterWidth = std::max(1, static_cast<int>(std::ceil(logicalSize.width() * kRasterScale)));
-    const auto rasterHeight = std::max(1, static_cast<int>(std::ceil(logicalSize.height() * kRasterScale)));
-    std::vector<double> field(static_cast<std::size_t>(rasterWidth * rasterHeight), 0.0);
-    double maxCellScreenWidth = 0.0;
-
-    for (const auto* cell : visibleCells) {
-        const auto intensity = std::clamp(cell->densityPeoplePerSquareMeter / scaleMax, 0.0, 1.0);
-        if (intensity <= 0.0) {
-            continue;
-        }
-
-        const auto minPoint = transform.map(cell->cellMin);
-        const auto maxPoint = transform.map(cell->cellMax);
-        const auto left = std::min(minPoint.x(), maxPoint.x());
-        const auto right = std::max(minPoint.x(), maxPoint.x());
-        const auto top = std::min(minPoint.y(), maxPoint.y());
-        const auto bottom = std::max(minPoint.y(), maxPoint.y());
-        if (right < 0.0
-            || left > logicalSize.width()
-            || bottom < 0.0
-            || top > logicalSize.height()) {
-            continue;
-        }
-        maxCellScreenWidth = std::max(maxCellScreenWidth, std::max(right - left, bottom - top));
-
-        const auto x0 = std::clamp(static_cast<int>(std::floor(left * kRasterScale)), 0, rasterWidth - 1);
-        const auto x1 = std::clamp(static_cast<int>(std::ceil(right * kRasterScale)), x0, rasterWidth - 1);
-        const auto y0 = std::clamp(static_cast<int>(std::floor(top * kRasterScale)), 0, rasterHeight - 1);
-        const auto y1 = std::clamp(static_cast<int>(std::ceil(bottom * kRasterScale)), y0, rasterHeight - 1);
-        for (int y = y0; y <= y1; ++y) {
-            for (int x = x0; x <= x1; ++x) {
-                auto& value = field[static_cast<std::size_t>(y * rasterWidth + x)];
-                value = std::max(value, intensity);
-            }
-        }
-    }
-
-    const auto blurRadius = std::clamp(
-        static_cast<int>(std::ceil(std::max(1.0, maxCellScreenWidth * kRasterScale * 0.5))),
-        1,
-        10);
-    auto blurred = boxBlurField(field, rasterWidth, rasterHeight, blurRadius);
-    blurred = boxBlurField(blurred, rasterWidth, rasterHeight, std::max(1, blurRadius / 2));
-    if (*std::max_element(blurred.begin(), blurred.end()) <= 1e-9) {
-        painter.restore();
-        return;
-    }
-
-    QImage heatmapImage(rasterWidth, rasterHeight, QImage::Format_ARGB32);
-    heatmapImage.fill(Qt::transparent);
-    for (int y = 0; y < rasterHeight; ++y) {
-        for (int x = 0; x < rasterWidth; ++x) {
-            const auto value = blurred[static_cast<std::size_t>(y * rasterWidth + x)];
-            if (value <= 0.002) {
+    const auto pixelsPerMeterKey = heatmapPixelsPerMeterKey(transform);
+    if (!heatmapWorldCacheValid_
+        || heatmapWorldCacheMode_ != ResultOverlayMode::Density
+        || heatmapWorldCacheFloorId_ != currentFloorId_
+        || heatmapWorldCacheRevision_ != heatmapOverlayRevision_
+        || std::abs(heatmapWorldCachePixelsPerMeterKey_ - pixelsPerMeterKey) > 1e-9) {
+        std::vector<HeatmapWorldSource> sources;
+        sources.reserve(densityOverlay_.size());
+        for (const auto& cell : densityOverlay_) {
+            if (!matchesFloor(cell.floorId, currentFloorId_)) {
                 continue;
             }
-            const auto intensity = std::clamp(std::pow(value, 0.82), 0.0, 1.0);
-            const auto alpha = std::clamp(
-                52 + static_cast<int>(178.0 * std::sqrt(intensity)),
-                0,
-                230);
-            heatmapImage.setPixelColor(x, y, densityHeatmapColor(intensity, alpha));
+            const auto intensity = std::clamp(cell.densityPeoplePerSquareMeter / scaleMax, 0.0, 1.0);
+            if (intensity <= 0.0) {
+                continue;
+            }
+            sources.push_back({
+                .center = cell.center,
+                .cellMin = cell.cellMin,
+                .cellMax = cell.cellMax,
+                .intensity = intensity,
+            });
         }
+
+        heatmapWorldCache_ = QImage();
+        if (auto generated = buildHeatmapWorldCacheImage(
+                layout_,
+                currentFloorId_,
+                sources,
+                pixelsPerMeterKey,
+                ResultOverlayMode::Density);
+            generated.has_value()) {
+            heatmapWorldCache_ = std::move(generated->image);
+            heatmapWorldCacheBounds_ = generated->bounds;
+        }
+        heatmapWorldCachePixelsPerMeterKey_ = pixelsPerMeterKey;
+        heatmapWorldCacheMode_ = ResultOverlayMode::Density;
+        heatmapWorldCacheFloorId_ = currentFloorId_;
+        heatmapWorldCacheRevision_ = heatmapOverlayRevision_;
+        heatmapWorldCacheValid_ = true;
     }
 
-    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
-    painter.drawImage(QRectF(0, 0, logicalSize.width(), logicalSize.height()), heatmapImage);
-    painter.restore();
+    drawHeatmapWorldCacheImage(
+        painter,
+        transform,
+        layout_,
+        currentFloorId_,
+        heatmapWorldCache_,
+        heatmapWorldCacheBounds_);
 }
 
 void SimulationCanvasWidget::drawPressureOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const {
