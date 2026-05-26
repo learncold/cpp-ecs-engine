@@ -68,6 +68,16 @@ SC_TEST(GeometryQueries_PolygonCenterAndSegmentHelpers) {
 
     const safecrowd::domain::LineSegment2D segment{.start = start, .end = end};
     SC_EXPECT_NEAR(safecrowd::domain::distancePointToSegment(point, segment), 3.0, 1e-9);
+    SC_EXPECT_TRUE(safecrowd::domain::lineSegmentsIntersect(
+        {.x = 0.0, .y = 0.0},
+        {.x = 4.0, .y = 4.0},
+        {.x = 0.0, .y = 4.0},
+        {.x = 4.0, .y = 0.0}));
+    SC_EXPECT_TRUE(!safecrowd::domain::lineSegmentsIntersect(
+        {.x = 0.0, .y = 0.0},
+        {.x = 4.0, .y = 0.0},
+        {.x = 0.0, .y = 1.0},
+        {.x = 4.0, .y = 1.0}));
 }
 
 SC_TEST(GeometryQueries_SpatialCellHelpers) {
@@ -193,4 +203,29 @@ SC_TEST(GeometryQueries_PointInsideWalkableZoneWithClearanceRejectsWallsAndOutsi
         layout, {.x = 6.8, .y = 7.5}, "L1", 0.35));
     SC_EXPECT_TRUE(!safecrowd::domain::pointInsideWalkableZoneWithClearance(
         layout, {.x = 11.0, .y = 2.0}, "L1", 0.35));
+}
+
+SC_TEST(GeometryQueries_SegmentCrossesMovementBarrierRespectsFloorAndBlockingFlag) {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.barriers.push_back({
+        .id = "wall-1",
+        .floorId = "L1",
+        .geometry = {.vertices = {{5.0, 0.0}, {5.0, 10.0}}},
+        .blocksMovement = true,
+    });
+    layout.barriers.push_back({
+        .id = "decorative-line",
+        .floorId = "L1",
+        .geometry = {.vertices = {{8.0, 0.0}, {8.0, 10.0}}},
+        .blocksMovement = false,
+    });
+
+    SC_EXPECT_TRUE(safecrowd::domain::segmentCrossesMovementBarrier(
+        layout, {.x = 4.0, .y = 5.0}, {.x = 6.0, .y = 5.0}, "L1"));
+    SC_EXPECT_TRUE(!safecrowd::domain::segmentCrossesMovementBarrier(
+        layout, {.x = 4.0, .y = 5.0}, {.x = 4.5, .y = 5.0}, "L1"));
+    SC_EXPECT_TRUE(!safecrowd::domain::segmentCrossesMovementBarrier(
+        layout, {.x = 7.0, .y = 5.0}, {.x = 9.0, .y = 5.0}, "L1"));
+    SC_EXPECT_TRUE(!safecrowd::domain::segmentCrossesMovementBarrier(
+        layout, {.x = 4.0, .y = 5.0}, {.x = 6.0, .y = 5.0}, "L2"));
 }

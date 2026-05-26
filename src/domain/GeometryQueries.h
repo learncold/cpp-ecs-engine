@@ -23,6 +23,11 @@ bool pointInPolygon(const Polygon2D& polygon, const Point2D& point);
 Point2D closestPointOnSegment(const Point2D& point, const Point2D& start, const Point2D& end);
 double distancePointToSegment(const Point2D& point, const Point2D& start, const Point2D& end);
 double distancePointToSegment(const Point2D& point, const LineSegment2D& segment);
+bool lineSegmentsIntersect(
+    const Point2D& firstStart,
+    const Point2D& firstEnd,
+    const Point2D& secondStart,
+    const Point2D& secondEnd);
 double distanceToPolygonBoundary(const Polygon2D& polygon, const Point2D& point);
 std::optional<Point2D> representativePointInPolygon(const Polygon2D& polygon);
 SpatialCell spatialCellFor(const Point2D& point, double cellSize);
@@ -35,6 +40,11 @@ bool pointHasBarrierClearance(
     const Point2D& point,
     const std::string& floorId,
     double clearance);
+bool segmentCrossesMovementBarrier(
+    const FacilityLayout2D& layout,
+    const Point2D& from,
+    const Point2D& to,
+    const std::string& floorId);
 bool pointInsideWalkableZoneWithClearance(
     const FacilityLayout2D& layout,
     const Point2D& point,

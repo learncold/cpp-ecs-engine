@@ -48,6 +48,35 @@ bool pointWithinSegmentBounds(
     return point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY;
 }
 
+bool segmentBoundsOverlap(
+    const Point2D& firstStart,
+    const Point2D& firstEnd,
+    const Point2D& secondStart,
+    const Point2D& secondEnd,
+    double margin = 0.0) {
+    const auto firstMinX = std::min(firstStart.x, firstEnd.x) - margin;
+    const auto firstMaxX = std::max(firstStart.x, firstEnd.x) + margin;
+    const auto firstMinY = std::min(firstStart.y, firstEnd.y) - margin;
+    const auto firstMaxY = std::max(firstStart.y, firstEnd.y) + margin;
+    const auto secondMinX = std::min(secondStart.x, secondEnd.x);
+    const auto secondMaxX = std::max(secondStart.x, secondEnd.x);
+    const auto secondMinY = std::min(secondStart.y, secondEnd.y);
+    const auto secondMaxY = std::max(secondStart.y, secondEnd.y);
+    return firstMinX <= secondMaxX
+        && firstMaxX >= secondMinX
+        && firstMinY <= secondMaxY
+        && firstMaxY >= secondMinY;
+}
+
+double cross(const Point2D& a, const Point2D& b, const Point2D& c) {
+    return ((b.x - a.x) * (c.y - a.y)) - ((b.y - a.y) * (c.x - a.x));
+}
+
+bool pointOnSegment(const Point2D& point, const Point2D& start, const Point2D& end) {
+    return std::fabs(cross(start, end, point)) <= kGeometryEpsilon
+        && pointWithinSegmentBounds(point, start, end, kGeometryEpsilon);
+}
+
 void appendRingYValues(const std::vector<Point2D>& ring, std::vector<double>& values) {
     for (const auto& point : ring) {
         values.push_back(point.y);
@@ -247,6 +276,33 @@ double distancePointToSegment(const Point2D& point, const LineSegment2D& segment
     return distancePointToSegment(point, segment.start, segment.end);
 }
 
+bool lineSegmentsIntersect(
+    const Point2D& firstStart,
+    const Point2D& firstEnd,
+    const Point2D& secondStart,
+    const Point2D& secondEnd) {
+    if (!segmentBoundsOverlap(firstStart, firstEnd, secondStart, secondEnd, kGeometryEpsilon)) {
+        return false;
+    }
+
+    const auto d1 = cross(firstStart, firstEnd, secondStart);
+    const auto d2 = cross(firstStart, firstEnd, secondEnd);
+    const auto d3 = cross(secondStart, secondEnd, firstStart);
+    const auto d4 = cross(secondStart, secondEnd, firstEnd);
+
+    if (((d1 > kGeometryEpsilon && d2 < -kGeometryEpsilon)
+            || (d1 < -kGeometryEpsilon && d2 > kGeometryEpsilon))
+        && ((d3 > kGeometryEpsilon && d4 < -kGeometryEpsilon)
+            || (d3 < -kGeometryEpsilon && d4 > kGeometryEpsilon))) {
+        return true;
+    }
+
+    return pointOnSegment(secondStart, firstStart, firstEnd)
+        || pointOnSegment(secondEnd, firstStart, firstEnd)
+        || pointOnSegment(firstStart, secondStart, secondEnd)
+        || pointOnSegment(firstEnd, secondStart, secondEnd);
+}
+
 double distanceToPolygonBoundary(const Polygon2D& polygon, const Point2D& point) {
     double best = std::numeric_limits<double>::max();
     const auto checkRing = [&](const std::vector<Point2D>& ring) {
@@ -364,6 +420,40 @@ bool pointHasBarrierClearance(
         }
     }
     return true;
+}
+
+bool segmentCrossesMovementBarrier(
+    const FacilityLayout2D& layout,
+    const Point2D& from,
+    const Point2D& to,
+    const std::string& floorId) {
+    if (std::hypot(to.x - from.x, to.y - from.y) <= kGeometryEpsilon) {
+        return false;
+    }
+
+    for (const auto& barrier : layout.barriers) {
+        if (!matchesFloor(barrier.floorId, floorId)) {
+            continue;
+        }
+        if (!barrier.blocksMovement || barrier.geometry.vertices.size() < 2) {
+            continue;
+        }
+
+        const auto& vertices = barrier.geometry.vertices;
+        for (std::size_t index = 0; index + 1 < vertices.size(); ++index) {
+            if (lineSegmentsIntersect(from, to, vertices[index], vertices[index + 1])) {
+                return true;
+            }
+        }
+        if (barrier.geometry.closed
+            && lineSegmentsIntersect(from, to, vertices.back(), vertices.front())) {
+            return true;
+        }
+        if (barrier.geometry.closed && pointInRing(vertices, to)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool pointInsideWalkableZoneWithClearance(
