@@ -237,7 +237,6 @@ if (SAFECROWD_BUILD_APP)
         src/application/ScenarioCanvasAuthoringRules.h
         src/application/ScenarioCanvasWidget.h
         src/application/ScenarioResultNavigation.h
-        src/application/ScenarioResultWidget.h
         src/application/ScenarioRunWidget.h
         src/application/SimulationCanvasWidget.h
         src/application/ToolIconResources.h
@@ -270,7 +269,6 @@ if (SAFECROWD_BUILD_APP)
         src/application/ScenarioCanvasAuthoringRules.cpp
         src/application/ScenarioCanvasWidget.cpp
         src/application/ScenarioResultNavigation.cpp
-        src/application/ScenarioResultWidget.cpp
         src/application/ScenarioRunWidget.cpp
         src/application/SimulationCanvasWidget.cpp
         src/application/ToolIconResources.cpp

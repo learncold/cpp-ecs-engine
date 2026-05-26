@@ -82,11 +82,10 @@ Application layer file roles:
 - `ProjectWorkspaceState.h`: application-level workspace state snapshot.
 - `ResultArtifactsCodec.h/.cpp`: JSON codec for simulation frames, risk snapshots, density metrics, and scenario result artifacts.
 - `ScenarioAuthoringWidget.h/.cpp`: scenario authoring screen that wires scenario canvas and controls.
-- `ScenarioBatchResultWidget.h/.cpp`: UI for displaying batch scenario run results.
+- `ScenarioBatchResultWidget.h/.cpp`: UI for displaying single and batch scenario run results.
 - `ScenarioCanvasAuthoringRules.h/.cpp`: app-internal scenario canvas authoring validation and draft creation/move rules.
 - `ScenarioCanvasWidget.h/.cpp`: interactive Qt canvas for scenario placements, hazards, blocks, guidance, selection, drag, and painting.
 - `ScenarioResultNavigation.h/.cpp`: helpers/widgets for navigating scenario result views.
-- `ScenarioResultWidget.h/.cpp`: UI for scenario result summaries and details.
 - `ScenarioRunWidget.h/.cpp`: UI for configuring and launching scenario runs.
 - `SimulationCanvasWidget.h/.cpp`: Qt canvas for simulation playback and visualization.
 - `ToolIconResources.h/.cpp`: helper functions for loading and recoloring tool icons.

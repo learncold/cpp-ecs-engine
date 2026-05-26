@@ -17,7 +17,6 @@
 #include "application/ProjectNavigatorWidget.h"
 #include "application/ScenarioAuthoringWidget.h"
 #include "application/ScenarioBatchResultWidget.h"
-#include "application/ScenarioResultWidget.h"
 #include "application/ScenarioRunWidget.h"
 #include "domain/DemoFixtureService.h"
 #include "domain/DxfImportService.h"
@@ -607,7 +606,7 @@ void MainWindow::openProject(const ProjectMetadata& metadata) {
         }
         break;
     case ProjectWorkspaceView::ScenarioResult:
-        if (workspace.batchResult.has_value() && workspace.batchResult->results.size() > 1) {
+        if (workspace.batchResult.has_value() && !workspace.batchResult->results.empty()) {
             showScenarioBatchResult(
                 *importResult.layout,
                 workspace.batchResult->results,
@@ -618,13 +617,10 @@ void MainWindow::openProject(const ProjectMetadata& metadata) {
             return;
         }
         if (workspace.result.has_value()) {
-            showScenarioResult(
+            showScenarioBatchResult(
                 *importResult.layout,
-                workspace.result->scenario,
-                workspace.result->frame,
-                workspace.result->risk,
-                workspace.result->artifacts,
-                workspace.result->navigationView,
+                {*workspace.result},
+                0,
                 workspace.authoring.has_value()
                     ? std::make_optional(initialStateFromSaved(*workspace.authoring, *importResult.layout))
                     : std::nullopt);
@@ -673,7 +669,6 @@ void MainWindow::saveCurrentProject() {
 
     auto* authoringWidget = visibleChild<ScenarioAuthoringWidget>(centralWidget());
     auto* batchResultWidget = visibleChild<ScenarioBatchResultWidget>(centralWidget());
-    auto* resultWidget = visibleChild<ScenarioResultWidget>(centralWidget());
     auto* runWidget = visibleChild<ScenarioRunWidget>(centralWidget());
 
     const auto rootWidget = centralWidget();
@@ -699,7 +694,6 @@ void MainWindow::saveCurrentProject() {
     };
     chooseActiveWorkflowWidget(authoringWidget);
     chooseActiveWorkflowWidget(batchResultWidget);
-    chooseActiveWorkflowWidget(resultWidget);
     chooseActiveWorkflowWidget(runWidget);
 
     if (activeWorkflowWidget == authoringWidget) {
@@ -729,18 +723,6 @@ void MainWindow::saveCurrentProject() {
                 static_cast<int>(workspace.batchResult->results.size()) - 1);
             workspace.result = workspace.batchResult->results[static_cast<std::size_t>(index)];
         }
-    } else if (activeWorkflowWidget == resultWidget) {
-        workspace.activeView = ProjectWorkspaceView::ScenarioResult;
-        if (resultWidget->returnAuthoringState().has_value()) {
-            workspace.authoring = savedStateFromInitial(*resultWidget->returnAuthoringState());
-        }
-        workspace.result = SavedScenarioResultState{
-            .scenario = resultWidget->scenario(),
-            .frame = resultWidget->frame(),
-            .risk = resultWidget->risk(),
-            .artifacts = resultWidget->artifacts(),
-            .navigationView = resultWidget->currentSavedNavigationView(),
-        };
     } else if (activeWorkflowWidget == runWidget) {
         if (runWidget->returnAuthoringState().has_value()) {
             workspace.authoring = savedStateFromInitial(*runWidget->returnAuthoringState());
@@ -754,12 +736,10 @@ void MainWindow::saveCurrentProject() {
                     0,
                     static_cast<int>(results.size()) - 1);
                 workspace.result = results[static_cast<std::size_t>(index)];
-                if (results.size() > 1) {
-                    workspace.batchResult = SavedScenarioBatchResultState{
-                        .results = std::move(results),
-                        .currentResultIndex = index,
-                    };
-                }
+                workspace.batchResult = SavedScenarioBatchResultState{
+                    .results = std::move(results),
+                    .currentResultIndex = index,
+                };
             }
         } else {
             workspace.activeView = ProjectWorkspaceView::ScenarioRun;
@@ -959,41 +939,6 @@ void MainWindow::showScenarioBatchResult(
         },
         std::move(returnAuthoringState),
         currentResultIndex,
-        this));
-}
-
-void MainWindow::showScenarioResult(
-    const safecrowd::domain::FacilityLayout2D& layout,
-    const safecrowd::domain::ScenarioDraft& scenario,
-    const safecrowd::domain::SimulationFrame& frame,
-    const safecrowd::domain::ScenarioRiskSnapshot& risk,
-    const safecrowd::domain::ScenarioResultArtifacts& artifacts,
-    SavedResultNavigationView savedNavigationView,
-    std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState) {
-    setCentralWidget(new ScenarioResultWidget(
-        currentProject_.name,
-        layout,
-        scenario,
-        frame,
-        risk,
-        artifacts,
-        [this]() {
-            saveCurrentProject();
-        },
-        [this]() {
-            hasCurrentProject_ = false;
-            currentProject_ = {};
-            showProjectNavigator();
-        },
-        [this]() {
-            if (lastApprovedImportResult_.has_value()) {
-                showLayoutReview(currentProject_, *lastApprovedImportResult_);
-            } else {
-                showLayoutReview(currentProject_);
-            }
-        },
-        savedNavigationView,
-        std::move(returnAuthoringState),
         this));
 }
 
