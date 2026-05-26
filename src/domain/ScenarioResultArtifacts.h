@@ -57,6 +57,23 @@ struct DensitySummary {
     DensityFieldSnapshot peakField{};
 };
 
+struct OccupancyHeatmapCell {
+    Point2D center{};
+    Point2D cellMin{};
+    Point2D cellMax{};
+    std::string floorId{};
+    double accumulatedAgentSeconds{0.0};
+    double normalizedIntensity{0.0};
+};
+
+struct OccupancyHeatmap {
+    double cellSizeMeters{0.0};
+    double kernelRadiusMeters{0.0};
+    double accumulatedSeconds{0.0};
+    double peakAccumulatedAgentSeconds{0.0};
+    std::vector<OccupancyHeatmapCell> cells{};
+};
+
 struct PressureCellMetric {
     Point2D center{};
     Point2D cellMin{};
@@ -159,6 +176,7 @@ struct ScenarioResultArtifacts {
     std::vector<SimulationFrame> replayFrames{};
     EvacuationTimingSummary timingSummary{};
     DensitySummary densitySummary{};
+    OccupancyHeatmap occupancyHeatmap{};
     PressureSummary pressureSummary{};
     HazardExposureSummary hazardExposureSummary{};
     CrossFlowSummary crossFlowSummary{};

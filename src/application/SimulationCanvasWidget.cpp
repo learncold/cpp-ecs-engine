@@ -12,6 +12,7 @@
 #include <QEvent>
 #include <QFrame>
 #include <QHBoxLayout>
+#include <QImage>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMouseEvent>
@@ -32,10 +33,7 @@ constexpr double kDefaultHotspotCellSize = 1.5;
 constexpr double kHotspotFocusZoom = 2.8;
 constexpr double kBottleneckFocusZoom = 2.4;
 constexpr double kCrossFlowCellFocusZoom = 2.8;
-constexpr double kDensityInfluenceRadiusMultiplier = 1.75;
-constexpr double kDensityMinimumScreenRadius = 14.0;
 constexpr double kDefaultDensityScaleMaxPeoplePerSquareMeter = 4.0;
-constexpr int kDensityZeroBaseAlpha = 112;
 constexpr double kPressureInfluenceRadiusMultiplier = 1.45;
 constexpr double kPressureMinimumScreenRadius = 12.0;
 constexpr double kDefaultPressureScaleMaxScore = 1.0;
@@ -161,6 +159,69 @@ QColor densityHeatmapColor(double ratio, int alpha) {
         return QColor(249, 115, 22, alpha);
     }
     return QColor(220, 38, 38, alpha);
+}
+
+QColor interpolateColor(const QColor& from, const QColor& to, double ratio, int alpha) {
+    const auto t = std::clamp(ratio, 0.0, 1.0);
+    return QColor(
+        static_cast<int>(std::lround(from.red() + ((to.red() - from.red()) * t))),
+        static_cast<int>(std::lround(from.green() + ((to.green() - from.green()) * t))),
+        static_cast<int>(std::lround(from.blue() + ((to.blue() - from.blue()) * t))),
+        alpha);
+}
+
+QColor occupancyHeatmapColor(double ratio, int alpha) {
+    const auto t = std::clamp(ratio, 0.0, 1.0);
+    if (t < 0.24) {
+        return interpolateColor(QColor("#1d4ed8"), QColor("#06b6d4"), t / 0.24, alpha);
+    }
+    if (t < 0.48) {
+        return interpolateColor(QColor("#06b6d4"), QColor("#22c55e"), (t - 0.24) / 0.24, alpha);
+    }
+    if (t < 0.70) {
+        return interpolateColor(QColor("#22c55e"), QColor("#facc15"), (t - 0.48) / 0.22, alpha);
+    }
+    if (t < 0.86) {
+        return interpolateColor(QColor("#facc15"), QColor("#f97316"), (t - 0.70) / 0.16, alpha);
+    }
+    return interpolateColor(QColor("#f97316"), QColor("#dc2626"), (t - 0.86) / 0.14, alpha);
+}
+
+std::vector<double> boxBlurField(const std::vector<double>& source, int width, int height, int radius) {
+    if (source.empty() || width <= 0 || height <= 0 || radius <= 0) {
+        return source;
+    }
+
+    std::vector<double> horizontal(source.size(), 0.0);
+    std::vector<double> blurred(source.size(), 0.0);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            double sum = 0.0;
+            int count = 0;
+            const auto left = std::max(0, x - radius);
+            const auto right = std::min(width - 1, x + radius);
+            for (int sampleX = left; sampleX <= right; ++sampleX) {
+                sum += source[static_cast<std::size_t>(y * width + sampleX)];
+                ++count;
+            }
+            horizontal[static_cast<std::size_t>(y * width + x)] = count == 0 ? 0.0 : sum / static_cast<double>(count);
+        }
+    }
+
+    for (int y = 0; y < height; ++y) {
+        const auto top = std::max(0, y - radius);
+        const auto bottom = std::min(height - 1, y + radius);
+        for (int x = 0; x < width; ++x) {
+            double sum = 0.0;
+            int count = 0;
+            for (int sampleY = top; sampleY <= bottom; ++sampleY) {
+                sum += horizontal[static_cast<std::size_t>(sampleY * width + x)];
+                ++count;
+            }
+            blurred[static_cast<std::size_t>(y * width + x)] = count == 0 ? 0.0 : sum / static_cast<double>(count);
+        }
+    }
+    return blurred;
 }
 
 QColor pressureHeatmapColor(double ratio, int alpha) {
@@ -611,6 +672,12 @@ void SimulationCanvasWidget::setDensityOverlay(
     update();
 }
 
+void SimulationCanvasWidget::setOccupancyHeatmapOverlay(safecrowd::domain::OccupancyHeatmap heatmap) {
+    occupancyHeatmapOverlay_ = std::move(heatmap);
+    invalidateOverlayCache();
+    update();
+}
+
 void SimulationCanvasWidget::setPressureOverlay(
     std::vector<safecrowd::domain::PressureCellMetric> pressureCells,
     double scaleMaxPressureScore) {
@@ -1040,7 +1107,9 @@ void SimulationCanvasWidget::refreshOverlayCache(const LayoutCanvasBounds& bound
     QPainter painter(&overlayCache_);
     painter.setRenderHint(QPainter::Antialiasing, true);
     const auto transform = currentTransform(bounds);
-    if (overlayMode_ == ResultOverlayMode::Density) {
+    if (overlayMode_ == ResultOverlayMode::Occupancy) {
+        drawOccupancyHeatmapOverlay(painter, transform);
+    } else if (overlayMode_ == ResultOverlayMode::Density) {
         drawDensityOverlay(painter, transform);
     } else if (overlayMode_ == ResultOverlayMode::Pressure) {
         drawPressureOverlay(painter, transform);
@@ -1297,6 +1366,114 @@ void SimulationCanvasWidget::drawRouteGuidanceOverlay(QPainter& painter, const L
     painter.restore();
 }
 
+void SimulationCanvasWidget::drawOccupancyHeatmapOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const {
+    if (occupancyHeatmapOverlay_.cells.empty()
+        || occupancyHeatmapOverlay_.peakAccumulatedAgentSeconds <= 0.0) {
+        return;
+    }
+
+    std::vector<const safecrowd::domain::OccupancyHeatmapCell*> visibleCells;
+    visibleCells.reserve(occupancyHeatmapOverlay_.cells.size());
+    for (const auto& cell : occupancyHeatmapOverlay_.cells) {
+        if (!matchesFloor(cell.floorId, currentFloorId_)) {
+            continue;
+        }
+        if (cell.normalizedIntensity <= 0.0) {
+            continue;
+        }
+        visibleCells.push_back(&cell);
+    }
+    if (visibleCells.empty()) {
+        return;
+    }
+
+    painter.save();
+    painter.setPen(Qt::NoPen);
+    painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+    QPainterPath walkableClip;
+    for (const auto& zone : layout_.zones) {
+        if (!matchesFloor(zone.floorId, currentFloorId_)) {
+            continue;
+        }
+        walkableClip.addPath(layoutCanvasPolygonPath(zone.area, transform));
+    }
+    if (!walkableClip.isEmpty()) {
+        painter.setClipPath(walkableClip);
+    }
+
+    const auto logicalSize = size();
+    if (logicalSize.isEmpty()) {
+        painter.restore();
+        return;
+    }
+
+    constexpr double kRasterScale = 0.5;
+    const auto rasterWidth = std::max(1, static_cast<int>(std::ceil(logicalSize.width() * kRasterScale)));
+    const auto rasterHeight = std::max(1, static_cast<int>(std::ceil(logicalSize.height() * kRasterScale)));
+    std::vector<double> field(static_cast<std::size_t>(rasterWidth * rasterHeight), 0.0);
+    double maxCellScreenWidth = 0.0;
+
+    for (const auto* cell : visibleCells) {
+        const auto minPoint = transform.map(cell->cellMin);
+        const auto maxPoint = transform.map(cell->cellMax);
+        const auto left = std::min(minPoint.x(), maxPoint.x());
+        const auto right = std::max(minPoint.x(), maxPoint.x());
+        const auto top = std::min(minPoint.y(), maxPoint.y());
+        const auto bottom = std::max(minPoint.y(), maxPoint.y());
+        if (right < 0.0
+            || left > logicalSize.width()
+            || bottom < 0.0
+            || top > logicalSize.height()) {
+            continue;
+        }
+        maxCellScreenWidth = std::max(maxCellScreenWidth, std::max(right - left, bottom - top));
+
+        const auto x0 = std::clamp(static_cast<int>(std::floor(left * kRasterScale)), 0, rasterWidth - 1);
+        const auto x1 = std::clamp(static_cast<int>(std::ceil(right * kRasterScale)), x0, rasterWidth - 1);
+        const auto y0 = std::clamp(static_cast<int>(std::floor(top * kRasterScale)), 0, rasterHeight - 1);
+        const auto y1 = std::clamp(static_cast<int>(std::ceil(bottom * kRasterScale)), y0, rasterHeight - 1);
+        const auto intensity = std::clamp(cell->normalizedIntensity, 0.0, 1.0);
+        for (int y = y0; y <= y1; ++y) {
+            for (int x = x0; x <= x1; ++x) {
+                auto& value = field[static_cast<std::size_t>(y * rasterWidth + x)];
+                value = std::max(value, intensity);
+            }
+        }
+    }
+
+    const auto blurRadius = std::clamp(
+        static_cast<int>(std::ceil(std::max(1.0, maxCellScreenWidth * kRasterScale * 0.5))),
+        1,
+        5);
+    auto blurred = boxBlurField(field, rasterWidth, rasterHeight, blurRadius);
+    blurred = boxBlurField(blurred, rasterWidth, rasterHeight, std::max(1, blurRadius / 2));
+    if (*std::max_element(blurred.begin(), blurred.end()) <= 1e-9) {
+        painter.restore();
+        return;
+    }
+
+    QImage heatmapImage(rasterWidth, rasterHeight, QImage::Format_ARGB32);
+    heatmapImage.fill(Qt::transparent);
+    for (int y = 0; y < rasterHeight; ++y) {
+        for (int x = 0; x < rasterWidth; ++x) {
+            const auto value = blurred[static_cast<std::size_t>(y * rasterWidth + x)];
+            if (value <= 0.002) {
+                continue;
+            }
+            const auto intensity = std::clamp(std::pow(value, 0.70), 0.0, 1.0);
+            const auto alpha = std::clamp(
+                44 + static_cast<int>(199.0 * std::sqrt(intensity)),
+                0,
+                243);
+            heatmapImage.setPixelColor(x, y, occupancyHeatmapColor(intensity, alpha));
+        }
+    }
+
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    painter.drawImage(QRectF(0, 0, logicalSize.width(), logicalSize.height()), heatmapImage);
+    painter.restore();
+}
+
 void SimulationCanvasWidget::drawDensityOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const {
     if (densityOverlay_.empty()) {
         return;
@@ -1317,12 +1494,6 @@ void SimulationCanvasWidget::drawDensityOverlay(QPainter& painter, const LayoutC
         std::isfinite(densityScaleMaxPeoplePerSquareMeter_) && densityScaleMaxPeoplePerSquareMeter_ > 0.0
         ? densityScaleMaxPeoplePerSquareMeter_
         : kDefaultDensityScaleMaxPeoplePerSquareMeter;
-    std::sort(visibleCells.begin(), visibleCells.end(), [](const auto* lhs, const auto* rhs) {
-        if (lhs->densityPeoplePerSquareMeter != rhs->densityPeoplePerSquareMeter) {
-            return lhs->densityPeoplePerSquareMeter < rhs->densityPeoplePerSquareMeter;
-        }
-        return lhs->agentCount < rhs->agentCount;
-    });
 
     painter.save();
     painter.setPen(Qt::NoPen);
@@ -1335,40 +1506,83 @@ void SimulationCanvasWidget::drawDensityOverlay(QPainter& painter, const LayoutC
         walkableClip.addPath(layoutCanvasPolygonPath(zone.area, transform));
     }
     if (!walkableClip.isEmpty()) {
-        // Areas without a density sample still represent the zero point of the density scale.
-        painter.fillPath(walkableClip, densityHeatmapColor(0.0, kDensityZeroBaseAlpha));
         painter.setClipPath(walkableClip);
     }
 
-    for (const auto* cell : visibleCells) {
-        const auto center = transform.map(cell->center);
-        const auto cellWidth = cell->cellMax.x > cell->cellMin.x
-            ? cell->cellMax.x - cell->cellMin.x
-            : kDefaultHotspotCellSize;
-        const auto cellHeight = cell->cellMax.y > cell->cellMin.y
-            ? cell->cellMax.y - cell->cellMin.y
-            : kDefaultHotspotCellSize;
-        const auto influenceRadiusWorld =
-            std::max(cellWidth, cellHeight) * kDensityInfluenceRadiusMultiplier;
-        const auto radiusAnchor = transform.map({
-            .x = cell->center.x + influenceRadiusWorld,
-            .y = cell->center.y,
-        });
-        const auto radius = std::max(
-            kDensityMinimumScreenRadius,
-            std::hypot(radiusAnchor.x() - center.x(), radiusAnchor.y() - center.y()));
-        const auto intensity = std::clamp(cell->densityPeoplePerSquareMeter / scaleMax, 0.0, 1.0);
-        const auto coreAlpha = 58 + static_cast<int>(118.0 * intensity);
-        const auto coreColor = densityHeatmapColor(intensity, std::clamp(coreAlpha, 58, 176));
-        const auto middleColor = densityHeatmapColor(intensity, static_cast<int>(coreAlpha * 0.42));
-
-        QRadialGradient gradient(center, radius);
-        gradient.setColorAt(0.0, coreColor);
-        gradient.setColorAt(0.38, middleColor);
-        gradient.setColorAt(1.0, densityHeatmapColor(intensity, 0));
-        painter.setBrush(gradient);
-        painter.drawEllipse(center, radius, radius);
+    const auto logicalSize = size();
+    if (logicalSize.isEmpty()) {
+        painter.restore();
+        return;
     }
+
+    constexpr double kRasterScale = 0.5;
+    const auto rasterWidth = std::max(1, static_cast<int>(std::ceil(logicalSize.width() * kRasterScale)));
+    const auto rasterHeight = std::max(1, static_cast<int>(std::ceil(logicalSize.height() * kRasterScale)));
+    std::vector<double> field(static_cast<std::size_t>(rasterWidth * rasterHeight), 0.0);
+    double maxCellScreenWidth = 0.0;
+
+    for (const auto* cell : visibleCells) {
+        const auto intensity = std::clamp(cell->densityPeoplePerSquareMeter / scaleMax, 0.0, 1.0);
+        if (intensity <= 0.0) {
+            continue;
+        }
+
+        const auto minPoint = transform.map(cell->cellMin);
+        const auto maxPoint = transform.map(cell->cellMax);
+        const auto left = std::min(minPoint.x(), maxPoint.x());
+        const auto right = std::max(minPoint.x(), maxPoint.x());
+        const auto top = std::min(minPoint.y(), maxPoint.y());
+        const auto bottom = std::max(minPoint.y(), maxPoint.y());
+        if (right < 0.0
+            || left > logicalSize.width()
+            || bottom < 0.0
+            || top > logicalSize.height()) {
+            continue;
+        }
+        maxCellScreenWidth = std::max(maxCellScreenWidth, std::max(right - left, bottom - top));
+
+        const auto x0 = std::clamp(static_cast<int>(std::floor(left * kRasterScale)), 0, rasterWidth - 1);
+        const auto x1 = std::clamp(static_cast<int>(std::ceil(right * kRasterScale)), x0, rasterWidth - 1);
+        const auto y0 = std::clamp(static_cast<int>(std::floor(top * kRasterScale)), 0, rasterHeight - 1);
+        const auto y1 = std::clamp(static_cast<int>(std::ceil(bottom * kRasterScale)), y0, rasterHeight - 1);
+        for (int y = y0; y <= y1; ++y) {
+            for (int x = x0; x <= x1; ++x) {
+                auto& value = field[static_cast<std::size_t>(y * rasterWidth + x)];
+                value = std::max(value, intensity);
+            }
+        }
+    }
+
+    const auto blurRadius = std::clamp(
+        static_cast<int>(std::ceil(std::max(1.0, maxCellScreenWidth * kRasterScale * 0.5))),
+        1,
+        10);
+    auto blurred = boxBlurField(field, rasterWidth, rasterHeight, blurRadius);
+    blurred = boxBlurField(blurred, rasterWidth, rasterHeight, std::max(1, blurRadius / 2));
+    if (*std::max_element(blurred.begin(), blurred.end()) <= 1e-9) {
+        painter.restore();
+        return;
+    }
+
+    QImage heatmapImage(rasterWidth, rasterHeight, QImage::Format_ARGB32);
+    heatmapImage.fill(Qt::transparent);
+    for (int y = 0; y < rasterHeight; ++y) {
+        for (int x = 0; x < rasterWidth; ++x) {
+            const auto value = blurred[static_cast<std::size_t>(y * rasterWidth + x)];
+            if (value <= 0.002) {
+                continue;
+            }
+            const auto intensity = std::clamp(std::pow(value, 0.82), 0.0, 1.0);
+            const auto alpha = std::clamp(
+                52 + static_cast<int>(178.0 * std::sqrt(intensity)),
+                0,
+                230);
+            heatmapImage.setPixelColor(x, y, densityHeatmapColor(intensity, alpha));
+        }
+    }
+
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    painter.drawImage(QRectF(0, 0, logicalSize.width(), logicalSize.height()), heatmapImage);
     painter.restore();
 }
 

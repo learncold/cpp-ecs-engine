@@ -543,6 +543,50 @@ private:
     double peakDensity_{0.0};
 };
 
+class OccupancyLegendWidget final : public QWidget {
+public:
+    explicit OccupancyLegendWidget(
+        const safecrowd::domain::OccupancyHeatmap& heatmap,
+        QWidget* parent = nullptr)
+        : QWidget(parent),
+          peakAgentSeconds_(heatmap.peakAccumulatedAgentSeconds) {
+        setFixedSize(300, 34);
+        setToolTip("Occupancy heatmap is normalized from the accumulated agent-time peak.");
+    }
+
+protected:
+    void paintEvent(QPaintEvent* event) override {
+        (void)event;
+
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+
+        const QRectF ramp(0, 4, width(), 9);
+        QLinearGradient gradient(ramp.left(), ramp.center().y(), ramp.right(), ramp.center().y());
+        gradient.setColorAt(0.0, QColor("#1d4ed8"));
+        gradient.setColorAt(0.24, QColor("#06b6d4"));
+        gradient.setColorAt(0.48, QColor("#22c55e"));
+        gradient.setColorAt(0.70, QColor("#facc15"));
+        gradient.setColorAt(0.86, QColor("#f97316"));
+        gradient.setColorAt(1.0, QColor("#dc2626"));
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(gradient);
+        painter.drawRoundedRect(ramp, 4, 4);
+
+        painter.setFont(ui::font(ui::FontRole::Caption));
+        painter.setPen(QColor("#687789"));
+        painter.drawText(QRectF(0, 16, 60, 16), Qt::AlignLeft | Qt::AlignVCenter, "Low");
+        painter.drawText(QRectF(92, 16, 116, 16), Qt::AlignCenter, "Accumulated");
+        painter.drawText(
+            QRectF(width() - 120, 16, 120, 16),
+            Qt::AlignRight | Qt::AlignVCenter,
+            QString("Peak %1s").arg(peakAgentSeconds_, 0, 'f', 1));
+    }
+
+private:
+    double peakAgentSeconds_{0.0};
+};
+
 class PressureLegendWidget final : public QWidget {
 public:
     explicit PressureLegendWidget(
@@ -1038,6 +1082,7 @@ QWidget* createResultCanvasPanel(
     auto* overlayLabel = createLabel("Map overlay", overlayBar, ui::FontRole::Caption);
     overlayLabel->setStyleSheet(ui::mutedTextStyleSheet());
     auto* overlayCombo = new QComboBox(overlayBar);
+    overlayCombo->addItem("Occupancy", static_cast<int>(ResultOverlayMode::Occupancy));
     overlayCombo->addItem("Peak Density", static_cast<int>(ResultOverlayMode::Density));
     overlayCombo->addItem("Pressure", static_cast<int>(ResultOverlayMode::Pressure));
     overlayCombo->addItem("Bottlenecks", static_cast<int>(ResultOverlayMode::Bottlenecks));
@@ -1048,13 +1093,18 @@ QWidget* createResultCanvasPanel(
     overlayLayout->addWidget(overlayLabel);
     overlayLayout->addWidget(overlayCombo);
     overlayLayout->addSpacing(10);
+    auto* occupancyLegend = new OccupancyLegendWidget(artifacts.occupancyHeatmap, overlayBar);
     auto* densityLegend = new DensityLegendWidget(artifacts.densitySummary, overlayBar);
     auto* pressureLegend = new PressureLegendWidget(artifacts.pressureSummary, overlayBar);
+    occupancyLegend->setVisible(false);
+    densityLegend->setVisible(false);
     pressureLegend->setVisible(false);
+    overlayLayout->addWidget(occupancyLegend);
     overlayLayout->addWidget(densityLegend);
     overlayLayout->addWidget(pressureLegend);
     overlayLayout->addStretch(1);
     layout->addWidget(overlayBar);
+    canvas->setOccupancyHeatmapOverlay(artifacts.occupancyHeatmap);
     canvas->setDensityOverlay(artifacts.densitySummary.peakField.cells.empty()
             ? artifacts.densitySummary.peakCells
             : artifacts.densitySummary.peakField.cells,
@@ -1067,16 +1117,23 @@ QWidget* createResultCanvasPanel(
             artifacts.pressureSummary.peakPressureScore));
     const QPointer<SimulationCanvasWidget> canvasGuard(canvas);
     const QPointer<QComboBox> overlayComboGuard(overlayCombo);
+    const QPointer<QWidget> occupancyLegendGuard(occupancyLegend);
     const QPointer<QWidget> densityLegendGuard(densityLegend);
     const QPointer<QWidget> pressureLegendGuard(pressureLegend);
+    const auto defaultOverlayMode = artifacts.occupancyHeatmap.cells.empty()
+        ? ResultOverlayMode::Density
+        : ResultOverlayMode::Occupancy;
     const std::function<void(ResultOverlayMode)> applyOverlayMode =
-        [canvasGuard, overlayComboGuard, densityLegendGuard, pressureLegendGuard](ResultOverlayMode mode) {
+        [canvasGuard, overlayComboGuard, occupancyLegendGuard, densityLegendGuard, pressureLegendGuard](ResultOverlayMode mode) {
             if (overlayComboGuard != nullptr) {
                 const auto comboIndex = overlayComboGuard->findData(static_cast<int>(mode));
                 if (comboIndex >= 0 && overlayComboGuard->currentIndex() != comboIndex) {
                     const QSignalBlocker blocker(overlayComboGuard);
                     overlayComboGuard->setCurrentIndex(comboIndex);
                 }
+            }
+            if (occupancyLegendGuard != nullptr) {
+                occupancyLegendGuard->setVisible(mode == ResultOverlayMode::Occupancy);
             }
             if (densityLegendGuard != nullptr) {
                 densityLegendGuard->setVisible(mode == ResultOverlayMode::Density);
@@ -1091,7 +1148,7 @@ QWidget* createResultCanvasPanel(
     if (overlayModeHandlerOut != nullptr) {
         *overlayModeHandlerOut = applyOverlayMode;
     }
-    applyOverlayMode(ResultOverlayMode::Density);
+    applyOverlayMode(defaultOverlayMode);
     QObject::connect(overlayCombo, &QComboBox::currentIndexChanged, panel, [overlayComboGuard, applyOverlayMode](int index) {
         if (overlayComboGuard == nullptr || index < 0) {
             return;

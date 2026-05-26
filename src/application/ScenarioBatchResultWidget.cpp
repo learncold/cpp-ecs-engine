@@ -1014,6 +1014,7 @@ QWidget* ScenarioBatchResultWidget::createCanvasPanel() {
     selectorLayout->addWidget(overlayLabel);
 
     overlayCombo_ = new QComboBox(selectorBar);
+    overlayCombo_->addItem("Occupancy", static_cast<int>(OverlayMode::Occupancy));
     overlayCombo_->addItem("Density", static_cast<int>(OverlayMode::Density));
     overlayCombo_->addItem("Pressure", static_cast<int>(OverlayMode::Pressure));
     overlayCombo_->addItem("Hotspots", static_cast<int>(OverlayMode::Hotspots));
@@ -1431,6 +1432,7 @@ void ScenarioBatchResultWidget::applySelectedResultStaticCanvasState() {
     canvas_->setHotspotOverlay(result.risk.hotspots);
     canvas_->setBottleneckOverlay(result.risk.bottlenecks);
     canvas_->setCrossFlowOverlay(result.risk.crossFlowCells);
+    canvas_->setOccupancyHeatmapOverlay(result.artifacts.occupancyHeatmap);
     canvas_->setDensityOverlay(
         result.artifacts.densitySummary.peakField.cells.empty()
             ? result.artifacts.densitySummary.peakCells
@@ -1451,6 +1453,16 @@ void ScenarioBatchResultWidget::applyOverlayModeToCanvas() {
         return;
     }
     switch (overlayMode_) {
+    case OverlayMode::Occupancy:
+        if (!results_.empty()
+            && currentResultIndex_ >= 0
+            && currentResultIndex_ < static_cast<int>(results_.size())
+            && !results_[static_cast<std::size_t>(currentResultIndex_)].artifacts.occupancyHeatmap.cells.empty()) {
+            canvas_->setResultOverlayMode(ResultOverlayMode::Occupancy);
+        } else {
+            canvas_->setResultOverlayMode(ResultOverlayMode::Density);
+        }
+        break;
     case OverlayMode::Pressure:
         canvas_->setResultOverlayMode(ResultOverlayMode::Pressure);
         break;

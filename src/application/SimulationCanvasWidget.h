@@ -29,6 +29,7 @@ namespace safecrowd::application {
 
 enum class ResultOverlayMode {
     None,
+    Occupancy,
     Density,
     Pressure,
     Hotspots,
@@ -48,6 +49,7 @@ public:
     void setDensityOverlay(
         std::vector<safecrowd::domain::DensityCellMetric> densityCells,
         double scaleMaxPeoplePerSquareMeter = 4.0);
+    void setOccupancyHeatmapOverlay(safecrowd::domain::OccupancyHeatmap heatmap);
     void setPressureOverlay(
         std::vector<safecrowd::domain::PressureCellMetric> pressureCells,
         double scaleMaxPressureScore = 1.0);
@@ -83,6 +85,7 @@ private:
     void drawConnectionBlockOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawEnvironmentHazardOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawRouteGuidanceOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
+    void drawOccupancyHeatmapOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawDensityOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawPressureOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawHotspotOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
@@ -98,6 +101,7 @@ private:
     std::vector<safecrowd::domain::ConnectionBlockDraft> connectionBlocks_{};
     std::vector<safecrowd::domain::EnvironmentHazardDraft> environmentHazards_{};
     std::vector<safecrowd::domain::RouteGuidanceDraft> routeGuidances_{};
+    safecrowd::domain::OccupancyHeatmap occupancyHeatmapOverlay_{};
     std::vector<safecrowd::domain::DensityCellMetric> densityOverlay_{};
     double densityScaleMaxPeoplePerSquareMeter_{4.0};
     std::vector<safecrowd::domain::PressureCellMetric> pressureOverlay_{};

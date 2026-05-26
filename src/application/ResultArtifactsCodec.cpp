@@ -469,6 +469,54 @@ safecrowd::domain::DensitySummary densitySummaryFromJson(const QJsonObject& obje
     return summary;
 }
 
+QJsonObject occupancyHeatmapCellToJson(const safecrowd::domain::OccupancyHeatmapCell& cell) {
+    QJsonObject object;
+    object["center"] = pointArray(cell.center);
+    object["cellMin"] = pointArray(cell.cellMin);
+    object["cellMax"] = pointArray(cell.cellMax);
+    object["floorId"] = QString::fromStdString(cell.floorId);
+    object["accumulatedAgentSeconds"] = cell.accumulatedAgentSeconds;
+    object["normalizedIntensity"] = cell.normalizedIntensity;
+    return object;
+}
+
+safecrowd::domain::OccupancyHeatmapCell occupancyHeatmapCellFromJson(const QJsonObject& object) {
+    return {
+        .center = pointFromJson(object.value("center")),
+        .cellMin = pointFromJson(object.value("cellMin")),
+        .cellMax = pointFromJson(object.value("cellMax")),
+        .floorId = object.value("floorId").toString().toStdString(),
+        .accumulatedAgentSeconds = object.value("accumulatedAgentSeconds").toDouble(),
+        .normalizedIntensity = object.value("normalizedIntensity").toDouble(),
+    };
+}
+
+QJsonObject occupancyHeatmapToJson(const safecrowd::domain::OccupancyHeatmap& heatmap) {
+    QJsonObject object;
+    object["cellSizeMeters"] = heatmap.cellSizeMeters;
+    object["kernelRadiusMeters"] = heatmap.kernelRadiusMeters;
+    object["accumulatedSeconds"] = heatmap.accumulatedSeconds;
+    object["peakAccumulatedAgentSeconds"] = heatmap.peakAccumulatedAgentSeconds;
+    QJsonArray cells;
+    for (const auto& cell : heatmap.cells) {
+        cells.append(occupancyHeatmapCellToJson(cell));
+    }
+    object["cells"] = cells;
+    return object;
+}
+
+safecrowd::domain::OccupancyHeatmap occupancyHeatmapFromJson(const QJsonObject& object) {
+    safecrowd::domain::OccupancyHeatmap heatmap;
+    heatmap.cellSizeMeters = object.value("cellSizeMeters").toDouble();
+    heatmap.kernelRadiusMeters = object.value("kernelRadiusMeters").toDouble();
+    heatmap.accumulatedSeconds = object.value("accumulatedSeconds").toDouble();
+    heatmap.peakAccumulatedAgentSeconds = object.value("peakAccumulatedAgentSeconds").toDouble();
+    for (const auto& value : object.value("cells").toArray()) {
+        heatmap.cells.push_back(occupancyHeatmapCellFromJson(value.toObject()));
+    }
+    return heatmap;
+}
+
 QJsonObject pressureCellMetricToJson(const safecrowd::domain::PressureCellMetric& cell) {
     QJsonObject object;
     object["center"] = pointArray(cell.center);
@@ -811,6 +859,7 @@ QJsonObject resultArtifactsToJson(const safecrowd::domain::ScenarioResultArtifac
     object["timingSummary"] = timing;
 
     object["densitySummary"] = densitySummaryToJson(artifacts.densitySummary);
+    object["occupancyHeatmap"] = occupancyHeatmapToJson(artifacts.occupancyHeatmap);
     object["pressureSummary"] = pressureSummaryToJson(artifacts.pressureSummary);
     object["hazardExposureSummary"] = hazardExposureSummaryToJson(artifacts.hazardExposureSummary);
     object["crossFlowSummary"] = crossFlowSummaryToJson(artifacts.crossFlowSummary);
@@ -873,6 +922,9 @@ safecrowd::domain::ScenarioResultArtifacts resultArtifactsFromJson(const QJsonOb
 
     if (object.value("densitySummary").isObject()) {
         artifacts.densitySummary = densitySummaryFromJson(object.value("densitySummary").toObject());
+    }
+    if (object.value("occupancyHeatmap").isObject()) {
+        artifacts.occupancyHeatmap = occupancyHeatmapFromJson(object.value("occupancyHeatmap").toObject());
     }
     if (object.value("pressureSummary").isObject()) {
         artifacts.pressureSummary = pressureSummaryFromJson(object.value("pressureSummary").toObject());

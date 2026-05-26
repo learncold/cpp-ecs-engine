@@ -157,8 +157,13 @@ struct ScenarioResultArtifactsResource {
     double nextReplaySampleTimeSeconds{0.0};
     double replaySampleIntervalSeconds{0.5};
     std::size_t maxReplayFrames{600};
+    double nextOccupancySampleTimeSeconds{0.0};
+    double occupancySampleIntervalSeconds{0.25};
+    bool occupancyTrackingInitialized{false};
+    double lastOccupancySampleTimeSeconds{0.0};
     bool densityTrackingInitialized{false};
     double lastDensitySampleTimeSeconds{0.0};
+    std::unordered_map<long long, OccupancyHeatmapCell> occupancyHeatmapCellsByAddress{};
     std::unordered_map<long long, DensityCellMetric> peakDensityCellsByAddress{};
     std::unordered_map<long long, PressureCellMetric> peakPressureCellsByAddress{};
     std::unordered_map<long long, ScenarioPressureHotspot> peakPressureHotspotsByAddress{};

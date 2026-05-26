@@ -26,6 +26,10 @@ constexpr std::size_t kMaxResultPressureCells = 5;
 constexpr std::size_t kMaxResultPressureHotspots = 5;
 constexpr std::size_t kMaxResultPressureAgents = 5;
 constexpr std::size_t kMaxResultCriticalPressureEvents = 5;
+constexpr double kOccupancyHeatmapSampleIntervalSeconds = 0.25;
+constexpr double kOccupancyHeatmapCellSizeMeters = 0.35;
+constexpr double kOccupancyHeatmapKernelRadiusMeters = 0.50;
+constexpr double kOccupancyHeatmapKernelSigmaMeters = 0.20;
 constexpr double kHighDensityThresholdPeoplePerSquareMeter =
     kPressureHighDensityThresholdPeoplePerSquareMeter;
 
@@ -246,6 +250,119 @@ DensityCellMetric densityMetricFromCell(
             ? 0.0
             : count / (cellSize * cellSize),
     };
+}
+
+void accumulateOccupancyHeatmap(
+    ScenarioResultArtifactsResource& result,
+    engine::WorldQuery& query,
+    double elapsedSeconds,
+    bool forceSample) {
+    const bool firstSample = !result.occupancyTrackingInitialized;
+    if (firstSample) {
+        result.occupancyTrackingInitialized = true;
+        result.lastOccupancySampleTimeSeconds = elapsedSeconds;
+        result.nextOccupancySampleTimeSeconds = elapsedSeconds + result.occupancySampleIntervalSeconds;
+    }
+
+    if (!firstSample && !forceSample && elapsedSeconds + 1e-9 < result.nextOccupancySampleTimeSeconds) {
+        return;
+    }
+
+    const auto deltaSeconds = firstSample
+        ? result.occupancySampleIntervalSeconds
+        : std::max(0.0, elapsedSeconds - result.lastOccupancySampleTimeSeconds);
+    result.lastOccupancySampleTimeSeconds = elapsedSeconds;
+    while (result.nextOccupancySampleTimeSeconds <= elapsedSeconds + 1e-9) {
+        result.nextOccupancySampleTimeSeconds += result.occupancySampleIntervalSeconds;
+    }
+    if (deltaSeconds <= 1e-9) {
+        return;
+    }
+
+    constexpr auto cellSize = kOccupancyHeatmapCellSizeMeters;
+    constexpr auto kernelRadius = kOccupancyHeatmapKernelRadiusMeters;
+    constexpr auto sigma = kOccupancyHeatmapKernelSigmaMeters;
+    constexpr auto twoSigmaSquared = 2.0 * sigma * sigma;
+    const auto range = std::max(1, static_cast<int>(std::ceil(kernelRadius / cellSize)));
+    const auto activeEntities = query.view<Position, EvacuationStatus>();
+    result.artifacts.occupancyHeatmap.accumulatedSeconds += deltaSeconds;
+
+    for (const auto entity : activeEntities) {
+        if (query.get<EvacuationStatus>(entity).evacuated) {
+            continue;
+        }
+
+        const auto& position = query.get<Position>(entity);
+        const auto floorId = query.contains<EvacuationRoute>(entity)
+            ? (!query.get<EvacuationRoute>(entity).displayFloorId.empty()
+                ? query.get<EvacuationRoute>(entity).displayFloorId
+                : query.get<EvacuationRoute>(entity).currentFloorId)
+            : std::string{};
+        const auto centerCell = spatialCellFor(position.value, cellSize);
+        for (int dy = -range; dy <= range; ++dy) {
+            for (int dx = -range; dx <= range; ++dx) {
+                const SpatialCell spatialCell{.x = centerCell.x + dx, .y = centerCell.y + dy};
+                const auto min = spatialCellMin(spatialCell, cellSize);
+                const auto max = spatialCellMax(spatialCell, cellSize);
+                const Point2D cellCenter{
+                    .x = (min.x + max.x) * 0.5,
+                    .y = (min.y + max.y) * 0.5,
+                };
+                const auto distanceSquared =
+                    ((cellCenter.x - position.value.x) * (cellCenter.x - position.value.x))
+                    + ((cellCenter.y - position.value.y) * (cellCenter.y - position.value.y));
+                if (distanceSquared > kernelRadius * kernelRadius) {
+                    continue;
+                }
+
+                const auto weight = std::exp(-distanceSquared / twoSigmaSquared);
+                const DensityCellAddress address{.cell = spatialCell, .floorId = floorId};
+                auto& heatmapCell = result.occupancyHeatmapCellsByAddress[densitySpatialKey(address)];
+                if (heatmapCell.cellMax.x <= heatmapCell.cellMin.x
+                    || heatmapCell.cellMax.y <= heatmapCell.cellMin.y) {
+                    heatmapCell.center = cellCenter;
+                    heatmapCell.cellMin = min;
+                    heatmapCell.cellMax = max;
+                    heatmapCell.floorId = floorId;
+                }
+                heatmapCell.accumulatedAgentSeconds += weight * deltaSeconds;
+            }
+        }
+    }
+}
+
+void refreshOccupancyHeatmapArtifact(ScenarioResultArtifactsResource& result) {
+    auto& heatmap = result.artifacts.occupancyHeatmap;
+    heatmap.cellSizeMeters = kOccupancyHeatmapCellSizeMeters;
+    heatmap.kernelRadiusMeters = kOccupancyHeatmapKernelRadiusMeters;
+    heatmap.peakAccumulatedAgentSeconds = 0.0;
+    heatmap.cells.clear();
+    heatmap.cells.reserve(result.occupancyHeatmapCellsByAddress.size());
+
+    for (const auto& [_, cell] : result.occupancyHeatmapCellsByAddress) {
+        heatmap.peakAccumulatedAgentSeconds =
+            std::max(heatmap.peakAccumulatedAgentSeconds, cell.accumulatedAgentSeconds);
+    }
+    if (heatmap.peakAccumulatedAgentSeconds <= 0.0) {
+        return;
+    }
+
+    for (const auto& [_, cell] : result.occupancyHeatmapCellsByAddress) {
+        if (cell.accumulatedAgentSeconds <= 1e-9) {
+            continue;
+        }
+        auto normalizedCell = cell;
+        normalizedCell.normalizedIntensity =
+            std::clamp(cell.accumulatedAgentSeconds / heatmap.peakAccumulatedAgentSeconds, 0.0, 1.0);
+        heatmap.cells.push_back(std::move(normalizedCell));
+    }
+
+    std::sort(heatmap.cells.begin(), heatmap.cells.end(), [](const auto& lhs, const auto& rhs) {
+        if (lhs.normalizedIntensity != rhs.normalizedIntensity) {
+            return lhs.normalizedIntensity > rhs.normalizedIntensity;
+        }
+        return lhs.accumulatedAgentSeconds > rhs.accumulatedAgentSeconds;
+    });
 }
 
 PressureCellMetric pressureMetricFromCell(
@@ -1193,6 +1310,8 @@ void ScenarioResultArtifactsSystem::configure(engine::EngineWorld& world) {
         .nextReplaySampleTimeSeconds = 0.0,
         .replaySampleIntervalSeconds = kReplaySampleIntervalSeconds,
         .maxReplayFrames = kMaxReplayFrames,
+        .nextOccupancySampleTimeSeconds = 0.0,
+        .occupancySampleIntervalSeconds = kOccupancyHeatmapSampleIntervalSeconds,
     });
 }
 
@@ -1226,6 +1345,8 @@ void ScenarioResultArtifactsSystem::update(engine::EngineWorld& world, const eng
             ++evacuatedCount;
         }
     }
+
+    accumulateOccupancyHeatmap(result, query, elapsedSeconds, complete);
 
     const auto shouldRecordSample =
         result.artifacts.evacuationProgress.empty()
@@ -1376,6 +1497,8 @@ void ScenarioResultArtifactsSystem::update(engine::EngineWorld& world, const eng
         return lhs.lastCompletionTimeSeconds.value_or(std::numeric_limits<double>::infinity())
             > rhs.lastCompletionTimeSeconds.value_or(std::numeric_limits<double>::infinity());
     });
+
+    refreshOccupancyHeatmapArtifact(result);
 
     std::unordered_map<long long, DensityCellAccumulator> densityCells;
     const auto activeEntities = query.view<Position, Agent, EvacuationStatus>();
