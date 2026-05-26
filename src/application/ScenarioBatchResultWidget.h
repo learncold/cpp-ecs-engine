@@ -46,12 +46,13 @@ public:
 
 private:
     enum class OverlayMode {
-        Density = 0,
-        Pressure = 1,
-        Hotspots = 2,
-        Bottlenecks = 3,
-        CrossFlow = 4,
-        None = 5,
+        Occupancy = 0,
+        Density = 1,
+        Pressure = 2,
+        Hotspots = 3,
+        Bottlenecks = 4,
+        CrossFlow = 5,
+        None = 6,
     };
 
     QWidget* createCanvasPanel();
@@ -115,7 +116,7 @@ private:
     QWidget* remainingChart_{nullptr};
     QWidget* exitsChart_{nullptr};
     QTimer* replayTimer_{nullptr};
-    OverlayMode overlayMode_{OverlayMode::Density};
+    OverlayMode overlayMode_{OverlayMode::Occupancy};
     ScenarioResultNavigationView resultNavigationView_{ScenarioResultNavigationView::Bottleneck};
 };
 
