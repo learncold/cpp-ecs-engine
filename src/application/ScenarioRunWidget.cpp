@@ -26,7 +26,6 @@
 
 #include "application/ScenarioAuthoringWidget.h"
 #include "application/ScenarioBatchResultWidget.h"
-#include "application/ScenarioResultWidget.h"
 #include "application/SimulationCanvasWidget.h"
 #include "application/ToolIconResources.h"
 #include "application/UiStyle.h"
@@ -1087,34 +1086,16 @@ void ScenarioRunWidget::showResults() {
         return;
     }
 
-    QWidget* resultWidget = nullptr;
-    if (results.size() == 1) {
-        const auto& result = results.front();
-        resultWidget = new ScenarioResultWidget(
-            projectName_,
-            layout_,
-            result.scenario,
-            result.frame,
-            result.risk,
-            result.artifacts,
-            saveProjectHandler_,
-            openProjectHandler_,
-            backToLayoutReviewHandler_,
-            SavedResultNavigationView::Bottleneck,
-            returnAuthoringState_,
-            this);
-    } else {
-        resultWidget = new ScenarioBatchResultWidget(
-            projectName_,
-            layout_,
-            std::move(results),
-            saveProjectHandler_,
-            openProjectHandler_,
-            backToLayoutReviewHandler_,
-            returnAuthoringState_,
-            selectedRunIndex_,
-            this);
-    }
+    auto* resultWidget = new ScenarioBatchResultWidget(
+        projectName_,
+        layout_,
+        std::move(results),
+        saveProjectHandler_,
+        openProjectHandler_,
+        backToLayoutReviewHandler_,
+        returnAuthoringState_,
+        selectedRunIndex_,
+        this);
     rootLayout->replaceWidget(shell_, resultWidget);
     shell_->hide();
     shell_->deleteLater();
