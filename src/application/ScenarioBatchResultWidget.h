@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <functional>
 #include <optional>
 #include <vector>
@@ -56,7 +57,10 @@ private:
     };
 
     QWidget* createCanvasPanel();
-    QWidget* createSummaryPanel();
+    QWidget* createRightPanelContainer();
+    QWidget* createDetailPanel();
+    QWidget* createOverviewPanel();
+    QWidget* createPanelToggleBar();
     void createRecommendedScenario(safecrowd::domain::ScenarioDraft recommendedScenario);
     void advanceReplay();
     void applyReplayFrame(int frameIndex);
@@ -69,15 +73,21 @@ private:
     void pauseReplay();
     void refreshComparisonSelection();
     void refreshComparisonCountLabel();
+    void refreshDetailPanel();
     void refreshExposureComparisonTable();
+    void refreshOverviewPanel();
+    void refreshPanelToggles();
     void refreshPressureComparisonTable();
     void refreshResultNavigationPanel();
+    void refreshRightPanel();
     void refreshSelectedResult();
     void rerunBatch();
     void seekToTimingMarkerSeconds(double seconds);
     void selectAllComparisonScenarios();
     void selectBaselineAndCurrentComparisonScenarios();
     void clearComparisonScenarios();
+    void clearDetailSelection();
+    void setDetailSelection(ScenarioResultNavigationView view, std::size_t index);
     void setComparisonSelection(std::vector<int> indices);
     void setRecommendationScenarioSelected(int index, bool selected);
     void setOverlayMode(OverlayMode mode);
@@ -85,6 +95,7 @@ private:
     void showClosestReplayFrameAtSeconds(double seconds);
     void showReplayFrame(const safecrowd::domain::SimulationFrame& frame);
     void syncCompareCheckBoxes();
+    QString detailTextForSelection(ScenarioResultNavigationView view, std::size_t index) const;
     QWidget* createBatchRecommendationNavigationPanel();
     int explicitBaselineResultIndex() const noexcept;
     int baselineResultIndex() const noexcept;
@@ -108,16 +119,24 @@ private:
     QPushButton* playButton_{nullptr};
     QSlider* replaySlider_{nullptr};
     QLabel* replayTimeLabel_{nullptr};
-    QLabel* detailLabel_{nullptr};
+    QLabel* overviewScenarioLabel_{nullptr};
+    QLabel* resultDetailLabel_{nullptr};
     QLabel* comparisonCountLabel_{nullptr};
     QTableWidget* exposureTable_{nullptr};
     QTableWidget* pressureTable_{nullptr};
+    QPushButton* detailPanelToggleButton_{nullptr};
+    QPushButton* overviewPanelToggleButton_{nullptr};
     std::vector<QCheckBox*> compareCheckBoxes_{};
     QWidget* remainingChart_{nullptr};
     QWidget* exitsChart_{nullptr};
     QTimer* replayTimer_{nullptr};
     OverlayMode overlayMode_{OverlayMode::Occupancy};
     ScenarioResultNavigationView resultNavigationView_{ScenarioResultNavigationView::Bottleneck};
+    std::optional<ScenarioResultNavigationView> detailSelectionView_{};
+    std::optional<std::size_t> detailSelectionIndex_{};
+    int detailSelectionResultIndex_{-1};
+    bool detailPanelVisible_{true};
+    bool overviewPanelVisible_{true};
 };
 
 }  // namespace safecrowd::application

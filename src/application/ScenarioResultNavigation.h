@@ -35,6 +35,7 @@ QWidget* createScenarioResultNavigationPanel(
     std::function<void(std::size_t)> bottleneckFocusHandler,
     std::function<void(std::size_t)> crossFlowCellFocusHandler,
     std::function<void(std::size_t)> hotspotFocusHandler,
+    std::function<void(ScenarioResultNavigationView, std::size_t)> itemSelectionHandler,
     QWidget* parent);
 
 QWidget* createScenarioRecommendationNavigationPanel(
