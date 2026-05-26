@@ -33,10 +33,7 @@ constexpr double kDefaultHotspotCellSize = 1.5;
 constexpr double kHotspotFocusZoom = 2.8;
 constexpr double kBottleneckFocusZoom = 2.4;
 constexpr double kCrossFlowCellFocusZoom = 2.8;
-constexpr double kDensityInfluenceRadiusMultiplier = 0.55;
-constexpr double kDensityMinimumScreenRadius = 7.0;
 constexpr double kDefaultDensityScaleMaxPeoplePerSquareMeter = 4.0;
-constexpr int kDensityZeroBaseAlpha = 112;
 constexpr double kPressureInfluenceRadiusMultiplier = 1.45;
 constexpr double kPressureMinimumScreenRadius = 12.0;
 constexpr double kDefaultPressureScaleMaxScore = 1.0;
@@ -1381,7 +1378,7 @@ void SimulationCanvasWidget::drawOccupancyHeatmapOverlay(QPainter& painter, cons
         if (!matchesFloor(cell.floorId, currentFloorId_)) {
             continue;
         }
-        if (cell.normalizedIntensity <= 0.015) {
+        if (cell.normalizedIntensity <= 0.0) {
             continue;
         }
         visibleCells.push_back(&cell);
@@ -1445,13 +1442,12 @@ void SimulationCanvasWidget::drawOccupancyHeatmapOverlay(QPainter& painter, cons
     }
 
     const auto blurRadius = std::clamp(
-        static_cast<int>(std::ceil(std::max(2.0, maxCellScreenWidth * kRasterScale * 1.75))),
-        2,
-        12);
+        static_cast<int>(std::ceil(std::max(1.0, maxCellScreenWidth * kRasterScale * 0.5))),
+        1,
+        5);
     auto blurred = boxBlurField(field, rasterWidth, rasterHeight, blurRadius);
     blurred = boxBlurField(blurred, rasterWidth, rasterHeight, std::max(1, blurRadius / 2));
-    const auto maxValue = *std::max_element(blurred.begin(), blurred.end());
-    if (maxValue <= 1e-9) {
+    if (*std::max_element(blurred.begin(), blurred.end()) <= 1e-9) {
         painter.restore();
         return;
     }
@@ -1460,13 +1456,13 @@ void SimulationCanvasWidget::drawOccupancyHeatmapOverlay(QPainter& painter, cons
     heatmapImage.fill(Qt::transparent);
     for (int y = 0; y < rasterHeight; ++y) {
         for (int x = 0; x < rasterWidth; ++x) {
-            const auto value = blurred[static_cast<std::size_t>(y * rasterWidth + x)] / maxValue;
-            if (value <= 0.018) {
+            const auto value = blurred[static_cast<std::size_t>(y * rasterWidth + x)];
+            if (value <= 0.002) {
                 continue;
             }
-            const auto intensity = std::clamp(value, 0.0, 1.0);
+            const auto intensity = std::clamp(std::pow(value, 0.70), 0.0, 1.0);
             const auto alpha = std::clamp(
-                38 + static_cast<int>(205.0 * std::sqrt(intensity)),
+                44 + static_cast<int>(199.0 * std::sqrt(intensity)),
                 0,
                 243);
             heatmapImage.setPixelColor(x, y, occupancyHeatmapColor(intensity, alpha));
@@ -1498,12 +1494,6 @@ void SimulationCanvasWidget::drawDensityOverlay(QPainter& painter, const LayoutC
         std::isfinite(densityScaleMaxPeoplePerSquareMeter_) && densityScaleMaxPeoplePerSquareMeter_ > 0.0
         ? densityScaleMaxPeoplePerSquareMeter_
         : kDefaultDensityScaleMaxPeoplePerSquareMeter;
-    std::sort(visibleCells.begin(), visibleCells.end(), [](const auto* lhs, const auto* rhs) {
-        if (lhs->densityPeoplePerSquareMeter != rhs->densityPeoplePerSquareMeter) {
-            return lhs->densityPeoplePerSquareMeter < rhs->densityPeoplePerSquareMeter;
-        }
-        return lhs->agentCount < rhs->agentCount;
-    });
 
     painter.save();
     painter.setPen(Qt::NoPen);
@@ -1516,41 +1506,83 @@ void SimulationCanvasWidget::drawDensityOverlay(QPainter& painter, const LayoutC
         walkableClip.addPath(layoutCanvasPolygonPath(zone.area, transform));
     }
     if (!walkableClip.isEmpty()) {
-        // Areas without a density sample still represent the zero point of the density scale.
-        painter.fillPath(walkableClip, densityHeatmapColor(0.0, kDensityZeroBaseAlpha));
         painter.setClipPath(walkableClip);
     }
 
-    for (const auto* cell : visibleCells) {
-        const auto center = transform.map(cell->center);
-        const auto cellWidth = cell->cellMax.x > cell->cellMin.x
-            ? cell->cellMax.x - cell->cellMin.x
-            : kDefaultHotspotCellSize;
-        const auto cellHeight = cell->cellMax.y > cell->cellMin.y
-            ? cell->cellMax.y - cell->cellMin.y
-            : kDefaultHotspotCellSize;
-        const auto influenceRadiusWorld =
-            std::max(cellWidth, cellHeight) * kDensityInfluenceRadiusMultiplier;
-        const auto radiusAnchor = transform.map({
-            .x = cell->center.x + influenceRadiusWorld,
-            .y = cell->center.y,
-        });
-        const auto radius = std::max(
-            kDensityMinimumScreenRadius,
-            std::hypot(radiusAnchor.x() - center.x(), radiusAnchor.y() - center.y()));
-        const auto intensity = std::clamp(cell->densityPeoplePerSquareMeter / scaleMax, 0.0, 1.0);
-        const auto coreAlpha = 80 + static_cast<int>(140.0 * intensity);
-        const auto coreColor = densityHeatmapColor(intensity, std::clamp(coreAlpha, 80, 220));
-        const auto middleColor = densityHeatmapColor(intensity, static_cast<int>(coreAlpha * 0.6));
-
-        QRadialGradient gradient(center, radius);
-        gradient.setColorAt(0.0, coreColor);
-        gradient.setColorAt(0.28, coreColor);
-        gradient.setColorAt(0.62, middleColor);
-        gradient.setColorAt(1.0, densityHeatmapColor(intensity, 0));
-        painter.setBrush(gradient);
-        painter.drawEllipse(center, radius, radius);
+    const auto logicalSize = size();
+    if (logicalSize.isEmpty()) {
+        painter.restore();
+        return;
     }
+
+    constexpr double kRasterScale = 0.5;
+    const auto rasterWidth = std::max(1, static_cast<int>(std::ceil(logicalSize.width() * kRasterScale)));
+    const auto rasterHeight = std::max(1, static_cast<int>(std::ceil(logicalSize.height() * kRasterScale)));
+    std::vector<double> field(static_cast<std::size_t>(rasterWidth * rasterHeight), 0.0);
+    double maxCellScreenWidth = 0.0;
+
+    for (const auto* cell : visibleCells) {
+        const auto intensity = std::clamp(cell->densityPeoplePerSquareMeter / scaleMax, 0.0, 1.0);
+        if (intensity <= 0.0) {
+            continue;
+        }
+
+        const auto minPoint = transform.map(cell->cellMin);
+        const auto maxPoint = transform.map(cell->cellMax);
+        const auto left = std::min(minPoint.x(), maxPoint.x());
+        const auto right = std::max(minPoint.x(), maxPoint.x());
+        const auto top = std::min(minPoint.y(), maxPoint.y());
+        const auto bottom = std::max(minPoint.y(), maxPoint.y());
+        if (right < 0.0
+            || left > logicalSize.width()
+            || bottom < 0.0
+            || top > logicalSize.height()) {
+            continue;
+        }
+        maxCellScreenWidth = std::max(maxCellScreenWidth, std::max(right - left, bottom - top));
+
+        const auto x0 = std::clamp(static_cast<int>(std::floor(left * kRasterScale)), 0, rasterWidth - 1);
+        const auto x1 = std::clamp(static_cast<int>(std::ceil(right * kRasterScale)), x0, rasterWidth - 1);
+        const auto y0 = std::clamp(static_cast<int>(std::floor(top * kRasterScale)), 0, rasterHeight - 1);
+        const auto y1 = std::clamp(static_cast<int>(std::ceil(bottom * kRasterScale)), y0, rasterHeight - 1);
+        for (int y = y0; y <= y1; ++y) {
+            for (int x = x0; x <= x1; ++x) {
+                auto& value = field[static_cast<std::size_t>(y * rasterWidth + x)];
+                value = std::max(value, intensity);
+            }
+        }
+    }
+
+    const auto blurRadius = std::clamp(
+        static_cast<int>(std::ceil(std::max(1.0, maxCellScreenWidth * kRasterScale * 0.5))),
+        1,
+        10);
+    auto blurred = boxBlurField(field, rasterWidth, rasterHeight, blurRadius);
+    blurred = boxBlurField(blurred, rasterWidth, rasterHeight, std::max(1, blurRadius / 2));
+    if (*std::max_element(blurred.begin(), blurred.end()) <= 1e-9) {
+        painter.restore();
+        return;
+    }
+
+    QImage heatmapImage(rasterWidth, rasterHeight, QImage::Format_ARGB32);
+    heatmapImage.fill(Qt::transparent);
+    for (int y = 0; y < rasterHeight; ++y) {
+        for (int x = 0; x < rasterWidth; ++x) {
+            const auto value = blurred[static_cast<std::size_t>(y * rasterWidth + x)];
+            if (value <= 0.002) {
+                continue;
+            }
+            const auto intensity = std::clamp(std::pow(value, 0.82), 0.0, 1.0);
+            const auto alpha = std::clamp(
+                52 + static_cast<int>(178.0 * std::sqrt(intensity)),
+                0,
+                230);
+            heatmapImage.setPixelColor(x, y, densityHeatmapColor(intensity, alpha));
+        }
+    }
+
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    painter.drawImage(QRectF(0, 0, logicalSize.width(), logicalSize.height()), heatmapImage);
     painter.restore();
 }
 

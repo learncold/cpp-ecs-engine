@@ -28,8 +28,8 @@ constexpr std::size_t kMaxResultPressureAgents = 5;
 constexpr std::size_t kMaxResultCriticalPressureEvents = 5;
 constexpr double kOccupancyHeatmapSampleIntervalSeconds = 0.25;
 constexpr double kOccupancyHeatmapCellSizeMeters = 0.35;
-constexpr double kOccupancyHeatmapKernelRadiusMeters = 1.2;
-constexpr double kOccupancyHeatmapKernelSigmaMeters = 0.45;
+constexpr double kOccupancyHeatmapKernelRadiusMeters = 0.50;
+constexpr double kOccupancyHeatmapKernelSigmaMeters = 0.20;
 constexpr double kHighDensityThresholdPeoplePerSquareMeter =
     kPressureHighDensityThresholdPeoplePerSquareMeter;
 
@@ -257,18 +257,20 @@ void accumulateOccupancyHeatmap(
     engine::WorldQuery& query,
     double elapsedSeconds,
     bool forceSample) {
-    if (!result.occupancyTrackingInitialized) {
+    const bool firstSample = !result.occupancyTrackingInitialized;
+    if (firstSample) {
         result.occupancyTrackingInitialized = true;
         result.lastOccupancySampleTimeSeconds = elapsedSeconds;
         result.nextOccupancySampleTimeSeconds = elapsedSeconds + result.occupancySampleIntervalSeconds;
+    }
+
+    if (!firstSample && !forceSample && elapsedSeconds + 1e-9 < result.nextOccupancySampleTimeSeconds) {
         return;
     }
 
-    if (!forceSample && elapsedSeconds + 1e-9 < result.nextOccupancySampleTimeSeconds) {
-        return;
-    }
-
-    const auto deltaSeconds = std::max(0.0, elapsedSeconds - result.lastOccupancySampleTimeSeconds);
+    const auto deltaSeconds = firstSample
+        ? result.occupancySampleIntervalSeconds
+        : std::max(0.0, elapsedSeconds - result.lastOccupancySampleTimeSeconds);
     result.lastOccupancySampleTimeSeconds = elapsedSeconds;
     while (result.nextOccupancySampleTimeSeconds <= elapsedSeconds + 1e-9) {
         result.nextOccupancySampleTimeSeconds += result.occupancySampleIntervalSeconds;
