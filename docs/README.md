@@ -1,11 +1,11 @@
 # SafeCrowd 문서 안내
 
-`docs/`는 기준 문서를 모아 두는 위치다. 진행 중 메모, 임시 TODO, 작업 상태 추적은 GitHub Issues와 Project에서 관리한다.
+`docs/`는 기준 문서를 모아 두는 위치다. 진행 중 메모, 임시 TODO, 작업 상태 추적은 필요에 따라 별도 문서나 GitHub 도구에서 관리한다.
 
 ## 문서 구조
 
 - `architecture/`: 계층 구조, 책임, 디렉터리 규칙 같은 오래 유지할 설계 기준
-- `process/`: GitHub Project, 이슈/PR 규칙 같은 협업 절차
+- `process/`: PR, 검증, GitHub 도구 사용 같은 협업 절차
 - `product/`: 개요, 사용자 시나리오, 위험 정의, 백로그 같은 제품 요구와 범위
 - `references/`: 외부 조사 자료와 튜토리얼. 기준 문서의 보조 근거로만 사용
 - `demo/`: 시연 시 사용하는 평면 자산과 시연 흐름 가이드

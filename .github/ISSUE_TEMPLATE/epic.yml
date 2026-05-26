@@ -1,13 +1,10 @@
 name: Epic
-description: Create a larger work item that groups multiple tasks.
-title: "EPIC- "
+description: Optionally record a larger planning item.
 body:
   - type: markdown
     attributes:
       value: |
-        Use this form for sprint-sized work that will be broken into multiple tasks.
-
-        GitHub assigns the numeric issue number automatically. Enter only the short title after `EPIC- `.
+        Use this form only when an optional planning issue is useful.
 
         Keep the layered architecture in mind:
         - `application -> domain -> engine`
@@ -78,13 +75,11 @@ body:
   - type: textarea
     id: child-tasks
     attributes:
-      label: Child Tasks
-      description: List planned child tasks or linked issues.
+      label: Related Work
+      description: List related branches, PRs, notes, or optional issues when useful.
       placeholder: |
-        - #12 Implement EngineRuntime minimal orchestration API
-        - #13 Add engine smoke test for deferred mutation flow
-    validations:
-      required: true
+        - Implement EngineRuntime minimal orchestration API
+        - Add engine smoke test for deferred mutation flow
   - type: textarea
     id: architecture
     attributes:
@@ -102,7 +97,6 @@ body:
       label: Done Criteria
       description: Define what counts as complete for this epic.
       placeholder: |
-        - All child tasks are closed
         - Demo-critical runtime path is implemented
         - No layer rule is violated
     validations:
@@ -113,12 +107,3 @@ body:
       label: Risks / Dependencies
       description: Note blockers, dependencies, or uncertainties.
       placeholder: Depends on stable vcpkg/Qt setup and the first tracked source files landing in `src/`.
-  - type: checkboxes
-    id: checks
-    attributes:
-      label: Repository Checks
-      options:
-        - label: I checked the current GitHub Project board before creating this epic.
-          required: true
-        - label: I will keep the issue title aligned with the repository naming convention.
-          required: true

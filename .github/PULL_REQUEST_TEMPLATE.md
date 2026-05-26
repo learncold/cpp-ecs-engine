@@ -2,12 +2,6 @@
 
 - 
 
-## Related Issue
-
-- Closes #
-- None (docs/policy-only PR)
-- None (application-only PR)
-
 ## Area
 
 - [ ] Engine

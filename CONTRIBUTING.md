@@ -1,37 +1,17 @@
 # SafeCrowd Contribution Rules
 
 이 저장소는 `application -> domain -> engine` 계층을 유지하는 것을 가장 중요한 규칙으로 둡니다.
-PR은 작은 단위로 나누고, 기본적으로 어떤 issue를 해결하는지 분명하게 남겨 주세요.
+PR은 작은 단위로 나누고, 변경 의도와 검증 결과를 분명하게 남겨 주세요.
 
 ## 기본 원칙
 
-- 기본 작업 흐름은 `issue -> branch -> PR -> merge`입니다.
-- 작업을 시작하기 전에 먼저 관련 GitHub issue가 이미 있는지 확인합니다.
-- 관련 issue가 없고 현재 정책상 issue 생성을 생략할 수 없는 작업이면, 새 issue를 한글로 등록한 뒤 작업을 시작합니다.
-- 새 task가 기존 Epic 아래에 들어가야 하는 범위라면, issue를 만든 뒤 GitHub native `sub-issue`로 연결합니다.
-- 연결 후에는 Project view의 `Parent issue`, `Sub-issues progress`에서 보이는지 확인합니다.
-- 다만 `docs/`, `uml/`, `AGENTS.md`, `CONTRIBUTING.md`, PR/issue template, PR 정책 워크플로처럼 문서 또는 기여 정책만 다루는 변경은 별도 issue 없이 진행할 수 있습니다.
-- `src/application/`에 한정된 UI/앱 조립 변경은 별도 issue 없이 진행할 수 있습니다. 새 application 파일을 앱 타깃에 연결하기 위한 `CMakeLists.txt` 변경도 이 예외에 포함할 수 있습니다.
-- 위 예외에 해당하는 변경이 해당 경로에만 한정된다면 유지보수자는 `main`에 직접 commit/push할 수 있습니다.
-- 문서/정책 변경과 application 예외를 벗어난 코드/빌드 변경이 섞이면 예외를 쓰지 않고 일반 PR 흐름으로 진행합니다.
-- 가능하면 하나의 PR은 하나의 issue만 해결합니다.
+- 기본 작업 흐름은 `branch -> PR -> merge`입니다.
+- GitHub issue 확인, 생성, 연결은 개발 시작 조건이 아닙니다.
+- `docs/`, `uml/`, `AGENTS.md`, `CONTRIBUTING.md`, PR template, PR 정책 워크플로처럼 문서 또는 기여 정책만 다루는 변경은 유지보수자가 `main`에 직접 commit/push할 수 있습니다.
+- `src/application/`에 한정된 UI/앱 조립 변경은 유지보수자가 PR 또는 직접 push로 반영할 수 있습니다. 새 application 파일을 앱 타깃에 연결하기 위한 `CMakeLists.txt` 변경도 이 범위에 포함할 수 있습니다.
+- 문서/정책 변경과 application-only 범위를 벗어난 코드/빌드 변경이 섞이면 일반 PR 흐름으로 진행합니다.
 - 서로 다른 계층을 동시에 크게 건드리는 PR은 피합니다.
 - 구조, 빌드, 의존성 규칙이 바뀌면 관련 문서를 함께 업데이트합니다.
-
-## Issue Rules
-
-- 새 work item은 GitHub issue form으로 생성합니다.
-- 새 issue를 만들 때는 한국어로 작성합니다.
-- `Epic`은 여러 task를 묶는 상위 계획에 사용합니다.
-- `Implementation Task`는 `Engine`, `Domain`, `Application`, `Build` 같은 코드/빌드 작업에 사용합니다.
-- `Lightweight Task`는 `Docs`, `Chore`, `Analysis` 같은 작은 작업에 사용합니다.
-- 제목은 저장소 관례에 맞춰 `EPIC- short title` 또는 `Task-short title` 형식을 유지합니다.
-- GitHub issue 번호(`#12` 같은 값)는 생성 후 자동으로 붙습니다. 제목에는 숫자를 직접 적지 않습니다.
-- task가 기존 Epic 범위에 속하면 parent epic을 적고 native `sub-issue` 관계까지 연결합니다.
-- parent/sub-issue 관계를 연결한 뒤 Project view의 `Parent issue`, `Sub-issues progress`에서 바로 보이는지 확인합니다.
-- Sprint와 Area는 issue 생성 시 바로 정합니다.
-- issue form의 `Area`와 GitHub Project의 `Area` 옵션이 일시적으로 다를 수 있습니다. 현재 Project 보드에 `Build` 옵션이 없으면 issue 자체에는 `Build`를 유지하고, 보드에는 가장 가까운 기존 영역으로 배치한 뒤 본문에 의도를 남깁니다.
-- 구조나 의존성에 영향을 주는 issue는 본문에 계층 영향과 검증 계획을 남깁니다.
 
 ## PR 제목 규칙
 
@@ -63,13 +43,10 @@ PR 제목은 아래 형식을 따릅니다.
 모든 PR은 아래 내용을 포함해야 합니다.
 
 - 변경 요약
-- 연결된 issue 또는 issue 예외 사유
 - 변경이 속한 영역
 - 아키텍처 규칙 점검 결과
 - 빌드/테스트 검증 결과 또는 미실행 사유
 - 남은 리스크나 후속 작업
-- docs/policy-only PR이고 변경 경로가 `docs/`, `uml/`, `AGENTS.md`, `CONTRIBUTING.md`, PR/issue template, `pr-policy.yml`에만 한정되면 `Related Issue`에는 `None (docs/policy-only PR)`를 사용합니다.
-- application-only PR이고 변경 경로가 `src/application/` 및 필요한 앱 타깃 연결용 `CMakeLists.txt`에 한정되면 `Related Issue`에는 `None (application-only PR)`를 사용합니다.
 
 ## 아키텍처 체크
 
@@ -121,7 +98,7 @@ cmake --build --preset build-engine-domain-debug
 
 ## 머지 규칙
 
-- 코드/빌드 변경은 `main`에 직접 push하지 않고 PR로 반영합니다. 단, issue 예외에 해당하는 application-only 변경은 유지보수자가 PR 또는 직접 push로 반영할 수 있습니다.
-- `docs/`, `uml/`, `AGENTS.md`, `CONTRIBUTING.md`, PR/issue template, PR 정책 워크플로처럼 문서/정책만 다루는 변경은 유지보수자가 `main`에 직접 push할 수 있습니다.
+- 코드/빌드 변경은 `main`에 직접 push하지 않고 PR로 반영합니다. 단, application-only 변경은 유지보수자가 PR 또는 직접 push로 반영할 수 있습니다.
+- `docs/`, `uml/`, `AGENTS.md`, `CONTRIBUTING.md`, PR template, PR 정책 워크플로처럼 문서/정책만 다루는 변경은 유지보수자가 `main`에 직접 push할 수 있습니다.
 - 머지는 squash merge를 기본으로 사용합니다.
 - PR 체크가 실패한 상태에서는 머지하지 않습니다.
