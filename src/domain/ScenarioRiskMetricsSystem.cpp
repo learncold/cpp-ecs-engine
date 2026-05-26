@@ -158,18 +158,6 @@ bool isStalled(const Velocity& velocity, const EvacuationRoute& route) {
     return scenarioAgentStalled(lengthOf(velocity.value), route.stalledSeconds);
 }
 
-int riskSeverity(ScenarioRiskLevel level) {
-    switch (level) {
-    case ScenarioRiskLevel::Low:
-        return 0;
-    case ScenarioRiskLevel::Medium:
-        return 1;
-    case ScenarioRiskLevel::High:
-        return 2;
-    }
-    return 0;
-}
-
 bool isHotspotSetWorse(
     const std::vector<ScenarioCongestionHotspot>& candidate,
     const std::vector<ScenarioCongestionHotspot>& currentPeak) {
@@ -506,50 +494,6 @@ std::uint64_t pressureFeedbackUpdateDivisor(
     return kScenarioPressureFeedbackQuietUpdateDivisor;
 }
 
-ScenarioRiskLevel completionRiskLevel(
-    const ScenarioSimulationClockResource& clock,
-    std::size_t totalAgentCount,
-    std::size_t evacuatedAgentCount,
-    std::size_t stalledAgentCount,
-    std::size_t hotspotCount,
-    std::size_t pressureHotspotCount,
-    std::size_t criticalPressureAgentCount,
-    std::size_t criticalPressureEventCount,
-    std::size_t bottleneckCount,
-    std::size_t crossFlowCellCount,
-    double peakCrossFlowScore) {
-    if (totalAgentCount == 0 || evacuatedAgentCount >= totalAgentCount) {
-        return ScenarioRiskLevel::Low;
-    }
-
-    const auto elapsedRatio = clock.timeLimitSeconds > 0.0
-        ? clock.elapsedSeconds / clock.timeLimitSeconds
-        : 0.0;
-    const auto activeAgentCount = totalAgentCount - evacuatedAgentCount;
-    const auto stalledRatio = activeAgentCount > 0
-        ? static_cast<double>(stalledAgentCount) / static_cast<double>(activeAgentCount)
-        : 0.0;
-
-    if (elapsedRatio >= 0.8
-        || stalledRatio >= 0.35
-        || criticalPressureEventCount > 0
-        || bottleneckCount >= 2
-        || peakCrossFlowScore >= 0.75) {
-        return ScenarioRiskLevel::High;
-    }
-    if (elapsedRatio >= 0.5
-        || stalledRatio >= 0.15
-        || hotspotCount > 0
-        || pressureHotspotCount > 0
-        || criticalPressureAgentCount > 0
-        || bottleneckCount > 0
-        || crossFlowCellCount > 0
-        || peakCrossFlowScore >= 0.45) {
-        return ScenarioRiskLevel::Medium;
-    }
-    return ScenarioRiskLevel::Low;
-}
-
 SimulationFrame captureSimulationFrame(
     engine::WorldQuery& query,
     const ScenarioSimulationClockResource& clock) {
@@ -848,17 +792,13 @@ public:
         ScenarioRiskSnapshot snapshot;
         const auto entities = query.view<Position, Agent, Velocity, EvacuationRoute, EvacuationStatus>();
 
-        std::size_t totalAgentCount = 0;
-        std::size_t evacuatedAgentCount = 0;
         std::vector<ActiveAgentContext> activeAgents;
         std::unordered_map<long long, RiskCellAccumulator> cells;
         cells.reserve(entities.size());
 
         for (const auto entity : entities) {
-            ++totalAgentCount;
             const auto& status = query.get<EvacuationStatus>(entity);
             if (status.evacuated) {
-                ++evacuatedAgentCount;
                 continue;
             }
 
@@ -925,18 +865,6 @@ public:
             deltaSeconds,
             resources.get<ScenarioCrossFlowResource>());
 
-        snapshot.completionRisk = completionRiskLevel(
-            clock,
-            totalAgentCount,
-            evacuatedAgentCount,
-            snapshot.stalledAgentCount,
-            snapshot.hotspots.size(),
-            snapshot.pressureHotspots.size(),
-            snapshot.criticalPressureAgentCount,
-            snapshot.criticalPressureEvents.size(),
-            snapshot.bottlenecks.size(),
-            snapshot.crossFlowCells.size(),
-            snapshot.peakCrossFlowScore);
         if (!snapshot.hotspots.empty()
             || !snapshot.pressureHotspots.empty()
             || !snapshot.criticalPressureEvents.empty()
@@ -957,9 +885,6 @@ public:
 
 private:
     void mergePeakSnapshot(ScenarioRiskSnapshot& peak, const ScenarioRiskSnapshot& current) const {
-        if (riskSeverity(current.completionRisk) > riskSeverity(peak.completionRisk)) {
-            peak.completionRisk = current.completionRisk;
-        }
         peak.stalledAgentCount = std::max(peak.stalledAgentCount, current.stalledAgentCount);
         peak.pressureExposedAgentCount = std::max(peak.pressureExposedAgentCount, current.pressureExposedAgentCount);
         peak.criticalPressureAgentCount = std::max(peak.criticalPressureAgentCount, current.criticalPressureAgentCount);

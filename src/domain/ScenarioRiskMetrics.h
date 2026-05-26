@@ -43,12 +43,6 @@ inline constexpr std::size_t kScenarioCrossFlowMinMovingAgents = 4;
 inline constexpr double kScenarioCrossFlowSideRatioThreshold = 0.30;
 inline constexpr double kScenarioCrossFlowCosineThreshold = 0.5;
 
-enum class ScenarioRiskLevel {
-    Low,
-    Medium,
-    High,
-};
-
 struct ScenarioCongestionHotspot {
     Point2D center{};
     Point2D cellMin{};
@@ -127,7 +121,6 @@ struct ScenarioCrossFlowCellMetric {
 };
 
 struct ScenarioRiskSnapshot {
-    ScenarioRiskLevel completionRisk{ScenarioRiskLevel::Low};
     std::size_t stalledAgentCount{0};
     std::size_t pressureExposedAgentCount{0};
     std::size_t criticalPressureAgentCount{0};
@@ -142,8 +135,6 @@ struct ScenarioRiskSnapshot {
     std::vector<ScenarioCrossFlowCellMetric> crossFlowCells{};
 };
 
-const char* scenarioRiskLevelLabel(ScenarioRiskLevel level) noexcept;
-const char* scenarioRiskDefinition() noexcept;
 const char* scenarioStalledDefinition() noexcept;
 const char* scenarioHotspotDefinition() noexcept;
 const char* scenarioPressureHotspotDefinition() noexcept;

@@ -116,7 +116,7 @@ private:
     QProgressBar* timeProgressBar_{nullptr};
     QLabel* agentCountLabel_{nullptr};
     QProgressBar* evacuationProgressBar_{nullptr};
-    QLabel* riskLabel_{nullptr};
+    QLabel* stalledLabel_{nullptr};
     QLabel* congestionLabel_{nullptr};
     QLabel* bottleneckLabel_{nullptr};
     QPushButton* pauseButton_{nullptr};

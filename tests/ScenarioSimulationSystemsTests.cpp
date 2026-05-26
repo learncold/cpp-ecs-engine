@@ -3790,7 +3790,6 @@ SC_TEST(ScenarioRiskMetricsSystem_PublishesStalledHotspotAndBottleneckMetrics) {
     SC_EXPECT_TRUE(snapshot.pressureHotspots.front().pressureScore >= 1.0);
     SC_EXPECT_TRUE(!snapshot.bottlenecks.empty());
     SC_EXPECT_EQ(snapshot.bottlenecks.front().label, std::string{"Room -> Exit"});
-    SC_EXPECT_EQ(snapshot.completionRisk, safecrowd::domain::ScenarioRiskLevel::High);
 }
 
 SC_TEST(ScenarioRiskMetricsSystem_DoesNotPublishPressureHotspotsForLooseClusterInSameCell) {
@@ -3928,7 +3927,6 @@ SC_TEST(ScenarioRiskMetricsSystem_PublishesCriticalPressureEventAfterSustainedEx
     SC_EXPECT_TRUE(snapshot.criticalPressureEvents.front().criticalAgentCount >= 2);
     SC_EXPECT_TRUE(snapshot.criticalPressureEvents.front().durationSeconds >= 1.0);
     SC_EXPECT_TRUE(snapshot.criticalPressureEvents.front().pressureScore > 0.0);
-    SC_EXPECT_EQ(snapshot.completionRisk, safecrowd::domain::ScenarioRiskLevel::High);
 }
 
 SC_TEST(ScenarioRiskMetricsSystem_DoesNotMergeHotspotsAcrossFloors) {
@@ -4088,7 +4086,6 @@ SC_TEST(ScenarioRiskMetricsSystem_PreservesPeakMetricsAfterAllAgentsEvacuate) {
     SC_EXPECT_TRUE(!metrics.peakSnapshot.pressureHotspots.empty());
     SC_EXPECT_TRUE(!metrics.peakSnapshot.bottlenecks.empty());
     SC_EXPECT_EQ(metrics.peakSnapshot.stalledAgentCount, std::size_t{8});
-    SC_EXPECT_EQ(metrics.peakSnapshot.completionRisk, safecrowd::domain::ScenarioRiskLevel::High);
 }
 
 SC_TEST(ScenarioRiskMetricsSystem_PreservesPeakCriticalPressureMetricsAfterAgentsEvacuate) {

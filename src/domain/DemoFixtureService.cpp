@@ -627,7 +627,6 @@ std::vector<SimulationFrame> makeBlockedDoorReplayFrames() {
 
 ScenarioRiskSnapshot makeBlockedDoorRiskSnapshot(const SimulationFrame& hotspotDetectionFrame, const SimulationFrame& bottleneckDetectionFrame) {
     ScenarioRiskSnapshot risk;
-    risk.completionRisk = ScenarioRiskLevel::High;
     risk.stalledAgentCount = 100;
     risk.hotspots = {
         {

@@ -381,7 +381,6 @@ SC_TEST(DemoFixtureBlockedDoorResultFixturePreservesScenarioAndResultData) {
     SC_EXPECT_TRUE(fixture.frame.complete);
     SC_EXPECT_EQ(fixture.frame.totalAgentCount, std::size_t{100});
     SC_EXPECT_EQ(fixture.frame.evacuatedAgentCount, std::size_t{100});
-    SC_EXPECT_EQ(fixture.risk.completionRisk, safecrowd::domain::ScenarioRiskLevel::High);
     SC_EXPECT_TRUE(!fixture.risk.hotspots.empty());
     SC_EXPECT_TRUE(!fixture.risk.bottlenecks.empty());
     SC_EXPECT_TRUE(!fixture.artifacts.evacuationProgress.empty());

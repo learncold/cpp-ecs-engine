@@ -184,7 +184,6 @@ SC_TEST(ProjectPersistence_preservesPressureResultArtifactsAndRiskSnapshot) {
     workspace.result = SavedScenarioResultState{
         .scenario = scenario,
         .risk = {
-            .completionRisk = ScenarioRiskLevel::High,
             .stalledAgentCount = 3,
             .pressureExposedAgentCount = 5,
             .criticalPressureAgentCount = 2,
@@ -231,7 +230,6 @@ SC_TEST(ProjectPersistence_preservesPressureResultArtifactsAndRiskSnapshot) {
     SC_EXPECT_TRUE(loaded.result.has_value());
 
     const auto& loadedRisk = loaded.result->risk;
-    SC_EXPECT_TRUE(loadedRisk.completionRisk == ScenarioRiskLevel::High);
     SC_EXPECT_EQ(loadedRisk.pressureExposedAgentCount, std::size_t{5});
     SC_EXPECT_EQ(loadedRisk.criticalPressureAgentCount, std::size_t{2});
     SC_EXPECT_EQ(loadedRisk.pressureHotspots.size(), std::size_t{1});
@@ -303,7 +301,6 @@ SC_TEST(ProjectPersistence_preservesBatchPressureResultArtifacts) {
     SavedScenarioResultState second;
     second.scenario.scenarioId = "pressure-batch-critical";
     second.scenario.name = "Pressure Batch Critical";
-    second.risk.completionRisk = ScenarioRiskLevel::High;
     second.risk.pressureExposedAgentCount = 7;
     second.risk.criticalPressureAgentCount = 3;
     second.risk.criticalPressureEvents = {event};
@@ -340,7 +337,6 @@ SC_TEST(ProjectPersistence_preservesBatchPressureResultArtifacts) {
 
     const auto& loadedSecond = loaded.batchResult->results.back();
     SC_EXPECT_EQ(loadedSecond.scenario.scenarioId, std::string{"pressure-batch-critical"});
-    SC_EXPECT_TRUE(loadedSecond.risk.completionRisk == ScenarioRiskLevel::High);
     SC_EXPECT_EQ(loadedSecond.risk.criticalPressureAgentCount, std::size_t{3});
     SC_EXPECT_EQ(loadedSecond.risk.criticalPressureEvents.size(), std::size_t{1});
     SC_EXPECT_NEAR(loadedSecond.risk.criticalPressureEvents.front().pressureScore, 11.0, 1e-9);
@@ -391,7 +387,6 @@ SC_TEST(ResultArtifactsCodec_readsNumericAgentIdsForLegacyJson) {
     pressureAgents.append(pressureAgent);
 
     QJsonObject riskObject;
-    riskObject["completionRisk"] = static_cast<int>(ScenarioRiskLevel::Medium);
     riskObject["stalledAgentCount"] = 0;
     riskObject["pressureAgents"] = pressureAgents;
 
@@ -662,7 +657,6 @@ SC_TEST(ProjectPersistence_preservesCrossFlowResultState) {
     scenario.name = "Cross Flow Scenario";
 
     ScenarioRiskSnapshot risk;
-    risk.completionRisk = ScenarioRiskLevel::Medium;
     risk.peakCrossFlowScore = 0.74;
     risk.totalCrossFlowExposureAgentSeconds = 19.5;
     risk.crossFlowCells.push_back({

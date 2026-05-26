@@ -163,7 +163,7 @@ compressionForce = sum(pair overlap) + sum(barrier intrusion)
 - `High`
   - sustained critical pressure event 1개 이상
 
-즉 pressure는 이제 completion risk 판단에 직접 들어갑니다.
+Completion risk 등급 산정은 제거되었고, pressure는 개별 pressure 지표와 결과 요약으로만 보고됩니다.
 
 ## snapshot과 peak snapshot
 매 프레임 결과는 `snapshot`에 저장되고, 런 전체 최고치는 `peakSnapshot`에 따로 누적됩니다.

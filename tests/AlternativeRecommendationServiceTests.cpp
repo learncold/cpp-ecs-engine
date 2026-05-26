@@ -129,7 +129,6 @@ ScenarioResultArtifacts makeExitUsageArtifacts(double mainRatio = 0.85, double e
 
 ScenarioRiskSnapshot makeCrossFlowRisk() {
     ScenarioRiskSnapshot risk;
-    risk.completionRisk = ScenarioRiskLevel::Medium;
     risk.peakCrossFlowScore = 0.78;
     risk.totalCrossFlowExposureAgentSeconds = 22.5;
     risk.crossFlowAgentCount = 7;

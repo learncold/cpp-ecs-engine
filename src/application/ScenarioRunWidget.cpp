@@ -668,10 +668,9 @@ QWidget* ScenarioRunWidget::createRunPanel() {
     agentCountLabel_ = createLabel("", panel);
     agentCountLabel_->setStyleSheet(ui::mutedTextStyleSheet());
     evacuationProgressBar_ = createProgressBar("Evacuation progress based on evacuated agents divided by total agents.", panel);
-    riskLabel_ = createLabel("", panel);
-    riskLabel_->setStyleSheet(ui::mutedTextStyleSheet());
-    riskLabel_->setToolTip(QString("%1\n\n%2")
-        .arg(safecrowd::domain::scenarioRiskDefinition(), safecrowd::domain::scenarioStalledDefinition()));
+    stalledLabel_ = createLabel("", panel);
+    stalledLabel_->setStyleSheet(ui::mutedTextStyleSheet());
+    stalledLabel_->setToolTip(safecrowd::domain::scenarioStalledDefinition());
     congestionLabel_ = createLabel("", panel);
     congestionLabel_->setStyleSheet(ui::mutedTextStyleSheet());
     congestionLabel_->setToolTip(safecrowd::domain::scenarioHotspotDefinition());
@@ -685,7 +684,7 @@ QWidget* ScenarioRunWidget::createRunPanel() {
     layout->addWidget(timeProgressBar_);
     layout->addWidget(agentCountLabel_);
     layout->addWidget(evacuationProgressBar_);
-    layout->addWidget(riskLabel_);
+    layout->addWidget(stalledLabel_);
     layout->addWidget(congestionLabel_);
     layout->addWidget(bottleneckLabel_);
 
@@ -868,9 +867,8 @@ void ScenarioRunWidget::refreshStatus() {
             static_cast<double>(frame.totalAgentCount)));
     }
     const auto& risk = selectedRun.risk;
-    if (riskLabel_ != nullptr) {
-        riskLabel_->setText(QString("Completion Risk: %1\nStalled Agents: %2")
-            .arg(safecrowd::domain::scenarioRiskLevelLabel(risk.completionRisk))
+    if (stalledLabel_ != nullptr) {
+        stalledLabel_->setText(QString("Stalled Agents: %1")
             .arg(static_cast<int>(risk.stalledAgentCount)));
     }
     if (congestionLabel_ != nullptr) {

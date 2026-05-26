@@ -2,28 +2,6 @@
 
 namespace safecrowd::domain {
 
-const char* scenarioRiskLevelLabel(ScenarioRiskLevel level) noexcept {
-    switch (level) {
-    case ScenarioRiskLevel::Low:
-        return "Low";
-    case ScenarioRiskLevel::Medium:
-        return "Medium";
-    case ScenarioRiskLevel::High:
-        return "High";
-    }
-    return "Low";
-}
-
-const char* scenarioRiskDefinition() noexcept {
-    return "Low when evacuation is complete or no active risk is detected. "
-           "Medium when elapsed time reaches 50% of the limit, stalled active agents reach 15%, "
-           "any hotspot/pressure hotspot/bottleneck/cross-flow hotspot is detected, or any active agent reaches "
-           "critical pressure exposure. "
-           "High when elapsed time reaches 80% of the limit, stalled active agents reach 35%, "
-           "a critical pressure event is sustained, two or more bottlenecks are detected, "
-           "or peak cross-flow score reaches 0.75.";
-}
-
 const char* scenarioStalledDefinition() noexcept {
     return "An active agent is stalled when speed is at or below 0.12 m/s, "
            "or route progress has been stalled for at least 0.75 seconds.";

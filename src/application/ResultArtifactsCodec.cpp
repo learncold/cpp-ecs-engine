@@ -312,7 +312,6 @@ safecrowd::domain::CrossFlowSummary crossFlowSummaryFromJson(const QJsonObject& 
 
 QJsonObject riskSnapshotToJson(const safecrowd::domain::ScenarioRiskSnapshot& risk) {
     QJsonObject object;
-    object["completionRisk"] = static_cast<int>(risk.completionRisk);
     object["stalledAgentCount"] = static_cast<qint64>(risk.stalledAgentCount);
     object["pressureExposedAgentCount"] = static_cast<qint64>(risk.pressureExposedAgentCount);
     object["criticalPressureAgentCount"] = static_cast<qint64>(risk.criticalPressureAgentCount);
@@ -354,7 +353,6 @@ QJsonObject riskSnapshotToJson(const safecrowd::domain::ScenarioRiskSnapshot& ri
 
 safecrowd::domain::ScenarioRiskSnapshot riskSnapshotFromJson(const QJsonObject& object) {
     safecrowd::domain::ScenarioRiskSnapshot risk;
-    risk.completionRisk = static_cast<safecrowd::domain::ScenarioRiskLevel>(object.value("completionRisk").toInt());
     risk.stalledAgentCount = static_cast<std::size_t>(object.value("stalledAgentCount").toInteger());
     risk.pressureExposedAgentCount =
         static_cast<std::size_t>(object.value("pressureExposedAgentCount").toInteger());

@@ -319,9 +319,9 @@ stage된 baseline 시나리오를 실제로 실행하고 진행 상태를 보는
 - elapsed time 기준 시간 진행률 표시
 - evacuated/total, active agents 표시
 - evacuated/total 기준 대피 진행률 표시
-- completion risk, stalled agents, hotspot, bottleneck 요약 표시
+- stalled agents, hotspot, bottleneck 요약 표시
 - run이 complete되면 Result Summary 진입 버튼 활성화
-- risk, stalled, hotspot, bottleneck 기준 툴팁 표시
+- stalled, hotspot, bottleneck 기준 툴팁 표시
 
 현재 UI 요소:
 
@@ -333,7 +333,7 @@ stage된 baseline 시나리오를 실제로 실행하고 진행 상태를 보는
 - evacuated / total
 - evacuation progress
 - active agents
-- completion risk
+- stalled agents
 - stalled agents
 - hotspot count
 - worst bottleneck summary
@@ -407,7 +407,7 @@ stage된 baseline 시나리오를 실제로 실행하고 진행 상태를 보는
 - Peak Density heatmap legend
 - `Run Again`
 - `Edit Scenario`
-- risk/stalled/hotspot/bottleneck 기준 툴팁
+- stalled/hotspot/bottleneck 기준 툴팁
 - `Run Again`은 같은 scenario 조건으로 Run Workspace를 새로 열어 시뮬레이션을 다시 시작한다.
 
 현재 약한 부분:

@@ -255,10 +255,9 @@ QString wrapPanelText(const QString& text, int maxLineCharacters) {
 QString compareScenarioLabel(const SavedScenarioResultState& result) {
     const auto name = wrapPanelText(QString::fromStdString(result.scenario.name), 34);
     const auto meta = wrapPanelText(
-        QString("%1  -  %2  -  %3")
+        QString("%1  -  %2")
             .arg(scenarioRoleLabel(result.scenario.role))
-            .arg(formatSeconds(finalSeconds(result)))
-            .arg(safecrowd::domain::scenarioRiskLevelLabel(result.risk.completionRisk)),
+            .arg(formatSeconds(finalSeconds(result))),
         38);
     return QString("%1\n%2").arg(name, meta);
 }
@@ -2281,7 +2280,7 @@ void ScenarioBatchResultWidget::refreshOverviewPanel() {
         : QString("No baseline");
     const auto& exposureSummary = result.artifacts.hazardExposureSummary;
     const auto* peakHazard = peakHazardExposureMetric(exposureSummary);
-    overviewScenarioLabel_->setText(QString("%1 (%2)\nFinal: %3\nDelta vs baseline: %4\nEvacuated: %5 / %6 (%7)\nRisk: %8\nHotspots: %9\nBottlenecks: %10\nHazard exposure: %11 (fire %12 / smoke %13)\nHazard peak: %14 at %15; score %16\nPressure hotspots: %17\nCritical pressure: %18 agents / %19 events\nPeak pressure: %20 at %21\nT50 / T90 / T95: %22 / %23 / %24")
+    overviewScenarioLabel_->setText(QString("%1 (%2)\nFinal: %3\nDelta vs baseline: %4\nEvacuated: %5 / %6 (%7)\nHotspots: %8\nBottlenecks: %9\nHazard exposure: %10 (fire %11 / smoke %12)\nHazard peak: %13 at %14; score %15\nPressure hotspots: %16\nCritical pressure: %17 agents / %18 events\nPeak pressure: %19 at %20\nT50 / T90 / T95: %21 / %22 / %23")
         .arg(QString::fromStdString(result.scenario.name))
         .arg(scenarioRoleLabel(result.scenario.role))
         .arg(formatSeconds(selectedFinalSeconds))
@@ -2289,7 +2288,6 @@ void ScenarioBatchResultWidget::refreshOverviewPanel() {
         .arg(static_cast<int>(result.frame.evacuatedAgentCount))
         .arg(static_cast<int>(result.frame.totalAgentCount))
         .arg(formatPercent(result.frame.evacuatedAgentCount, result.frame.totalAgentCount))
-        .arg(safecrowd::domain::scenarioRiskLevelLabel(result.risk.completionRisk))
         .arg(static_cast<int>(result.risk.hotspots.size()))
         .arg(static_cast<int>(result.risk.bottlenecks.size()))
         .arg(formatExposureSeconds(totalHazardExposureSeconds(exposureSummary)))
