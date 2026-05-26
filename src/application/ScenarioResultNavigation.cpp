@@ -21,6 +21,8 @@
 namespace safecrowd::application {
 namespace {
 
+using ResultItemSelectionHandler = std::function<void(ScenarioResultNavigationView, std::size_t)>;
+
 QLabel* createLabel(const QString& text, QWidget* parent, ui::FontRole role = ui::FontRole::Body) {
     auto* label = new QLabel(text, parent);
     label->setFont(ui::font(role));
@@ -322,6 +324,7 @@ ResultReportPanelParts createResultReportPanel(
 QWidget* createBottleneckReportPanel(
     const safecrowd::domain::ScenarioRiskSnapshot& risk,
     std::function<void(std::size_t)> bottleneckFocusHandler,
+    ResultItemSelectionHandler itemSelectionHandler,
     QWidget* parent) {
     auto parts = createResultReportPanel("Bottleneck", "Detected passage constraints", parent);
     auto* bottleneckHeader = createReportSectionHeader("Bottlenecks", parts.content);
@@ -334,7 +337,10 @@ QWidget* createBottleneckReportPanel(
     } else {
         for (std::size_t index = 0; index < risk.bottlenecks.size(); ++index) {
             auto* row = createBottleneckRowButton(risk.bottlenecks[index], index, parts.content);
-            QObject::connect(row, &QPushButton::clicked, parts.content, [bottleneckFocusHandler, index]() {
+            QObject::connect(row, &QPushButton::clicked, parts.content, [bottleneckFocusHandler, itemSelectionHandler, index]() {
+                if (itemSelectionHandler) {
+                    itemSelectionHandler(ScenarioResultNavigationView::Bottleneck, index);
+                }
                 if (bottleneckFocusHandler) {
                     bottleneckFocusHandler(index);
                 }
@@ -349,6 +355,7 @@ QWidget* createBottleneckReportPanel(
 QWidget* createHotspotReportPanel(
     const safecrowd::domain::ScenarioRiskSnapshot& risk,
     std::function<void(std::size_t)> hotspotFocusHandler,
+    ResultItemSelectionHandler itemSelectionHandler,
     QWidget* parent) {
     auto parts = createResultReportPanel("Hotspot", "Peak congestion locations", parent);
     auto* hotspotHeader = createReportSectionHeader("Hotspots", parts.content);
@@ -362,7 +369,10 @@ QWidget* createHotspotReportPanel(
     } else {
         for (std::size_t index = 0; index < risk.hotspots.size(); ++index) {
             auto* row = createHotspotRowButton(risk.hotspots[index], index, parts.content);
-            QObject::connect(row, &QPushButton::clicked, parts.content, [hotspotFocusHandler, index]() {
+            QObject::connect(row, &QPushButton::clicked, parts.content, [hotspotFocusHandler, itemSelectionHandler, index]() {
+                if (itemSelectionHandler) {
+                    itemSelectionHandler(ScenarioResultNavigationView::Hotspot, index);
+                }
                 if (hotspotFocusHandler) {
                     hotspotFocusHandler(index);
                 }
@@ -392,6 +402,7 @@ QFrame* createHazardKindRow(
 
 QWidget* createHazardExposureReportPanel(
     const safecrowd::domain::ScenarioResultArtifacts& artifacts,
+    ResultItemSelectionHandler itemSelectionHandler,
     QWidget* parent) {
     auto parts = createResultReportPanel("Exposure", "Fire and smoke dwell-time impact", parent);
     const auto& summary = artifacts.hazardExposureSummary;
@@ -445,49 +456,75 @@ QWidget* createHazardExposureReportPanel(
             .arg(hazard.position.x, 0, 'f', 1)
             .arg(hazard.position.y, 0, 'f', 1));
         lines.push_back(locationParts.join("    "));
-        parts.contentLayout->addWidget(createReportInfoRow(lines, parts.content));
+        auto* row = createReportRowButton(lines, parts.content);
+        QObject::connect(row, &QPushButton::clicked, parts.content, [itemSelectionHandler, index]() {
+            if (itemSelectionHandler) {
+                itemSelectionHandler(ScenarioResultNavigationView::HazardExposure, index);
+            }
+        });
+        parts.contentLayout->addWidget(row);
     }
 
     parts.contentLayout->addStretch(1);
     return parts.panel;
 }
 
-QWidget* createZoneReportPanel(const safecrowd::domain::ScenarioResultArtifacts& artifacts, QWidget* parent) {
+QWidget* createZoneReportPanel(
+    const safecrowd::domain::ScenarioResultArtifacts& artifacts,
+    ResultItemSelectionHandler itemSelectionHandler,
+    QWidget* parent) {
     auto parts = createResultReportPanel("Zone", "Completion by source zone", parent);
     if (artifacts.zoneCompletion.empty()) {
         auto* empty = createLabel("No zone completion data", parts.content);
         empty->setStyleSheet(ui::mutedTextStyleSheet());
         parts.contentLayout->addWidget(empty);
     } else {
-        for (const auto& zone : artifacts.zoneCompletion) {
-            parts.contentLayout->addWidget(createReportInfoRow({
+        for (std::size_t index = 0; index < artifacts.zoneCompletion.size(); ++index) {
+            const auto& zone = artifacts.zoneCompletion[index];
+            auto* row = createReportRowButton({
                 QString::fromStdString(zone.zoneLabel),
                 QString("People: %1    Out: %2")
                     .arg(static_cast<int>(zone.initialCount))
                     .arg(static_cast<int>(zone.evacuatedCount)),
                 QString("Last: %1").arg(formatOptionalSeconds(zone.lastCompletionTimeSeconds)),
-            }, parts.content));
+            }, parts.content);
+            QObject::connect(row, &QPushButton::clicked, parts.content, [itemSelectionHandler, index]() {
+                if (itemSelectionHandler) {
+                    itemSelectionHandler(ScenarioResultNavigationView::Zone, index);
+                }
+            });
+            parts.contentLayout->addWidget(row);
         }
     }
     parts.contentLayout->addStretch(1);
     return parts.panel;
 }
 
-QWidget* createGroupsReportPanel(const safecrowd::domain::ScenarioResultArtifacts& artifacts, QWidget* parent) {
+QWidget* createGroupsReportPanel(
+    const safecrowd::domain::ScenarioResultArtifacts& artifacts,
+    ResultItemSelectionHandler itemSelectionHandler,
+    QWidget* parent) {
     auto parts = createResultReportPanel("Groups", "Completion by crowd placement", parent);
     if (artifacts.placementCompletion.empty()) {
         auto* empty = createLabel("No group completion data", parts.content);
         empty->setStyleSheet(ui::mutedTextStyleSheet());
         parts.contentLayout->addWidget(empty);
     } else {
-        for (const auto& group : artifacts.placementCompletion) {
-            parts.contentLayout->addWidget(createReportInfoRow({
+        for (std::size_t index = 0; index < artifacts.placementCompletion.size(); ++index) {
+            const auto& group = artifacts.placementCompletion[index];
+            auto* row = createReportRowButton({
                 QString::fromStdString(group.placementId),
                 QString("People: %1    Out: %2")
                     .arg(static_cast<int>(group.initialCount))
                     .arg(static_cast<int>(group.evacuatedCount)),
                 QString("Last: %1").arg(formatOptionalSeconds(group.lastCompletionTimeSeconds)),
-            }, parts.content));
+            }, parts.content);
+            QObject::connect(row, &QPushButton::clicked, parts.content, [itemSelectionHandler, index]() {
+                if (itemSelectionHandler) {
+                    itemSelectionHandler(ScenarioResultNavigationView::Groups, index);
+                }
+            });
+            parts.contentLayout->addWidget(row);
         }
     }
     parts.contentLayout->addStretch(1);
@@ -498,6 +535,7 @@ QWidget* createCrossFlowReportPanel(
     const safecrowd::domain::ScenarioRiskSnapshot& risk,
     const safecrowd::domain::ScenarioResultArtifacts& artifacts,
     std::function<void(std::size_t)> crossFlowCellFocusHandler,
+    ResultItemSelectionHandler itemSelectionHandler,
     QWidget* parent) {
     auto parts = createResultReportPanel("Cross Flow", "Non-aligned movement streams", parent);
     auto* summaryHeader = createReportSectionHeader("Summary", parts.content);
@@ -523,7 +561,10 @@ QWidget* createCrossFlowReportPanel(
     } else {
         for (std::size_t index = 0; index < risk.crossFlowCells.size(); ++index) {
             auto* row = createCrossFlowCellRowButton(risk.crossFlowCells[index], index, parts.content);
-            QObject::connect(row, &QPushButton::clicked, parts.content, [crossFlowCellFocusHandler, index]() {
+            QObject::connect(row, &QPushButton::clicked, parts.content, [crossFlowCellFocusHandler, itemSelectionHandler, index]() {
+                if (itemSelectionHandler) {
+                    itemSelectionHandler(ScenarioResultNavigationView::CrossFlow, index);
+                }
                 if (crossFlowCellFocusHandler) {
                     crossFlowCellFocusHandler(index);
                 }
@@ -632,6 +673,7 @@ QWidget* createScenarioResultNavigationPanel(
     std::function<void(std::size_t)> bottleneckFocusHandler,
     std::function<void(std::size_t)> crossFlowCellFocusHandler,
     std::function<void(std::size_t)> hotspotFocusHandler,
+    std::function<void(ScenarioResultNavigationView, std::size_t)> itemSelectionHandler,
     QWidget* parent) {
     switch (view) {
     case ScenarioResultNavigationView::CrossFlow:
@@ -639,20 +681,29 @@ QWidget* createScenarioResultNavigationPanel(
             risk,
             artifacts,
             std::move(crossFlowCellFocusHandler),
+            std::move(itemSelectionHandler),
             parent);
     case ScenarioResultNavigationView::Hotspot:
-        return createHotspotReportPanel(risk, std::move(hotspotFocusHandler), parent);
+        return createHotspotReportPanel(
+            risk,
+            std::move(hotspotFocusHandler),
+            std::move(itemSelectionHandler),
+            parent);
     case ScenarioResultNavigationView::HazardExposure:
-        return createHazardExposureReportPanel(artifacts, parent);
+        return createHazardExposureReportPanel(artifacts, std::move(itemSelectionHandler), parent);
     case ScenarioResultNavigationView::Zone:
-        return createZoneReportPanel(artifacts, parent);
+        return createZoneReportPanel(artifacts, std::move(itemSelectionHandler), parent);
     case ScenarioResultNavigationView::Groups:
-        return createGroupsReportPanel(artifacts, parent);
+        return createGroupsReportPanel(artifacts, std::move(itemSelectionHandler), parent);
     case ScenarioResultNavigationView::Recommendations:
         return createResultReportPanel("Recommendations", "Recommended operational changes", parent).panel;
     case ScenarioResultNavigationView::Bottleneck:
     default:
-        return createBottleneckReportPanel(risk, std::move(bottleneckFocusHandler), parent);
+        return createBottleneckReportPanel(
+            risk,
+            std::move(bottleneckFocusHandler),
+            std::move(itemSelectionHandler),
+            parent);
     }
 }
 

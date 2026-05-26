@@ -81,6 +81,49 @@ QString formatPercent(std::size_t numerator, std::size_t denominator) {
     return QString("%1%").arg(ratio * 100.0, 0, 'f', 0);
 }
 
+QString formatRatioPercent(double ratio) {
+    return QString("%1%").arg(std::clamp(ratio, 0.0, 1.0) * 100.0, 0, 'f', 0);
+}
+
+QString formatPoint(const safecrowd::domain::Point2D& point) {
+    return QString("(%1, %2)").arg(point.x, 0, 'f', 1).arg(point.y, 0, 'f', 1);
+}
+
+QString formatBounds(
+    const safecrowd::domain::Point2D& min,
+    const safecrowd::domain::Point2D& max) {
+    return QString("%1 to %2").arg(formatPoint(min), formatPoint(max));
+}
+
+QString hazardKindLabel(safecrowd::domain::EnvironmentHazardKind kind) {
+    switch (kind) {
+    case safecrowd::domain::EnvironmentHazardKind::Smoke:
+        return "Smoke";
+    case safecrowd::domain::EnvironmentHazardKind::Fire:
+    default:
+        return "Fire";
+    }
+}
+
+QString severityLabel(safecrowd::domain::ScenarioElementSeverity severity) {
+    switch (severity) {
+    case safecrowd::domain::ScenarioElementSeverity::Low:
+        return "Low";
+    case safecrowd::domain::ScenarioElementSeverity::High:
+        return "High";
+    case safecrowd::domain::ScenarioElementSeverity::Medium:
+    default:
+        return "Medium";
+    }
+}
+
+QString detailText(const QString& title, const QStringList& lines) {
+    if (lines.isEmpty()) {
+        return title;
+    }
+    return QString("%1\n%2").arg(title, lines.join('\n'));
+}
+
 bool shouldShowRecommendationEvidence(const safecrowd::domain::AlternativeRecommendationEvidence& item) {
     const auto label = QString::fromStdString(item.label);
     return !label.startsWith("Risk ") && label != "Critical pressure events";
@@ -436,6 +479,9 @@ private:
         considerResult(displayIndex_);
         if (validIndex(displayIndex_)) {
             const auto& timing = (*results_)[static_cast<std::size_t>(displayIndex_)].artifacts.timingSummary;
+            if (timing.t50Seconds.has_value()) {
+                maxTime = std::max(maxTime, *timing.t50Seconds);
+            }
             if (timing.t90Seconds.has_value()) {
                 maxTime = std::max(maxTime, *timing.t90Seconds);
             }
@@ -500,6 +546,7 @@ private:
             }
         };
 
+        consider(timing.t50Seconds);
         consider(timing.t90Seconds);
         consider(timing.t95Seconds);
         if (!best.has_value()) {
@@ -546,6 +593,7 @@ private:
 
         if (validIndex(displayIndex_)) {
             const auto& timing = (*results_)[static_cast<std::size_t>(displayIndex_)].artifacts.timingSummary;
+            drawTimingMarker(painter, plot, maxTime, timing.t50Seconds, "T50");
             drawTimingMarker(painter, plot, maxTime, timing.t90Seconds, "T90");
             drawTimingMarker(painter, plot, maxTime, timing.t95Seconds, "T95");
         }
@@ -951,7 +999,8 @@ ScenarioBatchResultWidget::ScenarioBatchResultWidget(
         .showTopBar = true,
         .navigationMode = WorkspaceNavigationMode::PanelOnly,
         .showReviewPanel = true,
-        .reviewPanelWidth = 360,
+        .showReviewPanelToggle = false,
+        .reviewPanelWidth = 560,
     }, this);
     shell_->setTools({"Project"});
     shell_->setSaveProjectHandler(saveProjectHandler_);
@@ -959,10 +1008,10 @@ ScenarioBatchResultWidget::ScenarioBatchResultWidget(
     shell_->setBackHandler([this]() {
         navigateToAuthoring();
     });
+    shell_->setTopBarTrailingWidget(createPanelToggleBar());
 
     shell_->setCanvas(createCanvasPanel());
-    shell_->setReviewPanel(createSummaryPanel());
-    shell_->setReviewPanelVisible(true);
+    refreshRightPanel();
     rootLayout->addWidget(shell_);
     refreshSelectedResult();
 }
@@ -1084,6 +1133,7 @@ QWidget* ScenarioBatchResultWidget::createCanvasPanel() {
     connect(displayScenarioCombo_, &QComboBox::currentIndexChanged, this, [this](int index) {
         if (index >= 0 && index < static_cast<int>(results_.size())) {
             currentResultIndex_ = index;
+            clearDetailSelection();
             refreshSelectedResult();
         }
     });
@@ -1123,12 +1173,12 @@ QWidget* ScenarioBatchResultWidget::createCanvasPanel() {
     return panel;
 }
 
-QWidget* ScenarioBatchResultWidget::createSummaryPanel() {
+QWidget* ScenarioBatchResultWidget::createOverviewPanel() {
     auto* panel = new QWidget(shell_);
     auto* panelLayout = new QVBoxLayout(panel);
     panelLayout->setContentsMargins(0, 0, 0, 0);
     panelLayout->setSpacing(12);
-    panelLayout->addWidget(shell_ != nullptr ? shell_->createPanelHeader("Compare", panel, false) : createLabel("Compare", panel, ui::FontRole::Title));
+    panelLayout->addWidget(shell_ != nullptr ? shell_->createPanelHeader("Overview", panel, false) : createLabel("Overview", panel, ui::FontRole::Title));
 
     auto* scrollArea = new QScrollArea(panel);
     scrollArea->setWidgetResizable(true);
@@ -1216,9 +1266,9 @@ QWidget* ScenarioBatchResultWidget::createSummaryPanel() {
     detailLayout->setContentsMargins(12, 10, 12, 10);
     detailLayout->setSpacing(6);
     detailLayout->addWidget(createLabel("Selected Scenario", detailCard, ui::FontRole::SectionTitle));
-    detailLabel_ = createLabel("", detailCard);
-    detailLabel_->setStyleSheet(ui::mutedTextStyleSheet());
-    detailLayout->addWidget(detailLabel_);
+    overviewScenarioLabel_ = createLabel("", detailCard);
+    overviewScenarioLabel_->setStyleSheet(ui::mutedTextStyleSheet());
+    detailLayout->addWidget(overviewScenarioLabel_);
     layout->addWidget(detailCard);
 
     layout->addStretch(1);
@@ -1242,6 +1292,125 @@ QWidget* ScenarioBatchResultWidget::createSummaryPanel() {
         navigateToAuthoring();
     });
     return panel;
+}
+
+QWidget* ScenarioBatchResultWidget::createDetailPanel() {
+    auto* panel = new QWidget(shell_);
+    auto* panelLayout = new QVBoxLayout(panel);
+    panelLayout->setContentsMargins(0, 0, 0, 0);
+    panelLayout->setSpacing(12);
+    panelLayout->addWidget(shell_ != nullptr ? shell_->createPanelHeader("Detail", panel, false) : createLabel("Detail", panel, ui::FontRole::Title));
+
+    auto* scrollArea = new QScrollArea(panel);
+    scrollArea->setWidgetResizable(true);
+    scrollArea->setFrameShape(QFrame::NoFrame);
+    scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    ui::polishScrollArea(scrollArea);
+
+    auto* content = new QWidget(scrollArea);
+    content->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    auto* layout = new QVBoxLayout(content);
+    layout->setContentsMargins(0, 0, 10, 0);
+    layout->setSpacing(12);
+
+    auto* detailCard = new QFrame(content);
+    detailCard->setStyleSheet(ui::panelStyleSheet());
+    auto* detailLayout = new QVBoxLayout(detailCard);
+    detailLayout->setContentsMargins(12, 10, 12, 10);
+    detailLayout->setSpacing(6);
+    resultDetailLabel_ = createLabel("", detailCard);
+    resultDetailLabel_->setStyleSheet(ui::mutedTextStyleSheet());
+    resultDetailLabel_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    detailLayout->addWidget(resultDetailLabel_);
+    layout->addWidget(detailCard);
+    layout->addStretch(1);
+
+    scrollArea->setWidget(content);
+    panelLayout->addWidget(scrollArea, 1);
+    refreshDetailPanel();
+    return panel;
+}
+
+QWidget* ScenarioBatchResultWidget::createRightPanelContainer() {
+    auto* container = new QWidget(shell_);
+    auto* layout = new QHBoxLayout(container);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(12);
+
+    if (detailPanelVisible_) {
+        layout->addWidget(createDetailPanel(), 1);
+    }
+    if (detailPanelVisible_ && overviewPanelVisible_) {
+        auto* separator = new QFrame(container);
+        separator->setFrameShape(QFrame::NoFrame);
+        separator->setFixedWidth(1);
+        separator->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
+        separator->setStyleSheet("QFrame { background: #c9d5e2; border: 0; min-width: 1px; max-width: 1px; }");
+        layout->addWidget(separator);
+    }
+    if (overviewPanelVisible_) {
+        layout->addWidget(createOverviewPanel(), 1);
+    }
+    return container;
+}
+
+QWidget* ScenarioBatchResultWidget::createPanelToggleBar() {
+    auto* bar = new QWidget(shell_);
+    auto* layout = new QHBoxLayout(bar);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(8);
+
+    const auto buttonStyle = QString(
+        "QPushButton {"
+        " background: #ffffff;"
+        " border: 0;"
+        " border-radius: 8px;"
+        " margin: 1px 0px;"
+        " outline: none;"
+        " padding: 4px;"
+        "}"
+        "QPushButton:hover {"
+        " background: #eef3f8;"
+        "}"
+        "QPushButton:checked {"
+        " background: #e6eef8;"
+        "}"
+        "QPushButton:focus {"
+        " outline: none;"
+        "}");
+
+    detailPanelToggleButton_ = new QPushButton(bar);
+    detailPanelToggleButton_->setCheckable(true);
+    detailPanelToggleButton_->setChecked(detailPanelVisible_);
+    detailPanelToggleButton_->setFixedSize(36, 32);
+    detailPanelToggleButton_->setCursor(Qt::PointingHandCursor);
+    detailPanelToggleButton_->setFocusPolicy(Qt::NoFocus);
+    detailPanelToggleButton_->setToolTip("Detail");
+    detailPanelToggleButton_->setAccessibleName("Toggle Detail panel");
+    detailPanelToggleButton_->setStyleSheet(buttonStyle);
+    layout->addWidget(detailPanelToggleButton_);
+
+    overviewPanelToggleButton_ = new QPushButton(bar);
+    overviewPanelToggleButton_->setCheckable(true);
+    overviewPanelToggleButton_->setChecked(overviewPanelVisible_);
+    overviewPanelToggleButton_->setFixedSize(36, 32);
+    overviewPanelToggleButton_->setCursor(Qt::PointingHandCursor);
+    overviewPanelToggleButton_->setFocusPolicy(Qt::NoFocus);
+    overviewPanelToggleButton_->setToolTip("Overview");
+    overviewPanelToggleButton_->setAccessibleName("Toggle Overview panel");
+    overviewPanelToggleButton_->setStyleSheet(buttonStyle);
+    layout->addWidget(overviewPanelToggleButton_);
+
+    connect(detailPanelToggleButton_, &QPushButton::clicked, this, [this]() {
+        detailPanelVisible_ = !detailPanelVisible_;
+        refreshRightPanel();
+    });
+    connect(overviewPanelToggleButton_, &QPushButton::clicked, this, [this]() {
+        overviewPanelVisible_ = !overviewPanelVisible_;
+        refreshRightPanel();
+    });
+
+    return bar;
 }
 
 void ScenarioBatchResultWidget::navigateToAuthoring() {
@@ -1515,6 +1684,11 @@ void ScenarioBatchResultWidget::seekToTimingMarkerSeconds(double seconds) {
     }
 
     const auto& timing = results_[static_cast<std::size_t>(currentResultIndex_)].artifacts.timingSummary;
+    if (timing.t50Seconds.has_value()
+        && std::abs(seconds - *timing.t50Seconds) <= 1e-6) {
+        showClosestReplayFrameAtSeconds(*timing.t50Seconds);
+        return;
+    }
     if (timing.t90Seconds.has_value()
         && std::abs(seconds - *timing.t90Seconds) <= 1e-6) {
         if (timing.t90Frame.has_value()) {
@@ -1935,11 +2109,13 @@ void ScenarioBatchResultWidget::refreshResultNavigationPanel() {
         scenarioResultNavigationTabId(resultNavigationView_),
         [this](const QString& tabId) {
             resultNavigationView_ = scenarioResultNavigationViewFromTabId(tabId);
+            clearDetailSelection();
             refreshResultNavigationPanel();
         });
 
     const auto& result = results_[static_cast<std::size_t>(currentResultIndex_)];
     if (resultNavigationView_ == ScenarioResultNavigationView::Recommendations) {
+        clearDetailSelection();
         shell_->setNavigationPanel(createBatchRecommendationNavigationPanel());
         return;
     }
@@ -2006,6 +2182,9 @@ void ScenarioBatchResultWidget::refreshResultNavigationPanel() {
         std::move(bottleneckFocusHandler),
         std::move(crossFlowCellFocusHandler),
         std::move(hotspotFocusHandler),
+        [this](ScenarioResultNavigationView view, std::size_t index) {
+            setDetailSelection(view, index);
+        },
         shell_));
 }
 
@@ -2013,8 +2192,6 @@ void ScenarioBatchResultWidget::refreshSelectedResult() {
     if (results_.empty() || currentResultIndex_ < 0 || currentResultIndex_ >= static_cast<int>(results_.size())) {
         return;
     }
-    const auto& result = results_[currentResultIndex_];
-    const auto baselineIndex = baselineResultIndex();
 
     if (displayScenarioCombo_ != nullptr && displayScenarioCombo_->currentIndex() != currentResultIndex_) {
         const QSignalBlocker blocker(displayScenarioCombo_);
@@ -2032,51 +2209,291 @@ void ScenarioBatchResultWidget::refreshSelectedResult() {
     refreshExposureComparisonTable();
     refreshPressureComparisonTable();
     refreshResultNavigationPanel();
-    if (detailLabel_ != nullptr) {
-        const auto selectedFinalSeconds = finalSeconds(result);
-        const auto deltaText = baselineIndex >= 0
-            ? (currentResultIndex_ == baselineIndex
-                ? QString("Baseline")
-                : formatDeltaSeconds(selectedFinalSeconds - finalSeconds(results_[static_cast<std::size_t>(baselineIndex)])))
-            : QString("No baseline");
-        const auto& exposureSummary = result.artifacts.hazardExposureSummary;
-        const auto* peakHazard = peakHazardExposureMetric(exposureSummary);
-        detailLabel_->setText(QString("%1 (%2)\nFinal: %3\nDelta vs baseline: %4\nEvacuated: %5 / %6 (%7)\nRisk: %8\nHotspots: %9\nBottlenecks: %10\nHazard exposure: %11 (fire %12 / smoke %13)\nHazard peak: %14 at %15; score %16\nPressure hotspots: %17\nCritical pressure: %18 agents / %19 events\nPeak pressure: %20 at %21\nT90 / T95: %22 / %23")
-            .arg(QString::fromStdString(result.scenario.name))
-            .arg(scenarioRoleLabel(result.scenario.role))
-            .arg(formatSeconds(selectedFinalSeconds))
-            .arg(deltaText)
-            .arg(static_cast<int>(result.frame.evacuatedAgentCount))
-            .arg(static_cast<int>(result.frame.totalAgentCount))
-            .arg(formatPercent(result.frame.evacuatedAgentCount, result.frame.totalAgentCount))
-            .arg(safecrowd::domain::scenarioRiskLevelLabel(result.risk.completionRisk))
-            .arg(static_cast<int>(result.risk.hotspots.size()))
-            .arg(static_cast<int>(result.risk.bottlenecks.size()))
-            .arg(formatExposureSeconds(totalHazardExposureSeconds(exposureSummary)))
-            .arg(formatExposureSeconds(hazardExposureSecondsForKind(
-                exposureSummary,
-                safecrowd::domain::EnvironmentHazardKind::Fire)))
-            .arg(formatExposureSeconds(hazardExposureSecondsForKind(
-                exposureSummary,
-                safecrowd::domain::EnvironmentHazardKind::Smoke)))
-            .arg(peakHazard == nullptr
-                ? QString("0 people")
-                : QString("%1 people").arg(static_cast<int>(peakHazard->peakExposedAgentCount)))
-            .arg(peakHazard == nullptr ? QString("Pending") : formatSeconds(peakHazard->peakAtSeconds))
-            .arg(formatExposureScore(exposureSummary.totalExposureScore))
-            .arg(static_cast<int>(result.artifacts.pressureSummary.peakHotspots.size()))
-            .arg(static_cast<int>(result.artifacts.pressureSummary.peakCriticalAgentCount))
-            .arg(static_cast<int>(result.artifacts.pressureSummary.criticalEvents.size()))
-            .arg(formatPressureScore(result.artifacts.pressureSummary.peakPressureScore))
-            .arg(formatSeconds(result.artifacts.pressureSummary.peakAtSeconds))
-            .arg(formatSeconds(result.artifacts.timingSummary.t90Seconds))
-            .arg(formatSeconds(result.artifacts.timingSummary.t95Seconds))
-            + QString("\nCross flow: %1 score / %2 cells")
-                .arg(result.artifacts.crossFlowSummary.peakCrossFlowScore, 0, 'f', 2)
-                .arg(static_cast<int>(result.artifacts.crossFlowSummary.crossFlowHotspotCount))
-            + QString("\nCross-flow exposure: %1 agent-sec  |  Longest duration: %2 sec")
-                .arg(result.artifacts.crossFlowSummary.totalCrossFlowExposureAgentSeconds, 0, 'f', 1)
-                .arg(result.artifacts.crossFlowSummary.longestCrossFlowDurationSeconds, 0, 'f', 1));
+    refreshOverviewPanel();
+    refreshDetailPanel();
+}
+
+void ScenarioBatchResultWidget::refreshRightPanel() {
+    if (shell_ == nullptr) {
+        return;
+    }
+
+    overviewScenarioLabel_ = nullptr;
+    resultDetailLabel_ = nullptr;
+    comparisonCountLabel_ = nullptr;
+    compareCheckBoxes_.clear();
+    refreshPanelToggles();
+    if (!detailPanelVisible_ && !overviewPanelVisible_) {
+        shell_->setReviewPanelVisible(false);
+        return;
+    }
+
+    const int panelCount = (detailPanelVisible_ ? 1 : 0) + (overviewPanelVisible_ ? 1 : 0);
+    shell_->setReviewPanelWidth(panelCount > 1 ? 560 : 280);
+    shell_->setReviewPanel(createRightPanelContainer());
+    shell_->setReviewPanelVisible(true);
+    refreshComparisonCountLabel();
+    refreshOverviewPanel();
+    refreshDetailPanel();
+    syncCompareCheckBoxes();
+}
+
+void ScenarioBatchResultWidget::refreshPanelToggles() {
+    if (detailPanelToggleButton_ != nullptr) {
+        const QSignalBlocker blocker(detailPanelToggleButton_);
+        detailPanelToggleButton_->setChecked(detailPanelVisible_);
+    }
+    if (overviewPanelToggleButton_ != nullptr) {
+        const QSignalBlocker blocker(overviewPanelToggleButton_);
+        overviewPanelToggleButton_->setChecked(overviewPanelVisible_);
+    }
+}
+
+void ScenarioBatchResultWidget::clearDetailSelection() {
+    detailSelectionView_.reset();
+    detailSelectionIndex_.reset();
+    detailSelectionResultIndex_ = -1;
+    refreshDetailPanel();
+}
+
+void ScenarioBatchResultWidget::setDetailSelection(ScenarioResultNavigationView view, std::size_t index) {
+    detailSelectionView_ = view;
+    detailSelectionIndex_ = index;
+    detailSelectionResultIndex_ = currentResultIndex_;
+    refreshDetailPanel();
+}
+
+void ScenarioBatchResultWidget::refreshOverviewPanel() {
+    if (overviewScenarioLabel_ == nullptr
+        || results_.empty()
+        || currentResultIndex_ < 0
+        || currentResultIndex_ >= static_cast<int>(results_.size())) {
+        return;
+    }
+
+    const auto& result = results_[static_cast<std::size_t>(currentResultIndex_)];
+    const auto baselineIndex = baselineResultIndex();
+    const auto selectedFinalSeconds = finalSeconds(result);
+    const auto deltaText = baselineIndex >= 0
+        ? (currentResultIndex_ == baselineIndex
+            ? QString("Baseline")
+            : formatDeltaSeconds(selectedFinalSeconds - finalSeconds(results_[static_cast<std::size_t>(baselineIndex)])))
+        : QString("No baseline");
+    const auto& exposureSummary = result.artifacts.hazardExposureSummary;
+    const auto* peakHazard = peakHazardExposureMetric(exposureSummary);
+    overviewScenarioLabel_->setText(QString("%1 (%2)\nFinal: %3\nDelta vs baseline: %4\nEvacuated: %5 / %6 (%7)\nRisk: %8\nHotspots: %9\nBottlenecks: %10\nHazard exposure: %11 (fire %12 / smoke %13)\nHazard peak: %14 at %15; score %16\nPressure hotspots: %17\nCritical pressure: %18 agents / %19 events\nPeak pressure: %20 at %21\nT50 / T90 / T95: %22 / %23 / %24")
+        .arg(QString::fromStdString(result.scenario.name))
+        .arg(scenarioRoleLabel(result.scenario.role))
+        .arg(formatSeconds(selectedFinalSeconds))
+        .arg(deltaText)
+        .arg(static_cast<int>(result.frame.evacuatedAgentCount))
+        .arg(static_cast<int>(result.frame.totalAgentCount))
+        .arg(formatPercent(result.frame.evacuatedAgentCount, result.frame.totalAgentCount))
+        .arg(safecrowd::domain::scenarioRiskLevelLabel(result.risk.completionRisk))
+        .arg(static_cast<int>(result.risk.hotspots.size()))
+        .arg(static_cast<int>(result.risk.bottlenecks.size()))
+        .arg(formatExposureSeconds(totalHazardExposureSeconds(exposureSummary)))
+        .arg(formatExposureSeconds(hazardExposureSecondsForKind(
+            exposureSummary,
+            safecrowd::domain::EnvironmentHazardKind::Fire)))
+        .arg(formatExposureSeconds(hazardExposureSecondsForKind(
+            exposureSummary,
+            safecrowd::domain::EnvironmentHazardKind::Smoke)))
+        .arg(peakHazard == nullptr
+            ? QString("0 people")
+            : QString("%1 people").arg(static_cast<int>(peakHazard->peakExposedAgentCount)))
+        .arg(peakHazard == nullptr ? QString("Pending") : formatSeconds(peakHazard->peakAtSeconds))
+        .arg(formatExposureScore(exposureSummary.totalExposureScore))
+        .arg(static_cast<int>(result.artifacts.pressureSummary.peakHotspots.size()))
+        .arg(static_cast<int>(result.artifacts.pressureSummary.peakCriticalAgentCount))
+        .arg(static_cast<int>(result.artifacts.pressureSummary.criticalEvents.size()))
+        .arg(formatPressureScore(result.artifacts.pressureSummary.peakPressureScore))
+        .arg(formatSeconds(result.artifacts.pressureSummary.peakAtSeconds))
+        .arg(formatSeconds(result.artifacts.timingSummary.t50Seconds))
+        .arg(formatSeconds(result.artifacts.timingSummary.t90Seconds))
+        .arg(formatSeconds(result.artifacts.timingSummary.t95Seconds))
+        + QString("\nCross flow: %1 score / %2 cells")
+            .arg(result.artifacts.crossFlowSummary.peakCrossFlowScore, 0, 'f', 2)
+            .arg(static_cast<int>(result.artifacts.crossFlowSummary.crossFlowHotspotCount))
+        + QString("\nCross-flow exposure: %1 agent-sec  |  Longest duration: %2 sec")
+            .arg(result.artifacts.crossFlowSummary.totalCrossFlowExposureAgentSeconds, 0, 'f', 1)
+            .arg(result.artifacts.crossFlowSummary.longestCrossFlowDurationSeconds, 0, 'f', 1));
+}
+
+void ScenarioBatchResultWidget::refreshDetailPanel() {
+    if (resultDetailLabel_ == nullptr) {
+        return;
+    }
+    if (!detailSelectionView_.has_value()
+        || !detailSelectionIndex_.has_value()
+        || detailSelectionResultIndex_ != currentResultIndex_) {
+        resultDetailLabel_->setText("Select an item in the left result panel to inspect its metrics.");
+        return;
+    }
+    resultDetailLabel_->setText(detailTextForSelection(*detailSelectionView_, *detailSelectionIndex_));
+}
+
+QString ScenarioBatchResultWidget::detailTextForSelection(
+    ScenarioResultNavigationView view,
+    std::size_t index) const {
+    if (results_.empty() || currentResultIndex_ < 0 || currentResultIndex_ >= static_cast<int>(results_.size())) {
+        return "No result is selected.";
+    }
+
+    const auto& result = results_[static_cast<std::size_t>(currentResultIndex_)];
+    switch (view) {
+    case ScenarioResultNavigationView::Bottleneck: {
+        if (index >= result.risk.bottlenecks.size()) {
+            return "The selected bottleneck is no longer available.";
+        }
+        const auto& bottleneck = result.risk.bottlenecks[index];
+        QStringList lines{
+            QString("Connection: %1").arg(QString::fromStdString(bottleneck.connectionId)),
+            QString("Nearby agents: %1").arg(static_cast<int>(bottleneck.nearbyAgentCount)),
+            QString("Stalled agents: %1").arg(static_cast<int>(bottleneck.stalledAgentCount)),
+            QString("Average speed: %1 m/s").arg(bottleneck.averageSpeed, 0, 'f', 2),
+            QString("Detected: %1").arg(formatSeconds(bottleneck.detectedAtSeconds)),
+            QString("Passage: %1 to %2").arg(formatPoint(bottleneck.passage.start), formatPoint(bottleneck.passage.end)),
+        };
+        if (!bottleneck.floorId.empty()) {
+            lines.push_back(QString("Floor: %1").arg(QString::fromStdString(bottleneck.floorId)));
+        }
+        return detailText(
+            QString("Bottleneck %1: %2")
+                .arg(static_cast<int>(index + 1))
+                .arg(QString::fromStdString(bottleneck.label)),
+            lines);
+    }
+    case ScenarioResultNavigationView::CrossFlow: {
+        if (index >= result.risk.crossFlowCells.size()) {
+            return "The selected cross-flow cell is no longer available.";
+        }
+        const auto& cell = result.risk.crossFlowCells[index];
+        QStringList lines{
+            QString("Score: %1").arg(cell.crossFlowScore, 0, 'f', 2),
+            QString("Ratio: %1").arg(formatRatioPercent(cell.crossFlowRatio)),
+            QString("Moving agents: %1").arg(static_cast<int>(cell.movingAgentCount)),
+            QString("Peak agents: %1").arg(static_cast<int>(cell.peakAgentCount)),
+            QString("Primary / crossing: %1 / %2")
+                .arg(static_cast<int>(cell.primaryFlowCount))
+                .arg(static_cast<int>(cell.crossFlowCount)),
+            QString("Duration: %1 sec").arg(cell.durationSeconds, 0, 'f', 1),
+            QString("Exposure: %1 agent-sec").arg(cell.exposureAgentSeconds, 0, 'f', 1),
+            QString("Average speed: %1 m/s").arg(cell.averageSpeed, 0, 'f', 2),
+            QString("Speed drop: %1").arg(formatRatioPercent(cell.speedDropRatio)),
+            QString("Detected: %1").arg(formatSeconds(cell.detectedAtSeconds)),
+            QString("Center: %1").arg(formatPoint(cell.center)),
+            QString("Cell: %1").arg(formatBounds(cell.cellMin, cell.cellMax)),
+        };
+        if (!cell.floorId.empty()) {
+            lines.push_back(QString("Floor: %1").arg(QString::fromStdString(cell.floorId)));
+        }
+        return detailText(QString("Cross-Flow Cell %1").arg(static_cast<int>(index + 1)), lines);
+    }
+    case ScenarioResultNavigationView::Hotspot: {
+        if (index >= result.risk.hotspots.size()) {
+            return "The selected hotspot is no longer available.";
+        }
+        const auto& hotspot = result.risk.hotspots[index];
+        QStringList lines{
+            QString("Agents: %1").arg(static_cast<int>(hotspot.agentCount)),
+            QString("Detected: %1").arg(formatSeconds(hotspot.detectedAtSeconds)),
+            QString("Center: %1").arg(formatPoint(hotspot.center)),
+            QString("Cell: %1").arg(formatBounds(hotspot.cellMin, hotspot.cellMax)),
+        };
+        if (!hotspot.floorId.empty()) {
+            lines.push_back(QString("Floor: %1").arg(QString::fromStdString(hotspot.floorId)));
+        }
+        return detailText(QString("Hotspot %1").arg(static_cast<int>(index + 1)), lines);
+    }
+    case ScenarioResultNavigationView::HazardExposure: {
+        if (index >= result.artifacts.hazardExposureSummary.hazards.size()) {
+            return "The selected hazard exposure item is no longer available.";
+        }
+        const auto& hazard = result.artifacts.hazardExposureSummary.hazards[index];
+        const auto name = !hazard.hazardName.empty()
+            ? QString::fromStdString(hazard.hazardName)
+            : QString::fromStdString(hazard.hazardId);
+        QStringList lines{
+            QString("Kind: %1").arg(hazardKindLabel(hazard.kind)),
+            QString("Severity: %1").arg(severityLabel(hazard.severity)),
+            QString("Exposure: %1").arg(formatExposureSeconds(hazard.exposedAgentSeconds)),
+            QString("Peak exposed: %1 people").arg(static_cast<int>(hazard.peakExposedAgentCount)),
+            QString("First exposure: %1").arg(formatSeconds(hazard.firstExposureSeconds)),
+            QString("Peak time: %1").arg(formatSeconds(hazard.peakAtSeconds)),
+            QString("Score: %1").arg(formatExposureScore(hazard.exposureScore)),
+            QString("Position: %1").arg(formatPoint(hazard.position)),
+        };
+        if (!hazard.hazardId.empty()) {
+            lines.push_back(QString("ID: %1").arg(QString::fromStdString(hazard.hazardId)));
+        }
+        if (!hazard.affectedZoneId.empty()) {
+            lines.push_back(QString("Zone: %1").arg(QString::fromStdString(hazard.affectedZoneId)));
+        }
+        if (!hazard.floorId.empty()) {
+            lines.push_back(QString("Floor: %1").arg(QString::fromStdString(hazard.floorId)));
+        }
+        return detailText(
+            QString("Hazard %1: %2")
+                .arg(static_cast<int>(index + 1))
+                .arg(name.isEmpty() ? QString("Unnamed hazard") : name),
+            lines);
+    }
+    case ScenarioResultNavigationView::Zone: {
+        if (index >= result.artifacts.zoneCompletion.size()) {
+            return "The selected zone item is no longer available.";
+        }
+        const auto& zone = result.artifacts.zoneCompletion[index];
+        const auto remaining = zone.initialCount > zone.evacuatedCount
+            ? zone.initialCount - zone.evacuatedCount
+            : std::size_t{0};
+        const auto label = zone.zoneLabel.empty()
+            ? QString::fromStdString(zone.zoneId)
+            : QString::fromStdString(zone.zoneLabel);
+        QStringList lines{
+            QString("Zone ID: %1").arg(QString::fromStdString(zone.zoneId)),
+            QString("Initial people: %1").arg(static_cast<int>(zone.initialCount)),
+            QString("Evacuated: %1 (%2)")
+                .arg(static_cast<int>(zone.evacuatedCount))
+                .arg(formatPercent(zone.evacuatedCount, zone.initialCount)),
+            QString("Remaining: %1").arg(static_cast<int>(remaining)),
+            QString("Last completion: %1").arg(formatSeconds(zone.lastCompletionTimeSeconds)),
+        };
+        if (!zone.floorId.empty()) {
+            lines.push_back(QString("Floor: %1").arg(QString::fromStdString(zone.floorId)));
+        }
+        return detailText(
+            QString("Zone %1: %2")
+                .arg(static_cast<int>(index + 1))
+                .arg(label.isEmpty() ? QString("Unnamed zone") : label),
+            lines);
+    }
+    case ScenarioResultNavigationView::Groups: {
+        if (index >= result.artifacts.placementCompletion.size()) {
+            return "The selected group item is no longer available.";
+        }
+        const auto& group = result.artifacts.placementCompletion[index];
+        const auto remaining = group.initialCount > group.evacuatedCount
+            ? group.initialCount - group.evacuatedCount
+            : std::size_t{0};
+        QStringList lines{
+            QString("Placement ID: %1").arg(QString::fromStdString(group.placementId)),
+            QString("Zone ID: %1").arg(QString::fromStdString(group.zoneId)),
+            QString("Initial people: %1").arg(static_cast<int>(group.initialCount)),
+            QString("Evacuated: %1 (%2)")
+                .arg(static_cast<int>(group.evacuatedCount))
+                .arg(formatPercent(group.evacuatedCount, group.initialCount)),
+            QString("Remaining: %1").arg(static_cast<int>(remaining)),
+            QString("Last completion: %1").arg(formatSeconds(group.lastCompletionTimeSeconds)),
+        };
+        if (!group.floorId.empty()) {
+            lines.push_back(QString("Floor: %1").arg(QString::fromStdString(group.floorId)));
+        }
+        return detailText(QString("Group %1").arg(static_cast<int>(index + 1)), lines);
+    }
+    case ScenarioResultNavigationView::Recommendations:
+    default:
+        return "Select a measurable result item in the left panel.";
     }
 }
 
