@@ -39,7 +39,7 @@ safecrowd::domain::SimulationAgentFrame simulationAgentFrameFromJson(const QJson
         .id = unsignedIntegerFromJson(object.value("id")),
         .position = pointFromJson(object.value("position")),
         .velocity = pointFromJson(object.value("velocity")),
-        .radius = object.value("radius").toDouble(0.25),
+        .radius = object.value("radius").toDouble(safecrowd::domain::kDefaultAgentRadiusMeters),
         .floorId = object.value("floorId").toString().toStdString(),
         .stalled = object.value("stalled").toBool(false),
     };

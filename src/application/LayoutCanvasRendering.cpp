@@ -410,6 +410,10 @@ safecrowd::domain::Point2D LayoutCanvasTransform::unmap(const QPointF& point) co
     };
 }
 
+double LayoutCanvasTransform::mapDistance(double distance) const noexcept {
+    return std::abs(distance) * scale_;
+}
+
 bool LayoutCanvasCamera::handleGlobalKeyEvent(QEvent* event) {
     if (event->type() == QEvent::KeyPress) {
         auto* keyEvent = static_cast<QKeyEvent*>(event);

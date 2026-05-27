@@ -1,6 +1,7 @@
 #include "application/ScenarioCanvasAuthoringRules.h"
 
 #include "application/LayoutPreviewGeometry.h"
+#include "domain/AgentComponents.h"
 #include "domain/GeometryQueries.h"
 
 #include <algorithm>
@@ -14,7 +15,7 @@ namespace safecrowd::application {
 namespace {
 
 constexpr double kDefaultInitialSpeed = 1.3;
-constexpr double kOccupantWorldRadius = 0.25;
+constexpr double kOccupantWorldRadius = safecrowd::domain::kDefaultAgentRadiusMeters;
 constexpr double kOccupantMinSpacing = kOccupantWorldRadius * 2.0;
 constexpr double kGuidancePlacementBarrierClearance = 0.35;
 constexpr double kGeometryEpsilon = 1e-9;

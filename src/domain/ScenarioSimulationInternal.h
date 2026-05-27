@@ -21,7 +21,7 @@ struct ScenarioLayoutCacheResource;
 namespace safecrowd::domain::simulation_internal {
 
 inline constexpr double kDefaultTimeLimitSeconds = 60.0;
-inline constexpr double kDefaultAgentRadius = 0.25;
+inline constexpr double kDefaultAgentRadius = kDefaultAgentRadiusMeters;
 inline constexpr double kDefaultAgentSpeed = 1.3;
 inline constexpr double kStairAgentSpeed = 0.8;
 inline constexpr double kArrivalEpsilon = 0.05;

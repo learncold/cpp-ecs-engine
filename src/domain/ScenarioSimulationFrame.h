@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "domain/AgentComponents.h"
 #include "domain/Geometry2D.h"
 
 namespace safecrowd::domain {
@@ -13,7 +14,7 @@ struct SimulationAgentFrame {
     std::uint64_t id{0};
     Point2D position{};
     Point2D velocity{};
-    double radius{0.25};
+    double radius{static_cast<double>(kDefaultAgentRadiusMeters)};
     std::string floorId{};
     bool stalled{false};
 };

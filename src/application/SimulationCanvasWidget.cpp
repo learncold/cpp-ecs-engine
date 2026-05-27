@@ -1,6 +1,7 @@
 #include "application/SimulationCanvasWidget.h"
 
 #include "application/UiStyle.h"
+#include "domain/AgentComponents.h"
 #include "domain/GeometryQueries.h"
 
 #include <algorithm>
@@ -33,7 +34,6 @@ namespace safecrowd::application {
 namespace {
 
 constexpr double kViewportPadding = 32.0;
-constexpr double kAgentMarkerRadius = 5.0;
 constexpr double kDefaultHotspotCellSize = 1.5;
 constexpr double kHotspotFocusZoom = 2.8;
 constexpr double kBottleneckFocusZoom = 2.4;
@@ -1042,6 +1042,13 @@ std::optional<std::size_t> hoveredActiveRouteGuidanceIndex(
     return closestIndex;
 }
 
+double agentRadiusPixels(const LayoutCanvasTransform& transform, double radiusMeters) {
+    const auto safeRadius = std::isfinite(radiusMeters) && radiusMeters > 0.0
+        ? radiusMeters
+        : static_cast<double>(safecrowd::domain::kDefaultAgentRadiusMeters);
+    return transform.mapDistance(safeRadius);
+}
+
 }  // namespace
 
 SimulationCanvasWidget::SimulationCanvasWidget(safecrowd::domain::FacilityLayout2D layout, QWidget* parent)
@@ -1434,9 +1441,10 @@ void SimulationCanvasWidget::paintEvent(QPaintEvent* event) {
             continue;
         }
         const auto origin = transform.map(agent.position);
+        const auto radius = agentRadiusPixels(transform, agent.radius);
         painter.setPen(Qt::NoPen);
         painter.setBrush(agent.stalled ? kStalledAgentColor : kMovingAgentColor);
-        painter.drawEllipse(origin, kAgentMarkerRadius, kAgentMarkerRadius);
+        painter.drawEllipse(origin, radius, radius);
     }
 }
 

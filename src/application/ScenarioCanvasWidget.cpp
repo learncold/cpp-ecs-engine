@@ -3,6 +3,7 @@
 #include "application/ScenarioCanvasAuthoringRules.h"
 #include "application/ToolIconResources.h"
 #include "application/UiStyle.h"
+#include "domain/AgentComponents.h"
 #include "domain/GeometryQueries.h"
 
 #include <algorithm>
@@ -46,7 +47,8 @@ constexpr int kTopToolbarHeight = 44;
 constexpr int kPropertyPanelHeight = 42;
 constexpr int kToolbarButtonSize = 44;
 constexpr double kViewportPadding = 24.0;
-constexpr double kOccupantMarkerRadius = 5.0;
+constexpr double kMinimumOccupantPickRadius = 5.0;
+constexpr double kOccupantPickPadding = 6.0;
 constexpr int kDefaultSourceAgentsPerSpawn = 1;
 constexpr double kDefaultSourceStartSeconds = 0.0;
 constexpr double kDefaultSourceDurationSeconds = 180.0;
@@ -462,6 +464,16 @@ QString defaultFloorIdText(const safecrowd::domain::FacilityLayout2D& layout) {
     return QString::fromStdString(safecrowd::domain::defaultFloorId(layout));
 }
 
+double occupantMarkerRadiusPixels(const LayoutCanvasTransform& transform) {
+    return transform.mapDistance(safecrowd::domain::kDefaultAgentRadiusMeters);
+}
+
+double occupantPickRadiusPixels(const LayoutCanvasTransform& transform, double pickPadding = 0.0) {
+    return std::max(kMinimumOccupantPickRadius, occupantMarkerRadiusPixels(transform))
+        + kOccupantPickPadding
+        + std::max(0.0, pickPadding);
+}
+
 QRectF groupMarkerBounds(const ScenarioCrowdPlacement& placement, const LayoutCanvasTransform& transform) {
     const auto positions = scenarioPlacementDisplayPositions(placement);
     if (positions.empty()) {
@@ -469,11 +481,12 @@ QRectF groupMarkerBounds(const ScenarioCrowdPlacement& placement, const LayoutCa
     }
 
     QRectF bounds;
+    const auto markerRadius = occupantMarkerRadiusPixels(transform);
     for (const auto& worldPoint : positions) {
         const auto point = transform.map(worldPoint);
         const QRectF markerBounds(
-            point - QPointF(kOccupantMarkerRadius, kOccupantMarkerRadius),
-            QSizeF(kOccupantMarkerRadius * 2.0, kOccupantMarkerRadius * 2.0));
+            point - QPointF(markerRadius, markerRadius),
+            QSizeF(markerRadius * 2.0, markerRadius * 2.0));
         bounds = bounds.isNull() ? markerBounds : bounds.united(markerBounds);
     }
     return bounds.adjusted(-7.0, -7.0, 7.0, 7.0);
@@ -1696,6 +1709,7 @@ void ScenarioCanvasWidget::paintEvent(QPaintEvent* event) {
         return;
     }
     const auto transform = currentTransform(*bounds);
+    const auto occupantRadius = occupantMarkerRadiusPixels(transform);
 
     drawLayoutCanvasSurface(painter, QRectF(rect()));
 
@@ -1722,7 +1736,7 @@ void ScenarioCanvasWidget::paintEvent(QPaintEvent* event) {
             const auto origin = transform.map(placement.area.front());
             painter.setPen(Qt::NoPen);
             painter.setBrush(QColor("#1f5fae"));
-            painter.drawEllipse(origin, kOccupantMarkerRadius, kOccupantMarkerRadius);
+            painter.drawEllipse(origin, occupantRadius, occupantRadius);
             continue;
         }
 
@@ -1732,7 +1746,7 @@ void ScenarioCanvasWidget::paintEvent(QPaintEvent* event) {
             for (const auto& worldPoint : scenarioPlacementDisplayPositions(placement)) {
                 const auto point = transform.map(worldPoint);
                 painter.setPen(Qt::NoPen);
-                painter.drawEllipse(point, kOccupantMarkerRadius, kOccupantMarkerRadius);
+                painter.drawEllipse(point, occupantRadius, occupantRadius);
                 painter.setPen(QPen(QColor("#0f4c8f"), 1.2, Qt::SolidLine, Qt::RoundCap));
             }
             painter.setPen(Qt::NoPen);
@@ -1832,6 +1846,7 @@ void ScenarioCanvasWidget::drawFocusedPlacement(QPainter& painter, const LayoutC
 
     painter.setPen(QPen(kSelectionHighlightColor, 3.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
     painter.setBrush(QColor(kSelectionHighlightColor.red(), kSelectionHighlightColor.green(), kSelectionHighlightColor.blue(), 42));
+    const auto occupantRadius = occupantMarkerRadiusPixels(transform);
 
     for (const auto& placement : placements_) {
         const auto selected = selectedPlacementIds_.contains(placement.id) || placement.id == focusedPlacementId_;
@@ -1846,7 +1861,7 @@ void ScenarioCanvasWidget::drawFocusedPlacement(QPainter& painter, const LayoutC
             const auto center = transform.map(placement.area.front());
             painter.setPen(Qt::NoPen);
             painter.setBrush(kSelectionHighlightColor);
-            painter.drawEllipse(center, kOccupantMarkerRadius, kOccupantMarkerRadius);
+            painter.drawEllipse(center, occupantRadius, occupantRadius);
             painter.setPen(QPen(kSelectionHighlightColor, 3.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
             painter.setBrush(QColor(kSelectionHighlightColor.red(), kSelectionHighlightColor.green(), kSelectionHighlightColor.blue(), 42));
             continue;
@@ -1874,13 +1889,13 @@ void ScenarioCanvasWidget::drawFocusedPlacement(QPainter& painter, const LayoutC
                 const auto center = transform.map(markerPositions[static_cast<std::size_t>(index)]);
                 painter.setPen(Qt::NoPen);
                 painter.setBrush(kSelectionHighlightColor);
-                painter.drawEllipse(center, kOccupantMarkerRadius, kOccupantMarkerRadius);
+                painter.drawEllipse(center, occupantRadius, occupantRadius);
             }
         } else {
             painter.setPen(Qt::NoPen);
             painter.setBrush(kSelectionHighlightColor);
             for (const auto& worldPoint : markerPositions) {
-                painter.drawEllipse(transform.map(worldPoint), kOccupantMarkerRadius, kOccupantMarkerRadius);
+                painter.drawEllipse(transform.map(worldPoint), occupantRadius, occupantRadius);
             }
         }
 
@@ -2331,7 +2346,7 @@ QString ScenarioCanvasWidget::placementAt(
     const QPointF& position,
     const LayoutCanvasTransform& transform,
     double pickPadding) const {
-    const double pickRadius = kOccupantMarkerRadius + 6.0 + std::max(0.0, pickPadding);
+    const double pickRadius = occupantPickRadiusPixels(transform, pickPadding);
     for (auto it = placements_.rbegin(); it != placements_.rend(); ++it) {
         const auto& placement = *it;
         if (!currentFloorId_.isEmpty() && !placement.floorId.isEmpty() && placement.floorId != currentFloorId_) {
@@ -2379,7 +2394,7 @@ QString ScenarioCanvasWidget::selectedPlacementAt(const QPointF& position, const
             continue;
         }
 
-        const double pickRadius = kOccupantMarkerRadius + 6.0 + kSelectedPickPadding;
+        const double pickRadius = occupantPickRadiusPixels(transform, kSelectedPickPadding);
         if (placement.kind == ScenarioCrowdPlacementKind::Individual || placement.area.size() < 4) {
             if (QLineF(position, transform.map(placement.area.front())).length() <= pickRadius) {
                 return placement.id;
@@ -3036,9 +3051,10 @@ void ScenarioCanvasWidget::selectPlacementsInRect(const QRectF& screenRect, cons
 
         bool selected = false;
         if (placement.kind == ScenarioCrowdPlacementKind::Individual || placement.area.size() < 4) {
+            const auto markerRadius = occupantMarkerRadiusPixels(transform);
             const QRectF markerBounds(
-                transform.map(placement.area.front()) - QPointF(kOccupantMarkerRadius, kOccupantMarkerRadius),
-                QSizeF(kOccupantMarkerRadius * 2.0, kOccupantMarkerRadius * 2.0));
+                transform.map(placement.area.front()) - QPointF(markerRadius, markerRadius),
+                QSizeF(markerRadius * 2.0, markerRadius * 2.0));
             selected = screenRect.intersects(markerBounds);
         } else {
             selected = screenRect.intersects(groupMarkerBounds(placement, transform));

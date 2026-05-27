@@ -39,6 +39,7 @@ public:
 
     QPointF map(const safecrowd::domain::Point2D& point) const;
     safecrowd::domain::Point2D unmap(const QPointF& point) const;
+    double mapDistance(double distance) const noexcept;
 
 private:
     LayoutCanvasBounds bounds_{};

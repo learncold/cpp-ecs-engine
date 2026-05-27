@@ -9,12 +9,14 @@
 
 namespace safecrowd::domain {
 
+inline constexpr float kDefaultAgentRadiusMeters = 0.25f;
+
 struct Position {
     Point2D value;
 };
 
 struct Agent {
-    float radius{0.25f};
+    float radius{kDefaultAgentRadiusMeters};
     float maxSpeed{1.5f};
     std::string sourcePlacementId{};
     std::string sourceZoneId{};
