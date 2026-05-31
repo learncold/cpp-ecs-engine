@@ -130,6 +130,7 @@ Domain layer file roles:
 - `ScenarioSimulationRouteGuidance.h/.cpp`: internal route guidance controller, route planning/cache helpers, exit replanning, and hazard-aware route selection support for scenario simulation.
 - `ScenarioSimulationRunner.h/.cpp`: scenario simulation runner service.
 - `ScenarioSimulationSystems.h/.cpp`: simulation system registration and shared system helpers.
+- `ScenarioWayfindingSystem.cpp`: local wayfinding system for sign-driven next-connection selection and short route planning.
 - `ScenarioTemplateCatalog.h`: predefined scenario template catalog models/helpers.
 
 Engine layer file roles:

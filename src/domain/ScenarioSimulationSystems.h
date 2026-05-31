@@ -182,6 +182,7 @@ struct ScenarioAgentSeed {
     Velocity velocity{};
     AvoidanceState avoidance{};
     EvacuationRoute route{};
+    WayfindingState wayfinding{};
     EvacuationStatus status{};
 };
 
@@ -227,10 +228,17 @@ std::unique_ptr<engine::EngineSystem> makeScenarioControlSystem(
 std::unique_ptr<engine::EngineSystem> makeScenarioEnvironmentHazardSystem(
     FacilityLayout2D layout,
     std::vector<EnvironmentHazardDraft> hazards);
+std::unique_ptr<engine::EngineSystem> makeScenarioWayfindingSystem(
+    FacilityLayout2D layout,
+    std::vector<EvacuationSignDraft> signs);
 std::unique_ptr<engine::EngineSystem> makeScenarioSimulationMotionSystem(FacilityLayout2D layout);
 std::unique_ptr<engine::EngineSystem> makeScenarioSimulationMotionSystem(
     FacilityLayout2D layout,
     std::vector<RouteGuidanceDraft> routeGuidances);
+std::unique_ptr<engine::EngineSystem> makeScenarioSimulationMotionSystem(
+    FacilityLayout2D layout,
+    std::vector<RouteGuidanceDraft> routeGuidances,
+    ScenarioWayfindingMode wayfindingMode);
 std::unique_ptr<engine::EngineSystem> makeScenarioPressureFeedbackSystem(FacilityLayout2D layout);
 std::unique_ptr<engine::EngineSystem> makeScenarioRiskMetricsSystem(FacilityLayout2D layout);
 

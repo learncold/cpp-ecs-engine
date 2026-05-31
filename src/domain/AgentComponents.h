@@ -64,9 +64,30 @@ struct EvacuationRoute {
     std::string physicsFloorId{};
 };
 
+enum class WayfindingIntent {
+    Exploring,
+    FollowingSign,
+    MovingToVisibleExit,
+    FollowingKnownRoute,
+    AvoidingHazard,
+};
+
+struct WayfindingState {
+    WayfindingIntent intent{WayfindingIntent::Exploring};
+    std::vector<std::string> visitedZoneIds{};
+    std::string currentTargetConnectionId{};
+    std::string currentTargetZoneId{};
+    std::string lastSeenSignId{};
+    std::string avoidedConnectionId{};
+    double signCommitmentUntilSeconds{0.0};
+    double avoidConnectionUntilSeconds{0.0};
+    double nextDecisionSeconds{0.0};
+};
+
 struct EvacuationStatus {
     bool evacuated{false};
     double completionTimeSeconds{0.0};
+    std::string exitZoneId{};
 };
 
 }  // namespace safecrowd::domain

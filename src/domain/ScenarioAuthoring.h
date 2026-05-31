@@ -17,6 +17,11 @@ enum class ScenarioRole {
     Recommended,
 };
 
+enum class ScenarioWayfindingMode {
+    FullKnowledge,
+    LocalWayfinding,
+};
+
 enum class EnvironmentHazardKind {
     Fire,
     Smoke,
@@ -82,6 +87,24 @@ struct RouteGuidanceDraft {
     double maxDetourMeters{20.0};
 };
 
+enum class EvacuationSignKind {
+    DirectionArrow,
+    ExitMarker,
+    StairExitMarker,
+};
+
+struct EvacuationSignDraft {
+    std::string id{};
+    std::string floorId{};
+    std::string installZoneId{};
+    Point2D position{};
+    double orientationRadians{0.0};
+    double visibilityRadiusMeters{6.0};
+    double complianceRate{0.75};
+    EvacuationSignKind kind{EvacuationSignKind::DirectionArrow};
+    std::vector<RouteGuidancePeriodDraft> periods{};
+};
+
 struct ConnectionBlockIntervalDraft {
     double startSeconds{0.0};
     double endSeconds{0.0};
@@ -96,6 +119,7 @@ struct ConnectionBlockDraft {
 struct ControlPlan {
     std::vector<OperationalEventDraft> events{};
     std::vector<RouteGuidanceDraft> routeGuidances{};
+    std::vector<EvacuationSignDraft> evacuationSigns{};
     std::vector<ConnectionBlockDraft> connectionBlocks{};
 };
 
@@ -105,6 +129,7 @@ struct ExecutionConfig {
     std::uint32_t repeatCount{1};
     std::uint32_t baseSeed{0};
     bool recordOccupantHistory{false};
+    ScenarioWayfindingMode wayfindingMode{ScenarioWayfindingMode::FullKnowledge};
 };
 
 struct ScenarioDraft {

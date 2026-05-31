@@ -176,6 +176,27 @@ bool routeGuidancesEqual(const std::vector<RouteGuidanceDraft>& lhs,
     return true;
 }
 
+bool evacuationSignsEqual(const std::vector<EvacuationSignDraft>& lhs,
+                          const std::vector<EvacuationSignDraft>& rhs) {
+    if (lhs.size() != rhs.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < lhs.size(); ++i) {
+        if (lhs[i].id != rhs[i].id
+            || lhs[i].floorId != rhs[i].floorId
+            || lhs[i].installZoneId != rhs[i].installZoneId
+            || !pointsEqual(lhs[i].position, rhs[i].position)
+            || lhs[i].orientationRadians != rhs[i].orientationRadians
+            || lhs[i].visibilityRadiusMeters != rhs[i].visibilityRadiusMeters
+            || lhs[i].complianceRate != rhs[i].complianceRate
+            || lhs[i].kind != rhs[i].kind
+            || !routeGuidancePeriodsEqual(lhs[i].periods, rhs[i].periods)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool isRecommendationSourceTemplateId(const std::string& sourceTemplateId) {
     return sourceTemplateId.rfind("recommendation:", 0) == 0;
 }
@@ -225,6 +246,9 @@ std::vector<std::string> computeScenarioDiffKeys(const ScenarioDraft& baseline,
     if (!routeGuidancesEqual(baseline.control.routeGuidances, variant.control.routeGuidances)) {
         keys.emplace_back("control.routeGuidances");
     }
+    if (!evacuationSignsEqual(baseline.control.evacuationSigns, variant.control.evacuationSigns)) {
+        keys.emplace_back("control.evacuationSigns");
+    }
     if (baseline.execution.timeLimitSeconds != variant.execution.timeLimitSeconds) {
         keys.emplace_back("execution.timeLimit");
     }
@@ -239,6 +263,9 @@ std::vector<std::string> computeScenarioDiffKeys(const ScenarioDraft& baseline,
     }
     if (baseline.execution.recordOccupantHistory != variant.execution.recordOccupantHistory) {
         keys.emplace_back("execution.recordOccupantHistory");
+    }
+    if (baseline.execution.wayfindingMode != variant.execution.wayfindingMode) {
+        keys.emplace_back("execution.wayfindingMode");
     }
 
     return keys;

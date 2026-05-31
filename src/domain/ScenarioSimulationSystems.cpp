@@ -878,6 +878,7 @@ void ScenarioAgentSpawnSystem::configure(engine::EngineWorld& world) {
             seed.velocity,
             seed.avoidance,
             seed.route,
+            seed.wayfinding,
             seed.status);
     }
 }
@@ -927,6 +928,7 @@ void ScenarioOccupantSourceSpawnSystem::spawnDueSeeds(engine::EngineWorld& world
             seed.velocity,
             seed.avoidance,
             seed.route,
+            seed.wayfinding,
             seed.status);
         ++nextSeedIndex_;
     }
@@ -1412,16 +1414,19 @@ void ScenarioResultArtifactsSystem::update(engine::EngineWorld& world, const eng
         ++evacuatedCount;
         completionTimes.push_back(status.completionTimeSeconds);
 
-        if (route != nullptr && !route->destinationZoneId.empty()) {
-            auto& exit = exitUsageByZone[route->destinationZoneId];
+        const auto exitZoneId = !status.exitZoneId.empty()
+            ? status.exitZoneId
+            : (route == nullptr ? std::string{} : route->destinationZoneId);
+        if (!exitZoneId.empty()) {
+            auto& exit = exitUsageByZone[exitZoneId];
             if (exit.exitZoneId.empty()) {
-                exit.exitZoneId = route->destinationZoneId;
+                exit.exitZoneId = exitZoneId;
                 exit.exitLabel = activeLayout == nullptr
-                    ? route->destinationZoneId
-                    : zoneLabel(*activeLayout, route->destinationZoneId);
+                    ? exitZoneId
+                    : zoneLabel(*activeLayout, exitZoneId);
                 exit.floorId = activeLayout == nullptr
                     ? std::string{}
-                    : zoneFloorId(*activeLayout, route->destinationZoneId);
+                    : zoneFloorId(*activeLayout, exitZoneId);
             }
             ++exit.evacuatedCount;
             exit.lastExitTimeSeconds = exit.lastExitTimeSeconds.has_value()

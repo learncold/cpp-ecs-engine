@@ -9,6 +9,7 @@
 #include <QIcon>
 #include <QLabel>
 #include <QMessageBox>
+#include <QPointer>
 #include <QPushButton>
 #include <QShortcut>
 #include <QScrollArea>
@@ -650,6 +651,8 @@ void LayoutReviewWidget::clearInspectorEditor() {
 
     while (auto* item = inspectorEditorLayout_->takeAt(0)) {
         if (auto* widget = item->widget(); widget != nullptr) {
+            widget->hide();
+            widget->setParent(nullptr);
             widget->deleteLater();
         }
         delete item;
@@ -724,8 +727,8 @@ void LayoutReviewWidget::showVertexEditor(const PreviewSelection& selection) {
     grid->addWidget(new QLabel("X", gridHost), 0, 1);
     grid->addWidget(new QLabel("Y", gridHost), 0, 2);
 
-    std::vector<QDoubleSpinBox*> xEditors;
-    std::vector<QDoubleSpinBox*> yEditors;
+    std::vector<QPointer<QDoubleSpinBox>> xEditors;
+    std::vector<QPointer<QDoubleSpinBox>> yEditors;
     xEditors.reserve(vertices->size());
     yEditors.reserve(vertices->size());
 
@@ -755,7 +758,7 @@ void LayoutReviewWidget::showVertexEditor(const PreviewSelection& selection) {
     auto* applyButton = new QPushButton("Apply Vertices", editor);
     applyButton->setFont(ui::font(ui::FontRole::Body));
     editorLayout->addWidget(applyButton);
-    connect(applyButton, &QPushButton::clicked, this, [this, selection, xEditors, yEditors]() {
+    connect(applyButton, &QPushButton::clicked, editor, [this, selection, xEditors, yEditors]() {
         if (preview_ == nullptr || xEditors.size() != yEditors.size()) {
             return;
         }
@@ -763,12 +766,14 @@ void LayoutReviewWidget::showVertexEditor(const PreviewSelection& selection) {
         std::vector<safecrowd::domain::Point2D> updatedVertices;
         updatedVertices.reserve(xEditors.size());
         for (std::size_t index = 0; index < xEditors.size(); ++index) {
-            if (xEditors[index] == nullptr || yEditors[index] == nullptr) {
+            const auto* xEditor = xEditors[index].data();
+            const auto* yEditor = yEditors[index].data();
+            if (xEditor == nullptr || yEditor == nullptr) {
                 return;
             }
             updatedVertices.push_back({
-                .x = xEditors[index]->value(),
-                .y = yEditors[index]->value(),
+                .x = xEditor->value(),
+                .y = yEditor->value(),
             });
         }
         preview_->updateElementVertices(selection.kind, selection.id, updatedVertices);

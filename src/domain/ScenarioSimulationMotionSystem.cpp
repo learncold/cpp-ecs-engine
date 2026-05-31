@@ -32,6 +32,15 @@ public:
           routeGuidance_(std::move(routeGuidances)) {
     }
 
+    ScenarioSimulationMotionSystem(
+        FacilityLayout2D layout,
+        std::vector<RouteGuidanceDraft> routeGuidances,
+        ScenarioWayfindingMode wayfindingMode)
+        : layoutCache_(buildScenarioLayoutCache(std::move(layout))),
+          routeGuidance_(std::move(routeGuidances)),
+          wayfindingMode_(wayfindingMode) {
+    }
+
     void configure(engine::EngineWorld& world) override {
         if (layoutCache_.has_value() && !world.resources().contains<ScenarioLayoutCacheResource>()) {
             world.resources().set(*layoutCache_);
@@ -78,24 +87,30 @@ public:
             ? &resources.get<ScenarioAgentSpatialIndexResource>()
             : nullptr;
 
-        routeGuidance_.apply(
-            query,
-            entities,
-            layoutCache,
-            clock.elapsedSeconds,
-            step.derivedSeed,
-            reactions,
-            activeHazards,
-            sharedSpatialIndex);
+        if (wayfindingMode_ == ScenarioWayfindingMode::FullKnowledge) {
+            routeGuidance_.apply(
+                query,
+                entities,
+                layoutCache,
+                clock.elapsedSeconds,
+                step.derivedSeed,
+                reactions,
+                activeHazards,
+                sharedSpatialIndex);
+        }
         advanceRoutesForCurrentZones(query, activeEntities_, layoutCache);
-        replanBlockedExitRoutes(query, activeEntities_, layoutCache, clock.elapsedSeconds, layoutRevision, reactions);
+        if (wayfindingMode_ == ScenarioWayfindingMode::FullKnowledge) {
+            replanBlockedExitRoutes(query, activeEntities_, layoutCache, clock.elapsedSeconds, layoutRevision, reactions);
+        }
         advanceRoutesForWaypointProgress(
             query,
             0.0,
             activeEntities_,
             layoutCache);
         replanBlockedRouteSegments(query, activeEntities_, layoutCache, clock.elapsedSeconds, layoutRevision);
-        replanHazardAwareExitRoutes(query, activeEntities_, layoutCache, clock.elapsedSeconds, reactions, activeHazards);
+        if (wayfindingMode_ == ScenarioWayfindingMode::FullKnowledge) {
+            replanHazardAwareExitRoutes(query, activeEntities_, layoutCache, clock.elapsedSeconds, reactions, activeHazards);
+        }
         updateAgentPhysicsFloorIds(query, layoutCache, activeEntities_);
         std::optional<AgentSpatialIndex> localNeighborIndex;
         if (sharedSpatialIndex == nullptr) {
@@ -120,6 +135,17 @@ public:
             auto& velocity = query.get<Velocity>(entity);
             auto& route = query.get<EvacuationRoute>(entity);
             auto& status = query.get<EvacuationStatus>(entity);
+            const auto currentZoneId = zoneAt(layoutCache, position.value, route.currentFloorId);
+            const auto* currentZone = findCachedZone(layoutCache, currentZoneId);
+            if (currentZone != nullptr && currentZone->kind == ZoneKind::Exit) {
+                status.evacuated = true;
+                status.completionTimeSeconds = clock.elapsedSeconds;
+                status.exitZoneId = currentZone->id;
+                velocity.value = {};
+                ++newlyEvacuatedCount;
+                continue;
+            }
+
             if (route.destinationZoneId.empty()) {
                 continue;
             }
@@ -127,9 +153,11 @@ public:
             const auto& floorLayout = cachedLayoutForFloor(layoutCache, route.currentFloorId);
             const auto* destinationZone = findZone(floorLayout, route.destinationZoneId);
             if (destinationZone != nullptr
+                && destinationZone->kind == ZoneKind::Exit
                 && pointInRing(destinationZone->area.outline, position.value)) {
                 status.evacuated = true;
                 status.completionTimeSeconds = clock.elapsedSeconds;
+                status.exitZoneId = destinationZone->id;
                 velocity.value = {};
                 ++newlyEvacuatedCount;
             }
@@ -962,6 +990,10 @@ private:
         EvacuationRoute& route,
         const Point2D& routeStartPoint,
         const Point2D& planningPoint) const {
+        if (wayfindingMode_ == ScenarioWayfindingMode::LocalWayfinding) {
+            return false;
+        }
+
         auto startPoint = planningPoint;
         auto startZoneId = zoneAt(layoutCache, startPoint, route.currentFloorId);
         if (startZoneId.empty()) {
@@ -1880,6 +1912,7 @@ private:
 
     std::optional<ScenarioLayoutCacheResource> layoutCache_{};
     ScenarioRouteGuidanceController routeGuidance_{};
+    ScenarioWayfindingMode wayfindingMode_{ScenarioWayfindingMode::FullKnowledge};
     std::vector<engine::Entity> activeEntities_{};
     mutable std::size_t hazardReplanCursor_{0};
 };
@@ -1901,6 +1934,16 @@ std::unique_ptr<engine::EngineSystem> makeScenarioSimulationMotionSystem(
     FacilityLayout2D layout,
     std::vector<RouteGuidanceDraft> routeGuidances) {
     return std::make_unique<ScenarioSimulationMotionSystem>(std::move(layout), std::move(routeGuidances));
+}
+
+std::unique_ptr<engine::EngineSystem> makeScenarioSimulationMotionSystem(
+    FacilityLayout2D layout,
+    std::vector<RouteGuidanceDraft> routeGuidances,
+    ScenarioWayfindingMode wayfindingMode) {
+    return std::make_unique<ScenarioSimulationMotionSystem>(
+        std::move(layout),
+        std::move(routeGuidances),
+        wayfindingMode);
 }
 
 }  // namespace safecrowd::domain

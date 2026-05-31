@@ -9,6 +9,7 @@
 #include <QIcon>
 #include <QLabel>
 #include <QMenu>
+#include <QPointer>
 #include <QPushButton>
 #include <QSizePolicy>
 #include <QTimer>
@@ -354,9 +355,14 @@ void WorkspaceShell::setBackHandler(std::function<void()> handler) {
 
 QPushButton* WorkspaceShell::createBackButton(QWidget* parent) const {
     auto* button = createPanelBackButton(parent);
-    connect(button, &QPushButton::clicked, this, [this]() {
-        if (backHandler_) {
-            backHandler_();
+    const QPointer<WorkspaceShell> shellGuard(const_cast<WorkspaceShell*>(this));
+    connect(button, &QPushButton::clicked, button, [shellGuard]() {
+        if (shellGuard == nullptr) {
+            return;
+        }
+        const auto handler = shellGuard->backHandler_;
+        if (handler) {
+            handler();
         }
     });
     return button;
@@ -397,21 +403,29 @@ void WorkspaceShell::rebuildTopBar() {
         if (tool == "Project") {
             auto* menu = new QMenu(button);
             openProjectAction_ = menu->addAction("Open Project");
-            connect(openProjectAction_, &QAction::triggered, this, [this]() {
-                const auto handler = openProjectHandler_;
+            const QPointer<WorkspaceShell> openShellGuard(this);
+            connect(openProjectAction_, &QAction::triggered, openProjectAction_, [openShellGuard]() {
+                if (openShellGuard == nullptr) {
+                    return;
+                }
+                const auto handler = openShellGuard->openProjectHandler_;
                 if (handler) {
-                    QTimer::singleShot(0, this, [handler]() {
-                        handler();
+                    QTimer::singleShot(0, openShellGuard.data(), [openShellGuard, handler]() {
+                        if (openShellGuard != nullptr) {
+                            handler();
+                        }
                     });
                 }
             });
             saveProjectAction_ = menu->addAction("Save Project");
-            connect(saveProjectAction_, &QAction::triggered, this, [this]() {
-                const auto handler = saveProjectHandler_;
+            const QPointer<WorkspaceShell> saveShellGuard(this);
+            connect(saveProjectAction_, &QAction::triggered, saveProjectAction_, [saveShellGuard]() {
+                if (saveShellGuard == nullptr) {
+                    return;
+                }
+                const auto handler = saveShellGuard->saveProjectHandler_;
                 if (handler) {
-                    QTimer::singleShot(0, this, [handler]() {
-                        handler();
-                    });
+                    handler();
                 }
             });
             button->setMenu(menu);

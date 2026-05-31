@@ -243,7 +243,9 @@ ScenarioAgentSeed ScenarioSimulationRunner::createAgentSeed(
         placementFloorId = cachedFloorIdForZone(layoutCache_, startZoneId);
     }
 
-    const auto route = routePlan(position, startZoneId);
+    const auto route = scenario_.execution.wayfindingMode == ScenarioWayfindingMode::FullKnowledge
+        ? routePlan(position, startZoneId)
+        : RoutePlan{};
     const auto speed = speedOf(initialVelocity);
     auto evacuationRoute = EvacuationRoute{
         .waypoints = route.waypoints,
@@ -317,8 +319,18 @@ void ScenarioSimulationRunner::initializeRuntime() {
         {.phase = engine::UpdatePhase::FixedSimulation,
           .order = -10,
           .triggerPolicy = engine::TriggerPolicy::FixedStep});
+    if (scenario_.execution.wayfindingMode == ScenarioWayfindingMode::LocalWayfinding) {
+        runtime_->addSystem(
+            makeScenarioWayfindingSystem(layout_, scenario_.control.evacuationSigns),
+            {.phase = engine::UpdatePhase::FixedSimulation,
+             .order = -5,
+             .triggerPolicy = engine::TriggerPolicy::FixedStep});
+    }
     runtime_->addSystem(
-        makeScenarioSimulationMotionSystem(layout_, scenario_.control.routeGuidances),
+        makeScenarioSimulationMotionSystem(
+            layout_,
+            scenario_.control.routeGuidances,
+            scenario_.execution.wayfindingMode),
         {.phase = engine::UpdatePhase::FixedSimulation,
          .order = 0,
          .triggerPolicy = engine::TriggerPolicy::FixedStep});

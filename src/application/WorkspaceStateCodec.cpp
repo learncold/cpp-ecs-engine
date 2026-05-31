@@ -327,6 +327,30 @@ safecrowd::domain::ConnectionBlockDraft connectionBlockFromJson(const QJsonObjec
     return block;
 }
 
+QString wayfindingModeToJson(safecrowd::domain::ScenarioWayfindingMode mode) {
+    switch (mode) {
+    case safecrowd::domain::ScenarioWayfindingMode::LocalWayfinding:
+        return "LocalWayfinding";
+    case safecrowd::domain::ScenarioWayfindingMode::FullKnowledge:
+    default:
+        return "FullKnowledge";
+    }
+}
+
+safecrowd::domain::ScenarioWayfindingMode wayfindingModeFromJson(const QJsonValue& value) {
+    if (value.isDouble()) {
+        return value.toInt() == static_cast<int>(safecrowd::domain::ScenarioWayfindingMode::LocalWayfinding)
+            ? safecrowd::domain::ScenarioWayfindingMode::LocalWayfinding
+            : safecrowd::domain::ScenarioWayfindingMode::FullKnowledge;
+    }
+
+    const auto raw = value.toString().toLower();
+    if (raw == "localwayfinding" || raw == "local-wayfinding" || raw == "local_wayfinding") {
+        return safecrowd::domain::ScenarioWayfindingMode::LocalWayfinding;
+    }
+    return safecrowd::domain::ScenarioWayfindingMode::FullKnowledge;
+}
+
 QJsonObject controlPlanToJson(const safecrowd::domain::ControlPlan& control) {
     QJsonObject object;
     QJsonArray events;
@@ -370,6 +394,7 @@ QJsonObject executionToJson(const safecrowd::domain::ExecutionConfig& execution)
     object["repeatCount"] = static_cast<int>(execution.repeatCount);
     object["baseSeed"] = static_cast<int>(execution.baseSeed);
     object["recordOccupantHistory"] = execution.recordOccupantHistory;
+    object["wayfindingMode"] = wayfindingModeToJson(execution.wayfindingMode);
     return object;
 }
 
@@ -380,6 +405,7 @@ safecrowd::domain::ExecutionConfig executionFromJson(const QJsonObject& object) 
         .repeatCount = static_cast<std::uint32_t>(object.value("repeatCount").toInt(1)),
         .baseSeed = static_cast<std::uint32_t>(object.value("baseSeed").toInt()),
         .recordOccupantHistory = object.value("recordOccupantHistory").toBool(false),
+        .wayfindingMode = wayfindingModeFromJson(object.value("wayfindingMode")),
     };
 }
 

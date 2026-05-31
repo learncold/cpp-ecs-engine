@@ -624,6 +624,42 @@ int normalizedRunSeed(const safecrowd::domain::ExecutionConfig& execution) {
     return std::max(1, static_cast<int>(seed));
 }
 
+QString wayfindingModeLabel(safecrowd::domain::ScenarioWayfindingMode mode) {
+    switch (mode) {
+    case safecrowd::domain::ScenarioWayfindingMode::LocalWayfinding:
+        return "Local wayfinding";
+    case safecrowd::domain::ScenarioWayfindingMode::FullKnowledge:
+    default:
+        return "Full knowledge";
+    }
+}
+
+safecrowd::domain::ScenarioWayfindingMode initialRunWayfindingMode(
+    const std::vector<ScenarioAuthoringWidget::ScenarioState>& scenarios,
+    const std::vector<std::size_t>& stagedIndexes) {
+    for (const auto scenarioIndex : stagedIndexes) {
+        if (scenarioIndex < scenarios.size()) {
+            return scenarios[scenarioIndex].draft.execution.wayfindingMode;
+        }
+    }
+    return safecrowd::domain::ScenarioWayfindingMode::FullKnowledge;
+}
+
+safecrowd::domain::ScenarioWayfindingMode wayfindingModeFromCombo(const QComboBox* combo) {
+    if (combo == nullptr) {
+        return safecrowd::domain::ScenarioWayfindingMode::FullKnowledge;
+    }
+    bool ok = false;
+    const auto raw = combo->currentData().toInt(&ok);
+    if (!ok) {
+        return safecrowd::domain::ScenarioWayfindingMode::FullKnowledge;
+    }
+    if (raw == static_cast<int>(safecrowd::domain::ScenarioWayfindingMode::LocalWayfinding)) {
+        return safecrowd::domain::ScenarioWayfindingMode::LocalWayfinding;
+    }
+    return safecrowd::domain::ScenarioWayfindingMode::FullKnowledge;
+}
+
 QString signedDelta(int delta) {
     return delta > 0 ? QString("+%1").arg(delta) : QString::number(delta);
 }
@@ -726,6 +762,11 @@ QString buildChangeSummaryLine(
             .arg(boolValue(baseline.execution.recordOccupantHistory),
                  boolValue(variant.execution.recordOccupantHistory));
     }
+    if (key == "execution.wayfindingMode") {
+        return QString("execution.wayfindingMode (%1 -> %2)")
+            .arg(wayfindingModeLabel(baseline.execution.wayfindingMode),
+                 wayfindingModeLabel(variant.execution.wayfindingMode));
+    }
     return QString::fromStdString(key);
 }
 
@@ -763,6 +804,7 @@ QString compactChangeSummary(const QString& summary) {
     compact.replace("execution.repeatCount", "run repeat count");
     compact.replace("execution.baseSeed", "run base seed");
     compact.replace("execution.recordOccupantHistory", "run occupant history");
+    compact.replace("execution.wayfindingMode", "run wayfinding");
     return compact;
 }
 
@@ -849,17 +891,18 @@ bool editRunSettingsForStagedScenarios(
     QDialog dialog(parent);
     dialog.setWindowTitle("Run Settings");
     dialog.setMinimumWidth(560);
-    dialog.resize(620, std::min(720, 180 + static_cast<int>(stagedIndexes.size()) * 170));
+    dialog.resize(620, std::min(760, 280 + static_cast<int>(stagedIndexes.size()) * 170));
     dialog.setStyleSheet(
         "QDialog { background: #f4f7fb; }"
         "QScrollArea { background: transparent; border: 0; }"
-        "QDoubleSpinBox, QSpinBox {"
+        "QDoubleSpinBox, QSpinBox, QComboBox {"
         " background: #ffffff;"
         " border: 1px solid #c9d5e2;"
         " border-radius: 10px;"
         " padding: 6px 8px;"
         " min-height: 24px;"
-        "}");
+        "}"
+        "QComboBox::drop-down { border: 0; width: 24px; }");
 
     auto* root = new QVBoxLayout(&dialog);
     root->setContentsMargins(16, 16, 16, 16);
@@ -879,6 +922,33 @@ bool editRunSettingsForStagedScenarios(
 
     std::vector<RunSettingsControls> controls;
     controls.reserve(stagedIndexes.size());
+
+    auto* overallCard = createInspectorCard(content);
+    auto* overallLayout = new QVBoxLayout(overallCard);
+    overallLayout->setContentsMargins(12, 12, 12, 12);
+    overallLayout->setSpacing(10);
+    overallLayout->addWidget(createLabel("Overall", overallCard, ui::FontRole::SectionTitle));
+
+    auto* overallForm = new QFormLayout();
+    overallForm->setContentsMargins(0, 0, 0, 0);
+    overallForm->setHorizontalSpacing(10);
+    overallForm->setVerticalSpacing(8);
+
+    auto* wayfindingModeCombo = new QComboBox(overallCard);
+    wayfindingModeCombo->addItem(
+        wayfindingModeLabel(safecrowd::domain::ScenarioWayfindingMode::FullKnowledge),
+        static_cast<int>(safecrowd::domain::ScenarioWayfindingMode::FullKnowledge));
+    wayfindingModeCombo->addItem(
+        wayfindingModeLabel(safecrowd::domain::ScenarioWayfindingMode::LocalWayfinding),
+        static_cast<int>(safecrowd::domain::ScenarioWayfindingMode::LocalWayfinding));
+    wayfindingModeCombo->setToolTip("Wayfinding mode");
+    wayfindingModeCombo->setCurrentIndex(std::max(
+        0,
+        wayfindingModeCombo->findData(static_cast<int>(initialRunWayfindingMode(*scenarios, stagedIndexes)))));
+
+    overallForm->addRow("Wayfinding", wayfindingModeCombo);
+    overallLayout->addLayout(overallForm);
+    contentLayout->addWidget(overallCard);
 
     for (const auto scenarioIndex : stagedIndexes) {
         if (scenarioIndex >= scenarios->size()) {
@@ -983,6 +1053,7 @@ bool editRunSettingsForStagedScenarios(
         return false;
     }
 
+    const auto wayfindingMode = wayfindingModeFromCombo(wayfindingModeCombo);
     for (const auto& control : controls) {
         if (control.scenarioIndex >= scenarios->size()) {
             continue;
@@ -992,6 +1063,7 @@ bool editRunSettingsForStagedScenarios(
         execution.sampleIntervalSeconds = control.sampleIntervalSpin->value();
         execution.repeatCount = static_cast<std::uint32_t>(control.repeatCountSpin->value());
         execution.baseSeed = static_cast<std::uint32_t>(control.baseSeedSpin->value());
+        execution.wayfindingMode = wayfindingMode;
     }
     return true;
 }

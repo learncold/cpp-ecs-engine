@@ -191,6 +191,35 @@ private:
     }
 };
 
+class ConfigureEvacuatedAgentWithActualExitSystem final : public safecrowd::engine::EngineSystem {
+public:
+    void configure(safecrowd::engine::EngineWorld& world) override {
+        world.resources().set(safecrowd::domain::ScenarioSimulationClockResource{
+            .elapsedSeconds = 4.0,
+            .timeLimitSeconds = 10.0,
+            .complete = true,
+        });
+        world.commands().spawnEntity(
+            safecrowd::domain::Position{.value = {.x = 0.0, .y = 0.0}},
+            safecrowd::domain::Agent{
+                .radius = 0.25f,
+                .maxSpeed = 1.5f,
+                .sourcePlacementId = "group-a",
+                .sourceZoneId = "room-a",
+            },
+            safecrowd::domain::Velocity{.value = {}},
+            safecrowd::domain::EvacuationRoute{.destinationZoneId = "intermediate-zone"},
+            safecrowd::domain::EvacuationStatus{
+                .evacuated = true,
+                .completionTimeSeconds = 4.0,
+                .exitZoneId = "actual-exit",
+            });
+    }
+
+    void update(safecrowd::engine::EngineWorld&, const safecrowd::engine::EngineStepContext&) override {
+    }
+};
+
 class ConfigureDenseActiveAgentsSystem final : public safecrowd::engine::EngineSystem {
 public:
     void configure(safecrowd::engine::EngineWorld& world) override {
@@ -513,6 +542,178 @@ safecrowd::domain::FacilityLayout2D sameExitTwoDoorGuidanceLayout() {
     return layout;
 }
 
+safecrowd::domain::FacilityLayout2D branchingWayfindingLayout() {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.floors.push_back({.id = "L1", .label = "Floor 1"});
+    layout.zones.push_back({
+        .id = "room",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Room",
+        .area = {.outline = {{0.0, 0.0}, {4.0, 0.0}, {4.0, 4.0}, {0.0, 4.0}}},
+    });
+    layout.zones.push_back({
+        .id = "left-corridor",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Left Corridor",
+        .area = {.outline = {{-3.0, 2.0}, {0.0, 2.0}, {0.0, 4.0}, {-3.0, 4.0}}},
+    });
+    layout.zones.push_back({
+        .id = "right-corridor",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Right Corridor",
+        .area = {.outline = {{4.0, 0.0}, {7.0, 0.0}, {7.0, 2.0}, {4.0, 2.0}}},
+    });
+    layout.connections.push_back({
+        .id = "room-left",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ConnectionKind::Doorway,
+        .fromZoneId = "room",
+        .toZoneId = "left-corridor",
+        .effectiveWidth = 1.0,
+        .centerSpan = {{0.0, 2.4}, {0.0, 3.6}},
+    });
+    layout.connections.push_back({
+        .id = "room-right",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ConnectionKind::Doorway,
+        .fromZoneId = "room",
+        .toZoneId = "right-corridor",
+        .effectiveWidth = 1.0,
+        .centerSpan = {{4.0, 0.4}, {4.0, 1.6}},
+    });
+    return layout;
+}
+
+safecrowd::domain::FacilityLayout2D stairWayfindingLayout() {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.floors.push_back({.id = "L1", .label = "Floor 1"});
+    layout.floors.push_back({.id = "L2", .label = "Floor 2", .elevationMeters = 3.5});
+    layout.zones.push_back({
+        .id = "upper-room",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Upper Room",
+        .area = {.outline = {{0.0, 0.0}, {4.0, 0.0}, {4.0, 4.0}, {0.0, 4.0}}},
+    });
+    layout.zones.push_back({
+        .id = "upper-stair",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ZoneKind::Stair,
+        .label = "Upper Stair",
+        .area = {.outline = {{4.0, 2.0}, {6.0, 2.0}, {6.0, 4.0}, {4.0, 4.0}}},
+        .isStair = true,
+    });
+    layout.zones.push_back({
+        .id = "lower-stair",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Stair,
+        .label = "Lower Stair",
+        .area = {.outline = {{4.0, 2.0}, {6.0, 2.0}, {6.0, 4.0}, {4.0, 4.0}}},
+        .isStair = true,
+    });
+    layout.zones.push_back({
+        .id = "ground-room",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Ground Room",
+        .area = {.outline = {{0.0, 0.0}, {4.0, 0.0}, {4.0, 4.0}, {0.0, 4.0}}},
+    });
+    layout.zones.push_back({
+        .id = "ground-exit",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Exit,
+        .label = "Ground Exit",
+        .area = {.outline = {{-2.0, 0.0}, {0.0, 0.0}, {0.0, 2.0}, {-2.0, 2.0}}},
+    });
+    layout.connections.push_back({
+        .id = "upper-room-stair",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ConnectionKind::Doorway,
+        .fromZoneId = "upper-room",
+        .toZoneId = "upper-stair",
+        .effectiveWidth = 1.0,
+        .centerSpan = {{4.0, 2.4}, {4.0, 3.6}},
+    });
+    layout.connections.push_back({
+        .id = "stair-vertical",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ConnectionKind::Stair,
+        .fromZoneId = "upper-stair",
+        .toZoneId = "lower-stair",
+        .effectiveWidth = 1.0,
+        .isStair = true,
+        .centerSpan = {{4.5, 2.5}, {5.5, 2.5}},
+    });
+    layout.connections.push_back({
+        .id = "lower-stair-ground-room",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ConnectionKind::Doorway,
+        .fromZoneId = "lower-stair",
+        .toZoneId = "ground-room",
+        .effectiveWidth = 1.0,
+        .centerSpan = {{4.0, 2.4}, {4.0, 3.6}},
+    });
+    layout.connections.push_back({
+        .id = "ground-room-exit",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ConnectionKind::Exit,
+        .fromZoneId = "ground-room",
+        .toZoneId = "ground-exit",
+        .effectiveWidth = 1.0,
+        .centerSpan = {{0.0, 0.4}, {0.0, 1.6}},
+    });
+    return layout;
+}
+
+safecrowd::domain::FacilityLayout2D stairWithDeadEndDoorWayfindingLayout() {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.floors.push_back({.id = "L1", .label = "Floor 1"});
+    layout.zones.push_back({
+        .id = "room",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Room",
+        .area = {.outline = {{0.0, 0.0}, {6.0, 0.0}, {6.0, 4.0}, {0.0, 4.0}}},
+    });
+    layout.zones.push_back({
+        .id = "dead-end-room",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Dead End Room",
+        .area = {.outline = {{0.7, -1.5}, {2.3, -1.5}, {2.3, 0.0}, {0.7, 0.0}}},
+    });
+    layout.zones.push_back({
+        .id = "stair",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Stair,
+        .label = "Exit Stair",
+        .area = {.outline = {{6.0, 1.8}, {8.0, 1.8}, {8.0, 3.4}, {6.0, 3.4}}},
+        .isStair = true,
+    });
+    layout.connections.push_back({
+        .id = "room-dead-end-door",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ConnectionKind::Doorway,
+        .fromZoneId = "room",
+        .toZoneId = "dead-end-room",
+        .effectiveWidth = 1.0,
+        .centerSpan = {{1.0, 0.0}, {2.0, 0.0}},
+    });
+    layout.connections.push_back({
+        .id = "room-stair",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ConnectionKind::Doorway,
+        .fromZoneId = "room",
+        .toZoneId = "stair",
+        .effectiveWidth = 1.0,
+        .centerSpan = {{6.0, 2.0}, {6.0, 3.2}},
+    });
+    return layout;
+}
+
 safecrowd::domain::FacilityLayout2D wideTwoExitHazardRouteLayout() {
     safecrowd::domain::FacilityLayout2D layout;
     layout.zones.push_back({
@@ -600,6 +801,29 @@ safecrowd::domain::ScenarioAgentSeed straightRouteSeed(
             .previousDistanceToWaypoint = 1.0,
             .destinationZoneId = destinationZoneId,
         },
+        .status = {},
+    };
+}
+
+safecrowd::domain::ScenarioAgentSeed localWayfindingSeed(
+    safecrowd::domain::Point2D start,
+    std::string zoneId = "room",
+    std::string floorId = "L1") {
+    return {
+        .position = {.value = start},
+        .agent = {
+            .radius = 0.25f,
+            .maxSpeed = 1.0f,
+            .sourceZoneId = zoneId,
+            .guidancePropensity = 1.0,
+        },
+        .velocity = {.value = {}},
+        .route = {
+            .currentSegmentStart = start,
+            .currentFloorId = floorId,
+            .displayFloorId = floorId,
+        },
+        .wayfinding = {},
         .status = {},
     };
 }
@@ -694,6 +918,24 @@ void addClosureMotionSystems(
     runtime.addSystem(
         std::make_unique<safecrowd::domain::ScenarioFrameSyncSystem>(),
         {.phase = safecrowd::engine::UpdatePhase::RenderSync,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+}
+
+void addLocalWayfindingMotionSystems(
+    safecrowd::engine::EngineRuntime& runtime,
+    const safecrowd::domain::FacilityLayout2D& layout,
+    std::vector<safecrowd::domain::EvacuationSignDraft> signs = {}) {
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioWayfindingSystem(layout, std::move(signs)),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .order = -5,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioSimulationMotionSystem(
+            layout,
+            {},
+            safecrowd::domain::ScenarioWayfindingMode::LocalWayfinding),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
          .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
 }
 
@@ -1016,6 +1258,269 @@ SC_TEST(ScenarioAgentSpawnSystem_ConfiguresClockAndSpawnsAgentSeeds) {
     SC_EXPECT_EQ(frame.agents.size(), std::size_t{1});
     SC_EXPECT_NEAR(frame.agents.front().position.x, 2.0, 1e-9);
     SC_EXPECT_TRUE(frame.agents.front().stalled);
+}
+
+SC_TEST(ScenarioWayfindingSystem_DirectionArrowSelectsAlignedConnection) {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    seeds.push_back(localWayfindingSeed({.x = 1.0, .y = 3.0}));
+
+    safecrowd::domain::EvacuationSignDraft sign;
+    sign.id = "right-arrow";
+    sign.floorId = "L1";
+    sign.installZoneId = "room";
+    sign.position = {.x = 1.0, .y = 3.0};
+    sign.orientationRadians = 0.0;
+    sign.visibilityRadiusMeters = 10.0;
+    sign.complianceRate = 1.0;
+    sign.kind = safecrowd::domain::EvacuationSignKind::DirectionArrow;
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 41,
+    });
+    const auto layout = branchingWayfindingLayout();
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    addLocalWayfindingMotionSystems(runtime, layout, {sign});
+
+    runtime.play();
+    runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.1});
+    runtime.stepFrame(0.0);
+
+    const auto entities = runtime.world().query().view<
+        safecrowd::domain::Position,
+        safecrowd::domain::Agent,
+        safecrowd::domain::Velocity,
+        safecrowd::domain::AvoidanceState,
+        safecrowd::domain::EvacuationRoute,
+        safecrowd::domain::WayfindingState,
+        safecrowd::domain::EvacuationStatus>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{1});
+    const auto& route = runtime.world().query().get<safecrowd::domain::EvacuationRoute>(entities.front());
+    const auto& state = runtime.world().query().get<safecrowd::domain::WayfindingState>(entities.front());
+    SC_EXPECT_TRUE(!route.destinationZoneId.empty());
+    SC_EXPECT_EQ(route.destinationZoneId, std::string{"right-corridor"});
+    SC_EXPECT_TRUE(!route.waypointConnectionIds.empty());
+    SC_EXPECT_EQ(route.waypointConnectionIds.front(), std::string{"room-right"});
+    SC_EXPECT_EQ(state.lastSeenSignId, std::string{"right-arrow"});
+    SC_EXPECT_EQ(state.intent, safecrowd::domain::WayfindingIntent::FollowingSign);
+}
+
+SC_TEST(ScenarioWayfindingSystem_IgnoresSignOnOtherFloor) {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    seeds.push_back(localWayfindingSeed({.x = 0.8, .y = 3.0}));
+
+    safecrowd::domain::EvacuationSignDraft sign;
+    sign.id = "other-floor-arrow";
+    sign.floorId = "L2";
+    sign.installZoneId = "room";
+    sign.position = {.x = 1.0, .y = 3.0};
+    sign.orientationRadians = 0.0;
+    sign.visibilityRadiusMeters = 10.0;
+    sign.complianceRate = 1.0;
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 42,
+    });
+    const auto layout = branchingWayfindingLayout();
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    addLocalWayfindingMotionSystems(runtime, layout, {sign});
+
+    runtime.play();
+    runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.1});
+    runtime.stepFrame(0.0);
+
+    const auto entities = runtime.world().query().view<
+        safecrowd::domain::Position,
+        safecrowd::domain::Agent,
+        safecrowd::domain::Velocity,
+        safecrowd::domain::AvoidanceState,
+        safecrowd::domain::EvacuationRoute,
+        safecrowd::domain::WayfindingState,
+        safecrowd::domain::EvacuationStatus>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{1});
+    const auto& route = runtime.world().query().get<safecrowd::domain::EvacuationRoute>(entities.front());
+    const auto& state = runtime.world().query().get<safecrowd::domain::WayfindingState>(entities.front());
+    SC_EXPECT_EQ(route.destinationZoneId, std::string{"left-corridor"});
+    SC_EXPECT_TRUE(!route.waypointConnectionIds.empty());
+    SC_EXPECT_EQ(route.waypointConnectionIds.front(), std::string{"room-left"});
+    SC_EXPECT_TRUE(state.lastSeenSignId.empty());
+}
+
+SC_TEST(ScenarioWayfindingSystem_StairExitMarkerPrioritizesStairConnection) {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    seeds.push_back(localWayfindingSeed({.x = 1.0, .y = 3.0}, "upper-room", "L2"));
+
+    safecrowd::domain::EvacuationSignDraft sign;
+    sign.id = "stair-exit-sign";
+    sign.floorId = "L2";
+    sign.installZoneId = "upper-room";
+    sign.position = {.x = 1.0, .y = 3.0};
+    sign.orientationRadians = 0.0;
+    sign.visibilityRadiusMeters = 10.0;
+    sign.complianceRate = 1.0;
+    sign.kind = safecrowd::domain::EvacuationSignKind::StairExitMarker;
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 43,
+    });
+    const auto layout = stairWayfindingLayout();
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    addLocalWayfindingMotionSystems(runtime, layout, {sign});
+
+    runtime.play();
+    runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.1});
+    runtime.stepFrame(0.0);
+
+    const auto entities = runtime.world().query().view<
+        safecrowd::domain::Position,
+        safecrowd::domain::Agent,
+        safecrowd::domain::Velocity,
+        safecrowd::domain::AvoidanceState,
+        safecrowd::domain::EvacuationRoute,
+        safecrowd::domain::WayfindingState,
+        safecrowd::domain::EvacuationStatus>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{1});
+    const auto& route = runtime.world().query().get<safecrowd::domain::EvacuationRoute>(entities.front());
+    const auto& state = runtime.world().query().get<safecrowd::domain::WayfindingState>(entities.front());
+    SC_EXPECT_EQ(route.destinationZoneId, std::string{"upper-stair"});
+    SC_EXPECT_TRUE(!route.waypointConnectionIds.empty());
+    SC_EXPECT_EQ(route.waypointConnectionIds.front(), std::string{"upper-room-stair"});
+    SC_EXPECT_EQ(state.lastSeenSignId, std::string{"stair-exit-sign"});
+}
+
+SC_TEST(ScenarioWayfindingSystem_VisibleStairBeatsCloserDeadEndDoor) {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    seeds.push_back(localWayfindingSeed({.x = 1.5, .y = 1.0}));
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 44,
+    });
+    const auto layout = stairWithDeadEndDoorWayfindingLayout();
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    addLocalWayfindingMotionSystems(runtime, layout);
+
+    runtime.play();
+    runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.1});
+    runtime.stepFrame(0.0);
+
+    const auto entities = runtime.world().query().view<
+        safecrowd::domain::Position,
+        safecrowd::domain::Agent,
+        safecrowd::domain::Velocity,
+        safecrowd::domain::AvoidanceState,
+        safecrowd::domain::EvacuationRoute,
+        safecrowd::domain::WayfindingState,
+        safecrowd::domain::EvacuationStatus>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{1});
+    const auto& route = runtime.world().query().get<safecrowd::domain::EvacuationRoute>(entities.front());
+    SC_EXPECT_EQ(route.destinationZoneId, std::string{"stair"});
+    SC_EXPECT_TRUE(!route.waypointConnectionIds.empty());
+    SC_EXPECT_EQ(route.waypointConnectionIds.front(), std::string{"room-stair"});
+}
+
+SC_TEST(ScenarioWayfindingSystem_ReconsidersStalledDoorwayTarget) {
+    auto seed = localWayfindingSeed({.x = 1.5, .y = 0.2});
+    seed.route.waypoints = {{.x = 1.5, .y = 0.0}};
+    seed.route.waypointPassages = {{{.x = 1.0, .y = 0.0}, {.x = 2.0, .y = 0.0}}};
+    seed.route.waypointFromZoneIds = {"room"};
+    seed.route.waypointZoneIds = {"dead-end-room"};
+    seed.route.waypointFloorIds = {"L1"};
+    seed.route.waypointConnectionIds = {"room-dead-end-door"};
+    seed.route.waypointVerticalTransitions = {false};
+    seed.route.nextWaypointIndex = 0;
+    seed.route.previousDistanceToWaypoint = 0.2;
+    seed.route.stalledSeconds = 1.0;
+    seed.route.destinationZoneId = "dead-end-room";
+    seed.wayfinding.currentTargetConnectionId = "room-dead-end-door";
+    seed.wayfinding.currentTargetZoneId = "dead-end-room";
+
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    seeds.push_back(seed);
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 45,
+    });
+    const auto layout = stairWithDeadEndDoorWayfindingLayout();
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    addLocalWayfindingMotionSystems(runtime, layout);
+
+    runtime.play();
+    runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.1});
+    runtime.stepFrame(0.0);
+
+    const auto entities = runtime.world().query().view<
+        safecrowd::domain::Position,
+        safecrowd::domain::Agent,
+        safecrowd::domain::Velocity,
+        safecrowd::domain::AvoidanceState,
+        safecrowd::domain::EvacuationRoute,
+        safecrowd::domain::WayfindingState,
+        safecrowd::domain::EvacuationStatus>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{1});
+    const auto& route = runtime.world().query().get<safecrowd::domain::EvacuationRoute>(entities.front());
+    const auto& state = runtime.world().query().get<safecrowd::domain::WayfindingState>(entities.front());
+    SC_EXPECT_EQ(route.destinationZoneId, std::string{"stair"});
+    SC_EXPECT_TRUE(!route.waypointConnectionIds.empty());
+    SC_EXPECT_EQ(route.waypointConnectionIds.front(), std::string{"room-stair"});
+    SC_EXPECT_EQ(state.avoidedConnectionId, std::string{"room-dead-end-door"});
+}
+
+SC_TEST(ScenarioWayfindingSystem_RechoosesWhenSignedConnectionIsBlocked) {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    seeds.push_back(localWayfindingSeed({.x = 1.0, .y = 3.0}));
+
+    safecrowd::domain::EvacuationSignDraft sign;
+    sign.id = "right-arrow";
+    sign.floorId = "L1";
+    sign.installZoneId = "room";
+    sign.position = {.x = 1.0, .y = 3.0};
+    sign.orientationRadians = 0.0;
+    sign.visibilityRadiusMeters = 10.0;
+    sign.complianceRate = 1.0;
+
+    safecrowd::domain::ConnectionBlockDraft block;
+    block.id = "blocked-right";
+    block.connectionId = "room-right";
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 45,
+    });
+    const auto layout = branchingWayfindingLayout();
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioControlSystem(layout, {block}),
+        {.phase = safecrowd::engine::UpdatePhase::PreSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+    addLocalWayfindingMotionSystems(runtime, layout, {sign});
+
+    runtime.play();
+    runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.1});
+    runtime.stepFrame(0.0);
+
+    const auto entities = runtime.world().query().view<
+        safecrowd::domain::Position,
+        safecrowd::domain::Agent,
+        safecrowd::domain::Velocity,
+        safecrowd::domain::AvoidanceState,
+        safecrowd::domain::EvacuationRoute,
+        safecrowd::domain::WayfindingState,
+        safecrowd::domain::EvacuationStatus>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{1});
+    const auto& route = runtime.world().query().get<safecrowd::domain::EvacuationRoute>(entities.front());
+    SC_EXPECT_EQ(route.destinationZoneId, std::string{"left-corridor"});
+    SC_EXPECT_TRUE(!route.waypointConnectionIds.empty());
+    SC_EXPECT_EQ(route.waypointConnectionIds.front(), std::string{"room-left"});
 }
 
 SC_TEST(ScenarioSpatialIndexSystem_BuildsNearbyAgentResource) {
@@ -4169,6 +4674,27 @@ SC_TEST(ScenarioResultArtifactsSystem_PublishesEvacuationCurveAndPercentiles) {
     SC_EXPECT_EQ(artifacts.zoneCompletion.front().evacuatedCount, std::size_t{3});
     SC_EXPECT_EQ(artifacts.placementCompletion.size(), std::size_t{1});
     SC_EXPECT_EQ(artifacts.placementCompletion.front().placementId, std::string{"group-a"});
+}
+
+SC_TEST(ScenarioResultArtifactsSystem_UsesActualExitZoneWhenRecorded) {
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 44,
+    });
+    runtime.addSystem(std::make_unique<ConfigureEvacuatedAgentWithActualExitSystem>());
+    runtime.addSystem(
+        std::make_unique<safecrowd::domain::ScenarioResultArtifactsSystem>(1.0),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(0.0);
+
+    const auto& artifacts =
+        runtime.world().resources().get<safecrowd::domain::ScenarioResultArtifactsResource>().artifacts;
+    SC_EXPECT_EQ(artifacts.exitUsage.size(), std::size_t{1});
+    SC_EXPECT_EQ(artifacts.exitUsage.front().exitZoneId, std::string{"actual-exit"});
 }
 
 SC_TEST(ScenarioResultArtifactsSystem_PublishesDensitySummary) {

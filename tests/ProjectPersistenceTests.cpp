@@ -76,6 +76,7 @@ SC_TEST(ProjectPersistence_preservesRunningScenarioIndex) {
     baseline.scenarioId = "baseline";
     baseline.name = "Baseline";
     baseline.execution.repeatCount = 3;
+    baseline.execution.wayfindingMode = ScenarioWayfindingMode::LocalWayfinding;
 
     ProjectWorkspaceState workspace;
     workspace.activeView = ProjectWorkspaceView::ScenarioRun;
@@ -97,6 +98,7 @@ SC_TEST(ProjectPersistence_preservesRunningScenarioIndex) {
     SC_EXPECT_EQ(loaded.runningScenarios.size(), std::size_t{1});
     SC_EXPECT_EQ(loaded.runningScenarioIndex, 2);
     SC_EXPECT_EQ(loaded.runningScenarios.front().execution.repeatCount, std::uint32_t{3});
+    SC_EXPECT_TRUE(loaded.runningScenarios.front().execution.wayfindingMode == ScenarioWayfindingMode::LocalWayfinding);
 }
 
 SC_TEST(ProjectPersistence_preservesPressureResultArtifactsAndRiskSnapshot) {

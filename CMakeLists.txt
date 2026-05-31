@@ -102,6 +102,7 @@ add_library(safecrowd_domain STATIC
     src/domain/ScenarioSimulationRunner.cpp
     src/domain/ScenarioSimulationSystems.h
     src/domain/ScenarioSimulationSystems.cpp
+    src/domain/ScenarioWayfindingSystem.cpp
     src/domain/ProjectRepository.h
     src/domain/ScenarioTemplateCatalog.h
     src/domain/RawImportModel.h

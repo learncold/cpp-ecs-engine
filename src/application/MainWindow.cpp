@@ -686,6 +686,9 @@ void MainWindow::saveCurrentProject() {
     QWidget* activeWorkflowWidget = nullptr;
     int activeWorkflowDepth = -1;
     const auto chooseActiveWorkflowWidget = [&](QWidget* widget) {
+        if (widget == nullptr) {
+            return;
+        }
         const int depth = widgetDepth(widget);
         if (depth > activeWorkflowDepth) {
             activeWorkflowDepth = depth;
@@ -696,10 +699,10 @@ void MainWindow::saveCurrentProject() {
     chooseActiveWorkflowWidget(batchResultWidget);
     chooseActiveWorkflowWidget(runWidget);
 
-    if (activeWorkflowWidget == authoringWidget) {
+    if (authoringWidget != nullptr && activeWorkflowWidget == authoringWidget) {
         workspace.activeView = ProjectWorkspaceView::ScenarioAuthoring;
         workspace.authoring = authoringWidget->currentSavedState();
-    } else if (activeWorkflowWidget == batchResultWidget) {
+    } else if (batchResultWidget != nullptr && activeWorkflowWidget == batchResultWidget) {
         workspace.activeView = ProjectWorkspaceView::ScenarioResult;
         if (auto authoring = batchResultWidget->returnAuthoringState(); authoring.has_value()) {
             workspace.authoring = savedStateFromInitial(*authoring);
@@ -723,7 +726,7 @@ void MainWindow::saveCurrentProject() {
                 static_cast<int>(workspace.batchResult->results.size()) - 1);
             workspace.result = workspace.batchResult->results[static_cast<std::size_t>(index)];
         }
-    } else if (activeWorkflowWidget == runWidget) {
+    } else if (runWidget != nullptr && activeWorkflowWidget == runWidget) {
         if (runWidget->returnAuthoringState().has_value()) {
             workspace.authoring = savedStateFromInitial(*runWidget->returnAuthoringState());
         }
