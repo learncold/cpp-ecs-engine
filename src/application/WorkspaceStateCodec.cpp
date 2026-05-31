@@ -170,23 +170,27 @@ QJsonObject hazardToJson(const safecrowd::domain::EnvironmentHazardDraft& hazard
     object["startSeconds"] = hazard.startSeconds;
     object["endSeconds"] = hazard.endSeconds;
     object["severity"] = severityToJson(hazard.severity);
+    object["radiusMeters"] = safecrowd::domain::environmentHazardRadiusMeters(hazard);
     object["note"] = QString::fromStdString(hazard.note);
     return object;
 }
 
 safecrowd::domain::EnvironmentHazardDraft hazardFromJson(const QJsonObject& object) {
-    return {
-        .id = object.value("id").toString().toStdString(),
-        .kind = hazardKindFromJson(object.value("kind")),
-        .name = object.value("name").toString().toStdString(),
-        .affectedZoneId = object.value("affectedZoneId").toString().toStdString(),
-        .floorId = object.value("floorId").toString().toStdString(),
-        .position = pointFromJson(object.value("position")),
-        .startSeconds = object.value("startSeconds").toDouble(0.0),
-        .endSeconds = object.value("endSeconds").toDouble(0.0),
-        .severity = severityFromJson(object.value("severity")),
-        .note = object.value("note").toString().toStdString(),
-    };
+    safecrowd::domain::EnvironmentHazardDraft hazard;
+    hazard.id = object.value("id").toString().toStdString();
+    hazard.kind = hazardKindFromJson(object.value("kind"));
+    hazard.name = object.value("name").toString().toStdString();
+    hazard.affectedZoneId = object.value("affectedZoneId").toString().toStdString();
+    hazard.floorId = object.value("floorId").toString().toStdString();
+    hazard.position = pointFromJson(object.value("position"));
+    hazard.startSeconds = object.value("startSeconds").toDouble(0.0);
+    hazard.endSeconds = object.value("endSeconds").toDouble(0.0);
+    hazard.severity = severityFromJson(object.value("severity"));
+    hazard.radiusMeters = object.contains("radiusMeters")
+        ? object.value("radiusMeters").toDouble(safecrowd::domain::environmentHazardRadiusMeters(hazard.severity))
+        : safecrowd::domain::environmentHazardRadiusMeters(hazard.severity);
+    hazard.note = object.value("note").toString().toStdString();
+    return hazard;
 }
 
 QJsonObject environmentToJson(const safecrowd::domain::EnvironmentState& environment) {

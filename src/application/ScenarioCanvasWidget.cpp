@@ -254,7 +254,7 @@ QString formatEnvironmentHazardTooltip(const safecrowd::domain::EnvironmentHazar
     }
     text.append(QString("\nSeverity: %1").arg(severityLabel(hazard.severity)));
     text.append(QString("\nInfluence radius: %1m")
-        .arg(safecrowd::domain::environmentHazardRadiusMeters(hazard.severity), 0, 'f', 1));
+        .arg(safecrowd::domain::environmentHazardRadiusMeters(hazard), 0, 'f', 1));
     text.append(QStringLiteral("\nDetection varies by agent sensitivity"));
     return text;
 }
@@ -285,6 +285,48 @@ std::optional<std::size_t> hoveredEnvironmentHazardIndex(
         }
     }
     return closestIndex;
+}
+
+double environmentHazardInfluenceRadiusPixels(
+    const LayoutCanvasTransform& transform,
+    const safecrowd::domain::EnvironmentHazardDraft& hazard) {
+    const auto radiusMeters = std::max(0.0, safecrowd::domain::environmentHazardRadiusMeters(hazard));
+    if (!std::isfinite(radiusMeters) || radiusMeters <= 0.0) {
+        return 0.0;
+    }
+
+    const auto origin = transform.map({.x = 0.0, .y = 0.0});
+    const auto radiusPoint = transform.map({.x = radiusMeters, .y = 0.0});
+    return QLineF(origin, radiusPoint).length();
+}
+
+void drawEnvironmentHazardInfluenceRadius(
+    QPainter& painter,
+    const safecrowd::domain::EnvironmentHazardDraft& hazard,
+    const QPointF& center,
+    double radiusPixels,
+    int alphaScale = 100) {
+    if (!std::isfinite(radiusPixels) || radiusPixels <= 0.0) {
+        return;
+    }
+
+    const bool isFire = hazard.kind == safecrowd::domain::EnvironmentHazardKind::Fire;
+    const QColor strokeBase = isFire ? QColor(194, 65, 12) : QColor(71, 85, 105);
+    const QColor fillBase = isFire ? QColor(249, 115, 22) : QColor(148, 163, 184);
+    const auto alpha = [&](int value) {
+        return std::clamp((value * alphaScale) / 100, 0, 255);
+    };
+
+    QColor stroke = strokeBase;
+    stroke.setAlpha(alpha(88));
+    QColor fill = fillBase;
+    fill.setAlpha(alpha(24));
+
+    painter.save();
+    painter.setPen(QPen(stroke, 1.4, Qt::DashLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(fill);
+    painter.drawEllipse(center, radiusPixels, radiusPixels);
+    painter.restore();
 }
 
 QString formatRouteGuidanceTooltip(
@@ -1950,6 +1992,12 @@ void ScenarioCanvasWidget::drawEnvironmentHazards(QPainter& painter, const Layou
         }
 
         const auto center = transform.map(hazard.position);
+        drawEnvironmentHazardInfluenceRadius(
+            painter,
+            hazard,
+            center,
+            environmentHazardInfluenceRadiusPixels(transform, hazard));
+
         const QColor fill = hazard.kind == safecrowd::domain::EnvironmentHazardKind::Fire
             ? QColor("#c2410c")
             : QColor("#64748b");
@@ -2070,6 +2118,13 @@ void ScenarioCanvasWidget::drawDraggedEventPreview(QPainter& painter, const Layo
         if (valid) {
             center = transform.map(hazard.position);
         }
+        drawEnvironmentHazardInfluenceRadius(
+            painter,
+            hazard,
+            center,
+            environmentHazardInfluenceRadiusPixels(transform, hazard),
+            valid ? 80 : 45);
+
         const QColor fill = hazard.kind == safecrowd::domain::EnvironmentHazardKind::Fire
             ? alphaColor(QColor("#c2410c"), 150)
             : alphaColor(QColor("#64748b"), 150);
@@ -3429,9 +3484,6 @@ void ScenarioCanvasWidget::setToolMode(ToolMode mode) {
     if (fireHazardToolButton_ != nullptr) {
         fireHazardToolButton_->setChecked(mode == ToolMode::FireHazard);
     }
-    if (smokeHazardToolButton_ != nullptr) {
-        smokeHazardToolButton_->setChecked(mode == ToolMode::SmokeHazard);
-    }
     if (routeGuidanceToolButton_ != nullptr) {
         routeGuidanceToolButton_->setChecked(mode == ToolMode::RouteGuidance);
     }
@@ -3480,7 +3532,6 @@ void ScenarioCanvasWidget::setupToolbars() {
     sourceToolButton_ = makeButton(makeToolIcon("source", QColor("#1f5fae")), "Add Occupant Source");
     blockDoorToolButton_ = makeButton(makeToolIcon("block", QColor("#c0392b")), "block door");
     fireHazardToolButton_ = makeButton(makeToolIcon("fire", QColor("#c2410c")), "Add Fire Hazard");
-    smokeHazardToolButton_ = makeButton(makeToolIcon("smoke", QColor("#64748b")), "Add Smoke Hazard");
     routeGuidanceToolButton_ = makeButton(makeToolIcon("guidance", QColor("#1f5fae")), "Route guidance");
     topLayout->addStretch(1);
 
@@ -3509,7 +3560,6 @@ void ScenarioCanvasWidget::setupToolbars() {
     });
     connect(blockDoorToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::BlockDoor); });
     connect(fireHazardToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::FireHazard); });
-    connect(smokeHazardToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::SmokeHazard); });
     connect(routeGuidanceToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::RouteGuidance); });
 
     setToolMode(ToolMode::Select);

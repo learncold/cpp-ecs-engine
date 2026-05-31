@@ -1,6 +1,7 @@
 #include "domain/ScenarioAuthoring.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <utility>
 
@@ -94,6 +95,7 @@ bool hazardsEqual(const std::vector<EnvironmentHazardDraft>& lhs,
             || lhs[i].startSeconds != rhs[i].startSeconds
             || lhs[i].endSeconds != rhs[i].endSeconds
             || lhs[i].severity != rhs[i].severity
+            || environmentHazardRadiusMeters(lhs[i]) != environmentHazardRadiusMeters(rhs[i])
             || lhs[i].note != rhs[i].note) {
             return false;
         }
@@ -283,8 +285,15 @@ double environmentHazardRadiusMeters(ScenarioElementSeverity severity) {
     }
 }
 
+double environmentHazardRadiusMeters(const EnvironmentHazardDraft& hazard) {
+    if (!std::isfinite(hazard.radiusMeters) || hazard.radiusMeters < 0.0) {
+        return environmentHazardRadiusMeters(hazard.severity);
+    }
+    return hazard.radiusMeters;
+}
+
 double environmentHazardInfluenceAt(const EnvironmentHazardDraft& hazard, double distanceMeters) {
-    const auto radius = environmentHazardRadiusMeters(hazard.severity);
+    const auto radius = environmentHazardRadiusMeters(hazard);
     if (radius <= 1e-9) {
         return 0.0;
     }
@@ -342,7 +351,7 @@ double environmentHazardSmokeVisibilityMetersAt(const EnvironmentHazardDraft& ha
         return std::numeric_limits<double>::infinity();
     }
 
-    const auto radius = environmentHazardRadiusMeters(hazard.severity);
+    const auto radius = environmentHazardRadiusMeters(hazard);
     if (radius <= 1e-9) {
         return std::numeric_limits<double>::infinity();
     }
@@ -393,7 +402,7 @@ double environmentHazardSpeedFactorAt(
         return 1.0;
     }
 
-    const auto radius = environmentHazardRadiusMeters(hazard.severity);
+    const auto radius = environmentHazardRadiusMeters(hazard);
     if (radius <= 1e-9 || distanceMeters >= radius) {
         return 1.0;
     }
@@ -410,7 +419,7 @@ double environmentHazardSpeedFactorAt(
 
 EnvironmentHazardRuntimeProfile environmentHazardRuntimeProfile(const EnvironmentHazardDraft& hazard) {
     return {
-        .radiusMeters = environmentHazardRadiusMeters(hazard.severity),
+        .radiusMeters = environmentHazardRadiusMeters(hazard),
         .speedFactor = std::max(0.35, environmentHazardSpeedFactorAt(hazard, 0.0, 1.5)),
         .routePenaltyMeters = environmentHazardRoutePenaltyMeters(hazard.severity),
         .severityWeight = environmentHazardSeverityWeight(hazard.severity),

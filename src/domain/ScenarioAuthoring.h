@@ -43,6 +43,7 @@ struct EnvironmentHazardDraft {
     double startSeconds{0.0};
     double endSeconds{0.0};
     ScenarioElementSeverity severity{ScenarioElementSeverity::Medium};
+    double radiusMeters{-1.0};
     std::string note{};
 };
 
@@ -160,6 +161,7 @@ std::vector<std::string> computeScenarioDiffKeys(const ScenarioDraft& baseline,
                                                  const ScenarioDraft& variant);
 
 double environmentHazardRadiusMeters(ScenarioElementSeverity severity);
+double environmentHazardRadiusMeters(const EnvironmentHazardDraft& hazard);
 double environmentHazardInfluenceAt(const EnvironmentHazardDraft& hazard, double distanceMeters);
 double environmentHazardRoutePenaltyMeters(ScenarioElementSeverity severity);
 double environmentHazardSeverityWeight(ScenarioElementSeverity severity);

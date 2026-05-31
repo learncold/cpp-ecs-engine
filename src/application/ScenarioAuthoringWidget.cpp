@@ -164,6 +164,8 @@ bool environmentHazardEqual(
         && lhs.startSeconds == rhs.startSeconds
         && lhs.endSeconds == rhs.endSeconds
         && lhs.severity == rhs.severity
+        && safecrowd::domain::environmentHazardRadiusMeters(lhs)
+            == safecrowd::domain::environmentHazardRadiusMeters(rhs)
         && lhs.note == rhs.note;
 }
 
@@ -428,11 +430,6 @@ bool editEnvironmentHazard(
     form->setContentsMargins(0, 0, 0, 0);
     form->setSpacing(8);
 
-    auto* kindCombo = new QComboBox(&dialog);
-    kindCombo->addItem("Fire", static_cast<int>(safecrowd::domain::EnvironmentHazardKind::Fire));
-    kindCombo->addItem("Smoke", static_cast<int>(safecrowd::domain::EnvironmentHazardKind::Smoke));
-    kindCombo->setCurrentIndex(std::max(0, kindCombo->findData(static_cast<int>(hazard->kind))));
-
     auto* nameEdit = new QLineEdit(&dialog);
     nameEdit->setText(QString::fromStdString(hazard->name));
 
@@ -492,11 +489,17 @@ bool editEnvironmentHazard(
     severityCombo->addItem("High", static_cast<int>(safecrowd::domain::ScenarioElementSeverity::High));
     severityCombo->setCurrentIndex(std::max(0, severityCombo->findData(static_cast<int>(hazard->severity))));
 
+    auto* radiusSpin = new QDoubleSpinBox(&dialog);
+    radiusSpin->setRange(0.0, 10000.0);
+    radiusSpin->setDecimals(1);
+    radiusSpin->setSingleStep(0.5);
+    radiusSpin->setSuffix(" m");
+    radiusSpin->setValue(safecrowd::domain::environmentHazardRadiusMeters(*hazard));
+
     auto* noteEdit = new QPlainTextEdit(&dialog);
     noteEdit->setPlainText(QString::fromStdString(hazard->note));
     noteEdit->setMinimumHeight(72);
 
-    form->addRow("Kind", kindCombo);
     form->addRow("Name", nameEdit);
     form->addRow("Affected zone", zoneCombo);
     form->addRow("X", xSpin);
@@ -505,6 +508,7 @@ bool editEnvironmentHazard(
     form->addRow("End", endSpin);
     form->addRow("", openEndedCheck);
     form->addRow("Severity", severityCombo);
+    form->addRow("Radius", radiusSpin);
     form->addRow("Note", noteEdit);
     root->addLayout(form);
 
@@ -576,7 +580,6 @@ bool editEnvironmentHazard(
         return false;
     }
 
-    hazard->kind = static_cast<safecrowd::domain::EnvironmentHazardKind>(kindCombo->currentData().toInt());
     hazard->name = name.toStdString();
     hazard->affectedZoneId = selectedZoneId;
     hazard->floorId = selectedZone->floorId;
@@ -584,6 +587,7 @@ bool editEnvironmentHazard(
     hazard->startSeconds = startSpin->value();
     hazard->endSeconds = openEndedCheck->isChecked() ? hazard->startSeconds : endSpin->value();
     hazard->severity = static_cast<safecrowd::domain::ScenarioElementSeverity>(severityCombo->currentData().toInt());
+    hazard->radiusMeters = std::max(0.0, radiusSpin->value());
     hazard->note = noteEdit->toPlainText().trimmed().toStdString();
     return true;
 }
@@ -1589,11 +1593,13 @@ std::vector<NavigationTreeNode> buildEventsTree(
             const auto position = hazardPositionSummary(hazard);
             const auto schedule = hazardScheduleSummary(hazard);
             const auto severity = severityLabel(hazard.severity);
+            const auto radius = safecrowd::domain::environmentHazardRadiusMeters(hazard);
             QStringList details;
             details << QString("Zone: %1").arg(zone)
                     << QString("Location: %1").arg(position)
                     << QString("Period: %1").arg(schedule)
-                    << QString("Severity: %1").arg(severity);
+                    << QString("Severity: %1").arg(severity)
+                    << QString("Radius: %1m").arg(radius, 0, 'f', 1);
             if (hazard.kind == safecrowd::domain::EnvironmentHazardKind::Smoke) {
                 details << "Visibility: reduced visibility concept";
             }
@@ -1618,6 +1624,10 @@ std::vector<NavigationTreeNode> buildEventsTree(
                 {
                     .label = QString("Severity  -  %1").arg(severity),
                     .id = QString("%1/severity").arg(hazardId),
+                },
+                {
+                    .label = QString("Radius  -  %1m").arg(radius, 0, 'f', 1),
+                    .id = QString("%1/radius").arg(hazardId),
                 },
             };
             if (!hazard.note.empty()) {
@@ -2861,13 +2871,6 @@ void ScenarioAuthoringWidget::refreshInspector() {
                     auto* form = new QFormLayout();
                     configureInspectorForm(form);
 
-                    auto* kindCombo = new QComboBox(elementInspectorPanel_);
-                    kindCombo->addItem("Fire", static_cast<int>(safecrowd::domain::EnvironmentHazardKind::Fire));
-                    kindCombo->addItem("Smoke", static_cast<int>(safecrowd::domain::EnvironmentHazardKind::Smoke));
-                    kindCombo->setCurrentIndex(std::max(0, kindCombo->findData(static_cast<int>(hazardIt->kind))));
-                    configureInspectorCombo(kindCombo);
-                    form->addRow("Kind", kindCombo);
-
                     auto* nameEdit = new QLineEdit(elementInspectorPanel_);
                     nameEdit->setText(QString::fromStdString(hazardIt->name));
                     constrainInspectorField(nameEdit);
@@ -2935,6 +2938,15 @@ void ScenarioAuthoringWidget::refreshInspector() {
                             return severityLabel(severityFromSliderValue(value));
                         }));
 
+                    auto* radiusSpin = new QDoubleSpinBox(elementInspectorPanel_);
+                    radiusSpin->setRange(0.0, 10000.0);
+                    radiusSpin->setDecimals(1);
+                    radiusSpin->setSingleStep(0.5);
+                    radiusSpin->setSuffix(" m");
+                    radiusSpin->setValue(safecrowd::domain::environmentHazardRadiusMeters(*hazardIt));
+                    constrainInspectorField(radiusSpin);
+                    form->addRow("Radius", radiusSpin);
+
                     auto* noteEdit = new QPlainTextEdit(elementInspectorPanel_);
                     noteEdit->setPlainText(QString::fromStdString(hazardIt->note));
                     noteEdit->setMinimumHeight(74);
@@ -2948,7 +2960,7 @@ void ScenarioAuthoringWidget::refreshInspector() {
                     configureInspectorActionButton(applyButton);
                     panelLayout->addWidget(applyButton);
                     const auto hazardId = inspectorSelectionId_;
-                    connect(applyButton, &QPushButton::clicked, this, [this, hazardId, kindCombo, nameEdit, zoneCombo, xSpin, ySpin, startSpin, endSpin, openEndedCheck, severitySlider, noteEdit]() {
+                    connect(applyButton, &QPushButton::clicked, this, [this, hazardId, nameEdit, zoneCombo, xSpin, ySpin, startSpin, endSpin, openEndedCheck, severitySlider, radiusSpin, noteEdit]() {
                         auto* scenario = currentScenario();
                         if (scenario == nullptr) {
                             return;
@@ -2988,7 +3000,6 @@ void ScenarioAuthoringWidget::refreshInspector() {
 
                         const auto beforeChange = currentOperationalEventHistoryEntry(hazardId);
                         const auto previousHazard = *hazardIt;
-                        hazardIt->kind = static_cast<safecrowd::domain::EnvironmentHazardKind>(kindCombo->currentData().toInt());
                         hazardIt->name = name.toStdString();
                         hazardIt->affectedZoneId = zoneId.toStdString();
                         hazardIt->floorId = zone->floorId;
@@ -2998,6 +3009,7 @@ void ScenarioAuthoringWidget::refreshInspector() {
                             ? hazardIt->startSeconds
                             : std::max(hazardIt->startSeconds, endSpin->value());
                         hazardIt->severity = severityFromSliderValue(severitySlider != nullptr ? severitySlider->value() : 1);
+                        hazardIt->radiusMeters = std::max(0.0, radiusSpin->value());
                         hazardIt->note = noteEdit->toPlainText().trimmed().toStdString();
                         if (environmentHazardEqual(*hazardIt, previousHazard)) {
                             return;

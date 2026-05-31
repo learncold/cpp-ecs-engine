@@ -680,6 +680,7 @@ ScenarioEnvironmentHazardAuthoringResult createScenarioEnvironmentHazardForZone(
     draft.startSeconds = 0.0;
     draft.endSeconds = 60.0;
     draft.severity = safecrowd::domain::ScenarioElementSeverity::Medium;
+    draft.radiusMeters = safecrowd::domain::environmentHazardRadiusMeters(draft.severity);
     return {.hazard = std::move(draft)};
 }
 

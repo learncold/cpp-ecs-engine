@@ -29,6 +29,17 @@ SC_TEST(ProjectPersistence_preservesRecommendedScenarioDraftState) {
     guidance.maxDetourMeters = 20.0;
     draft.control.routeGuidances.push_back(guidance);
 
+    EnvironmentHazardDraft hazard;
+    hazard.id = "fire-a";
+    hazard.kind = EnvironmentHazardKind::Fire;
+    hazard.name = "Lobby fire";
+    hazard.affectedZoneId = "lobby";
+    hazard.floorId = "L1";
+    hazard.position = {.x = 3.0, .y = 4.0};
+    hazard.severity = ScenarioElementSeverity::High;
+    hazard.radiusMeters = 7.5;
+    draft.environment.hazards.push_back(hazard);
+
     SavedScenarioState scenario;
     scenario.draft = draft;
     scenario.baseScenarioId = "baseline-1";
@@ -66,6 +77,9 @@ SC_TEST(ProjectPersistence_preservesRecommendedScenarioDraftState) {
     SC_EXPECT_NEAR(loadedScenario.draft.control.routeGuidances.front().baseComplianceRate, 0.5, 1e-9);
     SC_EXPECT_NEAR(loadedScenario.draft.control.routeGuidances.front().influenceRadiusMeters, 2.5, 1e-9);
     SC_EXPECT_NEAR(loadedScenario.draft.control.routeGuidances.front().maxDetourMeters, 20.0, 1e-9);
+    SC_EXPECT_EQ(loadedScenario.draft.environment.hazards.size(), std::size_t{1});
+    SC_EXPECT_EQ(loadedScenario.draft.environment.hazards.front().id, std::string{"fire-a"});
+    SC_EXPECT_NEAR(loadedScenario.draft.environment.hazards.front().radiusMeters, 7.5, 1e-9);
 }
 
 SC_TEST(ProjectPersistence_preservesRunningScenarioIndex) {

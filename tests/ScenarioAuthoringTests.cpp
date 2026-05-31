@@ -121,6 +121,24 @@ SC_TEST(environmentHazardRuntimeProfile_UsesSharedSeverityAndScheduleRules) {
     SC_EXPECT_TRUE(!environmentHazardHasOpenEndedSchedule(hazard));
 }
 
+SC_TEST(environmentHazardRadiusMeters_UsesExplicitRadiusWhenConfigured) {
+    auto hazard = makeSmokeHazard();
+
+    SC_EXPECT_NEAR(environmentHazardRadiusMeters(hazard), 5.0, 1e-9);
+
+    hazard.radiusMeters = 8.0;
+    const auto profile = environmentHazardRuntimeProfile(hazard);
+
+    SC_EXPECT_NEAR(environmentHazardRadiusMeters(hazard), 8.0, 1e-9);
+    SC_EXPECT_NEAR(profile.radiusMeters, 8.0, 1e-9);
+    SC_EXPECT_NEAR(environmentHazardInfluenceAt(hazard, 4.0), 0.5, 1e-9);
+    SC_EXPECT_NEAR(environmentHazardInfluenceAt(hazard, 8.0), 0.0, 1e-9);
+
+    hazard.radiusMeters = 0.0;
+    SC_EXPECT_NEAR(environmentHazardRadiusMeters(hazard), 0.0, 1e-9);
+    SC_EXPECT_NEAR(environmentHazardInfluenceAt(hazard, 0.0), 0.0, 1e-9);
+}
+
 SC_TEST(environmentHazardInfluenceAt_UsesSmoothSeverityFalloff) {
     auto hazard = makeSmokeHazard();
     hazard.severity = ScenarioElementSeverity::High;
@@ -281,6 +299,18 @@ SC_TEST(computeScenarioDiffKeys_detectsEnvironmentHazardDetailChange) {
     variant.environment.hazards[0].position = {.x = 3.0, .y = 4.0};
     variant.environment.hazards[0].severity = ScenarioElementSeverity::Medium;
     variant.environment.hazards[0].note = "Edited";
+
+    const auto keys = computeScenarioDiffKeys(baseline, variant);
+
+    SC_EXPECT_EQ(keys.size(), std::size_t{1});
+    SC_EXPECT_TRUE(containsKey(keys, "environment.hazards"));
+}
+
+SC_TEST(computeScenarioDiffKeys_detectsEnvironmentHazardRadiusChange) {
+    auto baseline = makeBaselineDraft();
+    baseline.environment.hazards.push_back(makeSmokeHazard());
+    auto variant = duplicateScenarioDraft(baseline, "scenario-2", "Variant");
+    variant.environment.hazards[0].radiusMeters = 7.5;
 
     const auto keys = computeScenarioDiffKeys(baseline, variant);
 
