@@ -754,12 +754,20 @@ void updateAgentPhysicsFloorIds(
 
 std::string zoneAt(const ScenarioLayoutCacheResource& cache, const Point2D& point, const std::string& floorId) {
     const auto& floorLayout = cachedLayoutForFloor(cache, floorId);
+    const Zone2D* boundaryZone = nullptr;
+    double boundaryDistance = std::numeric_limits<double>::infinity();
+    constexpr double kZoneBoundaryTolerance = 0.04;
     for (const auto& zone : floorLayout.zones) {
         if (pointInRing(zone.area.outline, point)) {
             return zone.id;
         }
+        const auto distance = distanceToPolygonBoundary(zone.area, point);
+        if (distance <= kZoneBoundaryTolerance && distance < boundaryDistance) {
+            boundaryZone = &zone;
+            boundaryDistance = distance;
+        }
     }
-    return {};
+    return boundaryZone == nullptr ? std::string{} : boundaryZone->id;
 }
 
 Point2D passageNormalToward(const LineSegment2D& passage, const Zone2D& fromZone, const Zone2D& toZone) {

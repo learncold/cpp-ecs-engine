@@ -9,6 +9,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -21,8 +22,11 @@ constexpr double kExitImbalanceThreshold = 0.25;
 constexpr std::size_t kStagedEvacuationAgentsPerSpawn = 10;
 constexpr double kStagedEvacuationIntervalSeconds = 5.0;
 constexpr double kDefaultGuidanceCompliance = 0.5;
+constexpr double kMinimumGuidanceCompliance = 0.45;
+constexpr double kMaximumGuidanceCompliance = 0.85;
 constexpr double kDefaultGuidanceInfluenceRadiusMeters = 2.5;
 constexpr double kDefaultGuidanceMaxDetourMeters = 20.0;
+constexpr double kMaximumGuidanceDetourEstimateMeters = 35.0;
 
 struct AlternativeRecommendationInput {
     const FacilityLayout2D& layout;
@@ -114,6 +118,10 @@ Point2D averagePoint(const std::vector<Point2D>& points) {
     return result;
 }
 
+double distanceBetweenPoints(const Point2D& lhs, const Point2D& rhs) {
+    return std::hypot(lhs.x - rhs.x, lhs.y - rhs.y);
+}
+
 std::optional<Point2D> sourcePointForPlacement(
     const FacilityLayout2D& layout,
     const InitialPlacement2D& placement) {
@@ -184,6 +192,12 @@ bool containsString(const std::vector<std::string>& values, const std::string& v
     return std::find(values.begin(), values.end(), value) != values.end();
 }
 
+void appendUniqueString(std::vector<std::string>& values, const std::string& value) {
+    if (!value.empty() && !containsString(values, value)) {
+        values.push_back(value);
+    }
+}
+
 bool exitUsageContainsZone(const ScenarioResultArtifacts& artifacts, const std::string& zoneId) {
     return std::any_of(artifacts.exitUsage.begin(), artifacts.exitUsage.end(), [&](const auto& usage) {
         return usage.exitZoneId == zoneId;
@@ -211,28 +225,6 @@ std::vector<ExitUsageMetric> exitUsageCandidates(const AlternativeRecommendation
     return candidates;
 }
 
-std::optional<ExitUsageMetric> leastUsedExit(
-    const AlternativeRecommendationInput& request,
-    const std::vector<std::string>& excludedExitZoneIds = {}) {
-    const auto candidates = exitUsageCandidates(request);
-    if (candidates.empty()) {
-        return std::nullopt;
-    }
-
-    std::optional<ExitUsageMetric> best;
-    for (const auto& usage : candidates) {
-        if (containsString(excludedExitZoneIds, usage.exitZoneId)) {
-            continue;
-        }
-        if (!best.has_value()
-            || usage.usageRatio < best->usageRatio
-            || (usage.usageRatio == best->usageRatio && usage.evacuatedCount < best->evacuatedCount)) {
-            best = usage;
-        }
-    }
-    return best;
-}
-
 std::optional<ExitUsageMetric> mostUsedExit(const AlternativeRecommendationInput& request) {
     const auto candidates = exitUsageCandidates(request);
     const auto it = std::max_element(
@@ -247,12 +239,10 @@ std::optional<ExitUsageMetric> mostUsedExit(const AlternativeRecommendationInput
     return it == candidates.end() ? std::nullopt : std::optional<ExitUsageMetric>{*it};
 }
 
-bool hasRouteGuidance(const ScenarioDraft& scenario,
-                      const std::string& guidedExitZoneId,
-                      const std::string& installConnectionId) {
+bool hasRouteGuidanceForExit(const ScenarioDraft& scenario,
+                             const std::string& guidedExitZoneId) {
     return std::any_of(scenario.control.routeGuidances.begin(), scenario.control.routeGuidances.end(), [&](const auto& guidance) {
-        return guidance.guidedExitZoneId == guidedExitZoneId
-            && guidance.installConnectionId == installConnectionId;
+        return guidance.guidedExitZoneId == guidedExitZoneId;
     });
 }
 
@@ -382,12 +372,13 @@ std::vector<std::string> adjacentExitZoneIdsForConnection(
 
 RouteGuidanceDraft makeGuidance(const std::string& id,
                                 const std::string& guidedExitZoneId,
-                                const std::string& installConnectionId = {}) {
+                                const std::string& installConnectionId = {},
+                                double baseComplianceRate = kDefaultGuidanceCompliance) {
     RouteGuidanceDraft guidance;
     guidance.id = id;
     guidance.guidedExitZoneId = guidedExitZoneId;
     guidance.installConnectionId = installConnectionId;
-    guidance.baseComplianceRate = kDefaultGuidanceCompliance;
+    guidance.baseComplianceRate = std::clamp(baseComplianceRate, 0.0, 1.0);
     guidance.influenceRadiusMeters = kDefaultGuidanceInfluenceRadiusMeters;
     guidance.maxDetourMeters = kDefaultGuidanceMaxDetourMeters;
     return guidance;
@@ -437,6 +428,170 @@ bool sourceHasConnectionBlock(const ScenarioDraft& scenario, const std::string& 
     });
 }
 
+bool sourceHasActiveConnectionBlockAt(
+    const ScenarioDraft& scenario,
+    const std::string& connectionId,
+    const std::optional<double>& elapsedSeconds) {
+    return std::any_of(scenario.control.connectionBlocks.begin(), scenario.control.connectionBlocks.end(), [&](const auto& block) {
+        if (block.connectionId != connectionId) {
+            return false;
+        }
+        return !elapsedSeconds.has_value() || connectionBlockActiveAt(block, *elapsedSeconds);
+    });
+}
+
+bool recommendedDraftChangesSource(
+    const AlternativeRecommendationInput& request,
+    const ScenarioDraft& draft) {
+    return !computeScenarioDiffKeys(request.sourceScenario, draft).empty();
+}
+
+std::optional<Point2D> zoneReferencePoint(const FacilityLayout2D& layout, const std::string& zoneId) {
+    const auto* zone = findZone(layout, zoneId);
+    if (zone == nullptr || zone->area.outline.empty()) {
+        return std::nullopt;
+    }
+    if (zone->area.outline.size() == 1) {
+        return zone->area.outline.front();
+    }
+    return representativePointInPolygon(zone->area).value_or(averagePoint(zone->area.outline));
+}
+
+std::vector<std::string> sourceZoneIds(const ScenarioDraft& scenario) {
+    std::vector<std::string> zones;
+    for (const auto& placement : scenario.population.initialPlacements) {
+        appendUniqueString(zones, placement.zoneId);
+    }
+    for (const auto& source : scenario.population.occupantSources) {
+        appendUniqueString(zones, source.zoneId);
+    }
+    return zones;
+}
+
+bool connectionTraversableFromZone(
+    const ScenarioDraft& scenario,
+    const Connection2D& connection,
+    const std::string& zoneId,
+    std::string& nextZoneId) {
+    if (connection.directionality == TravelDirection::Closed
+        || sourceHasConnectionBlock(scenario, connection.id)) {
+        return false;
+    }
+    if (connection.fromZoneId == zoneId && connection.directionality != TravelDirection::ReverseOnly) {
+        nextZoneId = connection.toZoneId;
+        return !nextZoneId.empty();
+    }
+    if (connection.toZoneId == zoneId && connection.directionality != TravelDirection::ForwardOnly) {
+        nextZoneId = connection.fromZoneId;
+        return !nextZoneId.empty();
+    }
+    return false;
+}
+
+bool routeExistsBetweenZones(
+    const FacilityLayout2D& layout,
+    const ScenarioDraft& scenario,
+    const std::string& startZoneId,
+    const std::string& targetZoneId) {
+    if (startZoneId.empty() || targetZoneId.empty()) {
+        return false;
+    }
+    if (startZoneId == targetZoneId) {
+        return true;
+    }
+
+    std::vector<std::string> pending{startZoneId};
+    std::unordered_set<std::string> visited{startZoneId};
+    for (std::size_t index = 0; index < pending.size(); ++index) {
+        const auto zoneId = pending[index];
+        for (const auto& connection : layout.connections) {
+            std::string nextZoneId;
+            if (!connectionTraversableFromZone(scenario, connection, zoneId, nextZoneId)
+                || visited.find(nextZoneId) != visited.end()) {
+                continue;
+            }
+            if (nextZoneId == targetZoneId) {
+                return true;
+            }
+            visited.insert(nextZoneId);
+            pending.push_back(std::move(nextZoneId));
+        }
+    }
+    return false;
+}
+
+bool exitReachableFromScenarioSources(
+    const AlternativeRecommendationInput& request,
+    const std::string& exitZoneId) {
+    if (exitZoneId.empty()) {
+        return false;
+    }
+    const auto* exitZone = findZone(request.layout, exitZoneId);
+    if (exitZone == nullptr || exitZone->kind != ZoneKind::Exit) {
+        return false;
+    }
+    const auto zones = sourceZoneIds(request.sourceScenario);
+    if (zones.empty()) {
+        return false;
+    }
+    return std::any_of(zones.begin(), zones.end(), [&](const auto& zoneId) {
+        return routeExistsBetweenZones(request.layout, request.sourceScenario, zoneId, exitZoneId);
+    });
+}
+
+std::optional<double> nearestSourceDistanceToZone(
+    const AlternativeRecommendationInput& request,
+    const std::string& targetZoneId) {
+    const auto targetPoint = zoneReferencePoint(request.layout, targetZoneId);
+    if (!targetPoint.has_value()) {
+        return std::nullopt;
+    }
+
+    std::optional<double> best;
+    for (const auto& zoneId : sourceZoneIds(request.sourceScenario)) {
+        const auto sourcePoint = zoneReferencePoint(request.layout, zoneId);
+        if (!sourcePoint.has_value()) {
+            continue;
+        }
+        const auto distance = distanceBetweenPoints(*sourcePoint, *targetPoint);
+        if (!best.has_value() || distance < *best) {
+            best = distance;
+        }
+    }
+    return best;
+}
+
+bool guidanceDetourAcceptable(
+    const AlternativeRecommendationInput& request,
+    const std::string& currentExitZoneId,
+    const std::string& targetExitZoneId) {
+    const auto currentDistance = nearestSourceDistanceToZone(request, currentExitZoneId);
+    const auto targetDistance = nearestSourceDistanceToZone(request, targetExitZoneId);
+    if (!currentDistance.has_value() || !targetDistance.has_value()) {
+        return true;
+    }
+    return *targetDistance - *currentDistance <= kMaximumGuidanceDetourEstimateMeters;
+}
+
+std::optional<ExitUsageMetric> leastUsedReachableExit(
+    const AlternativeRecommendationInput& request,
+    const std::vector<std::string>& excludedExitZoneIds = {}) {
+    const auto candidates = exitUsageCandidates(request);
+    std::optional<ExitUsageMetric> best;
+    for (const auto& usage : candidates) {
+        if (containsString(excludedExitZoneIds, usage.exitZoneId)
+            || !exitReachableFromScenarioSources(request, usage.exitZoneId)) {
+            continue;
+        }
+        if (!best.has_value()
+            || usage.usageRatio < best->usageRatio
+            || (usage.usageRatio == best->usageRatio && usage.evacuatedCount < best->evacuatedCount)) {
+            best = usage;
+        }
+    }
+    return best;
+}
+
 bool bottleneckLessSevere(const ScenarioBottleneckMetric& lhs, const ScenarioBottleneckMetric& rhs) {
     if (lhs.stalledAgentCount == rhs.stalledAgentCount) {
         return lhs.nearbyAgentCount < rhs.nearbyAgentCount;
@@ -452,7 +607,10 @@ std::optional<std::string> blockedConnectionToRelieve(const AlternativeRecommend
     std::optional<ScenarioBottleneckMetric> best;
     for (const auto& bottleneck : request.risk.bottlenecks) {
         if (!bottleneck.connectionId.empty()
-            && sourceHasConnectionBlock(request.sourceScenario, bottleneck.connectionId)) {
+            && sourceHasActiveConnectionBlockAt(
+                request.sourceScenario,
+                bottleneck.connectionId,
+                bottleneck.detectedAtSeconds)) {
             if (!best.has_value() || bottleneckLessSevere(*best, bottleneck)) {
                 best = bottleneck;
             }
@@ -724,8 +882,75 @@ const AlternativeRecommendationRiskSignal* findRiskSignal(
     return it == signals.end() ? nullptr : &(*it);
 }
 
+struct RecommendationContext {
+    std::vector<AlternativeRecommendationRiskSignal> riskSignals{};
+    std::optional<ScenarioBottleneckMetric> worstBottleneck{};
+    std::optional<ScenarioBottleneckMetric> worstExitBottleneck{};
+    std::optional<ScenarioBottleneckMetric> worstCorridorBottleneck{};
+    std::optional<ExitUsageMetric> mostUsedExit{};
+    std::optional<ExitUsageMetric> leastUsedReachableExit{};
+    double exitUsageSpread{0.0};
+    bool exitUsageImbalanced{false};
+};
+
+RecommendationContext buildRecommendationContext(const AlternativeRecommendationInput& request) {
+    RecommendationContext context;
+    context.riskSignals = detectRiskSignals(request);
+    context.worstBottleneck = worstBottleneck(request.risk);
+    context.worstExitBottleneck = worstBottleneckForKind(request, AlternativeRecommendationRiskKind::ExitBottleneck);
+    context.worstCorridorBottleneck = worstBottleneckForKind(request, AlternativeRecommendationRiskKind::CorridorBottleneck);
+    context.mostUsedExit = mostUsedExit(request);
+    context.leastUsedReachableExit = leastUsedReachableExit(request);
+    if (context.mostUsedExit.has_value() && context.leastUsedReachableExit.has_value()) {
+        context.exitUsageSpread =
+            context.mostUsedExit->usageRatio - context.leastUsedReachableExit->usageRatio;
+        context.exitUsageImbalanced = context.mostUsedExit->exitZoneId != context.leastUsedReachableExit->exitZoneId
+            && context.exitUsageSpread >= kExitImbalanceThreshold;
+    }
+    return context;
+}
+
+const AlternativeRecommendationRiskSignal* findRiskSignal(
+    const RecommendationContext& context,
+    AlternativeRecommendationRiskKind kind) {
+    return findRiskSignal(context.riskSignals, kind);
+}
+
+int riskSeverity(const RecommendationContext& context, AlternativeRecommendationRiskKind kind) {
+    const auto* signal = findRiskSignal(context, kind);
+    return signal == nullptr ? 0 : signal->severity;
+}
+
+int priorityForCandidate(int basePriority, int severity, bool simulationAffecting) {
+    const auto severityBonus = std::clamp(severity / 8, 0, 35);
+    return basePriority - severityBonus + (simulationAffecting ? 0 : 100);
+}
+
+int exitUsageSeverity(const RecommendationContext& context) {
+    if (!context.mostUsedExit.has_value() || !context.leastUsedReachableExit.has_value()) {
+        return 0;
+    }
+    return static_cast<int>(std::round(std::max(0.0, context.exitUsageSpread) * 100.0))
+        + static_cast<int>(context.mostUsedExit->evacuatedCount / 2U);
+}
+
+double guidanceComplianceForSeverity(int severity) {
+    return std::clamp(
+        kMinimumGuidanceCompliance + (static_cast<double>(std::max(0, severity)) / 200.0),
+        kMinimumGuidanceCompliance,
+        kMaximumGuidanceCompliance);
+}
+
+double guidanceComplianceForExitSpread(double spread) {
+    return std::clamp(
+        kMinimumGuidanceCompliance + (std::max(0.0, spread) * 0.45),
+        kMinimumGuidanceCompliance,
+        0.80);
+}
+
 std::optional<AlternativeRecommendationCandidate> makeBlockedConnectionCandidate(
-    const AlternativeRecommendationInput& request) {
+    const AlternativeRecommendationInput& request,
+    const RecommendationContext& context) {
     const auto connectionId = blockedConnectionToRelieve(request);
     if (!connectionId.has_value()) {
         return std::nullopt;
@@ -741,11 +966,13 @@ std::optional<AlternativeRecommendationCandidate> makeBlockedConnectionCandidate
         }),
         draft.control.connectionBlocks.end());
     finalizeDiffKeys(request, draft);
+    if (!recommendedDraftChangesSource(request, draft)) {
+        return std::nullopt;
+    }
 
     AlternativeRecommendationCandidate candidate;
     candidate.kind = AlternativeRecommendationKind::BlockedConnectionRelief;
     candidate.id = "open-" + sanitizeId(*connectionId);
-    candidate.priority = 10;
     candidate.title = "Reopen blocked connection";
     candidate.summary = "Remove the block on " + connectionName(request.layout, *connectionId) + ".";
     candidate.expectedImprovement = "Restores a constrained exit path and can reduce queueing near blocked connectors.";
@@ -756,6 +983,10 @@ std::optional<AlternativeRecommendationCandidate> makeBlockedConnectionCandidate
             ? AlternativeRecommendationRiskKind::ExitBottleneck
             : AlternativeRecommendationRiskKind::CorridorBottleneck;
     }
+    candidate.priority = priorityForCandidate(
+        100,
+        candidate.riskKind.has_value() ? riskSeverity(context, *candidate.riskKind) : 0,
+        true);
     if (const auto bottleneck = worstBottleneck(request.risk);
         bottleneck.has_value() && bottleneck->connectionId == *connectionId) {
         candidate.evidence.push_back(evidence(
@@ -769,35 +1000,47 @@ std::optional<AlternativeRecommendationCandidate> makeBlockedConnectionCandidate
 }
 
 std::optional<AlternativeRecommendationCandidate> makeBottleneckGuidanceCandidate(
-    const AlternativeRecommendationInput& request) {
-    const auto bottleneck = worstBottleneck(request.risk);
+    const AlternativeRecommendationInput& request,
+    const RecommendationContext& context) {
+    const auto bottleneck = context.worstBottleneck;
     if (!bottleneck.has_value() || bottleneck->connectionId.empty()) {
         return std::nullopt;
     }
     const auto adjacentExitZoneIds = adjacentExitZoneIdsForConnection(request, bottleneck->connectionId);
-    const auto targetExit = leastUsedExit(
+    const auto targetExit = leastUsedReachableExit(
         request,
         adjacentExitZoneIds);
     if (!targetExit.has_value() || targetExit->exitZoneId.empty()) {
         return std::nullopt;
     }
-    if (hasRouteGuidance(request.sourceScenario, targetExit->exitZoneId, {})) {
+    if (hasRouteGuidanceForExit(request.sourceScenario, targetExit->exitZoneId)
+        || exitHasBottleneck(request, targetExit->exitZoneId)) {
+        return std::nullopt;
+    }
+    if (context.mostUsedExit.has_value()
+        && !guidanceDetourAcceptable(request, context.mostUsedExit->exitZoneId, targetExit->exitZoneId)) {
         return std::nullopt;
     }
 
+    const auto severity = riskSeverity(context, bottleneckRiskKind(request, *bottleneck));
     auto draft = makeRecommendedDraft(
         request,
         AlternativeRecommendationKind::BottleneckBypassGuidance,
         "Recommended: guide to " + zoneName(request.layout, targetExit->exitZoneId));
     draft.control.routeGuidances.push_back(makeGuidance(
         "recommendation-guidance-" + sanitizeId(targetExit->exitZoneId),
-        targetExit->exitZoneId));
+        targetExit->exitZoneId,
+        {},
+        guidanceComplianceForSeverity(severity)));
     finalizeDiffKeys(request, draft);
+    if (!recommendedDraftChangesSource(request, draft)) {
+        return std::nullopt;
+    }
 
     AlternativeRecommendationCandidate candidate;
     candidate.kind = AlternativeRecommendationKind::BottleneckBypassGuidance;
     candidate.id = "guide-around-" + sanitizeId(bottleneck->connectionId);
-    candidate.priority = 20;
+    candidate.priority = priorityForCandidate(120, severity, true);
     candidate.title = "Guide occupants to another exit";
     candidate.summary = "Install guidance at "
         + zoneName(request.layout, targetExit->exitZoneId)
@@ -828,34 +1071,43 @@ std::optional<AlternativeRecommendationCandidate> makeBottleneckGuidanceCandidat
 }
 
 std::optional<AlternativeRecommendationCandidate> makeExitBalancingCandidate(
-    const AlternativeRecommendationInput& request) {
+    const AlternativeRecommendationInput& request,
+    const RecommendationContext& context) {
     if (exitUsageCandidates(request).size() < 2) {
         return std::nullopt;
     }
-    const auto low = leastUsedExit(request);
-    const auto high = mostUsedExit(request);
+    const auto low = context.leastUsedReachableExit;
+    const auto high = context.mostUsedExit;
     if (!low.has_value() || !high.has_value() || low->exitZoneId.empty() || high->exitZoneId.empty()) {
         return std::nullopt;
     }
     if (low->exitZoneId == high->exitZoneId
         || high->usageRatio - low->usageRatio < kExitImbalanceThreshold
-        || hasRouteGuidance(request.sourceScenario, low->exitZoneId, {})) {
+        || hasRouteGuidanceForExit(request.sourceScenario, low->exitZoneId)
+        || exitHasBottleneck(request, low->exitZoneId)
+        || !guidanceDetourAcceptable(request, high->exitZoneId, low->exitZoneId)) {
         return std::nullopt;
     }
 
+    const auto severity = exitUsageSeverity(context);
     auto draft = makeRecommendedDraft(
         request,
         AlternativeRecommendationKind::ExitUsageBalancing,
         "Recommended: balance exit usage toward " + zoneName(request.layout, low->exitZoneId));
     draft.control.routeGuidances.push_back(makeGuidance(
         "recommendation-guidance-exit-" + sanitizeId(low->exitZoneId),
-        low->exitZoneId));
+        low->exitZoneId,
+        {},
+        guidanceComplianceForExitSpread(high->usageRatio - low->usageRatio)));
     finalizeDiffKeys(request, draft);
+    if (!recommendedDraftChangesSource(request, draft)) {
+        return std::nullopt;
+    }
 
     AlternativeRecommendationCandidate candidate;
     candidate.kind = AlternativeRecommendationKind::ExitUsageBalancing;
     candidate.id = "balance-exit-" + sanitizeId(low->exitZoneId);
-    candidate.priority = 30;
+    candidate.priority = priorityForCandidate(140, severity, true);
     candidate.title = "Balance exit usage";
     candidate.summary = "Guide a share of occupants toward the underused exit "
         + zoneName(request.layout, low->exitZoneId) + ".";
@@ -875,7 +1127,8 @@ std::optional<AlternativeRecommendationCandidate> makeExitBalancingCandidate(
 }
 
 std::optional<AlternativeRecommendationCandidate> makePressureHotspotCandidate(
-    const AlternativeRecommendationInput& request) {
+    const AlternativeRecommendationInput& request,
+    const RecommendationContext& context) {
     if (!hasPressureSignal(request)) {
         return std::nullopt;
     }
@@ -883,32 +1136,39 @@ std::optional<AlternativeRecommendationCandidate> makePressureHotspotCandidate(
         return std::nullopt;
     }
 
-    const auto targetExit = leastUsedExit(request);
+    const auto targetExit = context.leastUsedReachableExit;
     if (!targetExit.has_value() || targetExit->exitZoneId.empty()
-        || hasRouteGuidance(request.sourceScenario, targetExit->exitZoneId, {})
+        || hasRouteGuidanceForExit(request.sourceScenario, targetExit->exitZoneId)
         || exitHasBottleneck(request, targetExit->exitZoneId)) {
         return std::nullopt;
     }
-    if (const auto high = mostUsedExit(request);
-        high.has_value()
-        && high->exitZoneId != targetExit->exitZoneId
-        && high->usageRatio - targetExit->usageRatio >= kExitImbalanceThreshold) {
+    if (context.exitUsageImbalanced) {
+        return std::nullopt;
+    }
+    if (context.mostUsedExit.has_value()
+        && !guidanceDetourAcceptable(request, context.mostUsedExit->exitZoneId, targetExit->exitZoneId)) {
         return std::nullopt;
     }
 
+    const auto severity = riskSeverity(context, AlternativeRecommendationRiskKind::PressureHotspot);
     auto draft = makeRecommendedDraft(
         request,
         AlternativeRecommendationKind::PressureHotspotRelief,
         "Recommended: relieve pressure toward " + zoneName(request.layout, targetExit->exitZoneId));
     draft.control.routeGuidances.push_back(makeGuidance(
         "recommendation-guidance-pressure-" + sanitizeId(targetExit->exitZoneId),
-        targetExit->exitZoneId));
+        targetExit->exitZoneId,
+        {},
+        guidanceComplianceForSeverity(severity)));
     finalizeDiffKeys(request, draft);
+    if (!recommendedDraftChangesSource(request, draft)) {
+        return std::nullopt;
+    }
 
     AlternativeRecommendationCandidate candidate;
     candidate.kind = AlternativeRecommendationKind::PressureHotspotRelief;
     candidate.id = "relieve-pressure-" + sanitizeId(targetExit->exitZoneId);
-    candidate.priority = 40;
+    candidate.priority = priorityForCandidate(150, severity, true);
     candidate.title = "Relieve pressure hotspot";
     candidate.summary = "Guide part of the crowd toward "
         + zoneName(request.layout, targetExit->exitZoneId) + " to reduce local pressure.";
@@ -967,10 +1227,90 @@ std::optional<AlternativeRecommendationCandidate> makePressureHotspotCandidate(
 
 std::optional<AlternativeRecommendationCandidate> makeCrossFlowCandidate(
     const AlternativeRecommendationInput& request,
-    const std::vector<AlternativeRecommendationRiskSignal>& riskSignals) {
-    const auto* signal = findRiskSignal(riskSignals, AlternativeRecommendationRiskKind::CrossFlow);
+    const RecommendationContext& context) {
+    const auto* signal = findRiskSignal(context, AlternativeRecommendationRiskKind::CrossFlow);
     if (signal == nullptr) {
         return std::nullopt;
+    }
+
+    const auto severity = signal->severity;
+    if (!context.exitUsageImbalanced && exitUsageCandidates(request).size() >= 2) {
+        const auto targetExit = context.leastUsedReachableExit;
+        if (targetExit.has_value()
+            && context.mostUsedExit.has_value()
+            && targetExit->exitZoneId != context.mostUsedExit->exitZoneId
+            && !hasRouteGuidanceForExit(request.sourceScenario, targetExit->exitZoneId)
+            && !exitHasBottleneck(request, targetExit->exitZoneId)
+            && guidanceDetourAcceptable(request, context.mostUsedExit->exitZoneId, targetExit->exitZoneId)) {
+            auto draft = makeRecommendedDraft(
+                request,
+                AlternativeRecommendationKind::CrossFlowSeparation,
+                "Recommended: guide cross-flow away from shared movement");
+            draft.control.routeGuidances.push_back(makeGuidance(
+                "recommendation-guidance-cross-flow-" + sanitizeId(targetExit->exitZoneId),
+                targetExit->exitZoneId,
+                {},
+                guidanceComplianceForSeverity(severity)));
+            finalizeDiffKeys(request, draft);
+            if (recommendedDraftChangesSource(request, draft)) {
+                AlternativeRecommendationCandidate candidate;
+                candidate.kind = AlternativeRecommendationKind::CrossFlowSeparation;
+                candidate.riskKind = AlternativeRecommendationRiskKind::CrossFlow;
+                candidate.id = "guide-cross-flow-" + sanitizeId(targetExit->exitZoneId);
+                candidate.priority = priorityForCandidate(130, severity, true);
+                candidate.title = "Guide cross-flow to another exit";
+                candidate.summary = "Guide part of the crossing stream toward "
+                    + zoneName(request.layout, targetExit->exitZoneId)
+                    + " so the shared movement area carries less conflicting flow.";
+                candidate.expectedImprovement = "Reduces crossing movement interference with a rerunnable route-guidance draft.";
+                candidate.artifactSource = "AlternativeRecommendationRiskSignal + ScenarioResultArtifacts.exitUsage";
+                candidate.evidence = signal->evidence;
+                candidate.evidence.push_back(evidence(
+                    "Guided exit",
+                    zoneName(request.layout, targetExit->exitZoneId),
+                    "least-used reachable exit from FacilityLayout2D.zones + ScenarioResultArtifacts.exitUsage"));
+                candidate.recommendedScenario = std::move(draft);
+                return candidate;
+            }
+        }
+    }
+
+    if (findRiskSignal(context, AlternativeRecommendationRiskKind::PressureHotspot) == nullptr
+        && findRiskSignal(context, AlternativeRecommendationRiskKind::TimeLimitMissed) == nullptr) {
+        const auto stagedSources = makeSequentialStagedEvacuationSources(request);
+        if (stagedSources.size() >= 2
+            && std::none_of(stagedSources.begin(), stagedSources.end(), [&](const auto& source) {
+                   return hasOccupantSource(request.sourceScenario, source.id);
+               })) {
+            auto draft = makeRecommendedDraft(
+                request,
+                AlternativeRecommendationKind::CrossFlowSeparation,
+                "Recommended: time-separate cross-flow groups");
+            draft.population.initialPlacements.clear();
+            draft.population.occupantSources.insert(
+                draft.population.occupantSources.end(),
+                stagedSources.begin(),
+                stagedSources.end());
+            finalizeDiffKeys(request, draft);
+            if (recommendedDraftChangesSource(request, draft)) {
+                AlternativeRecommendationCandidate candidate;
+                candidate.kind = AlternativeRecommendationKind::CrossFlowSeparation;
+                candidate.riskKind = AlternativeRecommendationRiskKind::CrossFlow;
+                candidate.id = "stage-cross-flow-groups";
+                candidate.priority = priorityForCandidate(135, severity, true);
+                candidate.title = "Time-separate cross-flow groups";
+                candidate.summary = "Release source groups sequentially to reduce simultaneous crossing streams.";
+                candidate.expectedImprovement = "Turns the cross-flow rule into a rerunnable staged-release draft.";
+                candidate.artifactSource = "AlternativeRecommendationRiskSignal + ScenarioDraft.population.initialPlacements";
+                candidate.evidence = signal->evidence;
+                candidate.evidence.push_back(evidence(
+                    "Staged groups",
+                    std::to_string(stagedSources.size()) + " source groups",
+                    "ScenarioDraft.population.initialPlacements"));
+                candidate.recommendedScenario = std::move(draft);
+                return candidate;
+            }
+        }
     }
 
     const std::string eventId = "recommendation-cross-flow-separation";
@@ -993,7 +1333,7 @@ std::optional<AlternativeRecommendationCandidate> makeCrossFlowCandidate(
     candidate.kind = AlternativeRecommendationKind::CrossFlowSeparation;
     candidate.riskKind = AlternativeRecommendationRiskKind::CrossFlow;
     candidate.id = "separate-cross-flow";
-    candidate.priority = 35;
+    candidate.priority = priorityForCandidate(240, severity, false);
     candidate.title = "Separate cross-flow movements";
     candidate.summary = "Record a lane separation or time-separated entry operation.";
     candidate.expectedImprovement = "Reduces crossing movement interference and lets the revised operation be compared by rerun.";
@@ -1005,12 +1345,15 @@ std::optional<AlternativeRecommendationCandidate> makeCrossFlowCandidate(
 
 std::optional<AlternativeRecommendationCandidate> makeStagedEvacuationCandidate(
     const AlternativeRecommendationInput& request,
-    const std::vector<AlternativeRecommendationRiskSignal>& riskSignals) {
-    const auto* signal = findRiskSignal(riskSignals, AlternativeRecommendationRiskKind::PressureHotspot);
+    const RecommendationContext& context) {
+    const auto* signal = findRiskSignal(context, AlternativeRecommendationRiskKind::PressureHotspot);
     if (signal == nullptr) {
-        signal = findRiskSignal(riskSignals, AlternativeRecommendationRiskKind::TimeLimitMissed);
+        signal = findRiskSignal(context, AlternativeRecommendationRiskKind::TimeLimitMissed);
     }
     if (signal == nullptr) {
+        return std::nullopt;
+    }
+    if (!request.sourceScenario.population.occupantSources.empty()) {
         return std::nullopt;
     }
 
@@ -1040,12 +1383,15 @@ std::optional<AlternativeRecommendationCandidate> makeStagedEvacuationCandidate(
         stagedSources.begin(),
         stagedSources.end());
     finalizeDiffKeys(request, draft);
+    if (!recommendedDraftChangesSource(request, draft)) {
+        return std::nullopt;
+    }
 
     AlternativeRecommendationCandidate candidate;
     candidate.kind = AlternativeRecommendationKind::StagedEvacuation;
     candidate.riskKind = signal->kind;
     candidate.id = "staged-evacuation-batches";
-    candidate.priority = 45;
+    candidate.priority = priorityForCandidate(160, signal->severity, true);
     candidate.title = "Stage groups sequentially";
     candidate.summary = "Release each source group in order: up to " + std::to_string(kStagedEvacuationAgentsPerSpawn)
         + " agents every " + fixed(kStagedEvacuationIntervalSeconds, 0)
@@ -1118,29 +1464,33 @@ AlternativeRecommendationResult recommendFromInput(const AlternativeRecommendati
         return result;
     }
 
-    result.riskSignals = detectRiskSignals(request);
+    const auto context = buildRecommendationContext(request);
+    result.riskSignals = context.riskSignals;
 
-    if (const auto candidate = makeBlockedConnectionCandidate(request); candidate.has_value()) {
+    if (const auto candidate = makeBlockedConnectionCandidate(request, context); candidate.has_value()) {
         result.candidates.push_back(*candidate);
     }
-    if (const auto candidate = makeBottleneckGuidanceCandidate(request); candidate.has_value()) {
+    if (const auto candidate = makeBottleneckGuidanceCandidate(request, context); candidate.has_value()) {
         result.candidates.push_back(*candidate);
     }
-    if (const auto candidate = makeExitBalancingCandidate(request); candidate.has_value()) {
+    if (const auto candidate = makeExitBalancingCandidate(request, context); candidate.has_value()) {
         result.candidates.push_back(*candidate);
     }
-    if (const auto candidate = makeCrossFlowCandidate(request, result.riskSignals); candidate.has_value()) {
+    if (const auto candidate = makeCrossFlowCandidate(request, context); candidate.has_value()) {
         result.candidates.push_back(*candidate);
     }
-    if (const auto candidate = makePressureHotspotCandidate(request); candidate.has_value()) {
+    if (const auto candidate = makePressureHotspotCandidate(request, context); candidate.has_value()) {
         result.candidates.push_back(*candidate);
     }
-    if (const auto candidate = makeStagedEvacuationCandidate(request, result.riskSignals); candidate.has_value()) {
+    if (const auto candidate = makeStagedEvacuationCandidate(request, context); candidate.has_value()) {
         result.candidates.push_back(*candidate);
     }
 
     std::sort(result.candidates.begin(), result.candidates.end(), [](const auto& lhs, const auto& rhs) {
-        return lhs.priority < rhs.priority;
+        if (lhs.priority != rhs.priority) {
+            return lhs.priority < rhs.priority;
+        }
+        return lhs.id < rhs.id;
     });
 
     if (result.candidates.empty()) {

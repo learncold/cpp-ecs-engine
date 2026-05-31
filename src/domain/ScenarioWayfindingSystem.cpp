@@ -124,6 +124,26 @@ bool routeTargetStalled(const EvacuationRoute& route) {
     return !route.waypointConnectionIds[route.nextWaypointIndex].empty();
 }
 
+const Connection2D* routeTargetConnection(
+    const ScenarioLayoutCacheResource& layoutCache,
+    const EvacuationRoute& route) {
+    if (route.nextWaypointIndex >= route.waypointConnectionIds.size()) {
+        return nullptr;
+    }
+    return findConnectionById(layoutCache, route.waypointConnectionIds[route.nextWaypointIndex]);
+}
+
+bool routeTargetTouchesStairZone(
+    const ScenarioLayoutCacheResource& layoutCache,
+    const Connection2D* connection) {
+    if (connection == nullptr) {
+        return false;
+    }
+
+    return zoneIsStairLike(findCachedZone(layoutCache, connection->fromZoneId))
+        || zoneIsStairLike(findCachedZone(layoutCache, connection->toZoneId));
+}
+
 void clearRoute(EvacuationRoute& route, const Point2D& position) {
     route.waypoints.clear();
     route.waypointPassages.clear();
@@ -248,11 +268,17 @@ WayfindingCandidate scoreCandidate(
     const ScenarioConnectionTraversal& traversal,
     double elapsedSeconds) {
     const auto& connection = layoutCache.layout.connections[traversal.connectionIndex];
+    const auto* currentZone = findCachedZone(layoutCache, currentZoneId);
     const auto* nextZone = findCachedZone(layoutCache, traversal.nextZoneId);
     const auto midpointPoint = midpoint(connection.centerSpan);
     const auto connectionFloorId = connection.floorId.empty()
         ? cachedFloorIdForZone(layoutCache, currentZoneId)
         : connection.floorId;
+    const bool currentZoneIsStairLike = zoneIsStairLike(currentZone);
+    const bool nextZoneIsStairLike = zoneIsStairLike(nextZone);
+    const bool candidateIsVertical = isVerticalConnection(connection);
+    const bool candidateIsStairLike = connectionIsVerticalOrStair(layoutCache.layout, connection);
+    const bool targetZoneVisited = containsString(state.visitedZoneIds, traversal.nextZoneId);
 
     WayfindingCandidate candidate{
         .connectionIndex = traversal.connectionIndex,
@@ -266,9 +292,16 @@ WayfindingCandidate scoreCandidate(
         candidate.score += 100.0;
         candidate.intent = WayfindingIntent::MovingToVisibleExit;
     }
-    if (connectionIsVerticalOrStair(layoutCache.layout, connection)
-        && connectionVisibleFrom(layoutCache, position, agent, currentZoneId, connection)) {
-        candidate.score += 70.0;
+    if (candidateIsVertical && currentZoneIsStairLike) {
+        if (!targetZoneVisited) {
+            candidate.score += 90.0;
+        }
+    } else if (candidateIsStairLike) {
+        if (!targetZoneVisited && nextZoneIsStairLike) {
+            candidate.score += 75.0;
+        } else if (connectionVisibleFrom(layoutCache, position, agent, currentZoneId, connection)) {
+            candidate.score += 70.0;
+        }
     }
     if (zoneLooksLikeDeadEnd(layoutCache, currentZoneId, traversal.nextZoneId)) {
         candidate.score -= 18.0;
@@ -279,7 +312,7 @@ WayfindingCandidate scoreCandidate(
         candidate.score -= 120.0;
     }
 
-    candidate.score += containsString(state.visitedZoneIds, traversal.nextZoneId) ? -6.0 : 5.0;
+    candidate.score += targetZoneVisited ? -6.0 : 5.0;
     if (state.currentTargetZoneId == traversal.nextZoneId) {
         candidate.score -= 2.0;
     }
@@ -402,12 +435,24 @@ ScenarioRoutePlan routePlanToConnection(
         plan.waypointPassages.push_back(finalWaypoint ? passage : pointPassage(segment[waypointIndex]));
         plan.waypointFromZoneIds.push_back(finalWaypoint ? startZoneId : std::string{});
         plan.waypointZoneIds.push_back(finalWaypoint ? candidate.nextZoneId : std::string{});
-        plan.waypointFloorIds.push_back(finalWaypoint && !targetFloorId.empty() ? targetFloorId : startFloorId);
+        plan.waypointFloorIds.push_back(finalWaypoint && !targetFloorId.empty() ? targetFloorId : std::string{});
         plan.waypointConnectionIds.push_back(finalWaypoint ? connection.id : std::string{});
         plan.waypointVerticalTransitions.push_back(finalWaypoint && isVerticalConnection(connection));
     }
 
-    if (!plan.waypoints.empty() && distanceBetween(start, plan.waypoints.front()) <= kArrivalEpsilon) {
+    const bool firstWaypointCarriesConnection = !plan.waypointConnectionIds.empty()
+        && !plan.waypointConnectionIds.front().empty();
+    const bool firstWaypointCarriesZoneTransition = !plan.waypointFromZoneIds.empty()
+        && !plan.waypointFromZoneIds.front().empty()
+        && !plan.waypointZoneIds.empty()
+        && !plan.waypointZoneIds.front().empty();
+    const bool firstWaypointCarriesVerticalTransition = !plan.waypointVerticalTransitions.empty()
+        && plan.waypointVerticalTransitions.front();
+    if (!plan.waypoints.empty()
+        && distanceBetween(start, plan.waypoints.front()) <= kArrivalEpsilon
+        && !firstWaypointCarriesConnection
+        && !firstWaypointCarriesZoneTransition
+        && !firstWaypointCarriesVerticalTransition) {
         plan.waypoints.erase(plan.waypoints.begin());
         plan.waypointPassages.erase(plan.waypointPassages.begin());
         plan.waypointFromZoneIds.erase(plan.waypointFromZoneIds.begin());
@@ -503,13 +548,17 @@ public:
             const bool hasActiveRoute = route.nextWaypointIndex < route.waypoints.size();
             const bool targetBlocked = hasActiveRoute && routeTargetBlocked(layoutCache, route, currentZoneId);
             const bool targetStalled = hasActiveRoute && routeTargetStalled(route);
-            if (hasActiveRoute && !targetBlocked && !targetStalled) {
+            const auto* targetConnection = hasActiveRoute ? routeTargetConnection(layoutCache, route) : nullptr;
+            const bool targetIsVerticalTransition = targetConnection != nullptr && isVerticalConnection(*targetConnection);
+            const bool targetTouchesStairZone = routeTargetTouchesStairZone(layoutCache, targetConnection);
+            if (hasActiveRoute && !targetBlocked && (!targetStalled || targetIsVerticalTransition)) {
                 continue;
             }
             if (hasActiveRoute) {
                 if (targetStalled
                     && route.nextWaypointIndex < route.waypointConnectionIds.size()
-                    && !route.waypointConnectionIds[route.nextWaypointIndex].empty()) {
+                    && !route.waypointConnectionIds[route.nextWaypointIndex].empty()
+                    && !targetTouchesStairZone) {
                     state.avoidedConnectionId = route.waypointConnectionIds[route.nextWaypointIndex];
                     state.avoidConnectionUntilSeconds = clock.elapsedSeconds + kStalledConnectionAvoidSeconds;
                 }

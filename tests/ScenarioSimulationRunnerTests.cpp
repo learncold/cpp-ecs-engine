@@ -1868,6 +1868,142 @@ SC_TEST(ScenarioSimulationRunnerMovesFollowingAgentsThroughDescendingUShapedStai
     SC_EXPECT_EQ(stalledAgents, std::size_t{0});
 }
 
+SC_TEST(ScenarioSimulationRunnerLocalWayfindingMovesDemoStairEntrantsToLowerFloor) {
+    using Ids = safecrowd::domain::DemoLayouts::TwoFloorEvacuationIds;
+
+    safecrowd::domain::InitialPlacement2D placement;
+    placement.id = "local-west-stair-entrants";
+    placement.floorId = Ids::UpperFloorId;
+    placement.zoneId = Ids::UpperWestStairZoneId;
+    placement.explicitPositions = {
+        {.x = 4.2, .y = 9.25},
+        {.x = 4.6, .y = 9.25},
+        {.x = 4.2, .y = 9.65},
+        {.x = 4.6, .y = 9.65},
+    };
+
+    safecrowd::domain::ScenarioDraft scenario;
+    scenario.population.initialPlacements.push_back(placement);
+    scenario.execution.timeLimitSeconds = 16.0;
+    scenario.execution.wayfindingMode = safecrowd::domain::ScenarioWayfindingMode::LocalWayfinding;
+
+    const auto layout = safecrowd::domain::DemoLayouts::twoFloorEvacuationFacility();
+    safecrowd::domain::ScenarioSimulationRunner runner(layout, scenario);
+    bool observedLowerFloor = false;
+    for (int i = 0; i < 160 && !runner.complete(); ++i) {
+        runner.step(0.1);
+        for (const auto& agent : runner.frame().agents) {
+            observedLowerFloor = observedLowerFloor || agent.floorId == Ids::LowerFloorId;
+        }
+    }
+
+    std::size_t agentsStillOnUpperStair = 0;
+    std::size_t stalledAgentsOnLowerStair = 0;
+    for (const auto& agent : runner.frame().agents) {
+        if (agent.floorId == Ids::UpperFloorId
+            && agent.position.x >= 3.0
+            && agent.position.x <= 5.0
+            && agent.position.y >= 9.0
+            && agent.position.y <= 13.0) {
+            ++agentsStillOnUpperStair;
+        }
+        if (agent.floorId == Ids::LowerFloorId
+            && agent.position.x >= 1.0
+            && agent.position.x <= 3.0
+            && agent.position.y >= 9.0
+            && agent.position.y <= 13.0
+            && agent.stalled) {
+            ++stalledAgentsOnLowerStair;
+        }
+    }
+
+    SC_EXPECT_TRUE(observedLowerFloor || runner.frame().agents.empty());
+    SC_EXPECT_EQ(agentsStillOnUpperStair, std::size_t{0});
+    SC_EXPECT_EQ(stalledAgentsOnLowerStair, std::size_t{0});
+}
+
+SC_TEST(ScenarioSimulationRunnerLocalWayfindingMovesDemoCorridorAgentsTowardStair) {
+    using Ids = safecrowd::domain::DemoLayouts::TwoFloorEvacuationIds;
+
+    safecrowd::domain::InitialPlacement2D placement;
+    placement.id = "local-west-corridor-entrants";
+    placement.floorId = Ids::UpperFloorId;
+    placement.zoneId = Ids::UpperCorridorZoneId;
+    placement.explicitPositions = {
+        {.x = 2.0, .y = 8.45},
+        {.x = 2.4, .y = 8.45},
+        {.x = 3.0, .y = 8.45},
+        {.x = 3.4, .y = 8.45},
+    };
+
+    safecrowd::domain::ScenarioDraft scenario;
+    scenario.population.initialPlacements.push_back(placement);
+    scenario.execution.timeLimitSeconds = 24.0;
+    scenario.execution.wayfindingMode = safecrowd::domain::ScenarioWayfindingMode::LocalWayfinding;
+
+    const auto layout = safecrowd::domain::DemoLayouts::twoFloorEvacuationFacility();
+    safecrowd::domain::ScenarioSimulationRunner runner(layout, scenario);
+    bool observedLowerFloor = false;
+    for (int i = 0; i < 240 && !runner.complete(); ++i) {
+        runner.step(0.1);
+        for (const auto& agent : runner.frame().agents) {
+            observedLowerFloor = observedLowerFloor || agent.floorId == Ids::LowerFloorId;
+        }
+    }
+
+    std::size_t stalledAgentsInUpperCorridor = 0;
+    for (const auto& agent : runner.frame().agents) {
+        if (agent.floorId == Ids::UpperFloorId
+            && agent.position.x >= 1.0
+            && agent.position.x <= 27.0
+            && agent.position.y >= 6.0
+            && agent.position.y <= 9.0
+            && agent.stalled) {
+            ++stalledAgentsInUpperCorridor;
+        }
+    }
+
+    SC_EXPECT_TRUE(observedLowerFloor || runner.frame().agents.empty());
+    SC_EXPECT_EQ(stalledAgentsInUpperCorridor, std::size_t{0});
+}
+
+SC_TEST(ScenarioSimulationRunnerLocalWayfindingCrossesNearbyUShapedStairPortal) {
+    safecrowd::domain::InitialPlacement2D placement;
+    placement.id = "local-u-stair-near-portal";
+    placement.floorId = "L2";
+    placement.zoneId = "stair-l2";
+    placement.explicitPositions = {
+        {.x = 3.1, .y = 2.02},
+        {.x = 3.5, .y = 2.02},
+    };
+
+    safecrowd::domain::ScenarioDraft scenario;
+    scenario.population.initialPlacements.push_back(placement);
+    scenario.execution.timeLimitSeconds = 8.0;
+    scenario.execution.wayfindingMode = safecrowd::domain::ScenarioWayfindingMode::LocalWayfinding;
+
+    const auto layout = descendingWestEntryUShapedStairTransitionLayout();
+    safecrowd::domain::ScenarioSimulationRunner runner(layout, scenario);
+    bool observedLowerFloor = false;
+    for (int i = 0; i < 80 && !runner.complete(); ++i) {
+        runner.step(0.1);
+        for (const auto& agent : runner.frame().agents) {
+            observedLowerFloor = observedLowerFloor || agent.floorId == "L1";
+        }
+    }
+
+    std::size_t stalledAgents = 0;
+    for (const auto& agent : runner.frame().agents) {
+        if (agent.stalled) {
+            ++stalledAgents;
+        }
+        SC_EXPECT_TRUE(agentInsideAnyZoneOnFrameFloor(layout, agent));
+    }
+
+    SC_EXPECT_TRUE(observedLowerFloor || runner.frame().agents.empty());
+    SC_EXPECT_EQ(stalledAgents, std::size_t{0});
+}
+
 SC_TEST(ScenarioSimulationRunnerLimitsUShapedStairOverlapWhileQueuing) {
     safecrowd::domain::InitialPlacement2D placement;
     placement.id = "descending-queue";

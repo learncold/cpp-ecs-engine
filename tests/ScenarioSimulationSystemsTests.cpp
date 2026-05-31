@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "domain/AgentComponents.h"
+#include "domain/DemoLayouts.h"
 #include "domain/GeometryQueries.h"
 #include "domain/ScenarioSimulationInternal.h"
 #include "domain/ScenarioSimulationSystems.h"
@@ -828,6 +829,26 @@ safecrowd::domain::ScenarioAgentSeed localWayfindingSeed(
     };
 }
 
+safecrowd::domain::ScenarioAgentSeed localWayfindingVerticalStairSeed(
+    safecrowd::domain::Point2D start) {
+    auto seed = localWayfindingSeed(start, "upper-stair", "L2");
+    seed.route.waypoints = {{.x = 1.0, .y = 1.0}};
+    seed.route.waypointPassages = {{{.x = 0.6, .y = 1.0}, {.x = 1.4, .y = 1.0}}};
+    seed.route.waypointFromZoneIds = {"upper-stair"};
+    seed.route.waypointZoneIds = {"lower-stair"};
+    seed.route.waypointFloorIds = {"L1"};
+    seed.route.waypointConnectionIds = {"vertical-stair"};
+    seed.route.waypointVerticalTransitions = {true};
+    seed.route.nextWaypointIndex = 0;
+    seed.route.currentSegmentStart = {.x = 1.0, .y = 1.8};
+    seed.route.previousDistanceToWaypoint =
+        safecrowd::domain::simulation_internal::distanceBetween(start, seed.route.waypoints.front());
+    seed.route.destinationZoneId = "lower-stair";
+    seed.wayfinding.currentTargetConnectionId = "vertical-stair";
+    seed.wayfinding.currentTargetZoneId = "lower-stair";
+    return seed;
+}
+
 safecrowd::domain::ScenarioAgentSeed doorRouteSeed(
     safecrowd::domain::Point2D start,
     std::string destinationZoneId,
@@ -1472,6 +1493,326 @@ SC_TEST(ScenarioWayfindingSystem_ReconsidersStalledDoorwayTarget) {
     SC_EXPECT_TRUE(!route.waypointConnectionIds.empty());
     SC_EXPECT_EQ(route.waypointConnectionIds.front(), std::string{"room-stair"});
     SC_EXPECT_EQ(state.avoidedConnectionId, std::string{"room-dead-end-door"});
+}
+
+SC_TEST(ScenarioWayfindingSystem_KeepsStalledStairTargetCommitted) {
+    auto seed = localWayfindingVerticalStairSeed({.x = 1.0, .y = 1.01});
+    seed.route.stalledSeconds = 1.0;
+
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    seeds.push_back(seed);
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 46,
+    });
+    const auto layout = verticalPortalTransitionLayout();
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioWayfindingSystem(layout, {}),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .order = -5,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    stepScenarioRuntime(runtime, 0.0);
+
+    const auto entities = runtime.world().query().view<
+        safecrowd::domain::Position,
+        safecrowd::domain::Agent,
+        safecrowd::domain::Velocity,
+        safecrowd::domain::AvoidanceState,
+        safecrowd::domain::EvacuationRoute,
+        safecrowd::domain::WayfindingState,
+        safecrowd::domain::EvacuationStatus>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{1});
+    const auto& route = runtime.world().query().get<safecrowd::domain::EvacuationRoute>(entities.front());
+    const auto& state = runtime.world().query().get<safecrowd::domain::WayfindingState>(entities.front());
+    SC_EXPECT_EQ(route.destinationZoneId, std::string{"lower-stair"});
+    SC_EXPECT_TRUE(!route.waypointConnectionIds.empty());
+    SC_EXPECT_EQ(route.waypointConnectionIds.front(), std::string{"vertical-stair"});
+    SC_EXPECT_EQ(route.nextWaypointIndex, std::size_t{0});
+    SC_EXPECT_TRUE(state.avoidedConnectionId.empty());
+    SC_EXPECT_EQ(state.currentTargetConnectionId, std::string{"vertical-stair"});
+}
+
+SC_TEST(ScenarioWayfindingSystem_ReplansStalledStairAdjacentOpeningTarget) {
+    auto seed = localWayfindingSeed({.x = 4.2, .y = 3.0}, "lower-stair", "L1");
+    seed.route.waypoints = {{.x = 4.0, .y = 3.0}};
+    seed.route.waypointPassages = {{{.x = 4.0, .y = 2.4}, {.x = 4.0, .y = 3.6}}};
+    seed.route.waypointFromZoneIds = {"lower-stair"};
+    seed.route.waypointZoneIds = {"ground-room"};
+    seed.route.waypointFloorIds = {"L1"};
+    seed.route.waypointConnectionIds = {"lower-stair-ground-room"};
+    seed.route.waypointVerticalTransitions = {false};
+    seed.route.nextWaypointIndex = 0;
+    seed.route.currentSegmentStart = {.x = 4.2, .y = 3.0};
+    seed.route.previousDistanceToWaypoint = 0.2;
+    seed.route.stalledSeconds = 1.0;
+    seed.route.destinationZoneId = "ground-room";
+    seed.wayfinding.visitedZoneIds = {"upper-stair", "lower-stair"};
+    seed.wayfinding.currentTargetConnectionId = "lower-stair-ground-room";
+    seed.wayfinding.currentTargetZoneId = "ground-room";
+
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    seeds.push_back(seed);
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 47,
+    });
+    const auto layout = stairWayfindingLayout();
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioWayfindingSystem(layout, {}),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .order = -5,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    stepScenarioRuntime(runtime, 0.0);
+
+    const auto entities = runtime.world().query().view<
+        safecrowd::domain::Position,
+        safecrowd::domain::Agent,
+        safecrowd::domain::Velocity,
+        safecrowd::domain::AvoidanceState,
+        safecrowd::domain::EvacuationRoute,
+        safecrowd::domain::WayfindingState,
+        safecrowd::domain::EvacuationStatus>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{1});
+    const auto& route = runtime.world().query().get<safecrowd::domain::EvacuationRoute>(entities.front());
+    const auto& state = runtime.world().query().get<safecrowd::domain::WayfindingState>(entities.front());
+    SC_EXPECT_EQ(route.destinationZoneId, std::string{"ground-room"});
+    SC_EXPECT_TRUE(!route.waypointConnectionIds.empty());
+    SC_EXPECT_EQ(route.waypointConnectionIds.front(), std::string{"lower-stair-ground-room"});
+    SC_EXPECT_NEAR(route.stalledSeconds, 0.0, 1e-9);
+    SC_EXPECT_TRUE(state.avoidedConnectionId.empty());
+}
+
+SC_TEST(ScenarioSimulationMotionSystem_LocalWayfindingLandsInsideVerticalTargetZone) {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    seeds.push_back(localWayfindingVerticalStairSeed({.x = 1.0, .y = 1.0}));
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 47,
+    });
+    const auto layout = verticalPortalTransitionLayout();
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    addLocalWayfindingMotionSystems(runtime, layout);
+
+    runtime.play();
+    stepScenarioRuntime(runtime, 0.001);
+
+    const auto entities = runtime.world().query().view<
+        safecrowd::domain::Position,
+        safecrowd::domain::Agent,
+        safecrowd::domain::Velocity,
+        safecrowd::domain::AvoidanceState,
+        safecrowd::domain::EvacuationRoute,
+        safecrowd::domain::WayfindingState,
+        safecrowd::domain::EvacuationStatus>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{1});
+    const auto& position = runtime.world().query().get<safecrowd::domain::Position>(entities.front());
+    const auto& route = runtime.world().query().get<safecrowd::domain::EvacuationRoute>(entities.front());
+    SC_EXPECT_EQ(route.currentFloorId, std::string{"L1"});
+    SC_EXPECT_EQ(route.nextWaypointIndex, std::size_t{1});
+    SC_EXPECT_NEAR(position.value.x, 1.0, 0.002);
+    SC_EXPECT_TRUE(position.value.y < 0.85);
+    SC_EXPECT_TRUE(position.value.y > 0.1);
+}
+
+SC_TEST(ScenarioWayfindingSystem_SelectsDemoStairVerticalTransitionFromStairEntry) {
+    using Ids = safecrowd::domain::DemoLayouts::TwoFloorEvacuationIds;
+
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    seeds.push_back(localWayfindingSeed(
+        {.x = 4.0, .y = 9.2},
+        Ids::UpperWestStairZoneId,
+        Ids::UpperFloorId));
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 48,
+    });
+    const auto layout = safecrowd::domain::DemoLayouts::twoFloorEvacuationFacility();
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioWayfindingSystem(layout, {}),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .order = -5,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    stepScenarioRuntime(runtime, 0.0);
+
+    const auto entities = runtime.world().query().view<
+        safecrowd::domain::Position,
+        safecrowd::domain::Agent,
+        safecrowd::domain::Velocity,
+        safecrowd::domain::AvoidanceState,
+        safecrowd::domain::EvacuationRoute,
+        safecrowd::domain::WayfindingState,
+        safecrowd::domain::EvacuationStatus>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{1});
+    const auto& route = runtime.world().query().get<safecrowd::domain::EvacuationRoute>(entities.front());
+    const auto& state = runtime.world().query().get<safecrowd::domain::WayfindingState>(entities.front());
+    SC_EXPECT_EQ(route.destinationZoneId, std::string{Ids::LowerWestStairZoneId});
+    SC_EXPECT_TRUE(!route.waypointConnectionIds.empty());
+    SC_EXPECT_EQ(route.waypointConnectionIds.front(), std::string{Ids::WestStairVerticalConnectionId});
+    SC_EXPECT_EQ(state.currentTargetConnectionId, std::string{Ids::WestStairVerticalConnectionId});
+}
+
+SC_TEST(ScenarioWayfindingSystem_KeepsNearConnectionWaypointForStairEntryCrossing) {
+    using Ids = safecrowd::domain::DemoLayouts::TwoFloorEvacuationIds;
+
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    seeds.push_back(localWayfindingSeed(
+        {.x = 4.0, .y = 8.99},
+        Ids::UpperCorridorZoneId,
+        Ids::UpperFloorId));
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 50,
+    });
+    const auto layout = safecrowd::domain::DemoLayouts::twoFloorEvacuationFacility();
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioWayfindingSystem(layout, {}),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .order = -5,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    stepScenarioRuntime(runtime, 0.0);
+
+    const auto entities = runtime.world().query().view<
+        safecrowd::domain::Position,
+        safecrowd::domain::Agent,
+        safecrowd::domain::Velocity,
+        safecrowd::domain::AvoidanceState,
+        safecrowd::domain::EvacuationRoute,
+        safecrowd::domain::WayfindingState,
+        safecrowd::domain::EvacuationStatus>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{1});
+    const auto& route = runtime.world().query().get<safecrowd::domain::EvacuationRoute>(entities.front());
+    SC_EXPECT_EQ(route.destinationZoneId, std::string{Ids::UpperWestStairZoneId});
+    SC_EXPECT_TRUE(!route.waypoints.empty());
+    SC_EXPECT_TRUE(!route.waypointConnectionIds.empty());
+    SC_EXPECT_EQ(route.waypointConnectionIds.front(), std::string{Ids::UpperCorridorWestStairConnectionId});
+}
+
+SC_TEST(ScenarioWayfindingSystem_DoesNotBacktrackToVisitedDemoStairLanding) {
+    using Ids = safecrowd::domain::DemoLayouts::TwoFloorEvacuationIds;
+
+    auto seed = localWayfindingSeed(
+        {.x = 2.0, .y = 10.2},
+        Ids::LowerWestStairZoneId,
+        Ids::LowerFloorId);
+    seed.wayfinding.visitedZoneIds = {Ids::UpperWestStairZoneId, Ids::LowerWestStairZoneId};
+
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    seeds.push_back(seed);
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 49,
+    });
+    const auto layout = safecrowd::domain::DemoLayouts::twoFloorEvacuationFacility();
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioWayfindingSystem(layout, {}),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .order = -5,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    stepScenarioRuntime(runtime, 0.0);
+
+    const auto entities = runtime.world().query().view<
+        safecrowd::domain::Position,
+        safecrowd::domain::Agent,
+        safecrowd::domain::Velocity,
+        safecrowd::domain::AvoidanceState,
+        safecrowd::domain::EvacuationRoute,
+        safecrowd::domain::WayfindingState,
+        safecrowd::domain::EvacuationStatus>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{1});
+    const auto& route = runtime.world().query().get<safecrowd::domain::EvacuationRoute>(entities.front());
+    const auto& state = runtime.world().query().get<safecrowd::domain::WayfindingState>(entities.front());
+    SC_EXPECT_EQ(route.destinationZoneId, std::string{Ids::LowerWestVestibuleZoneId});
+    SC_EXPECT_TRUE(!route.waypointConnectionIds.empty());
+    SC_EXPECT_EQ(route.waypointConnectionIds.front(), std::string{Ids::LowerWestStairVestibuleConnectionId});
+    SC_EXPECT_EQ(state.currentTargetConnectionId, std::string{Ids::LowerWestStairVestibuleConnectionId});
+}
+
+SC_TEST(ScenarioWayfindingSystem_KeepsNearConnectionWaypointAfterStairLanding) {
+    using Ids = safecrowd::domain::DemoLayouts::TwoFloorEvacuationIds;
+
+    auto seed = localWayfindingSeed(
+        {.x = 2.0, .y = 9.01},
+        Ids::LowerWestStairZoneId,
+        Ids::LowerFloorId);
+    seed.wayfinding.visitedZoneIds = {Ids::UpperWestStairZoneId, Ids::LowerWestStairZoneId};
+
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    seeds.push_back(seed);
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 51,
+    });
+    const auto layout = safecrowd::domain::DemoLayouts::twoFloorEvacuationFacility();
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioWayfindingSystem(layout, {}),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .order = -5,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    stepScenarioRuntime(runtime, 0.0);
+
+    const auto entities = runtime.world().query().view<
+        safecrowd::domain::Position,
+        safecrowd::domain::Agent,
+        safecrowd::domain::Velocity,
+        safecrowd::domain::AvoidanceState,
+        safecrowd::domain::EvacuationRoute,
+        safecrowd::domain::WayfindingState,
+        safecrowd::domain::EvacuationStatus>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{1});
+    const auto& route = runtime.world().query().get<safecrowd::domain::EvacuationRoute>(entities.front());
+    SC_EXPECT_EQ(route.destinationZoneId, std::string{Ids::LowerWestVestibuleZoneId});
+    SC_EXPECT_TRUE(!route.waypoints.empty());
+    SC_EXPECT_TRUE(!route.waypointConnectionIds.empty());
+    SC_EXPECT_EQ(route.waypointConnectionIds.front(), std::string{Ids::LowerWestStairVestibuleConnectionId});
+}
+
+SC_TEST(ScenarioWayfindingSystem_RecognizesAgentsOnDemoZoneBoundaries) {
+    using Ids = safecrowd::domain::DemoLayouts::TwoFloorEvacuationIds;
+
+    const auto cache = safecrowd::domain::simulation_internal::buildScenarioLayoutCache(
+        safecrowd::domain::DemoLayouts::twoFloorEvacuationFacility());
+
+    SC_EXPECT_EQ(
+        safecrowd::domain::simulation_internal::zoneAt(cache, {.x = 3.0, .y = 12.0}, Ids::LowerFloorId),
+        std::string{Ids::LowerWestStairZoneId});
+    SC_EXPECT_EQ(
+        safecrowd::domain::simulation_internal::zoneAt(cache, {.x = 4.0, .y = 8.99}, Ids::UpperFloorId),
+        std::string{Ids::UpperCorridorZoneId});
+    const auto upperBoundaryZone =
+        safecrowd::domain::simulation_internal::zoneAt(cache, {.x = 4.0, .y = 9.0}, Ids::UpperFloorId);
+    SC_EXPECT_TRUE(upperBoundaryZone == Ids::UpperCorridorZoneId || upperBoundaryZone == Ids::UpperWestStairZoneId);
 }
 
 SC_TEST(ScenarioWayfindingSystem_RechoosesWhenSignedConnectionIsBlocked) {

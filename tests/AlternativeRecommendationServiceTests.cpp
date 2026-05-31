@@ -87,6 +87,17 @@ FacilityLayout2D makeSingleExitRecommendationLayout() {
     return layout;
 }
 
+FacilityLayout2D makeUnreachableExitRecommendationLayout() {
+    FacilityLayout2D layout = makeSingleExitRecommendationLayout();
+    layout.zones.push_back({
+        .id = "exit-east",
+        .floorId = "L1",
+        .kind = ZoneKind::Exit,
+        .label = "East Exit",
+    });
+    return layout;
+}
+
 ScenarioDraft makeScenario() {
     ScenarioDraft scenario;
     scenario.scenarioId = "scenario-1";
@@ -307,6 +318,33 @@ SC_TEST(AlternativeRecommendationService_skipsBlockedConnectionWithoutBottleneck
     SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::BlockedConnectionRelief));
 }
 
+SC_TEST(AlternativeRecommendationService_skipsInactiveBlockedConnectionRelief) {
+    auto scenario = makeScenario();
+    scenario.control.connectionBlocks.push_back({
+        .id = "block-main",
+        .connectionId = "door-main",
+        .intervals = {{.startSeconds = 0.0, .endSeconds = 5.0}},
+    });
+
+    ScenarioRiskSnapshot risk;
+    risk.bottlenecks.push_back({
+        .connectionId = "door-main",
+        .nearbyAgentCount = 8,
+        .stalledAgentCount = 5,
+        .detectedAtSeconds = 20.0,
+    });
+
+    const AlternativeRecommendationService service;
+    const auto result = service.recommend({
+        .layout = makeRecommendationLayout(),
+        .sourceScenario = scenario,
+        .risk = risk,
+        .artifacts = makeCompletedArtifacts(),
+    });
+
+    SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::BlockedConnectionRelief));
+}
+
 SC_TEST(AlternativeRecommendationService_reopensWorstBlockedBottleneck) {
     auto scenario = makeScenario();
     scenario.control.connectionBlocks.push_back({
@@ -363,7 +401,8 @@ SC_TEST(AlternativeRecommendationService_addsRouteGuidanceForExitImbalance) {
     SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.size(), std::size_t{1});
     SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.front().guidedExitZoneId, std::string{"exit-east"});
     SC_EXPECT_TRUE(it->recommendedScenario.control.routeGuidances.front().installConnectionId.empty());
-    SC_EXPECT_NEAR(it->recommendedScenario.control.routeGuidances.front().baseComplianceRate, 0.5, 1e-9);
+    SC_EXPECT_TRUE(it->recommendedScenario.control.routeGuidances.front().baseComplianceRate > 0.5);
+    SC_EXPECT_TRUE(it->recommendedScenario.control.routeGuidances.front().baseComplianceRate <= 0.85);
     SC_EXPECT_NEAR(it->recommendedScenario.control.routeGuidances.front().influenceRadiusMeters, 2.5, 1e-9);
     SC_EXPECT_NEAR(it->recommendedScenario.control.routeGuidances.front().maxDetourMeters, 20.0, 1e-9);
     SC_EXPECT_TRUE(containsDiffKey(it->recommendedScenario, "control.routeGuidances"));
@@ -394,6 +433,37 @@ SC_TEST(AlternativeRecommendationService_skipsExitBalancingBelowThreshold) {
         .layout = makeRecommendationLayout(),
         .sourceScenario = makeScenario(),
         .artifacts = makeExitUsageArtifacts(0.60, 0.40),
+    });
+
+    SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::ExitUsageBalancing));
+}
+
+SC_TEST(AlternativeRecommendationService_skipsExitBalancingForExistingGuidanceToTargetExit) {
+    auto scenario = makeScenario();
+    scenario.control.routeGuidances.push_back({
+        .id = "manual-guidance-east",
+        .guidedExitZoneId = "exit-east",
+        .installConnectionId = "door-east",
+    });
+
+    const AlternativeRecommendationService service;
+    const auto result = service.recommend({
+        .layout = makeRecommendationLayout(),
+        .sourceScenario = scenario,
+        .artifacts = makeExitUsageArtifacts(),
+    });
+
+    SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::ExitUsageBalancing));
+}
+
+SC_TEST(AlternativeRecommendationService_skipsUnreachableUnusedExitBalancing) {
+    const auto artifacts = makeSingleExitUsageArtifacts("exit-main", "Main Exit", 20, 1.0);
+
+    const AlternativeRecommendationService service;
+    const auto result = service.recommend({
+        .layout = makeUnreachableExitRecommendationLayout(),
+        .sourceScenario = makeScenario(),
+        .artifacts = artifacts,
     });
 
     SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::ExitUsageBalancing));
@@ -716,6 +786,74 @@ SC_TEST(AlternativeRecommendationService_usesCrossFlowMetrics) {
     SC_EXPECT_TRUE(containsEvidenceSource(*it, "ScenarioResultArtifacts.crossFlowSummary"));
     SC_EXPECT_EQ(it->recommendedScenario.control.events.size(), std::size_t{1});
     SC_EXPECT_TRUE(containsDiffKey(it->recommendedScenario, "control.events"));
+}
+
+SC_TEST(AlternativeRecommendationService_convertsCrossFlowToRouteGuidanceWhenExitDataAllows) {
+    auto artifacts = makeCrossFlowArtifacts();
+    artifacts.exitUsage = makeExitUsageArtifacts(0.55, 0.45).exitUsage;
+
+    const AlternativeRecommendationService service;
+    const auto result = service.recommend({
+        .layout = makeRecommendationLayout(),
+        .sourceScenario = makeScenario(),
+        .risk = makeCrossFlowRisk(),
+        .artifacts = artifacts,
+    });
+
+    const auto it = std::find_if(result.candidates.begin(), result.candidates.end(), [](const auto& candidate) {
+        return candidate.kind == AlternativeRecommendationKind::CrossFlowSeparation;
+    });
+    SC_EXPECT_TRUE(it != result.candidates.end());
+    SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.size(), std::size_t{1});
+    SC_EXPECT_TRUE(it->recommendedScenario.control.events.empty());
+    SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.front().guidedExitZoneId, std::string{"exit-east"});
+    SC_EXPECT_TRUE(containsDiffKey(it->recommendedScenario, "control.routeGuidances"));
+}
+
+SC_TEST(AlternativeRecommendationService_convertsCrossFlowToStagedReleaseWhenNoExitUsageExists) {
+    auto scenario = makeScenario();
+    auto second = scenario.population.initialPlacements.front();
+    second.id = "group-b";
+    second.targetAgentCount = 15;
+    scenario.population.initialPlacements.push_back(second);
+
+    const AlternativeRecommendationService service;
+    const auto result = service.recommend({
+        .layout = makeRecommendationLayout(),
+        .sourceScenario = scenario,
+        .risk = makeCrossFlowRisk(),
+        .artifacts = makeCrossFlowArtifacts(),
+    });
+
+    const auto it = std::find_if(result.candidates.begin(), result.candidates.end(), [](const auto& candidate) {
+        return candidate.kind == AlternativeRecommendationKind::CrossFlowSeparation;
+    });
+    SC_EXPECT_TRUE(it != result.candidates.end());
+    SC_EXPECT_TRUE(it->recommendedScenario.control.events.empty());
+    SC_EXPECT_TRUE(it->recommendedScenario.population.initialPlacements.empty());
+    SC_EXPECT_EQ(it->recommendedScenario.population.occupantSources.size(), std::size_t{2});
+    SC_EXPECT_TRUE(containsDiffKey(it->recommendedScenario, "population.placements"));
+}
+
+SC_TEST(AlternativeRecommendationService_ranksSimulationChangingCandidateBeforeManualCrossFlowEvent) {
+    auto artifacts = makeCrossFlowArtifacts();
+    artifacts.exitUsage = makeExitUsageArtifacts(0.90, 0.10).exitUsage;
+
+    const AlternativeRecommendationService service;
+    const auto result = service.recommend({
+        .layout = makeRecommendationLayout(),
+        .sourceScenario = makeScenario(),
+        .risk = makeCrossFlowRisk(),
+        .artifacts = artifacts,
+    });
+
+    SC_EXPECT_TRUE(result.candidates.size() >= 2);
+    SC_EXPECT_TRUE(result.candidates.front().kind == AlternativeRecommendationKind::ExitUsageBalancing);
+    const auto it = std::find_if(result.candidates.begin(), result.candidates.end(), [](const auto& candidate) {
+        return candidate.kind == AlternativeRecommendationKind::CrossFlowSeparation;
+    });
+    SC_EXPECT_TRUE(it != result.candidates.end());
+    SC_EXPECT_EQ(it->recommendedScenario.control.events.size(), std::size_t{1});
 }
 
 SC_TEST(AlternativeRecommendationService_addsStagedEvacuationForMissedTimeLimit) {
