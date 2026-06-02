@@ -265,6 +265,10 @@ QString compareScenarioLabel(const SavedScenarioResultState& result) {
     return QString("%1\n%2").arg(name, meta);
 }
 
+QString exitUsageLabel(const safecrowd::domain::ExitUsageMetric& exit) {
+    return QString::fromStdString(exit.exitLabel.empty() ? exit.exitZoneId : exit.exitLabel);
+}
+
 std::vector<std::pair<double, double>> progressSeries(const SavedScenarioResultState& result) {
     std::vector<std::pair<double, double>> series;
     if (!result.artifacts.evacuationProgress.empty()) {
@@ -354,6 +358,10 @@ public:
         timingMarkerActivatedHandler_ = std::move(handler);
     }
 
+    void setExitUsageActivatedHandler(std::function<void(int, std::optional<double>)> handler) {
+        exitUsageActivatedHandler_ = std::move(handler);
+    }
+
 protected:
     void paintEvent(QPaintEvent* event) override {
         (void)event;
@@ -388,7 +396,18 @@ protected:
         if (event == nullptr) {
             return;
         }
-        const bool hover = timingMarkerHitSeconds(event->position()).has_value();
+        const auto exitHit = exitUsagePointHit(event->position());
+        if (exitHit.has_value()) {
+            setToolTip(QString("%1\nExit: %2\nUsage: %3 (%4 people)\nLast exit: %5")
+                .arg(QString::fromStdString((*results_)[static_cast<std::size_t>(exitHit->resultIndex)].scenario.name))
+                .arg(exitHit->exitLabel)
+                .arg(formatRatioPercent(exitHit->usageRatio))
+                .arg(static_cast<int>(exitHit->evacuatedCount))
+                .arg(formatSeconds(exitHit->lastExitTimeSeconds)));
+        } else {
+            setToolTip(QString{});
+        }
+        const bool hover = timingMarkerHitSeconds(event->position()).has_value() || exitHit.has_value();
         setCursor(hover ? Qt::PointingHandCursor : Qt::ArrowCursor);
         QWidget::mouseMoveEvent(event);
     }
@@ -405,7 +424,15 @@ protected:
         }
         const auto seconds = timingMarkerHitSeconds(event->position());
         if (!seconds.has_value()) {
-            QWidget::mousePressEvent(event);
+            const auto exitHit = exitUsagePointHit(event->position());
+            if (!exitHit.has_value()) {
+                QWidget::mousePressEvent(event);
+                return;
+            }
+            event->accept();
+            if (exitUsageActivatedHandler_) {
+                exitUsageActivatedHandler_(exitHit->resultIndex, exitHit->lastExitTimeSeconds);
+            }
             return;
         }
         event->accept();
@@ -415,6 +442,15 @@ protected:
     }
 
 private:
+    struct ExitUsagePointHit {
+        int resultIndex{0};
+        QString exitLabel{};
+        std::size_t evacuatedCount{0};
+        double usageRatio{0.0};
+        std::optional<double> lastExitTimeSeconds{};
+        double distance{0.0};
+    };
+
     QColor colorForSeries(int index) const {
         static const std::vector<QColor> colors{
             QColor("#2563eb"),
@@ -557,6 +593,85 @@ private:
         return best->seconds;
     }
 
+    std::vector<QString> exitLabels() const {
+        std::vector<QString> exits;
+        if (results_ == nullptr) {
+            return exits;
+        }
+        for (const auto index : selectedIndices_) {
+            if (!validIndex(index)) {
+                continue;
+            }
+            for (const auto& exit : (*results_)[static_cast<std::size_t>(index)].artifacts.exitUsage) {
+                const auto label = exitUsageLabel(exit);
+                if (std::find(exits.begin(), exits.end(), label) == exits.end()) {
+                    exits.push_back(label);
+                }
+            }
+        }
+        return exits;
+    }
+
+    const safecrowd::domain::ExitUsageMetric* exitUsageMetricForLabel(
+        const SavedScenarioResultState& result,
+        const QString& exitLabel) const {
+        const auto it = std::find_if(result.artifacts.exitUsage.begin(), result.artifacts.exitUsage.end(), [&](const auto& exit) {
+            return exitUsageLabel(exit) == exitLabel;
+        });
+        return it == result.artifacts.exitUsage.end() ? nullptr : &(*it);
+    }
+
+    std::optional<ExitUsagePointHit> exitUsagePointHit(const QPointF& position) const {
+        if (mode_ != ComparisonGraphMode::Exits || results_ == nullptr) {
+            return std::nullopt;
+        }
+        const QRectF plot = QRectF(rect()).adjusted(40, 16, -18, -68);
+        if (!plot.adjusted(-10.0, -10.0, 10.0, 10.0).contains(position)) {
+            return std::nullopt;
+        }
+
+        const auto exits = exitLabels();
+        if (exits.empty()) {
+            return std::nullopt;
+        }
+
+        constexpr double kHitRadiusPixels = 8.0;
+        std::optional<ExitUsagePointHit> best;
+        for (const auto index : selectedIndices_) {
+            if (!validIndex(index)) {
+                continue;
+            }
+            const auto& result = (*results_)[static_cast<std::size_t>(index)];
+            for (int exitIndex = 0; exitIndex < static_cast<int>(exits.size()); ++exitIndex) {
+                const auto& exitLabel = exits[static_cast<std::size_t>(exitIndex)];
+                const auto* exit = exitUsageMetricForLabel(result, exitLabel);
+                if (exit == nullptr) {
+                    continue;
+                }
+                const auto usageRatio = std::clamp(exit->usageRatio, 0.0, 1.0);
+                const auto x = exits.size() == 1
+                    ? plot.center().x()
+                    : plot.left() + (static_cast<double>(exitIndex) / static_cast<double>(exits.size() - 1)) * plot.width();
+                const auto y = plot.bottom() - usageRatio * plot.height();
+                const auto distance = std::hypot(position.x() - x, position.y() - y);
+                if (distance > kHitRadiusPixels) {
+                    continue;
+                }
+                if (!best.has_value() || distance < best->distance) {
+                    best = ExitUsagePointHit{
+                        .resultIndex = index,
+                        .exitLabel = exitLabel,
+                        .evacuatedCount = exit->evacuatedCount,
+                        .usageRatio = usageRatio,
+                        .lastExitTimeSeconds = exit->lastExitTimeSeconds,
+                        .distance = distance,
+                    };
+                }
+            }
+        }
+        return best;
+    }
+
     void drawRemaining(QPainter& painter, const QRectF& plot) {
         const auto maxTime = remainingMaxTimeSeconds();
 
@@ -608,18 +723,7 @@ private:
     }
 
     void drawExits(QPainter& painter, const QRectF& plot) {
-        std::vector<QString> exits;
-        for (const auto index : selectedIndices_) {
-            if (!validIndex(index)) {
-                continue;
-            }
-            for (const auto& exit : (*results_)[static_cast<std::size_t>(index)].artifacts.exitUsage) {
-                const auto label = QString::fromStdString(exit.exitLabel.empty() ? exit.exitZoneId : exit.exitLabel);
-                if (std::find(exits.begin(), exits.end(), label) == exits.end()) {
-                    exits.push_back(label);
-                }
-            }
-        }
+        const auto exits = exitLabels();
         if (exits.empty()) {
             painter.setPen(QColor("#6b7785"));
             painter.setFont(ui::font(ui::FontRole::Caption));
@@ -652,12 +756,8 @@ private:
             for (int exitIndex = 0; exitIndex < static_cast<int>(exits.size()); ++exitIndex) {
                 double usageRatio = 0.0;
                 const auto& exitLabel = exits[static_cast<std::size_t>(exitIndex)];
-                for (const auto& exit : result.artifacts.exitUsage) {
-                    const auto label = QString::fromStdString(exit.exitLabel.empty() ? exit.exitZoneId : exit.exitLabel);
-                    if (label == exitLabel) {
-                        usageRatio = std::clamp(exit.usageRatio, 0.0, 1.0);
-                        break;
-                    }
+                if (const auto* exit = exitUsageMetricForLabel(result, exitLabel); exit != nullptr) {
+                    usageRatio = std::clamp(exit->usageRatio, 0.0, 1.0);
                 }
                 const auto x = exits.size() == 1
                     ? plot.center().x()
@@ -675,12 +775,8 @@ private:
             for (int exitIndex = 0; exitIndex < static_cast<int>(exits.size()); ++exitIndex) {
                 double usageRatio = 0.0;
                 const auto& exitLabel = exits[static_cast<std::size_t>(exitIndex)];
-                for (const auto& exit : result.artifacts.exitUsage) {
-                    const auto label = QString::fromStdString(exit.exitLabel.empty() ? exit.exitZoneId : exit.exitLabel);
-                    if (label == exitLabel) {
-                        usageRatio = std::clamp(exit.usageRatio, 0.0, 1.0);
-                        break;
-                    }
+                if (const auto* exit = exitUsageMetricForLabel(result, exitLabel); exit != nullptr) {
+                    usageRatio = std::clamp(exit->usageRatio, 0.0, 1.0);
                 }
                 const auto x = exits.size() == 1
                     ? plot.center().x()
@@ -772,6 +868,7 @@ private:
     int displayIndex_{0};
     double currentTimeSeconds_{-1.0};
     std::function<void(double)> timingMarkerActivatedHandler_{};
+    std::function<void(int, std::optional<double>)> exitUsageActivatedHandler_{};
 };
 
 std::vector<safecrowd::domain::SimulationFrame> replayFramesForResult(const SavedScenarioResultState& result) {
@@ -1086,6 +1183,19 @@ QWidget* ScenarioBatchResultWidget::createCanvasPanel() {
     static_cast<ComparisonGraphWidget*>(exitsChart_)->setResults(results_, selectedCompareIndices_, currentResultIndex_);
     static_cast<ComparisonGraphWidget*>(remainingChart_)->setTimingMarkerActivatedHandler([this](double seconds) {
         seekToTimingMarkerSeconds(seconds);
+    });
+    static_cast<ComparisonGraphWidget*>(exitsChart_)->setExitUsageActivatedHandler([this](
+        int resultIndex,
+        std::optional<double> lastExitTimeSeconds) {
+        if (resultIndex < 0 || resultIndex >= static_cast<int>(results_.size())) {
+            return;
+        }
+        currentResultIndex_ = resultIndex;
+        clearDetailSelection();
+        refreshSelectedResult();
+        if (lastExitTimeSeconds.has_value()) {
+            showClosestReplayFrameAtSeconds(*lastExitTimeSeconds);
+        }
     });
     tabs->addTab(remainingChart_, "Remaining");
     tabs->addTab(exitsChart_, "Exits");
@@ -1579,6 +1689,7 @@ void ScenarioBatchResultWidget::applySelectedResultStaticCanvasState() {
     const auto& result = results_[static_cast<std::size_t>(currentResultIndex_)];
     canvas_->setConnectionBlocks(result.scenario.control.connectionBlocks);
     canvas_->setEnvironmentHazards(result.scenario.environment.hazards);
+    canvas_->setRouteGuidances(result.scenario.control.routeGuidances);
     canvas_->setHotspotOverlay(result.risk.hotspots);
     canvas_->setBottleneckOverlay(result.risk.bottlenecks);
     canvas_->setCrossFlowOverlay(result.risk.crossFlowCells);
@@ -2205,6 +2316,12 @@ void ScenarioBatchResultWidget::setDetailSelection(ScenarioResultNavigationView 
     detailSelectionView_ = view;
     detailSelectionIndex_ = index;
     detailSelectionResultIndex_ = currentResultIndex_;
+    if (!detailPanelVisible_ || overviewPanelVisible_) {
+        detailPanelVisible_ = true;
+        overviewPanelVisible_ = false;
+        refreshRightPanel();
+        return;
+    }
     refreshDetailPanel();
 }
 
