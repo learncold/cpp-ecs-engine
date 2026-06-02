@@ -128,7 +128,7 @@ private:
     QWidget* remainingChart_{nullptr};
     QWidget* exitsChart_{nullptr};
     QTimer* replayTimer_{nullptr};
-    OverlayMode overlayMode_{OverlayMode::Occupancy};
+    OverlayMode overlayMode_{OverlayMode::Density};
     ScenarioResultNavigationView resultNavigationView_{ScenarioResultNavigationView::Bottleneck};
     std::optional<ScenarioResultNavigationView> detailSelectionView_{};
     std::optional<std::size_t> detailSelectionIndex_{};
