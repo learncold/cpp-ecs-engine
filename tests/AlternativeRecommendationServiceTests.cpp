@@ -218,6 +218,14 @@ bool containsEvidenceSource(
     });
 }
 
+bool containsEvidenceSource(
+    const AlternativeRecommendationRiskSignal& signal,
+    const std::string& source) {
+    return std::any_of(signal.evidence.begin(), signal.evidence.end(), [&](const auto& evidence) {
+        return evidence.source == source;
+    });
+}
+
 bool containsDiffKey(const ScenarioDraft& scenario, const std::string& key) {
     return std::find(scenario.variationDiffKeys.begin(), scenario.variationDiffKeys.end(), key)
         != scenario.variationDiffKeys.end();
@@ -399,12 +407,18 @@ SC_TEST(AlternativeRecommendationService_addsRouteGuidanceForExitImbalance) {
     });
     SC_EXPECT_TRUE(it != result.candidates.end());
     SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.size(), std::size_t{1});
-    SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.front().guidedExitZoneId, std::string{"exit-east"});
-    SC_EXPECT_TRUE(it->recommendedScenario.control.routeGuidances.front().installConnectionId.empty());
-    SC_EXPECT_TRUE(it->recommendedScenario.control.routeGuidances.front().baseComplianceRate > 0.5);
-    SC_EXPECT_TRUE(it->recommendedScenario.control.routeGuidances.front().baseComplianceRate <= 0.85);
-    SC_EXPECT_NEAR(it->recommendedScenario.control.routeGuidances.front().influenceRadiusMeters, 2.5, 1e-9);
-    SC_EXPECT_NEAR(it->recommendedScenario.control.routeGuidances.front().maxDetourMeters, 20.0, 1e-9);
+    const auto& guidance = it->recommendedScenario.control.routeGuidances.front();
+    SC_EXPECT_EQ(guidance.guidedExitZoneId, std::string{"exit-east"});
+    SC_EXPECT_TRUE(guidance.installConnectionId.empty());
+    SC_EXPECT_EQ(guidance.installFloorId, std::string{"L1"});
+    SC_EXPECT_NEAR(guidance.installPosition.x, 0.5, 1e-9);
+    SC_EXPECT_NEAR(guidance.installPosition.y, 0.5, 1e-9);
+    SC_EXPECT_TRUE(guidance.baseComplianceRate > 0.5);
+    SC_EXPECT_TRUE(guidance.baseComplianceRate <= 0.85);
+    SC_EXPECT_TRUE(guidance.influenceRadiusMeters > 2.5);
+    SC_EXPECT_TRUE(guidance.maxDetourMeters > 20.0);
+    SC_EXPECT_TRUE(containsEvidenceLabel(*it, "Guidance install"));
+    SC_EXPECT_TRUE(containsEvidenceLabel(*it, "Guidance tuning"));
     SC_EXPECT_TRUE(containsDiffKey(it->recommendedScenario, "control.routeGuidances"));
 }
 
@@ -424,6 +438,7 @@ SC_TEST(AlternativeRecommendationService_balancesExitUsageTowardUnusedLayoutExit
     SC_EXPECT_TRUE(it != result.candidates.end());
     SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.size(), std::size_t{1});
     SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.front().guidedExitZoneId, std::string{"exit-east"});
+    SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.front().installFloorId, std::string{"L1"});
     SC_EXPECT_TRUE(containsEvidenceSource(*it, "FacilityLayout2D.zones + ScenarioResultArtifacts.exitUsage"));
 }
 
@@ -491,7 +506,9 @@ SC_TEST(AlternativeRecommendationService_addsBottleneckGuidanceAtExit) {
     SC_EXPECT_TRUE(it != result.candidates.end());
     SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.size(), std::size_t{1});
     SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.front().guidedExitZoneId, std::string{"exit-east"});
-    SC_EXPECT_TRUE(it->recommendedScenario.control.routeGuidances.front().installConnectionId.empty());
+    SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.front().installConnectionId, std::string{"door-main"});
+    SC_EXPECT_TRUE(it->recommendedScenario.control.routeGuidances.front().influenceRadiusMeters > 2.5);
+    SC_EXPECT_TRUE(containsEvidenceLabel(*it, "Guidance install"));
     SC_EXPECT_TRUE(containsDiffKey(it->recommendedScenario, "control.routeGuidances"));
 }
 
@@ -517,7 +534,7 @@ SC_TEST(AlternativeRecommendationService_installsCorridorBottleneckGuidanceAtExi
     SC_EXPECT_TRUE(it != result.candidates.end());
     SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.size(), std::size_t{1});
     SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.front().guidedExitZoneId, std::string{"exit-east"});
-    SC_EXPECT_TRUE(it->recommendedScenario.control.routeGuidances.front().installConnectionId.empty());
+    SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.front().installConnectionId, std::string{"hall-main"});
 }
 
 SC_TEST(AlternativeRecommendationService_guidesBottleneckAwayFromAdjacentLeastUsedExit) {
@@ -542,7 +559,7 @@ SC_TEST(AlternativeRecommendationService_guidesBottleneckAwayFromAdjacentLeastUs
     SC_EXPECT_TRUE(it != result.candidates.end());
     SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.size(), std::size_t{1});
     SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.front().guidedExitZoneId, std::string{"exit-main"});
-    SC_EXPECT_TRUE(it->recommendedScenario.control.routeGuidances.front().installConnectionId.empty());
+    SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.front().installConnectionId, std::string{"door-east"});
     SC_EXPECT_TRUE(containsEvidenceLabel(*it, "Excluded adjacent exits"));
     SC_EXPECT_TRUE(containsEvidenceSource(*it, "least-used non-adjacent exit from FacilityLayout2D.zones + ScenarioResultArtifacts.exitUsage"));
 }
@@ -571,7 +588,7 @@ SC_TEST(AlternativeRecommendationService_guidesBottleneckTowardUnusedNonAdjacent
     SC_EXPECT_TRUE(it != result.candidates.end());
     SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.size(), std::size_t{1});
     SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.front().guidedExitZoneId, std::string{"exit-main"});
-    SC_EXPECT_TRUE(it->recommendedScenario.control.routeGuidances.front().installConnectionId.empty());
+    SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.front().installConnectionId, std::string{"door-east"});
     SC_EXPECT_TRUE(containsEvidenceSource(*it, "least-used non-adjacent exit from FacilityLayout2D.zones + ScenarioResultArtifacts.exitUsage"));
 }
 
@@ -598,6 +615,12 @@ SC_TEST(AlternativeRecommendationService_addsPressureHotspotReliefWithExitUsage)
     auto artifacts = makeExitUsageArtifacts(0.55, 0.45);
     artifacts.pressureSummary.hotspotScoreThreshold = 4.0;
     artifacts.pressureSummary.peakPressureScore = 5.5;
+    artifacts.pressureSummary.peakCell = PressureCellMetric{
+        .center = {.x = 1.25, .y = 0.75},
+        .floorId = "L1",
+        .agentCount = 6,
+        .pressureScore = 5.5,
+    };
 
     const AlternativeRecommendationService service;
     const auto result = service.recommend({
@@ -611,8 +634,14 @@ SC_TEST(AlternativeRecommendationService_addsPressureHotspotReliefWithExitUsage)
     });
     SC_EXPECT_TRUE(it != result.candidates.end());
     SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.size(), std::size_t{1});
-    SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.front().guidedExitZoneId, std::string{"exit-east"});
-    SC_EXPECT_TRUE(it->recommendedScenario.control.routeGuidances.front().installConnectionId.empty());
+    const auto& guidance = it->recommendedScenario.control.routeGuidances.front();
+    SC_EXPECT_EQ(guidance.guidedExitZoneId, std::string{"exit-east"});
+    SC_EXPECT_TRUE(guidance.installConnectionId.empty());
+    SC_EXPECT_EQ(guidance.installFloorId, std::string{"L1"});
+    SC_EXPECT_NEAR(guidance.installPosition.x, 1.25, 1e-9);
+    SC_EXPECT_NEAR(guidance.installPosition.y, 0.75, 1e-9);
+    SC_EXPECT_TRUE(guidance.influenceRadiusMeters > 2.5);
+    SC_EXPECT_TRUE(containsEvidenceSource(*it, "ScenarioResultArtifacts.pressureSummary.peakCell"));
     SC_EXPECT_TRUE(containsDiffKey(it->recommendedScenario, "control.routeGuidances"));
 }
 
@@ -765,10 +794,10 @@ SC_TEST(AlternativeRecommendationService_suppressesOneWayOperationForCrossFlow) 
 
     SC_EXPECT_TRUE(hasRiskSignalKind(result, AlternativeRecommendationRiskKind::CrossFlow));
     SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::CorridorOneWayFlow));
-    SC_EXPECT_TRUE(hasCandidateKind(result, AlternativeRecommendationKind::CrossFlowSeparation));
+    SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::CrossFlowSeparation));
 }
 
-SC_TEST(AlternativeRecommendationService_usesCrossFlowMetrics) {
+SC_TEST(AlternativeRecommendationService_reportsCrossFlowRiskWithoutManualOnlyDraft) {
     const AlternativeRecommendationService service;
     const auto result = service.recommend({
         .layout = makeRecommendationLayout(),
@@ -777,15 +806,13 @@ SC_TEST(AlternativeRecommendationService_usesCrossFlowMetrics) {
         .artifacts = makeCrossFlowArtifacts(),
     });
 
-    const auto it = std::find_if(result.candidates.begin(), result.candidates.end(), [](const auto& candidate) {
-        return candidate.kind == AlternativeRecommendationKind::CrossFlowSeparation;
+    const auto signalIt = std::find_if(result.riskSignals.begin(), result.riskSignals.end(), [](const auto& signal) {
+        return signal.kind == AlternativeRecommendationRiskKind::CrossFlow;
     });
-    SC_EXPECT_TRUE(hasRiskSignalKind(result, AlternativeRecommendationRiskKind::CrossFlow));
-    SC_EXPECT_TRUE(it != result.candidates.end());
-    SC_EXPECT_TRUE(containsEvidenceSource(*it, "ScenarioRiskSnapshot.crossFlowCells"));
-    SC_EXPECT_TRUE(containsEvidenceSource(*it, "ScenarioResultArtifacts.crossFlowSummary"));
-    SC_EXPECT_EQ(it->recommendedScenario.control.events.size(), std::size_t{1});
-    SC_EXPECT_TRUE(containsDiffKey(it->recommendedScenario, "control.events"));
+    SC_EXPECT_TRUE(signalIt != result.riskSignals.end());
+    SC_EXPECT_TRUE(containsEvidenceSource(*signalIt, "ScenarioRiskSnapshot.crossFlowCells"));
+    SC_EXPECT_TRUE(containsEvidenceSource(*signalIt, "ScenarioResultArtifacts.crossFlowSummary"));
+    SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::CrossFlowSeparation));
 }
 
 SC_TEST(AlternativeRecommendationService_convertsCrossFlowToRouteGuidanceWhenExitDataAllows) {
@@ -806,7 +833,12 @@ SC_TEST(AlternativeRecommendationService_convertsCrossFlowToRouteGuidanceWhenExi
     SC_EXPECT_TRUE(it != result.candidates.end());
     SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.size(), std::size_t{1});
     SC_EXPECT_TRUE(it->recommendedScenario.control.events.empty());
-    SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.front().guidedExitZoneId, std::string{"exit-east"});
+    const auto& guidance = it->recommendedScenario.control.routeGuidances.front();
+    SC_EXPECT_EQ(guidance.guidedExitZoneId, std::string{"exit-east"});
+    SC_EXPECT_EQ(guidance.installFloorId, std::string{"L1"});
+    SC_EXPECT_NEAR(guidance.installPosition.x, 1.0, 1e-9);
+    SC_EXPECT_NEAR(guidance.installPosition.y, 0.5, 1e-9);
+    SC_EXPECT_TRUE(containsEvidenceLabel(*it, "Guidance install"));
     SC_EXPECT_TRUE(containsDiffKey(it->recommendedScenario, "control.routeGuidances"));
 }
 
@@ -832,10 +864,12 @@ SC_TEST(AlternativeRecommendationService_convertsCrossFlowToStagedReleaseWhenNoE
     SC_EXPECT_TRUE(it->recommendedScenario.control.events.empty());
     SC_EXPECT_TRUE(it->recommendedScenario.population.initialPlacements.empty());
     SC_EXPECT_EQ(it->recommendedScenario.population.occupantSources.size(), std::size_t{2});
+    SC_EXPECT_EQ(it->recommendedScenario.population.occupantSources.front().agentsPerSpawn, std::size_t{4});
+    SC_EXPECT_TRUE(it->recommendedScenario.population.occupantSources.front().spawnIntervalSeconds > 9.0);
     SC_EXPECT_TRUE(containsDiffKey(it->recommendedScenario, "population.placements"));
 }
 
-SC_TEST(AlternativeRecommendationService_ranksSimulationChangingCandidateBeforeManualCrossFlowEvent) {
+SC_TEST(AlternativeRecommendationService_skipsManualCrossFlowFallbackWhenExitBalancingExists) {
     auto artifacts = makeCrossFlowArtifacts();
     artifacts.exitUsage = makeExitUsageArtifacts(0.90, 0.10).exitUsage;
 
@@ -847,13 +881,9 @@ SC_TEST(AlternativeRecommendationService_ranksSimulationChangingCandidateBeforeM
         .artifacts = artifacts,
     });
 
-    SC_EXPECT_TRUE(result.candidates.size() >= 2);
+    SC_EXPECT_EQ(result.candidates.size(), std::size_t{1});
     SC_EXPECT_TRUE(result.candidates.front().kind == AlternativeRecommendationKind::ExitUsageBalancing);
-    const auto it = std::find_if(result.candidates.begin(), result.candidates.end(), [](const auto& candidate) {
-        return candidate.kind == AlternativeRecommendationKind::CrossFlowSeparation;
-    });
-    SC_EXPECT_TRUE(it != result.candidates.end());
-    SC_EXPECT_EQ(it->recommendedScenario.control.events.size(), std::size_t{1});
+    SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::CrossFlowSeparation));
 }
 
 SC_TEST(AlternativeRecommendationService_addsStagedEvacuationForMissedTimeLimit) {
@@ -881,10 +911,10 @@ SC_TEST(AlternativeRecommendationService_addsStagedEvacuationForMissedTimeLimit)
     SC_EXPECT_EQ(it->recommendedScenario.population.occupantSources.size(), std::size_t{1});
     const auto& source = it->recommendedScenario.population.occupantSources.front();
     SC_EXPECT_EQ(source.targetAgentCount, std::size_t{20});
-    SC_EXPECT_EQ(source.agentsPerSpawn, std::size_t{10});
-    SC_EXPECT_NEAR(source.spawnIntervalSeconds, 5.0, 1e-9);
+    SC_EXPECT_EQ(source.agentsPerSpawn, std::size_t{8});
+    SC_EXPECT_NEAR(source.spawnIntervalSeconds, 3.525, 1e-9);
     SC_EXPECT_NEAR(source.startSeconds, 0.0, 1e-9);
-    SC_EXPECT_NEAR(source.endSeconds, 10.0, 1e-9);
+    SC_EXPECT_NEAR(source.endSeconds, 10.575, 1e-9);
     SC_EXPECT_TRUE(containsDiffKey(it->recommendedScenario, "population.placements"));
 }
 
@@ -916,10 +946,10 @@ SC_TEST(AlternativeRecommendationService_stagesLargeInitialPlacementForPressureH
     SC_EXPECT_EQ(source.zoneId, std::string{"room-a"});
     SC_EXPECT_EQ(source.floorId, std::string{"L1"});
     SC_EXPECT_EQ(source.targetAgentCount, std::size_t{100});
-    SC_EXPECT_EQ(source.agentsPerSpawn, std::size_t{10});
-    SC_EXPECT_NEAR(source.spawnIntervalSeconds, 5.0, 1e-9);
+    SC_EXPECT_EQ(source.agentsPerSpawn, std::size_t{16});
+    SC_EXPECT_NEAR(source.spawnIntervalSeconds, 6.80625, 1e-9);
     SC_EXPECT_NEAR(source.startSeconds, 0.0, 1e-9);
-    SC_EXPECT_NEAR(source.endSeconds, 50.0, 1e-9);
+    SC_EXPECT_NEAR(source.endSeconds, 47.64375, 1e-9);
     SC_EXPECT_TRUE(containsEvidenceLabel(*it, "Release schedule"));
     SC_EXPECT_TRUE(containsDiffKey(it->recommendedScenario, "population.placements"));
 }
@@ -956,12 +986,12 @@ SC_TEST(AlternativeRecommendationService_stagesAllInitialPlacementsInOrder) {
     SC_EXPECT_EQ(secondSource.id, std::string{"recommendation-source-group-b"});
     SC_EXPECT_EQ(firstSource.targetAgentCount, std::size_t{25});
     SC_EXPECT_EQ(secondSource.targetAgentCount, std::size_t{25});
-    SC_EXPECT_EQ(firstSource.agentsPerSpawn, std::size_t{10});
-    SC_EXPECT_EQ(secondSource.agentsPerSpawn, std::size_t{10});
+    SC_EXPECT_EQ(firstSource.agentsPerSpawn, std::size_t{8});
+    SC_EXPECT_EQ(secondSource.agentsPerSpawn, std::size_t{8});
     SC_EXPECT_NEAR(firstSource.startSeconds, 0.0, 1e-9);
-    SC_EXPECT_NEAR(firstSource.endSeconds, 15.0, 1e-9);
-    SC_EXPECT_NEAR(secondSource.startSeconds, 15.0, 1e-9);
-    SC_EXPECT_NEAR(secondSource.endSeconds, 30.0, 1e-9);
+    SC_EXPECT_NEAR(firstSource.endSeconds, 27.225, 1e-9);
+    SC_EXPECT_NEAR(secondSource.startSeconds, 27.225, 1e-9);
+    SC_EXPECT_NEAR(secondSource.endSeconds, 54.45, 1e-9);
     SC_EXPECT_TRUE(containsEvidenceLabel(*it, "Release window"));
 }
 

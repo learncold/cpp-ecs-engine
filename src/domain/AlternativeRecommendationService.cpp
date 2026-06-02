@@ -19,13 +19,17 @@ namespace safecrowd::domain {
 namespace {
 
 constexpr double kExitImbalanceThreshold = 0.25;
-constexpr std::size_t kStagedEvacuationAgentsPerSpawn = 10;
-constexpr double kStagedEvacuationIntervalSeconds = 5.0;
+constexpr std::size_t kMinimumStagedEvacuationAgentsPerSpawn = 4;
+constexpr std::size_t kMaximumStagedEvacuationAgentsPerSpawn = 25;
+constexpr double kMinimumStagedEvacuationIntervalSeconds = 3.0;
+constexpr double kMaximumStagedEvacuationIntervalSeconds = 12.0;
 constexpr double kDefaultGuidanceCompliance = 0.5;
 constexpr double kMinimumGuidanceCompliance = 0.45;
 constexpr double kMaximumGuidanceCompliance = 0.85;
 constexpr double kDefaultGuidanceInfluenceRadiusMeters = 2.5;
+constexpr double kMaximumGuidanceInfluenceRadiusMeters = 10.0;
 constexpr double kDefaultGuidanceMaxDetourMeters = 20.0;
+constexpr double kMaximumGuidanceMaxDetourMeters = 60.0;
 constexpr double kMaximumGuidanceDetourEstimateMeters = 35.0;
 
 struct AlternativeRecommendationInput {
@@ -35,6 +39,28 @@ struct AlternativeRecommendationInput {
     const ScenarioRiskSnapshot& risk;
     const ScenarioResultArtifacts& artifacts;
     const SimulationFrame* finalFrame{nullptr};
+};
+
+struct SourceAnchor {
+    std::string id{};
+    std::string zoneId{};
+    std::string floorId{};
+    Point2D position{};
+    std::size_t agentCount{0};
+};
+
+struct GuidanceInstallAnchor {
+    std::string connectionId{};
+    std::string floorId{};
+    std::string zoneId{};
+    Point2D position{};
+    std::string description{};
+    std::string evidenceSource{};
+};
+
+struct StagedEvacuationProfile {
+    std::size_t agentsPerSpawn{0};
+    double intervalSeconds{0.0};
 };
 
 std::string sanitizeId(std::string value) {
@@ -122,6 +148,17 @@ double distanceBetweenPoints(const Point2D& lhs, const Point2D& rhs) {
     return std::hypot(lhs.x - rhs.x, lhs.y - rhs.y);
 }
 
+Point2D segmentMidpoint(const LineSegment2D& segment) {
+    return {
+        .x = (segment.start.x + segment.end.x) * 0.5,
+        .y = (segment.start.y + segment.end.y) * 0.5,
+    };
+}
+
+std::string pointLabel(const Point2D& point) {
+    return "(" + fixed(point.x, 1) + ", " + fixed(point.y, 1) + ")";
+}
+
 std::optional<Point2D> sourcePointForPlacement(
     const FacilityLayout2D& layout,
     const InitialPlacement2D& placement) {
@@ -159,6 +196,28 @@ std::string connectionName(const FacilityLayout2D& layout, const std::string& co
     }
     return connection->id + " (" + zoneName(layout, connection->fromZoneId) + " -> "
         + zoneName(layout, connection->toZoneId) + ")";
+}
+
+std::string floorIdForZone(const FacilityLayout2D& layout, const std::string& zoneId) {
+    const auto* zone = findZone(layout, zoneId);
+    return zone == nullptr ? std::string{} : zone->floorId;
+}
+
+bool zoneGeometryContainsPoint(const Zone2D& zone, const Point2D& point) {
+    return zone.area.outline.size() >= 3 && pointInPolygon(zone.area, point);
+}
+
+std::string zoneIdContainingPoint(
+    const FacilityLayout2D& layout,
+    const Point2D& point,
+    const std::string& floorId) {
+    for (const auto& zone : layout.zones) {
+        if (!matchesFloor(zone.floorId, floorId) || !zoneGeometryContainsPoint(zone, point)) {
+            continue;
+        }
+        return zone.id;
+    }
+    return {};
 }
 
 std::string zoneNameList(const FacilityLayout2D& layout, const std::vector<std::string>& zoneIds) {
@@ -257,12 +316,6 @@ bool exitHasBottleneck(
     });
 }
 
-bool hasOperationalEvent(const ScenarioDraft& scenario, const std::string& id) {
-    return std::any_of(scenario.control.events.begin(), scenario.control.events.end(), [&](const auto& event) {
-        return event.id == id;
-    });
-}
-
 bool hasOccupantSource(const ScenarioDraft& scenario, const std::string& id) {
     return std::any_of(scenario.population.occupantSources.begin(), scenario.population.occupantSources.end(), [&](const auto& source) {
         return source.id == id;
@@ -275,11 +328,43 @@ std::size_t placementAgentCount(const InitialPlacement2D& placement) {
         : placement.explicitPositions.size();
 }
 
-std::size_t stagedEvacuationTickCount(std::size_t targetAgentCount) {
-    if (targetAgentCount == 0) {
+std::size_t totalInitialPlacementAgents(const ScenarioDraft& scenario) {
+    std::size_t total = 0;
+    for (const auto& placement : scenario.population.initialPlacements) {
+        total += placementAgentCount(placement);
+    }
+    return total;
+}
+
+StagedEvacuationProfile stagedEvacuationProfileFor(
+    const AlternativeRecommendationInput& request,
+    int severity) {
+    const auto totalAgents = totalInitialPlacementAgents(request.sourceScenario);
+    if (totalAgents == 0) {
+        return {};
+    }
+
+    const auto normalizedSeverity = std::clamp(static_cast<double>(std::max(0, severity)) / 160.0, 0.0, 1.0);
+    const auto desiredBatchCount = 2.0 + (normalizedSeverity * 8.0);
+    const auto agentsPerSpawn = static_cast<std::size_t>(
+        std::ceil(static_cast<double>(totalAgents) / desiredBatchCount));
+    return {
+        .agentsPerSpawn = std::clamp(
+            agentsPerSpawn,
+            kMinimumStagedEvacuationAgentsPerSpawn,
+            kMaximumStagedEvacuationAgentsPerSpawn),
+        .intervalSeconds = std::clamp(
+            kMinimumStagedEvacuationIntervalSeconds + (normalizedSeverity * 7.0),
+            kMinimumStagedEvacuationIntervalSeconds,
+            kMaximumStagedEvacuationIntervalSeconds),
+    };
+}
+
+std::size_t stagedEvacuationTickCount(std::size_t targetAgentCount, std::size_t agentsPerSpawn) {
+    if (targetAgentCount == 0 || agentsPerSpawn == 0) {
         return 0;
     }
-    return (targetAgentCount + kStagedEvacuationAgentsPerSpawn - 1) / kStagedEvacuationAgentsPerSpawn;
+    return (targetAgentCount + agentsPerSpawn - 1) / agentsPerSpawn;
 }
 
 OccupantSource2D makeStagedEvacuationSource(
@@ -287,18 +372,19 @@ OccupantSource2D makeStagedEvacuationSource(
     const InitialPlacement2D& placement,
     std::size_t targetAgentCount,
     Point2D sourcePosition,
+    const StagedEvacuationProfile& profile,
     double startSeconds) {
-    const auto tickCount = stagedEvacuationTickCount(targetAgentCount);
+    const auto tickCount = stagedEvacuationTickCount(targetAgentCount, profile.agentsPerSpawn);
     OccupantSource2D source;
     source.id = "recommendation-source-" + sanitizeId(placement.id.empty() ? placement.zoneId : placement.id);
     source.zoneId = placement.zoneId;
     source.floorId = placement.floorId;
     source.position = sourcePosition;
     source.targetAgentCount = targetAgentCount;
-    source.agentsPerSpawn = std::min(kStagedEvacuationAgentsPerSpawn, targetAgentCount);
+    source.agentsPerSpawn = std::min(profile.agentsPerSpawn, targetAgentCount);
     source.startSeconds = startSeconds;
-    source.endSeconds = startSeconds + (kStagedEvacuationIntervalSeconds * static_cast<double>(tickCount));
-    source.spawnIntervalSeconds = kStagedEvacuationIntervalSeconds;
+    source.endSeconds = startSeconds + (profile.intervalSeconds * static_cast<double>(tickCount));
+    source.spawnIntervalSeconds = profile.intervalSeconds;
     source.initialVelocity = placement.initialVelocity;
     if (source.floorId.empty()) {
         if (const auto* zone = findZone(request.layout, placement.zoneId); zone != nullptr) {
@@ -309,7 +395,12 @@ OccupantSource2D makeStagedEvacuationSource(
 }
 
 std::vector<OccupantSource2D> makeSequentialStagedEvacuationSources(
-    const AlternativeRecommendationInput& request) {
+    const AlternativeRecommendationInput& request,
+    const StagedEvacuationProfile& profile) {
+    if (profile.agentsPerSpawn == 0 || profile.intervalSeconds <= 0.0) {
+        return {};
+    }
+
     std::vector<OccupantSource2D> sources;
     sources.reserve(request.sourceScenario.population.initialPlacements.size());
 
@@ -323,7 +414,13 @@ std::vector<OccupantSource2D> makeSequentialStagedEvacuationSources(
         if (!sourcePosition.has_value()) {
             return {};
         }
-        auto source = makeStagedEvacuationSource(request, placement, targetAgentCount, *sourcePosition, nextStartSeconds);
+        auto source = makeStagedEvacuationSource(
+            request,
+            placement,
+            targetAgentCount,
+            *sourcePosition,
+            profile,
+            nextStartSeconds);
         nextStartSeconds = source.endSeconds;
         sources.push_back(std::move(source));
     }
@@ -341,7 +438,7 @@ std::size_t totalSourceAgents(const std::vector<OccupantSource2D>& sources) {
 std::size_t totalSourceTicks(const std::vector<OccupantSource2D>& sources) {
     std::size_t total = 0;
     for (const auto& source : sources) {
-        total += stagedEvacuationTickCount(source.targetAgentCount);
+        total += stagedEvacuationTickCount(source.targetAgentCount, source.agentsPerSpawn);
     }
     return total;
 }
@@ -372,28 +469,14 @@ std::vector<std::string> adjacentExitZoneIdsForConnection(
 
 RouteGuidanceDraft makeGuidance(const std::string& id,
                                 const std::string& guidedExitZoneId,
-                                const std::string& installConnectionId = {},
                                 double baseComplianceRate = kDefaultGuidanceCompliance) {
     RouteGuidanceDraft guidance;
     guidance.id = id;
     guidance.guidedExitZoneId = guidedExitZoneId;
-    guidance.installConnectionId = installConnectionId;
     guidance.baseComplianceRate = std::clamp(baseComplianceRate, 0.0, 1.0);
     guidance.influenceRadiusMeters = kDefaultGuidanceInfluenceRadiusMeters;
     guidance.maxDetourMeters = kDefaultGuidanceMaxDetourMeters;
     return guidance;
-}
-
-OperationalEventDraft makeOperationalEvent(const std::string& id,
-                                           const std::string& name,
-                                           const std::string& triggerSummary,
-                                           const std::string& targetSummary) {
-    OperationalEventDraft event;
-    event.id = id;
-    event.name = name;
-    event.triggerSummary = triggerSummary;
-    event.targetSummary = targetSummary;
-    return event;
 }
 
 std::string recommendedScenarioId(const ScenarioDraft& source, AlternativeRecommendationKind kind) {
@@ -455,6 +538,327 @@ std::optional<Point2D> zoneReferencePoint(const FacilityLayout2D& layout, const 
         return zone->area.outline.front();
     }
     return representativePointInPolygon(zone->area).value_or(averagePoint(zone->area.outline));
+}
+
+std::vector<SourceAnchor> sourceAnchorsForRequest(const AlternativeRecommendationInput& request) {
+    std::vector<SourceAnchor> anchors;
+    anchors.reserve(
+        request.sourceScenario.population.initialPlacements.size()
+        + request.sourceScenario.population.occupantSources.size());
+
+    for (const auto& placement : request.sourceScenario.population.initialPlacements) {
+        const auto targetAgentCount = placementAgentCount(placement);
+        if (targetAgentCount == 0) {
+            continue;
+        }
+        const auto position = sourcePointForPlacement(request.layout, placement);
+        if (!position.has_value()) {
+            continue;
+        }
+        auto floorId = placement.floorId;
+        if (floorId.empty()) {
+            floorId = floorIdForZone(request.layout, placement.zoneId);
+        }
+        anchors.push_back({
+            .id = placement.id,
+            .zoneId = placement.zoneId,
+            .floorId = std::move(floorId),
+            .position = *position,
+            .agentCount = targetAgentCount,
+        });
+    }
+
+    for (const auto& source : request.sourceScenario.population.occupantSources) {
+        if (source.targetAgentCount == 0) {
+            continue;
+        }
+        auto floorId = source.floorId;
+        if (floorId.empty()) {
+            floorId = floorIdForZone(request.layout, source.zoneId);
+        }
+        anchors.push_back({
+            .id = source.id,
+            .zoneId = source.zoneId,
+            .floorId = std::move(floorId),
+            .position = source.position,
+            .agentCount = source.targetAgentCount,
+        });
+    }
+
+    return anchors;
+}
+
+std::optional<SourceAnchor> bestSourceAnchor(
+    const AlternativeRecommendationInput& request,
+    const std::optional<Point2D>& preferredPoint = std::nullopt,
+    const std::string& preferredFloorId = {}) {
+    const auto anchors = sourceAnchorsForRequest(request);
+    if (anchors.empty()) {
+        return std::nullopt;
+    }
+
+    const SourceAnchor* best = nullptr;
+    double bestDistance = 0.0;
+    for (const auto& anchor : anchors) {
+        if (!preferredFloorId.empty() && !matchesFloor(anchor.floorId, preferredFloorId)) {
+            continue;
+        }
+        const auto distance = preferredPoint.has_value()
+            ? distanceBetweenPoints(anchor.position, *preferredPoint)
+            : 0.0;
+        if (best == nullptr
+            || (preferredPoint.has_value() && distance < bestDistance)
+            || (!preferredPoint.has_value() && anchor.agentCount > best->agentCount)
+            || (preferredPoint.has_value() && distance == bestDistance && anchor.agentCount > best->agentCount)) {
+            best = &anchor;
+            bestDistance = distance;
+        }
+    }
+
+    if (best == nullptr && !preferredFloorId.empty()) {
+        return bestSourceAnchor(request, preferredPoint);
+    }
+    return best == nullptr ? std::nullopt : std::optional<SourceAnchor>{*best};
+}
+
+std::optional<GuidanceInstallAnchor> sourceGuidanceAnchor(
+    const AlternativeRecommendationInput& request,
+    const std::optional<Point2D>& preferredPoint = std::nullopt,
+    const std::string& preferredFloorId = {},
+    const std::string& evidenceSource = "ScenarioDraft.population") {
+    const auto anchor = bestSourceAnchor(request, preferredPoint, preferredFloorId);
+    if (!anchor.has_value()) {
+        return std::nullopt;
+    }
+
+    auto installFloorId = anchor->floorId;
+    auto installZoneId = zoneIdContainingPoint(request.layout, anchor->position, installFloorId);
+    if (installFloorId.empty() && !installZoneId.empty()) {
+        installFloorId = floorIdForZone(request.layout, installZoneId);
+    }
+
+    std::string description = "near source";
+    if (!anchor->zoneId.empty()) {
+        description += " " + zoneName(request.layout, anchor->zoneId);
+    }
+    description += " at " + pointLabel(anchor->position);
+    if (!installFloorId.empty()) {
+        description += " on " + installFloorId;
+    }
+
+    return GuidanceInstallAnchor{
+        .floorId = std::move(installFloorId),
+        .zoneId = std::move(installZoneId),
+        .position = anchor->position,
+        .description = std::move(description),
+        .evidenceSource = evidenceSource,
+    };
+}
+
+GuidanceInstallAnchor pointGuidanceAnchor(
+    const AlternativeRecommendationInput& request,
+    const Point2D& point,
+    std::string floorId,
+    std::string description,
+    std::string evidenceSource) {
+    auto installZoneId = zoneIdContainingPoint(request.layout, point, floorId);
+    if (floorId.empty() && !installZoneId.empty()) {
+        floorId = floorIdForZone(request.layout, installZoneId);
+    }
+    if (floorId.empty()) {
+        if (const auto source = bestSourceAnchor(request, point); source.has_value()) {
+            floorId = source->floorId;
+        }
+    }
+
+    if (!installZoneId.empty()) {
+        description += " in " + zoneName(request.layout, installZoneId);
+    }
+    description += " at " + pointLabel(point);
+    if (!floorId.empty()) {
+        description += " on " + floorId;
+    }
+
+    return GuidanceInstallAnchor{
+        .floorId = std::move(floorId),
+        .zoneId = std::move(installZoneId),
+        .position = point,
+        .description = std::move(description),
+        .evidenceSource = std::move(evidenceSource),
+    };
+}
+
+std::optional<GuidanceInstallAnchor> connectionGuidanceAnchor(
+    const AlternativeRecommendationInput& request,
+    const std::string& connectionId,
+    std::string evidenceSource) {
+    const auto* connection = findConnection(request.layout, connectionId);
+    if (connection == nullptr) {
+        return std::nullopt;
+    }
+
+    auto floorId = connection->floorId;
+    if (floorId.empty()) {
+        floorId = floorIdForZone(request.layout, connection->fromZoneId);
+    }
+    if (floorId.empty()) {
+        floorId = floorIdForZone(request.layout, connection->toZoneId);
+    }
+
+    auto description = connectionName(request.layout, connectionId);
+    if (!floorId.empty()) {
+        description += " on " + floorId;
+    }
+
+    return GuidanceInstallAnchor{
+        .connectionId = connectionId,
+        .floorId = std::move(floorId),
+        .position = segmentMidpoint(connection->centerSpan),
+        .description = std::move(description),
+        .evidenceSource = std::move(evidenceSource),
+    };
+}
+
+std::optional<GuidanceInstallAnchor> pressureGuidanceAnchor(const AlternativeRecommendationInput& request) {
+    if (request.artifacts.pressureSummary.peakCell.has_value()) {
+        const auto& cell = *request.artifacts.pressureSummary.peakCell;
+        return pointGuidanceAnchor(
+            request,
+            cell.center,
+            cell.floorId,
+            "pressure peak cell",
+            "ScenarioResultArtifacts.pressureSummary.peakCell");
+    }
+
+    if (!request.artifacts.pressureSummary.peakHotspots.empty()) {
+        const auto it = std::max_element(
+            request.artifacts.pressureSummary.peakHotspots.begin(),
+            request.artifacts.pressureSummary.peakHotspots.end(),
+            [](const auto& lhs, const auto& rhs) {
+                return lhs.pressureScore < rhs.pressureScore;
+            });
+        return pointGuidanceAnchor(
+            request,
+            it->center,
+            it->floorId,
+            "pressure hotspot",
+            "ScenarioResultArtifacts.pressureSummary.peakHotspots");
+    }
+
+    if (!request.risk.pressureHotspots.empty()) {
+        const auto it = std::max_element(
+            request.risk.pressureHotspots.begin(),
+            request.risk.pressureHotspots.end(),
+            [](const auto& lhs, const auto& rhs) {
+                return lhs.pressureScore < rhs.pressureScore;
+            });
+        return pointGuidanceAnchor(
+            request,
+            it->center,
+            it->floorId,
+            "risk pressure hotspot",
+            "ScenarioRiskSnapshot.pressureHotspots");
+    }
+
+    if (!request.risk.criticalPressureEvents.empty()) {
+        const auto it = std::max_element(
+            request.risk.criticalPressureEvents.begin(),
+            request.risk.criticalPressureEvents.end(),
+            [](const auto& lhs, const auto& rhs) {
+                if (lhs.criticalAgentCount == rhs.criticalAgentCount) {
+                    return lhs.pressureScore < rhs.pressureScore;
+                }
+                return lhs.criticalAgentCount < rhs.criticalAgentCount;
+            });
+        return pointGuidanceAnchor(
+            request,
+            it->center,
+            it->floorId,
+            "critical pressure event",
+            "ScenarioRiskSnapshot.criticalPressureEvents");
+    }
+
+    return sourceGuidanceAnchor(request, std::nullopt, {}, "ScenarioDraft.population fallback");
+}
+
+std::optional<GuidanceInstallAnchor> crossFlowGuidanceAnchor(const AlternativeRecommendationInput& request) {
+    if (!request.risk.crossFlowCells.empty()) {
+        const auto it = std::max_element(
+            request.risk.crossFlowCells.begin(),
+            request.risk.crossFlowCells.end(),
+            [](const auto& lhs, const auto& rhs) {
+                if (lhs.crossFlowScore == rhs.crossFlowScore) {
+                    return lhs.exposureAgentSeconds < rhs.exposureAgentSeconds;
+                }
+                return lhs.crossFlowScore < rhs.crossFlowScore;
+            });
+        return pointGuidanceAnchor(
+            request,
+            it->center,
+            it->floorId,
+            "cross-flow hotspot",
+            "ScenarioRiskSnapshot.crossFlowCells");
+    }
+    return sourceGuidanceAnchor(request, std::nullopt, {}, "ScenarioDraft.population fallback");
+}
+
+std::optional<double> anchorDistanceToZone(
+    const AlternativeRecommendationInput& request,
+    const GuidanceInstallAnchor& anchor,
+    const std::string& targetZoneId) {
+    const auto targetPoint = zoneReferencePoint(request.layout, targetZoneId);
+    if (!targetPoint.has_value()) {
+        return std::nullopt;
+    }
+    return distanceBetweenPoints(anchor.position, *targetPoint);
+}
+
+double guidanceInfluenceRadiusForSeverity(int severity) {
+    return std::clamp(
+        kDefaultGuidanceInfluenceRadiusMeters + (static_cast<double>(std::max(0, severity)) / 35.0),
+        kDefaultGuidanceInfluenceRadiusMeters,
+        kMaximumGuidanceInfluenceRadiusMeters);
+}
+
+double guidanceMaxDetourForSeverity(
+    int severity,
+    const std::optional<double>& anchorDistanceToTarget) {
+    auto detourMeters = kDefaultGuidanceMaxDetourMeters + (static_cast<double>(std::max(0, severity)) / 5.0);
+    if (anchorDistanceToTarget.has_value()) {
+        detourMeters = std::max(detourMeters, *anchorDistanceToTarget * 0.75);
+    }
+    return std::clamp(
+        detourMeters,
+        kDefaultGuidanceMaxDetourMeters,
+        kMaximumGuidanceMaxDetourMeters);
+}
+
+void configureGuidanceForRecommendation(
+    RouteGuidanceDraft& guidance,
+    const AlternativeRecommendationInput& request,
+    const GuidanceInstallAnchor& anchor,
+    int severity) {
+    guidance.installConnectionId = anchor.connectionId;
+    guidance.installFloorId = anchor.floorId;
+    guidance.installZoneId = anchor.zoneId;
+    guidance.installPosition = anchor.position;
+    guidance.influenceRadiusMeters = guidanceInfluenceRadiusForSeverity(severity);
+    guidance.maxDetourMeters = guidanceMaxDetourForSeverity(
+        severity,
+        anchorDistanceToZone(request, anchor, guidance.guidedExitZoneId));
+}
+
+AlternativeRecommendationEvidence guidanceInstallEvidence(const GuidanceInstallAnchor& anchor) {
+    return evidence("Guidance install", anchor.description, anchor.evidenceSource);
+}
+
+AlternativeRecommendationEvidence guidanceTuningEvidence(const RouteGuidanceDraft& guidance) {
+    return evidence(
+        "Guidance tuning",
+        percent(guidance.baseComplianceRate) + " compliance / "
+            + fixed(guidance.influenceRadiusMeters, 1) + " m radius / "
+            + fixed(guidance.maxDetourMeters, 0) + " m max detour",
+        "recommended RouteGuidanceDraft");
 }
 
 std::vector<std::string> sourceZoneIds(const ScenarioDraft& scenario) {
@@ -1023,15 +1427,23 @@ std::optional<AlternativeRecommendationCandidate> makeBottleneckGuidanceCandidat
     }
 
     const auto severity = riskSeverity(context, bottleneckRiskKind(request, *bottleneck));
+    const auto installAnchor = connectionGuidanceAnchor(
+        request,
+        bottleneck->connectionId,
+        "ScenarioRiskSnapshot.bottlenecks");
+    if (!installAnchor.has_value()) {
+        return std::nullopt;
+    }
     auto draft = makeRecommendedDraft(
         request,
         AlternativeRecommendationKind::BottleneckBypassGuidance,
         "Recommended: guide to " + zoneName(request.layout, targetExit->exitZoneId));
-    draft.control.routeGuidances.push_back(makeGuidance(
+    auto guidance = makeGuidance(
         "recommendation-guidance-" + sanitizeId(targetExit->exitZoneId),
         targetExit->exitZoneId,
-        {},
-        guidanceComplianceForSeverity(severity)));
+        guidanceComplianceForSeverity(severity));
+    configureGuidanceForRecommendation(guidance, request, *installAnchor, severity);
+    draft.control.routeGuidances.push_back(guidance);
     finalizeDiffKeys(request, draft);
     if (!recommendedDraftChangesSource(request, draft)) {
         return std::nullopt;
@@ -1042,10 +1454,10 @@ std::optional<AlternativeRecommendationCandidate> makeBottleneckGuidanceCandidat
     candidate.id = "guide-around-" + sanitizeId(bottleneck->connectionId);
     candidate.priority = priorityForCandidate(120, severity, true);
     candidate.title = "Guide occupants to another exit";
-    candidate.summary = "Install guidance at "
-        + zoneName(request.layout, targetExit->exitZoneId)
-        + " instead of placing a guidance marker on "
-        + connectionName(request.layout, bottleneck->connectionId) + ".";
+    candidate.summary = "Install guidance near "
+        + connectionName(request.layout, bottleneck->connectionId)
+        + " and route a share of occupants toward "
+        + zoneName(request.layout, targetExit->exitZoneId) + ".";
     candidate.expectedImprovement = "Shifts part of the crowd toward an alternate exit before rerunning the scenario.";
     candidate.artifactSource = "ScenarioRiskSnapshot.bottlenecks + FacilityLayout2D.zones + ScenarioResultArtifacts.exitUsage";
     candidate.riskKind = bottleneckRiskKind(request, *bottleneck);
@@ -1066,6 +1478,8 @@ std::optional<AlternativeRecommendationCandidate> makeBottleneckGuidanceCandidat
         adjacentExitZoneIds.empty()
             ? "least-used exit from FacilityLayout2D.zones + ScenarioResultArtifacts.exitUsage"
             : "least-used non-adjacent exit from FacilityLayout2D.zones + ScenarioResultArtifacts.exitUsage"));
+    candidate.evidence.push_back(guidanceInstallEvidence(*installAnchor));
+    candidate.evidence.push_back(guidanceTuningEvidence(guidance));
     candidate.recommendedScenario = std::move(draft);
     return candidate;
 }
@@ -1090,15 +1504,28 @@ std::optional<AlternativeRecommendationCandidate> makeExitBalancingCandidate(
     }
 
     const auto severity = exitUsageSeverity(context);
+    const auto highExitPoint = zoneReferencePoint(request.layout, high->exitZoneId);
+    const auto highExitFloorId = high->floorId.empty()
+        ? floorIdForZone(request.layout, high->exitZoneId)
+        : high->floorId;
+    const auto installAnchor = sourceGuidanceAnchor(
+        request,
+        highExitPoint,
+        highExitFloorId,
+        "ScenarioResultArtifacts.exitUsage + ScenarioDraft.population");
+    if (!installAnchor.has_value()) {
+        return std::nullopt;
+    }
     auto draft = makeRecommendedDraft(
         request,
         AlternativeRecommendationKind::ExitUsageBalancing,
         "Recommended: balance exit usage toward " + zoneName(request.layout, low->exitZoneId));
-    draft.control.routeGuidances.push_back(makeGuidance(
+    auto guidance = makeGuidance(
         "recommendation-guidance-exit-" + sanitizeId(low->exitZoneId),
         low->exitZoneId,
-        {},
-        guidanceComplianceForExitSpread(high->usageRatio - low->usageRatio)));
+        guidanceComplianceForExitSpread(high->usageRatio - low->usageRatio));
+    configureGuidanceForRecommendation(guidance, request, *installAnchor, severity);
+    draft.control.routeGuidances.push_back(guidance);
     finalizeDiffKeys(request, draft);
     if (!recommendedDraftChangesSource(request, draft)) {
         return std::nullopt;
@@ -1122,6 +1549,8 @@ std::optional<AlternativeRecommendationCandidate> makeExitBalancingCandidate(
         "Underused exit",
         zoneName(request.layout, low->exitZoneId) + " at " + percent(low->usageRatio),
         "FacilityLayout2D.zones + ScenarioResultArtifacts.exitUsage"));
+    candidate.evidence.push_back(guidanceInstallEvidence(*installAnchor));
+    candidate.evidence.push_back(guidanceTuningEvidence(guidance));
     candidate.recommendedScenario = std::move(draft);
     return candidate;
 }
@@ -1151,15 +1580,20 @@ std::optional<AlternativeRecommendationCandidate> makePressureHotspotCandidate(
     }
 
     const auto severity = riskSeverity(context, AlternativeRecommendationRiskKind::PressureHotspot);
+    const auto installAnchor = pressureGuidanceAnchor(request);
+    if (!installAnchor.has_value()) {
+        return std::nullopt;
+    }
     auto draft = makeRecommendedDraft(
         request,
         AlternativeRecommendationKind::PressureHotspotRelief,
         "Recommended: relieve pressure toward " + zoneName(request.layout, targetExit->exitZoneId));
-    draft.control.routeGuidances.push_back(makeGuidance(
+    auto guidance = makeGuidance(
         "recommendation-guidance-pressure-" + sanitizeId(targetExit->exitZoneId),
         targetExit->exitZoneId,
-        {},
-        guidanceComplianceForSeverity(severity)));
+        guidanceComplianceForSeverity(severity));
+    configureGuidanceForRecommendation(guidance, request, *installAnchor, severity);
+    draft.control.routeGuidances.push_back(guidance);
     finalizeDiffKeys(request, draft);
     if (!recommendedDraftChangesSource(request, draft)) {
         return std::nullopt;
@@ -1221,6 +1655,8 @@ std::optional<AlternativeRecommendationCandidate> makePressureHotspotCandidate(
         "Guided exit",
         zoneName(request.layout, targetExit->exitZoneId),
         "least-used exit from FacilityLayout2D.zones + ScenarioResultArtifacts.exitUsage"));
+    candidate.evidence.push_back(guidanceInstallEvidence(*installAnchor));
+    candidate.evidence.push_back(guidanceTuningEvidence(guidance));
     candidate.recommendedScenario = std::move(draft);
     return candidate;
 }
@@ -1242,15 +1678,20 @@ std::optional<AlternativeRecommendationCandidate> makeCrossFlowCandidate(
             && !hasRouteGuidanceForExit(request.sourceScenario, targetExit->exitZoneId)
             && !exitHasBottleneck(request, targetExit->exitZoneId)
             && guidanceDetourAcceptable(request, context.mostUsedExit->exitZoneId, targetExit->exitZoneId)) {
+            const auto installAnchor = crossFlowGuidanceAnchor(request);
+            if (!installAnchor.has_value()) {
+                return std::nullopt;
+            }
             auto draft = makeRecommendedDraft(
                 request,
                 AlternativeRecommendationKind::CrossFlowSeparation,
                 "Recommended: guide cross-flow away from shared movement");
-            draft.control.routeGuidances.push_back(makeGuidance(
+            auto guidance = makeGuidance(
                 "recommendation-guidance-cross-flow-" + sanitizeId(targetExit->exitZoneId),
                 targetExit->exitZoneId,
-                {},
-                guidanceComplianceForSeverity(severity)));
+                guidanceComplianceForSeverity(severity));
+            configureGuidanceForRecommendation(guidance, request, *installAnchor, severity);
+            draft.control.routeGuidances.push_back(guidance);
             finalizeDiffKeys(request, draft);
             if (recommendedDraftChangesSource(request, draft)) {
                 AlternativeRecommendationCandidate candidate;
@@ -1269,6 +1710,8 @@ std::optional<AlternativeRecommendationCandidate> makeCrossFlowCandidate(
                     "Guided exit",
                     zoneName(request.layout, targetExit->exitZoneId),
                     "least-used reachable exit from FacilityLayout2D.zones + ScenarioResultArtifacts.exitUsage"));
+                candidate.evidence.push_back(guidanceInstallEvidence(*installAnchor));
+                candidate.evidence.push_back(guidanceTuningEvidence(guidance));
                 candidate.recommendedScenario = std::move(draft);
                 return candidate;
             }
@@ -1277,7 +1720,8 @@ std::optional<AlternativeRecommendationCandidate> makeCrossFlowCandidate(
 
     if (findRiskSignal(context, AlternativeRecommendationRiskKind::PressureHotspot) == nullptr
         && findRiskSignal(context, AlternativeRecommendationRiskKind::TimeLimitMissed) == nullptr) {
-        const auto stagedSources = makeSequentialStagedEvacuationSources(request);
+        const auto profile = stagedEvacuationProfileFor(request, severity);
+        const auto stagedSources = makeSequentialStagedEvacuationSources(request, profile);
         if (stagedSources.size() >= 2
             && std::none_of(stagedSources.begin(), stagedSources.end(), [&](const auto& source) {
                    return hasOccupantSource(request.sourceScenario, source.id);
@@ -1307,40 +1751,18 @@ std::optional<AlternativeRecommendationCandidate> makeCrossFlowCandidate(
                     "Staged groups",
                     std::to_string(stagedSources.size()) + " source groups",
                     "ScenarioDraft.population.initialPlacements"));
+                candidate.evidence.push_back(evidence(
+                    "Release schedule",
+                    "sequential groups, up to " + std::to_string(profile.agentsPerSpawn) + " agents every "
+                        + fixed(profile.intervalSeconds, 1) + " sec",
+                    "recommended OccupantSource2D"));
                 candidate.recommendedScenario = std::move(draft);
                 return candidate;
             }
         }
     }
 
-    const std::string eventId = "recommendation-cross-flow-separation";
-    if (hasOperationalEvent(request.sourceScenario, eventId)) {
-        return std::nullopt;
-    }
-
-    auto draft = makeRecommendedDraft(
-        request,
-        AlternativeRecommendationKind::CrossFlowSeparation,
-        "Recommended: separate cross-flow movements");
-    draft.control.events.push_back(makeOperationalEvent(
-        eventId,
-        "Separate cross-flow movements",
-        signal->summary,
-        "Use lane separation, time-separated entry, or exit-before-entry operation."));
-    finalizeDiffKeys(request, draft);
-
-    AlternativeRecommendationCandidate candidate;
-    candidate.kind = AlternativeRecommendationKind::CrossFlowSeparation;
-    candidate.riskKind = AlternativeRecommendationRiskKind::CrossFlow;
-    candidate.id = "separate-cross-flow";
-    candidate.priority = priorityForCandidate(240, severity, false);
-    candidate.title = "Separate cross-flow movements";
-    candidate.summary = "Record a lane separation or time-separated entry operation.";
-    candidate.expectedImprovement = "Reduces crossing movement interference and lets the revised operation be compared by rerun.";
-    candidate.artifactSource = "AlternativeRecommendationRiskSignal + cross-flow metrics";
-    candidate.evidence = signal->evidence;
-    candidate.recommendedScenario = std::move(draft);
-    return candidate;
+    return std::nullopt;
 }
 
 std::optional<AlternativeRecommendationCandidate> makeStagedEvacuationCandidate(
@@ -1357,7 +1779,8 @@ std::optional<AlternativeRecommendationCandidate> makeStagedEvacuationCandidate(
         return std::nullopt;
     }
 
-    const auto stagedSources = makeSequentialStagedEvacuationSources(request);
+    const auto profile = stagedEvacuationProfileFor(request, signal->severity);
+    const auto stagedSources = makeSequentialStagedEvacuationSources(request, profile);
     if (stagedSources.empty()) {
         return std::nullopt;
     }
@@ -1371,7 +1794,7 @@ std::optional<AlternativeRecommendationCandidate> makeStagedEvacuationCandidate(
     if (stagedAgentCount == 0 || tickCount == 0) {
         return std::nullopt;
     }
-    const auto finalSpawnSeconds = kStagedEvacuationIntervalSeconds * static_cast<double>(tickCount - 1);
+    const auto finalSpawnSeconds = profile.intervalSeconds * static_cast<double>(tickCount - 1);
 
     auto draft = makeRecommendedDraft(
         request,
@@ -1393,8 +1816,8 @@ std::optional<AlternativeRecommendationCandidate> makeStagedEvacuationCandidate(
     candidate.id = "staged-evacuation-batches";
     candidate.priority = priorityForCandidate(160, signal->severity, true);
     candidate.title = "Stage groups sequentially";
-    candidate.summary = "Release each source group in order: up to " + std::to_string(kStagedEvacuationAgentsPerSpawn)
-        + " agents every " + fixed(kStagedEvacuationIntervalSeconds, 0)
+    candidate.summary = "Release each source group in order: up to " + std::to_string(profile.agentsPerSpawn)
+        + " agents every " + fixed(profile.intervalSeconds, 1)
         + " sec, then start the next group instead of releasing " + std::to_string(stagedAgentCount) + " at once.";
     candidate.expectedImprovement = "Reduces simultaneous demand at exits or bottlenecks before validating by rerun.";
     candidate.artifactSource = "AlternativeRecommendationRiskSignal + ScenarioDraft.population.initialPlacements";
@@ -1405,8 +1828,8 @@ std::optional<AlternativeRecommendationCandidate> makeStagedEvacuationCandidate(
         "ScenarioDraft.population.initialPlacements"));
     candidate.evidence.push_back(evidence(
         "Release schedule",
-        "sequential groups, up to " + std::to_string(kStagedEvacuationAgentsPerSpawn) + " agents every "
-            + fixed(kStagedEvacuationIntervalSeconds, 0) + " sec x " + std::to_string(tickCount) + " batches",
+        "sequential groups, up to " + std::to_string(profile.agentsPerSpawn) + " agents every "
+            + fixed(profile.intervalSeconds, 1) + " sec x " + std::to_string(tickCount) + " batches",
         "recommended OccupantSource2D"));
     candidate.evidence.push_back(evidence(
         "Release window",
@@ -1494,8 +1917,9 @@ AlternativeRecommendationResult recommendFromInput(const AlternativeRecommendati
     });
 
     if (result.candidates.empty()) {
-        result.blockingReasons.push_back(
-            "No detected risk signal, blocked connection, exit imbalance, or pressure hotspot produced an actionable v1 recommendation.");
+        result.blockingReasons.push_back(result.riskSignals.empty()
+            ? "No detected risk signal, blocked connection, exit imbalance, or pressure hotspot produced an actionable v1 recommendation."
+            : "Detected risk signals did not produce a simulation-changing recommendation draft with the current layout and scenario data.");
     }
 
     return result;

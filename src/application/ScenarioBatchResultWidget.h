@@ -89,7 +89,6 @@ private:
     void clearDetailSelection();
     void setDetailSelection(ScenarioResultNavigationView view, std::size_t index);
     void setComparisonSelection(std::vector<int> indices);
-    void setRecommendationScenarioSelected(int index, bool selected);
     void setOverlayMode(OverlayMode mode);
     void showAuthoring(ScenarioAuthoringWidget::InitialState initialState);
     void showClosestReplayFrameAtSeconds(double seconds);
@@ -109,7 +108,6 @@ private:
     std::function<void()> backToLayoutReviewHandler_{};
     int currentResultIndex_{0};
     std::vector<int> selectedCompareIndices_{};
-    std::vector<int> selectedRecommendationIndices_{};
     std::vector<safecrowd::domain::SimulationFrame> replayFrames_{};
     int replayFrameIndex_{0};
     WorkspaceShell* shell_{nullptr};

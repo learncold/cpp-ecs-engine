@@ -986,10 +986,6 @@ ScenarioBatchResultWidget::ScenarioBatchResultWidget(
         resultNavigationView_ = resultNavigationViewFromSaved(results_[static_cast<std::size_t>(currentResultIndex_)].navigationView);
     }
     selectedCompareIndices_ = defaultCompareIndices(results_, currentResultIndex_, baselineResultIndex());
-    for (int index = 0; index < static_cast<int>(results_.size()); ++index) {
-        selectedRecommendationIndices_.push_back(index);
-    }
-
     auto* rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
@@ -1916,22 +1912,6 @@ void ScenarioBatchResultWidget::syncCompareCheckBoxes() {
     }
 }
 
-void ScenarioBatchResultWidget::setRecommendationScenarioSelected(int index, bool selected) {
-    if (index < 0 || index >= static_cast<int>(results_.size())) {
-        return;
-    }
-    const auto it = std::find(selectedRecommendationIndices_.begin(), selectedRecommendationIndices_.end(), index);
-    if (selected && it == selectedRecommendationIndices_.end()) {
-        selectedRecommendationIndices_.push_back(index);
-        std::sort(selectedRecommendationIndices_.begin(), selectedRecommendationIndices_.end());
-    } else if (!selected && it != selectedRecommendationIndices_.end()) {
-        selectedRecommendationIndices_.erase(it);
-    }
-    QTimer::singleShot(0, this, [this]() {
-        refreshResultNavigationPanel();
-    });
-}
-
 QWidget* ScenarioBatchResultWidget::createBatchRecommendationNavigationPanel() {
     auto* panel = new QWidget(shell_);
     auto* layout = new QVBoxLayout(panel);
@@ -1941,38 +1921,9 @@ QWidget* ScenarioBatchResultWidget::createBatchRecommendationNavigationPanel() {
     auto* header = createLabel("Recommendations", panel, ui::FontRole::SectionTitle);
     header->setStyleSheet(ui::mutedTextStyleSheet());
     layout->addWidget(header);
-    auto* caption = createLabel("Select scenarios to inspect their operational alternatives.", panel, ui::FontRole::Caption);
+    auto* caption = createLabel("Generated from the currently selected result's persisted risk metrics and artifacts.", panel, ui::FontRole::Caption);
     caption->setStyleSheet(ui::subtleTextStyleSheet());
     layout->addWidget(caption);
-
-    auto* selector = new QFrame(panel);
-    selector->setStyleSheet(ui::panelStyleSheet());
-    auto* selectorLayout = new QVBoxLayout(selector);
-    selectorLayout->setContentsMargins(14, 12, 14, 12);
-    selectorLayout->setSpacing(8);
-    selectorLayout->addWidget(createLabel("Scenarios", selector, ui::FontRole::Body));
-    for (int index = 0; index < static_cast<int>(results_.size()); ++index) {
-        const auto& result = results_[static_cast<std::size_t>(index)];
-        auto* checkbox = new QCheckBox(
-            QString("%1\n%2  -  %3")
-                .arg(QString::fromStdString(result.scenario.name))
-                .arg(scenarioRoleLabel(result.scenario.role))
-                .arg(formatSeconds(finalSeconds(result))),
-            selector);
-        checkbox->setFont(ui::font(ui::FontRole::Caption));
-        checkbox->setChecked(std::find(
-            selectedRecommendationIndices_.begin(),
-            selectedRecommendationIndices_.end(),
-            index) != selectedRecommendationIndices_.end());
-        checkbox->setStyleSheet(
-            "QCheckBox { color: #344256; spacing: 8px; }"
-            "QCheckBox::indicator { width: 16px; height: 16px; }");
-        selectorLayout->addWidget(checkbox);
-        connect(checkbox, &QCheckBox::toggled, this, [this, index](bool checked) {
-            setRecommendationScenarioSelected(index, checked);
-        });
-    }
-    layout->addWidget(selector);
 
     auto* scrollArea = new QScrollArea(panel);
     scrollArea->setWidgetResizable(true);
@@ -1986,110 +1937,120 @@ QWidget* ScenarioBatchResultWidget::createBatchRecommendationNavigationPanel() {
     contentLayout->setContentsMargins(0, 0, 10, 0);
     contentLayout->setSpacing(12);
 
-    if (selectedRecommendationIndices_.empty()) {
-        auto* empty = createLabel("Select at least one scenario.", content, ui::FontRole::Caption);
-        empty->setStyleSheet(ui::mutedTextStyleSheet());
-        contentLayout->addWidget(empty);
-    }
-
     const auto baselineIndex = explicitBaselineResultIndex();
     const auto* baselineScenario =
         baselineIndex >= 0 && baselineIndex < static_cast<int>(results_.size())
             ? &results_[static_cast<std::size_t>(baselineIndex)].scenario
             : nullptr;
     const safecrowd::domain::AlternativeRecommendationService service;
-    for (const auto index : selectedRecommendationIndices_) {
-        if (index < 0 || index >= static_cast<int>(results_.size())) {
-            continue;
+    const auto& result = results_[static_cast<std::size_t>(currentResultIndex_)];
+    const auto recommendation = service.recommend(
+        layout_,
+        result.scenario,
+        result.risk,
+        result.artifacts,
+        baselineScenario,
+        &result.frame);
+
+    auto* scenarioHeader = new QWidget(content);
+    auto* scenarioHeaderLayout = new QVBoxLayout(scenarioHeader);
+    scenarioHeaderLayout->setContentsMargins(0, 0, 0, 0);
+    scenarioHeaderLayout->setSpacing(2);
+    auto* title = createLabel(QString::fromStdString(result.scenario.name), scenarioHeader, ui::FontRole::Body);
+    title->setStyleSheet("QLabel { color: #16202b; font-weight: 600; }");
+    scenarioHeaderLayout->addWidget(title);
+    auto* meta = createLabel(
+        QString("%1  -  %2  -  %3 recommendation%4")
+            .arg(scenarioRoleLabel(result.scenario.role))
+            .arg(formatSeconds(finalSeconds(result)))
+            .arg(static_cast<int>(recommendation.candidates.size()))
+            .arg(recommendation.candidates.size() == 1 ? "" : "s"),
+        scenarioHeader,
+        ui::FontRole::Caption);
+    meta->setStyleSheet(ui::subtleTextStyleSheet());
+    scenarioHeaderLayout->addWidget(meta);
+    contentLayout->addWidget(scenarioHeader);
+
+    if (recommendation.candidates.empty()) {
+        const auto message = recommendation.blockingReasons.empty()
+            ? QString("No actionable recommendation for this scenario.")
+            : QString::fromStdString(recommendation.blockingReasons.front());
+        auto* empty = createLabel(message, content, ui::FontRole::Caption);
+        empty->setStyleSheet(ui::mutedTextStyleSheet());
+        contentLayout->addWidget(empty);
+    }
+
+    for (const auto& candidate : recommendation.candidates) {
+        auto* section = new QFrame(content);
+        section->setStyleSheet(ui::panelStyleSheet());
+        section->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+        section->setMinimumWidth(0);
+        auto* sectionLayout = new QVBoxLayout(section);
+        sectionLayout->setContentsMargins(14, 12, 14, 12);
+        sectionLayout->setSpacing(6);
+
+        auto* candidateTitle = createLabel(QString::fromStdString(candidate.title), section, ui::FontRole::Body);
+        candidateTitle->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        candidateTitle->setStyleSheet("QLabel { color: #16202b; font-weight: 600; }");
+        sectionLayout->addWidget(candidateTitle);
+
+        auto* summary = createLabel(QString::fromStdString(candidate.summary), section, ui::FontRole::Caption);
+        summary->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        summary->setStyleSheet(ui::mutedTextStyleSheet());
+        sectionLayout->addWidget(summary);
+
+        if (!candidate.expectedImprovement.empty()) {
+            auto* improvement = createLabel(
+                QString("Expected: %1").arg(QString::fromStdString(candidate.expectedImprovement)),
+                section,
+                ui::FontRole::Caption);
+            improvement->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+            improvement->setStyleSheet(ui::subtleTextStyleSheet());
+            sectionLayout->addWidget(improvement);
         }
-        const auto& result = results_[static_cast<std::size_t>(index)];
-        const auto recommendation = service.recommend(
-            layout_,
-            result.scenario,
-            result.risk,
-            result.artifacts,
-            baselineScenario,
-            &result.frame);
-
-        auto* scenarioHeader = new QWidget(content);
-        auto* scenarioHeaderLayout = new QVBoxLayout(scenarioHeader);
-        scenarioHeaderLayout->setContentsMargins(0, 0, 0, 0);
-        scenarioHeaderLayout->setSpacing(2);
-        auto* title = createLabel(QString::fromStdString(result.scenario.name), scenarioHeader, ui::FontRole::Body);
-        title->setStyleSheet("QLabel { color: #16202b; font-weight: 600; }");
-        scenarioHeaderLayout->addWidget(title);
-        auto* meta = createLabel(
-            QString("%1  -  %2  -  %3 recommendation%4")
-                .arg(scenarioRoleLabel(result.scenario.role))
-                .arg(formatSeconds(finalSeconds(result)))
-                .arg(static_cast<int>(recommendation.candidates.size()))
-                .arg(recommendation.candidates.size() == 1 ? "" : "s"),
-            scenarioHeader,
-            ui::FontRole::Caption);
-        meta->setStyleSheet(ui::subtleTextStyleSheet());
-        scenarioHeaderLayout->addWidget(meta);
-        contentLayout->addWidget(scenarioHeader);
-
-        if (recommendation.candidates.empty()) {
-            const auto message = recommendation.blockingReasons.empty()
-                ? QString("No actionable recommendation for this scenario.")
-                : QString::fromStdString(recommendation.blockingReasons.front());
-            auto* empty = createLabel(message, content, ui::FontRole::Caption);
-            empty->setStyleSheet(ui::mutedTextStyleSheet());
-            contentLayout->addWidget(empty);
-            continue;
-        }
-
-        for (const auto& candidate : recommendation.candidates) {
-            auto* section = new QFrame(content);
-            section->setStyleSheet(ui::panelStyleSheet());
-            section->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
-            section->setMinimumWidth(0);
-            auto* sectionLayout = new QVBoxLayout(section);
-            sectionLayout->setContentsMargins(14, 12, 14, 12);
-            sectionLayout->setSpacing(6);
-
-            auto* candidateTitle = createLabel(QString::fromStdString(candidate.title), section, ui::FontRole::Body);
-            candidateTitle->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-            candidateTitle->setStyleSheet("QLabel { color: #16202b; font-weight: 600; }");
-            sectionLayout->addWidget(candidateTitle);
-
-            auto* summary = createLabel(QString::fromStdString(candidate.summary), section, ui::FontRole::Caption);
-            summary->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-            summary->setStyleSheet(ui::mutedTextStyleSheet());
-            sectionLayout->addWidget(summary);
-
-            for (const auto& item : candidate.evidence) {
-                if (!shouldShowRecommendationEvidence(item)) {
-                    continue;
-                }
-                auto* evidenceLabel = createLabel(
-                    QString("%1: %2")
-                        .arg(QString::fromStdString(item.label),
-                             QString::fromStdString(item.value)),
-                    section,
-                    ui::FontRole::Caption);
-                evidenceLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-                evidenceLabel->setStyleSheet(ui::subtleTextStyleSheet());
-                evidenceLabel->setToolTip(QString::fromStdString(item.source));
-                sectionLayout->addWidget(evidenceLabel);
+        if (!candidate.recommendedScenario.variationDiffKeys.empty()) {
+            QStringList changes;
+            for (const auto& key : candidate.recommendedScenario.variationDiffKeys) {
+                changes.push_back(QString::fromStdString(key));
             }
-
-            auto* button = new QPushButton("Create Scenario", section);
-            button->setFont(ui::font(ui::FontRole::Body));
-            button->setStyleSheet(ui::secondaryButtonStyleSheet());
-            button->setCursor(Qt::PointingHandCursor);
-            button->setMinimumWidth(0);
-            button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-            button->setToolTip("Create recommended scenario");
-            sectionLayout->addWidget(button);
-            connect(button, &QPushButton::clicked, section, [this, index, scenario = candidate.recommendedScenario]() {
-                currentResultIndex_ = index;
-                createRecommendedScenario(scenario);
-            });
-
-            contentLayout->addWidget(section);
+            auto* changesLabel = createLabel(
+                QString("Changes: %1").arg(changes.join(", ")),
+                section,
+                ui::FontRole::Caption);
+            changesLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+            changesLabel->setStyleSheet(ui::subtleTextStyleSheet());
+            sectionLayout->addWidget(changesLabel);
         }
+
+        for (const auto& item : candidate.evidence) {
+            if (!shouldShowRecommendationEvidence(item)) {
+                continue;
+            }
+            auto* evidenceLabel = createLabel(
+                QString("%1: %2")
+                    .arg(QString::fromStdString(item.label),
+                         QString::fromStdString(item.value)),
+                section,
+                ui::FontRole::Caption);
+            evidenceLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+            evidenceLabel->setStyleSheet(ui::subtleTextStyleSheet());
+            evidenceLabel->setToolTip(QString::fromStdString(item.source));
+            sectionLayout->addWidget(evidenceLabel);
+        }
+
+        auto* button = new QPushButton("Create Scenario", section);
+        button->setFont(ui::font(ui::FontRole::Body));
+        button->setStyleSheet(ui::secondaryButtonStyleSheet());
+        button->setCursor(Qt::PointingHandCursor);
+        button->setMinimumWidth(0);
+        button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        button->setToolTip("Create recommended scenario");
+        sectionLayout->addWidget(button);
+        connect(button, &QPushButton::clicked, section, [this, scenario = candidate.recommendedScenario]() {
+            createRecommendedScenario(scenario);
+        });
+
+        contentLayout->addWidget(section);
     }
 
     contentLayout->addStretch(1);

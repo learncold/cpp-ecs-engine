@@ -742,6 +742,29 @@ QWidget* createScenarioRecommendationNavigationPanel(
         summary->setStyleSheet(ui::mutedTextStyleSheet());
         sectionLayout->addWidget(summary);
 
+        if (!candidate.expectedImprovement.empty()) {
+            auto* improvement = createLabel(
+                QString("Expected: %1").arg(QString::fromStdString(candidate.expectedImprovement)),
+                section,
+                ui::FontRole::Caption);
+            improvement->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+            improvement->setStyleSheet(ui::subtleTextStyleSheet());
+            sectionLayout->addWidget(improvement);
+        }
+        if (!candidate.recommendedScenario.variationDiffKeys.empty()) {
+            QStringList changes;
+            for (const auto& key : candidate.recommendedScenario.variationDiffKeys) {
+                changes.push_back(QString::fromStdString(key));
+            }
+            auto* changesLabel = createLabel(
+                QString("Changes: %1").arg(changes.join(", ")),
+                section,
+                ui::FontRole::Caption);
+            changesLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+            changesLabel->setStyleSheet(ui::subtleTextStyleSheet());
+            sectionLayout->addWidget(changesLabel);
+        }
+
         for (const auto& item : candidate.evidence) {
             if (!shouldShowRecommendationEvidence(item)) {
                 continue;
