@@ -13,9 +13,11 @@
 #include "domain/ScenarioAuthoring.h"
 #include "domain/ScenarioBatchRunner.h"
 
+class QDoubleSpinBox;
 class QLabel;
 class QProgressBar;
 class QPushButton;
+class QSpinBox;
 class QTimer;
 
 namespace safecrowd::application {
@@ -89,6 +91,8 @@ private:
     void refreshStatus();
     void selectRun(int index);
     std::size_t selectedSourceScenarioIndex() const;
+    void applyRunSettings();
+    void syncRunSettingsControls();
     void showResults();
     void setPlaybackSpeedMultiplier(int multiplier);
     void stopRun();
@@ -126,6 +130,11 @@ private:
     QPushButton* speed3Button_{nullptr};
     QPushButton* speed5Button_{nullptr};
     QPushButton* resultButton_{nullptr};
+    QDoubleSpinBox* timeLimitSpin_{nullptr};
+    QDoubleSpinBox* sampleIntervalSpin_{nullptr};
+    QSpinBox* repeatSpin_{nullptr};
+    QSpinBox* seedSpin_{nullptr};
+    QPushButton* applySettingsButton_{nullptr};
     int selectedRunIndex_{0};
     int playbackSpeedMultiplier_{1};
     bool paused_{false};
