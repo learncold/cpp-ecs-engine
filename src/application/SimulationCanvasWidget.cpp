@@ -39,8 +39,6 @@ constexpr double kHotspotFocusZoom = 2.8;
 constexpr double kBottleneckFocusZoom = 2.4;
 constexpr double kCrossFlowCellFocusZoom = 2.8;
 constexpr double kDefaultDensityScaleMaxPeoplePerSquareMeter = 4.0;
-constexpr double kPressureInfluenceRadiusMultiplier = 1.45;
-constexpr double kPressureMinimumScreenRadius = 12.0;
 constexpr double kDefaultPressureScaleMaxScore = 1.0;
 constexpr double kCrossFlowInfluenceRadiusMultiplier = 1.3;
 constexpr double kCrossFlowMinimumScreenRadius = 16.0;
@@ -97,6 +95,8 @@ struct GeneratedHeatmapWorldCache {
     QImage image{};
     LayoutCanvasBounds bounds{};
 };
+
+QColor pressureHeatmapColor(double ratio, int alpha);
 
 QString hazardKindLabel(safecrowd::domain::EnvironmentHazardKind kind) {
     switch (kind) {
@@ -495,7 +495,8 @@ std::optional<GeneratedHeatmapWorldCache> buildHeatmapWorldCacheImage(
         return std::nullopt;
     }
 
-    const auto maxBlurRadius = mode == ResultOverlayMode::Density ? 10 : 5;
+    const auto maxBlurRadius =
+        (mode == ResultOverlayMode::Density || mode == ResultOverlayMode::Pressure) ? 10 : 5;
     auto pixelsPerMeter = pixelsPerMeterKey;
     LayoutCanvasBounds imageBounds;
     int blurRadius = 1;
@@ -608,6 +609,13 @@ std::optional<GeneratedHeatmapWorldCache> buildHeatmapWorldCacheImage(
                     0,
                     230);
                 image.setPixelColor(x, y, densityHeatmapColor(intensity, alpha));
+            } else if (mode == ResultOverlayMode::Pressure) {
+                const auto intensity = std::clamp(std::pow(value, 0.78), 0.0, 1.0);
+                const auto alpha = std::clamp(
+                    50 + static_cast<int>(188.0 * std::sqrt(intensity)),
+                    0,
+                    238);
+                image.setPixelColor(x, y, pressureHeatmapColor(intensity, alpha));
             } else {
                 const auto intensity = std::clamp(std::pow(value, 0.70), 0.0, 1.0);
                 const auto alpha = std::clamp(
@@ -1132,6 +1140,8 @@ void SimulationCanvasWidget::setPressureOverlay(
         std::isfinite(scaleMaxPressureScore) && scaleMaxPressureScore > 0.0
         ? scaleMaxPressureScore
         : kDefaultPressureScaleMaxScore;
+    ++heatmapOverlayRevision_;
+    invalidateHeatmapWorldCache();
     invalidateOverlayCache();
     update();
 }
@@ -1427,6 +1437,8 @@ void SimulationCanvasWidget::paintEvent(QPaintEvent* event) {
         drawOccupancyHeatmapOverlay(painter, transform);
     } else if (overlayMode_ == ResultOverlayMode::Density) {
         drawDensityOverlay(painter, transform);
+    } else if (overlayMode_ == ResultOverlayMode::Pressure) {
+        drawPressureOverlay(painter, transform);
     } else {
         refreshOverlayCache(*bounds);
         if (!overlayCache_.isNull()) {
@@ -1528,7 +1540,9 @@ void SimulationCanvasWidget::refreshOverlayCache(const LayoutCanvasBounds& bound
         overlayCacheFloorId_ = currentFloorId_;
         return;
     }
-    if (overlayMode_ == ResultOverlayMode::Occupancy || overlayMode_ == ResultOverlayMode::Density) {
+    if (overlayMode_ == ResultOverlayMode::Occupancy
+        || overlayMode_ == ResultOverlayMode::Density
+        || overlayMode_ == ResultOverlayMode::Pressure) {
         overlayCache_ = QPixmap();
         overlayCacheValid_ = true;
         overlayCacheMode_ = overlayMode_;
@@ -1945,23 +1959,8 @@ void SimulationCanvasWidget::drawDensityOverlay(QPainter& painter, const LayoutC
         heatmapWorldCacheBounds_);
 }
 
-void SimulationCanvasWidget::drawPressureOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const {
+void SimulationCanvasWidget::drawPressureOverlay(QPainter& painter, const LayoutCanvasTransform& transform) {
     if (pressureOverlay_.empty()) {
-        return;
-    }
-
-    std::vector<const safecrowd::domain::PressureCellMetric*> visibleCells;
-    visibleCells.reserve(pressureOverlay_.size());
-    for (const auto& cell : pressureOverlay_) {
-        if (!matchesFloor(cell.floorId, currentFloorId_)) {
-            continue;
-        }
-        if (cell.pressureScore <= 0.0) {
-            continue;
-        }
-        visibleCells.push_back(&cell);
-    }
-    if (visibleCells.empty()) {
         return;
     }
 
@@ -1969,57 +1968,56 @@ void SimulationCanvasWidget::drawPressureOverlay(QPainter& painter, const Layout
         std::isfinite(pressureScaleMaxScore_) && pressureScaleMaxScore_ > 0.0
         ? pressureScaleMaxScore_
         : kDefaultPressureScaleMaxScore;
-    std::sort(visibleCells.begin(), visibleCells.end(), [](const auto* lhs, const auto* rhs) {
-        if (lhs->pressureScore != rhs->pressureScore) {
-            return lhs->pressureScore < rhs->pressureScore;
+
+    const auto pixelsPerMeterKey = heatmapPixelsPerMeterKey(transform);
+    if (!heatmapWorldCacheValid_
+        || heatmapWorldCacheMode_ != ResultOverlayMode::Pressure
+        || heatmapWorldCacheFloorId_ != currentFloorId_
+        || heatmapWorldCacheRevision_ != heatmapOverlayRevision_
+        || std::abs(heatmapWorldCachePixelsPerMeterKey_ - pixelsPerMeterKey) > 1e-9) {
+        std::vector<HeatmapWorldSource> sources;
+        sources.reserve(pressureOverlay_.size());
+        for (const auto& cell : pressureOverlay_) {
+            if (!matchesFloor(cell.floorId, currentFloorId_) || cell.pressureScore <= 0.0) {
+                continue;
+            }
+            const auto intensity = std::clamp(cell.pressureScore / scaleMax, 0.0, 1.0);
+            if (intensity <= 0.0) {
+                continue;
+            }
+            sources.push_back({
+                .center = cell.center,
+                .cellMin = cell.cellMin,
+                .cellMax = cell.cellMax,
+                .intensity = intensity,
+            });
         }
-        return lhs->intrudingPairCount < rhs->intrudingPairCount;
-    });
 
-    painter.save();
-    painter.setPen(Qt::NoPen);
-    painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
-    QPainterPath walkableClip;
-    for (const auto& zone : layout_.zones) {
-        if (!matchesFloor(zone.floorId, currentFloorId_)) {
-            continue;
+        heatmapWorldCache_ = QImage();
+        if (auto generated = buildHeatmapWorldCacheImage(
+                layout_,
+                currentFloorId_,
+                sources,
+                pixelsPerMeterKey,
+                ResultOverlayMode::Pressure);
+            generated.has_value()) {
+            heatmapWorldCache_ = std::move(generated->image);
+            heatmapWorldCacheBounds_ = generated->bounds;
         }
-        walkableClip.addPath(layoutCanvasPolygonPath(zone.area, transform));
-    }
-    if (!walkableClip.isEmpty()) {
-        painter.setClipPath(walkableClip);
+        heatmapWorldCachePixelsPerMeterKey_ = pixelsPerMeterKey;
+        heatmapWorldCacheMode_ = ResultOverlayMode::Pressure;
+        heatmapWorldCacheFloorId_ = currentFloorId_;
+        heatmapWorldCacheRevision_ = heatmapOverlayRevision_;
+        heatmapWorldCacheValid_ = true;
     }
 
-    for (const auto* cell : visibleCells) {
-        const auto center = transform.map(cell->center);
-        const auto cellWidth = cell->cellMax.x > cell->cellMin.x
-            ? cell->cellMax.x - cell->cellMin.x
-            : kDefaultHotspotCellSize;
-        const auto cellHeight = cell->cellMax.y > cell->cellMin.y
-            ? cell->cellMax.y - cell->cellMin.y
-            : kDefaultHotspotCellSize;
-        const auto influenceRadiusWorld =
-            std::max(cellWidth, cellHeight) * kPressureInfluenceRadiusMultiplier;
-        const auto radiusAnchor = transform.map({
-            .x = cell->center.x + influenceRadiusWorld,
-            .y = cell->center.y,
-        });
-        const auto radius = std::max(
-            kPressureMinimumScreenRadius,
-            std::hypot(radiusAnchor.x() - center.x(), radiusAnchor.y() - center.y()));
-        const auto intensity = std::clamp(cell->pressureScore / scaleMax, 0.0, 1.0);
-        const auto coreAlpha = 62 + static_cast<int>(138.0 * intensity);
-        const auto coreColor = pressureHeatmapColor(intensity, std::clamp(coreAlpha, 62, 200));
-        const auto middleColor = pressureHeatmapColor(intensity, static_cast<int>(coreAlpha * 0.46));
-
-        QRadialGradient gradient(center, radius);
-        gradient.setColorAt(0.0, coreColor);
-        gradient.setColorAt(0.34, middleColor);
-        gradient.setColorAt(1.0, pressureHeatmapColor(intensity, 0));
-        painter.setBrush(gradient);
-        painter.drawEllipse(center, radius, radius);
-    }
-    painter.restore();
+    drawHeatmapWorldCacheImage(
+        painter,
+        transform,
+        layout_,
+        currentFloorId_,
+        heatmapWorldCache_,
+        heatmapWorldCacheBounds_);
 }
 
 void SimulationCanvasWidget::drawHotspotOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const {

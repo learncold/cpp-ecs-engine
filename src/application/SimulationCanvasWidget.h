@@ -88,7 +88,7 @@ private:
     void drawRouteGuidanceOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawOccupancyHeatmapOverlay(QPainter& painter, const LayoutCanvasTransform& transform);
     void drawDensityOverlay(QPainter& painter, const LayoutCanvasTransform& transform);
-    void drawPressureOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
+    void drawPressureOverlay(QPainter& painter, const LayoutCanvasTransform& transform);
     void drawHotspotOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawBottleneckOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
     void drawCrossFlowOverlay(QPainter& painter, const LayoutCanvasTransform& transform) const;
