@@ -80,7 +80,7 @@ ProjectWorkspaceState makeEvacuationScenarioDemoWorkspace() {
     });
     authoring.currentScenarioIndex = 1;
     authoring.navigationView = SavedNavigationView::Events;
-    authoring.inspectorPanelVisible = true;
+    authoring.inspectorPanelVisible = false;
     authoring.scenarioPanelVisible = true;
     authoring.rightPanelMode = SavedRightPanelMode::Scenario;
 
@@ -122,7 +122,7 @@ ProjectWorkspaceState makeTwoFloorEvacuationDemoWorkspace() {
     });
     authoring.currentScenarioIndex = 1;
     authoring.navigationView = SavedNavigationView::Events;
-    authoring.inspectorPanelVisible = true;
+    authoring.inspectorPanelVisible = false;
     authoring.scenarioPanelVisible = true;
     authoring.rightPanelMode = SavedRightPanelMode::Scenario;
 

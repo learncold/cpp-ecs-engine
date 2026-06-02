@@ -55,7 +55,7 @@ public:
         std::vector<ScenarioState> scenarios{};
         int currentScenarioIndex{-1};
         NavigationView navigationView{NavigationView::Layout};
-        bool inspectorPanelVisible{true};
+        bool inspectorPanelVisible{false};
         bool scenarioPanelVisible{true};
         RightPanelMode rightPanelMode{RightPanelMode::Scenario};
     };
@@ -167,7 +167,7 @@ private:
     std::vector<ScenarioState> scenarios_{};
     int currentScenarioIndex_{-1};
     NavigationView navigationView_{NavigationView::Layout};
-    bool inspectorPanelVisible_{true};
+    bool inspectorPanelVisible_{false};
     bool scenarioPanelVisible_{true};
     QSet<QString> layoutExpandedNodeIds_{};
     QString selectedLayoutElementId_{};

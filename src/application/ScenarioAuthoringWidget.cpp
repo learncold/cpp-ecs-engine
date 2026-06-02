@@ -1811,6 +1811,9 @@ ScenarioAuthoringWidget::ScenarioAuthoringWidget(
       navigationView_(initialState.navigationView),
       inspectorPanelVisible_(initialState.inspectorPanelVisible),
       scenarioPanelVisible_(initialState.scenarioPanelVisible) {
+    if (inspectorPanelVisible_ && scenarioPanelVisible_) {
+        inspectorPanelVisible_ = false;
+    }
     for (auto& scenario : scenarios_) {
         if (!scenarioHasOccupants(scenario)) {
             scenario.stagedForRun = false;
@@ -3663,8 +3666,7 @@ void ScenarioAuthoringWidget::refreshRightPanel() {
         return;
     }
 
-    const int panelCount = (inspectorPanelVisible_ ? 1 : 0) + (scenarioPanelVisible_ ? 1 : 0);
-    shell_->setReviewPanelWidth(panelCount > 1 ? 560 : 280);
+    shell_->setReviewPanelWidth(280);
     shell_->setReviewPanel(createRightPanelContainer());
     shell_->setReviewPanelVisible(true);
     refreshScenarioSwitcher();
@@ -4034,11 +4036,15 @@ QWidget* ScenarioAuthoringWidget::createPanelToggleBar() {
     layout->addWidget(scenarioPanelToggleButton_);
 
     connect(inspectorPanelToggleButton_, &QPushButton::clicked, this, [this]() {
-        inspectorPanelVisible_ = !inspectorPanelVisible_;
+        const bool showInspector = !inspectorPanelVisible_;
+        inspectorPanelVisible_ = showInspector;
+        scenarioPanelVisible_ = false;
         refreshRightPanel();
     });
     connect(scenarioPanelToggleButton_, &QPushButton::clicked, this, [this]() {
-        scenarioPanelVisible_ = !scenarioPanelVisible_;
+        const bool showScenario = !scenarioPanelVisible_;
+        scenarioPanelVisible_ = showScenario;
+        inspectorPanelVisible_ = false;
         refreshRightPanel();
     });
 

@@ -133,7 +133,7 @@ private:
     std::optional<ScenarioResultNavigationView> detailSelectionView_{};
     std::optional<std::size_t> detailSelectionIndex_{};
     int detailSelectionResultIndex_{-1};
-    bool detailPanelVisible_{true};
+    bool detailPanelVisible_{false};
     bool overviewPanelVisible_{true};
 };
 

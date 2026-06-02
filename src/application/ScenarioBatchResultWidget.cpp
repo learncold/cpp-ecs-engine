@@ -10,6 +10,7 @@
 #include <utility>
 
 #include <QCheckBox>
+#include <QColor>
 #include <QComboBox>
 #include <QEvent>
 #include <QFrame>
@@ -25,6 +26,7 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSignalBlocker>
+#include <QSize>
 #include <QSizePolicy>
 #include <QSlider>
 #include <QStringList>
@@ -37,6 +39,7 @@
 #include "application/ScenarioResultNavigation.h"
 #include "application/ScenarioRunWidget.h"
 #include "application/SimulationCanvasWidget.h"
+#include "application/ToolIconResources.h"
 #include "application/UiStyle.h"
 #include "application/WorkspaceShell.h"
 #include "domain/AlternativeRecommendationService.h"
@@ -1346,6 +1349,11 @@ QWidget* ScenarioBatchResultWidget::createPanelToggleBar() {
     detailPanelToggleButton_ = new QPushButton(bar);
     detailPanelToggleButton_->setCheckable(true);
     detailPanelToggleButton_->setChecked(detailPanelVisible_);
+    detailPanelToggleButton_->setIcon(makeSvgToolIcon(
+        QStringLiteral(":/tool-icons/etc/inspector-panel.svg"),
+        QColor("#16202b"),
+        QSize(22, 22)));
+    detailPanelToggleButton_->setIconSize(QSize(22, 22));
     detailPanelToggleButton_->setFixedSize(36, 32);
     detailPanelToggleButton_->setCursor(Qt::PointingHandCursor);
     detailPanelToggleButton_->setFocusPolicy(Qt::NoFocus);
@@ -1357,6 +1365,11 @@ QWidget* ScenarioBatchResultWidget::createPanelToggleBar() {
     overviewPanelToggleButton_ = new QPushButton(bar);
     overviewPanelToggleButton_->setCheckable(true);
     overviewPanelToggleButton_->setChecked(overviewPanelVisible_);
+    overviewPanelToggleButton_->setIcon(makeSvgToolIcon(
+        QStringLiteral(":/tool-icons/scenario-authoring/scenario-panel.svg"),
+        QColor("#16202b"),
+        QSize(22, 22)));
+    overviewPanelToggleButton_->setIconSize(QSize(22, 22));
     overviewPanelToggleButton_->setFixedSize(36, 32);
     overviewPanelToggleButton_->setCursor(Qt::PointingHandCursor);
     overviewPanelToggleButton_->setFocusPolicy(Qt::NoFocus);
@@ -1366,11 +1379,15 @@ QWidget* ScenarioBatchResultWidget::createPanelToggleBar() {
     layout->addWidget(overviewPanelToggleButton_);
 
     connect(detailPanelToggleButton_, &QPushButton::clicked, this, [this]() {
-        detailPanelVisible_ = !detailPanelVisible_;
+        const bool showDetail = !detailPanelVisible_;
+        detailPanelVisible_ = showDetail;
+        overviewPanelVisible_ = false;
         refreshRightPanel();
     });
     connect(overviewPanelToggleButton_, &QPushButton::clicked, this, [this]() {
-        overviewPanelVisible_ = !overviewPanelVisible_;
+        const bool showOverview = !overviewPanelVisible_;
+        overviewPanelVisible_ = showOverview;
+        detailPanelVisible_ = false;
         refreshRightPanel();
     });
 
@@ -1398,7 +1415,7 @@ void ScenarioBatchResultWidget::navigateToAuthoring() {
         }
     }
     initial.rightPanelMode = ScenarioAuthoringWidget::RightPanelMode::Scenario;
-    initial.inspectorPanelVisible = true;
+    initial.inspectorPanelVisible = false;
     initial.scenarioPanelVisible = true;
     showAuthoring(std::move(initial));
 }
@@ -1439,7 +1456,7 @@ void ScenarioBatchResultWidget::createRecommendedScenario(
         existingIndex.has_value()) {
         initial.currentScenarioIndex = *existingIndex;
         initial.rightPanelMode = ScenarioAuthoringWidget::RightPanelMode::Scenario;
-        initial.inspectorPanelVisible = true;
+        initial.inspectorPanelVisible = false;
         initial.scenarioPanelVisible = true;
         showAuthoring(std::move(initial));
         return;
@@ -1484,7 +1501,7 @@ void ScenarioBatchResultWidget::createRecommendedScenario(
     initial.scenarios.push_back(std::move(state));
     initial.currentScenarioIndex = static_cast<int>(initial.scenarios.size()) - 1;
     initial.rightPanelMode = ScenarioAuthoringWidget::RightPanelMode::Scenario;
-    initial.inspectorPanelVisible = true;
+    initial.inspectorPanelVisible = false;
     initial.scenarioPanelVisible = true;
     showAuthoring(std::move(initial));
 }
@@ -2157,8 +2174,7 @@ void ScenarioBatchResultWidget::refreshRightPanel() {
         return;
     }
 
-    const int panelCount = (detailPanelVisible_ ? 1 : 0) + (overviewPanelVisible_ ? 1 : 0);
-    shell_->setReviewPanelWidth(panelCount > 1 ? 560 : 280);
+    shell_->setReviewPanelWidth(280);
     shell_->setReviewPanel(createRightPanelContainer());
     shell_->setReviewPanelVisible(true);
     refreshComparisonCountLabel();
