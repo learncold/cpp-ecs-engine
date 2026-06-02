@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <optional>
@@ -47,6 +48,18 @@ int normalizedRunIndex(int index, std::size_t runCount) {
         return 0;
     }
     return std::clamp(index, 0, static_cast<int>(runCount) - 1);
+}
+
+int firstRunIndexForSourceScenario(
+    const safecrowd::domain::ScenarioBatchRunner& batchRunner,
+    std::size_t sourceScenarioIndex,
+    int fallbackIndex) {
+    for (std::size_t index = 0; index < batchRunner.size(); ++index) {
+        if (batchRunner.run(index).sourceScenarioIndex == sourceScenarioIndex) {
+            return static_cast<int>(index);
+        }
+    }
+    return normalizedRunIndex(fallbackIndex, batchRunner.size());
 }
 
 enum class TransportIconKind {
@@ -696,7 +709,7 @@ QWidget* ScenarioRunWidget::createRunPanel() {
     seedSpin_->setToolTip("Base random seed");
     settingsForm->addRow("Seed", seedSpin_);
 
-    applySettingsButton_ = new QPushButton("Apply & restart", settingsGroup);
+    applySettingsButton_ = new QPushButton("Apply selected & restart", settingsGroup);
     applySettingsButton_->setFont(ui::font(ui::FontRole::Caption));
     applySettingsButton_->setStyleSheet(ui::secondaryButtonStyleSheet());
     settingsForm->addRow(applySettingsButton_);
@@ -1008,16 +1021,17 @@ void ScenarioRunWidget::applyRunSettings() {
         return;
     }
 
-    const auto timeLimitSeconds = timeLimitSpin_->value();
-    const auto sampleIntervalSeconds = sampleIntervalSpin_->value();
-    const auto repeatCount = static_cast<std::uint32_t>(repeatSpin_->value());
-    const auto baseSeed = static_cast<std::uint32_t>(seedSpin_->value());
-    for (auto& scenario : scenarios_) {
-        scenario.execution.timeLimitSeconds = timeLimitSeconds;
-        scenario.execution.sampleIntervalSeconds = sampleIntervalSeconds;
-        scenario.execution.repeatCount = repeatCount;
-        scenario.execution.baseSeed = baseSeed;
+    const auto sourceIndex = selectedSourceScenarioIndex();
+    if (sourceIndex >= scenarios_.size()) {
+        return;
     }
+
+    auto& execution = scenarios_[sourceIndex].execution;
+    execution.timeLimitSeconds = timeLimitSpin_->value();
+    execution.sampleIntervalSeconds = sampleIntervalSpin_->value();
+    execution.repeatCount = static_cast<std::uint32_t>(repeatSpin_->value());
+    execution.baseSeed = static_cast<std::uint32_t>(seedSpin_->value());
+    syncReturnAuthoringScenarioExecution(sourceIndex);
 
     playbackSpeedMultiplier_ = 1;
     paused_ = false;
@@ -1026,7 +1040,7 @@ void ScenarioRunWidget::applyRunSettings() {
         timer_->stop();
     }
     batchRunner_.reset(layout_, scenarios_);
-    selectedRunIndex_ = normalizedRunIndex(selectedRunIndex_, batchRunner_.size());
+    selectedRunIndex_ = firstRunIndexForSourceScenario(batchRunner_, sourceIndex, selectedRunIndex_);
     if (!batchRunner_.empty()) {
         scenario_ = batchRunner_.run(static_cast<std::size_t>(selectedRunIndex_)).scenario;
     }
@@ -1037,6 +1051,27 @@ void ScenarioRunWidget::applyRunSettings() {
     if (timer_ != nullptr) {
         timer_->start();
     }
+}
+
+void ScenarioRunWidget::syncReturnAuthoringScenarioExecution(std::size_t sourceIndex) {
+    if (!returnAuthoringState_.has_value() || sourceIndex >= scenarios_.size()) {
+        return;
+    }
+
+    const auto& sourceScenario = scenarios_[sourceIndex];
+    auto& authoringScenarios = returnAuthoringState_->scenarios;
+    auto it = std::find_if(authoringScenarios.begin(), authoringScenarios.end(), [&](const auto& scenario) {
+        return scenario.draft.scenarioId == sourceScenario.scenarioId;
+    });
+    if (it == authoringScenarios.end() && sourceIndex < authoringScenarios.size()) {
+        it = std::next(authoringScenarios.begin(), static_cast<std::ptrdiff_t>(sourceIndex));
+    }
+    if (it == authoringScenarios.end()) {
+        return;
+    }
+
+    it->draft.execution = sourceScenario.execution;
+    it->stagedForRun = true;
 }
 
 void ScenarioRunWidget::cycleFastForwardMode() {

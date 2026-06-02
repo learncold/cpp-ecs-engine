@@ -92,6 +92,7 @@ private:
     void selectRun(int index);
     std::size_t selectedSourceScenarioIndex() const;
     void applyRunSettings();
+    void syncReturnAuthoringScenarioExecution(std::size_t sourceIndex);
     void syncRunSettingsControls();
     void showResults();
     void setPlaybackSpeedMultiplier(int multiplier);
