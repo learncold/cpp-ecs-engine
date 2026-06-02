@@ -49,6 +49,8 @@ const char* toString(ImportIssueCode code) noexcept {
         return "InvalidFloorReference";
     case ImportIssueCode::ConnectionSpanMisaligned:
         return "ConnectionSpanMisaligned";
+    case ImportIssueCode::ObstructedConnection:
+        return "ObstructedConnection";
     }
 
     return "Unknown";

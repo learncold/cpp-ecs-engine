@@ -126,6 +126,7 @@ bool isLiveValidationIssue(safecrowd::domain::ImportIssueCode code) {
     case ImportIssueCode::DisconnectedWalkableArea:
     case ImportIssueCode::WidthBelowMinimum:
     case ImportIssueCode::ConnectionSpanMisaligned:
+    case ImportIssueCode::ObstructedConnection:
         return true;
     default:
         return false;

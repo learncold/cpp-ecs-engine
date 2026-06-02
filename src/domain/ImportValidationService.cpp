@@ -256,6 +256,57 @@ bool hasRouteToExit(
     return false;
 }
 
+bool isPassageConnection(const Connection2D& connection) {
+    return connection.kind == ConnectionKind::Doorway
+        || connection.kind == ConnectionKind::Opening
+        || connection.kind == ConnectionKind::Exit;
+}
+
+bool barrierSharesConnectionFloor(const Barrier2D& barrier, const Connection2D& connection) {
+    return barrier.floorId.empty() || connection.floorId.empty() || barrier.floorId == connection.floorId;
+}
+
+// A blocking barrier obstructs a passage when one of its segments crosses the
+// connection span through the span interior. Crossings at the span endpoints
+// (where doorways legitimately meet flanking walls) and collinear/parallel
+// barriers that run along a zone boundary are intentionally ignored.
+bool barrierSegmentCrossesSpanInterior(const LineSegment2D& barrierSegment, const LineSegment2D& span) {
+    const auto spanDirection = subtract(span.end, span.start);
+    const auto barrierDirection = subtract(barrierSegment.end, barrierSegment.start);
+    const auto denominator = cross(spanDirection, barrierDirection);
+    if (std::abs(denominator) <= kGeometryEpsilon) {
+        return false;
+    }
+
+    const auto delta = subtract(barrierSegment.start, span.start);
+    const auto spanFraction = cross(delta, barrierDirection) / denominator;
+    const auto barrierFraction = cross(delta, spanDirection) / denominator;
+    constexpr double kSpanInteriorMargin = 0.15;
+    return spanFraction > kSpanInteriorMargin
+        && spanFraction < 1.0 - kSpanInteriorMargin
+        && barrierFraction >= -kGeometryEpsilon
+        && barrierFraction <= 1.0 + kGeometryEpsilon;
+}
+
+bool barrierObstructsConnection(const Barrier2D& barrier, const Connection2D& connection) {
+    if (!barrier.blocksMovement || barrier.geometry.vertices.size() < 2) {
+        return false;
+    }
+
+    const auto& vertices = barrier.geometry.vertices;
+    const std::size_t segmentCount = barrier.geometry.closed ? vertices.size() : vertices.size() - 1;
+    for (std::size_t index = 0; index < segmentCount; ++index) {
+        const LineSegment2D segment{
+            .start = vertices[index],
+            .end = vertices[(index + 1) % vertices.size()],
+        };
+        if (barrierSegmentCrossesSpanInterior(segment, connection.centerSpan)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 }  // namespace
 
 std::vector<ImportIssue> ImportValidationService::validate(const FacilityLayout2D& layout) const {
@@ -381,6 +432,26 @@ std::vector<ImportIssue> ImportValidationService::validate(const FacilityLayout2
                 .targetId = connection.toZoneId,
                 .isBlocking = true,
             });
+        }
+    }
+
+    for (const auto& connection : layout.connections) {
+        if (!isPassageConnection(connection)) {
+            continue;
+        }
+        for (const auto& barrier : layout.barriers) {
+            if (!barrierSharesConnectionFloor(barrier, connection)
+                || !barrierObstructsConnection(barrier, connection)) {
+                continue;
+            }
+            issues.push_back({
+                .severity = ImportIssueSeverity::Warning,
+                .code = ImportIssueCode::ObstructedConnection,
+                .message = "A wall or obstacle crosses a connection passage and may block movement through it.",
+                .sourceId = barrier.id,
+                .targetId = connection.id,
+            });
+            break;
         }
     }
 

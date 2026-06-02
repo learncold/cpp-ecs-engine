@@ -159,6 +159,7 @@ if (BUILD_TESTING)
         tests/EcsCoreTests.cpp
         tests/ImportContractsTests.cpp
         tests/DxfImportServiceTests.cpp
+        tests/ImportValidationServiceTests.cpp
         tests/DemoFixtureServiceTests.cpp
         tests/FacilityLayoutBuilderTests.cpp
         tests/WorldQueryTests.cpp
