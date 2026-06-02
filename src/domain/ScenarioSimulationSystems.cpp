@@ -778,17 +778,28 @@ public:
                 continue;
             }
 
-            if (!state.hazardDetected || state.hazardKey != detectedHazard->key) {
-                state.hazardDetected = true;
-                state.hazardAware = false;
+            if (state.hazardKey != detectedHazard->key) {
+                // New hazard encounter: restart the sense -> detect -> react pipeline.
                 state.hazardKey = detectedHazard->key;
+                state.hazardSensedSinceSeconds = elapsedSeconds;
+                state.hazardDetected = false;
+                state.hazardAware = false;
+            }
+
+            // Detection lags entering sensing range by the agent's detection delay;
+            // the reaction delay then runs from the moment of detection.
+            if (!state.hazardDetected
+                && elapsedSeconds + 1e-9
+                    >= state.hazardSensedSinceSeconds + std::max(0.0, agent.detectionDelaySeconds)) {
+                state.hazardDetected = true;
                 state.hazardDetectedAtSeconds = elapsedSeconds;
                 state.hazardReactionReadySeconds =
                     elapsedSeconds + std::max(0.0, agent.reactionDelaySeconds);
             }
 
             state.hazardInRange = true;
-            state.hazardAware = elapsedSeconds + 1e-9 >= state.hazardReactionReadySeconds;
+            state.hazardAware = state.hazardDetected
+                && elapsedSeconds + 1e-9 >= state.hazardReactionReadySeconds;
             state.hazardKind = detectedHazard->draft.kind;
             state.hazardSeverity = detectedHazard->draft.severity;
             state.hazardPosition = detectedHazard->draft.position;

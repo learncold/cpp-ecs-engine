@@ -274,6 +274,8 @@ ScenarioAgentSeed ScenarioSimulationRunner::createAgentSeed(
         ^ mix64(fnv1a64(sourcePlacementId))
         ^ mix64(fnv1a64(startZoneId))
         ^ mix64(static_cast<std::uint64_t>(evacuationRoute.destinationZoneId.size()));
+    const auto detectionSalt = mix64(propensitySalt ^ 0x9E3779B97F4A7C15ULL);
+    constexpr double kAgentDetectionDelayMaxSeconds = 3.0;
     return {
         .position = {.value = position},
         .agent = {
@@ -282,6 +284,7 @@ ScenarioAgentSeed ScenarioSimulationRunner::createAgentSeed(
             .sourcePlacementId = sourcePlacementId,
             .sourceZoneId = startZoneId,
             .guidancePropensity = beta22(baseSeed, propensitySalt),
+            .detectionDelaySeconds = kAgentDetectionDelayMaxSeconds * beta22(baseSeed, detectionSalt),
         },
         .velocity = {.value = {}},
         .route = std::move(evacuationRoute),
