@@ -288,9 +288,35 @@ bool barrierSegmentCrossesSpanInterior(const LineSegment2D& barrierSegment, cons
         && barrierFraction <= 1.0 + kGeometryEpsilon;
 }
 
+Point2D pointAlongSpan(const LineSegment2D& span, double fraction) {
+    return {
+        .x = span.start.x + ((span.end.x - span.start.x) * fraction),
+        .y = span.start.y + ((span.end.y - span.start.y) * fraction),
+    };
+}
+
+bool closedBarrierContainsSpanInterior(const Barrier2D& barrier, const LineSegment2D& span) {
+    if (!barrier.geometry.closed || barrier.geometry.vertices.size() < 3) {
+        return false;
+    }
+
+    const Polygon2D barrierFootprint{.outline = barrier.geometry.vertices};
+    constexpr double kInteriorSampleFractions[] = {0.25, 0.5, 0.75};
+    for (const auto fraction : kInteriorSampleFractions) {
+        if (pointInPolygon(barrierFootprint, pointAlongSpan(span, fraction))) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool barrierObstructsConnection(const Barrier2D& barrier, const Connection2D& connection) {
     if (!barrier.blocksMovement || barrier.geometry.vertices.size() < 2) {
         return false;
+    }
+
+    if (closedBarrierContainsSpanInterior(barrier, connection.centerSpan)) {
+        return true;
     }
 
     const auto& vertices = barrier.geometry.vertices;

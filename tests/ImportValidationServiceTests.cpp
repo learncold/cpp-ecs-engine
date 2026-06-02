@@ -76,6 +76,23 @@ SC_TEST(ImportValidationFlagsBarrierCrossingConnectionPassage) {
     SC_EXPECT_TRUE(!hasBlockingImportIssue(issues));
 }
 
+SC_TEST(ImportValidationFlagsClosedObstacleContainingConnectionPassage) {
+    auto layout = makeConnectedRoomAndExit();
+    // Closed footprint fully contains the passage span, so no obstacle edge
+    // crosses the span even though movement through the passage is blocked.
+    layout.barriers.push_back({
+        .id = "obstacle",
+        .floorId = "F1",
+        .geometry = {.vertices = {{9.5, 3.5}, {11.5, 3.5}, {11.5, 4.5}, {9.5, 4.5}}, .closed = true},
+        .blocksMovement = true,
+    });
+
+    ImportValidationService validator;
+    const auto issues = validator.validate(layout);
+
+    SC_EXPECT_TRUE(hasIssueCode(issues, ImportIssueCode::ObstructedConnection));
+}
+
 SC_TEST(ImportValidationIgnoresNonBlockingBarrierOverConnection) {
     auto layout = makeConnectedRoomAndExit();
     layout.barriers.push_back({
