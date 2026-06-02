@@ -3484,6 +3484,10 @@ void ScenarioCanvasWidget::setToolMode(ToolMode mode) {
     if (fireHazardToolButton_ != nullptr) {
         fireHazardToolButton_->setChecked(mode == ToolMode::FireHazard);
     }
+    // Unused code: smoke hazard is currently not used.
+    // if (smokeHazardToolButton_ != nullptr) {
+    //     smokeHazardToolButton_->setChecked(mode == ToolMode::SmokeHazard);
+    // }
     if (routeGuidanceToolButton_ != nullptr) {
         routeGuidanceToolButton_->setChecked(mode == ToolMode::RouteGuidance);
     }
@@ -3532,6 +3536,8 @@ void ScenarioCanvasWidget::setupToolbars() {
     sourceToolButton_ = makeButton(makeToolIcon("source", QColor("#1f5fae")), "Add Occupant Source");
     blockDoorToolButton_ = makeButton(makeToolIcon("block", QColor("#c0392b")), "block door");
     fireHazardToolButton_ = makeButton(makeToolIcon("fire", QColor("#c2410c")), "Add Fire Hazard");
+    // Unused code: smoke hazard is currently not used.
+    // smokeHazardToolButton_ = makeButton(makeToolIcon("smoke", QColor("#64748b")), "Add Smoke Hazard");
     routeGuidanceToolButton_ = makeButton(makeToolIcon("guidance", QColor("#1f5fae")), "Route guidance");
     topLayout->addStretch(1);
 
@@ -3560,6 +3566,8 @@ void ScenarioCanvasWidget::setupToolbars() {
     });
     connect(blockDoorToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::BlockDoor); });
     connect(fireHazardToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::FireHazard); });
+    // Unused code: smoke hazard is currently not used.
+    // connect(smokeHazardToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::SmokeHazard); });
     connect(routeGuidanceToolButton_, &QToolButton::clicked, this, [this]() { setToolMode(ToolMode::RouteGuidance); });
 
     setToolMode(ToolMode::Select);

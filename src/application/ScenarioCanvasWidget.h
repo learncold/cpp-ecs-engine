@@ -225,6 +225,8 @@ private:
     QToolButton* sourceToolButton_{nullptr};
     QToolButton* blockDoorToolButton_{nullptr};
     QToolButton* fireHazardToolButton_{nullptr};
+    // Unused code: smoke hazard is currently not used.
+    // QToolButton* smokeHazardToolButton_{nullptr};
     QToolButton* routeGuidanceToolButton_{nullptr};
     QLabel* groupCountLabel_{nullptr};
     QSpinBox* groupCountSpinBox_{nullptr};

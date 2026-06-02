@@ -47,8 +47,6 @@ public:
         safecrowd::domain::ScenarioDraft draft{};
         std::vector<safecrowd::domain::OperationalEventDraft> events{};
         std::vector<ScenarioCrowdPlacement> crowdPlacements{};
-        QString startText{};
-        QString destinationText{};
         QString baseScenarioId{};
         bool stagedForRun{false};
     };
@@ -129,7 +127,6 @@ private:
     void showScenarioNameDialog(int sourceIndex);
     QWidget* createRightPanelContainer();
     QWidget* createElementInspectorPanel();
-    QWidget* createRunPanel();
     QWidget* createScenarioPanel();
     QWidget* createPanelToggleBar();
     void setInspectorSelectionFromCanvas(const ScenarioCanvasSelection& selection);

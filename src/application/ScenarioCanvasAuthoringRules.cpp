@@ -166,6 +166,17 @@ QString nextRouteGuidanceId(const std::vector<safecrowd::domain::RouteGuidanceDr
     return QString("guidance-%1").arg(static_cast<int>(guidances.size()) + 1);
 }
 
+std::vector<safecrowd::domain::Point2D> generateGroupPlacementPositions(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const QString& currentFloorId,
+    const std::vector<ScenarioCrowdPlacement>& placements,
+    const QString& excludedPlacementId,
+    const QString& seedPlacementId,
+    const QString& zoneId,
+    const std::vector<safecrowd::domain::Point2D>& area,
+    int occupantCount,
+    safecrowd::domain::InitialPlacementDistribution distribution);
+
 PointBounds boundsOfPoints(const std::vector<safecrowd::domain::Point2D>& points) {
     PointBounds bounds;
     if (points.empty()) {
@@ -301,6 +312,43 @@ std::vector<safecrowd::domain::Point2D> generateRandomPlacementPositions(
     }
 
     return positions;
+}
+
+std::vector<safecrowd::domain::Point2D> generateGroupPlacementPositions(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const QString& currentFloorId,
+    const std::vector<ScenarioCrowdPlacement>& placements,
+    const QString& excludedPlacementId,
+    const QString& seedPlacementId,
+    const QString& zoneId,
+    const std::vector<safecrowd::domain::Point2D>& area,
+    int occupantCount,
+    safecrowd::domain::InitialPlacementDistribution distribution) {
+    const auto pointOccupiedByExistingPlacement = [&](const safecrowd::domain::Point2D& point) {
+        for (const auto& placement : placements) {
+            if (!excludedPlacementId.isEmpty() && placement.id == excludedPlacementId) {
+                continue;
+            }
+            if (!currentFloorId.isEmpty() && !placement.floorId.isEmpty() && placement.floorId != currentFloorId) {
+                continue;
+            }
+            for (const auto& existing : scenarioPlacementDisplayPositions(placement)) {
+                if (std::hypot(existing.x - point.x, existing.y - point.y) < kOccupantMinSpacing) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+    const auto blocked = [&](const safecrowd::domain::Point2D& point) {
+        return zoneIdAt(layout, currentFloorId, point) != zoneId
+            || placementPointBlocked(layout, currentFloorId, point)
+            || pointOccupiedByExistingPlacement(point);
+    };
+
+    return distribution == safecrowd::domain::InitialPlacementDistribution::Random
+        ? generateRandomPlacementPositions(seedPlacementId, area, occupantCount, blocked)
+        : generateUniformPlacementPositions(area, occupantCount, blocked);
 }
 
 std::string pickNearestExitZoneIdForPoint(
@@ -475,27 +523,16 @@ ScenarioPlacementAuthoringResult createScenarioGroupPlacement(
         return {};
     }
 
-    const auto pointOccupiedByExistingPlacement = [&](const safecrowd::domain::Point2D& point) {
-        for (const auto& placement : placements) {
-            if (!currentFloorId.isEmpty() && !placement.floorId.isEmpty() && placement.floorId != currentFloorId) {
-                continue;
-            }
-            for (const auto& existing : scenarioPlacementDisplayPositions(placement)) {
-                if (std::hypot(existing.x - point.x, existing.y - point.y) < kOccupantMinSpacing) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    };
-    const auto blocked = [&](const safecrowd::domain::Point2D& point) {
-        return zoneIdAt(layout, currentFloorId, point) != zoneId
-            || placementPointBlocked(layout, currentFloorId, point)
-            || pointOccupiedByExistingPlacement(point);
-    };
-    const auto generatedPositions = distribution == safecrowd::domain::InitialPlacementDistribution::Random
-        ? generateRandomPlacementPositions(id, area, occupantCount, blocked)
-        : generateUniformPlacementPositions(area, occupantCount, blocked);
+    const auto generatedPositions = generateGroupPlacementPositions(
+        layout,
+        currentFloorId,
+        placements,
+        {},
+        id,
+        zoneId,
+        area,
+        occupantCount,
+        distribution);
     if (static_cast<int>(generatedPositions.size()) < occupantCount) {
         return {
             .placement = std::nullopt,
@@ -517,6 +554,50 @@ ScenarioPlacementAuthoringResult createScenarioGroupPlacement(
             .generatedPositions = generatedPositions,
         },
     };
+}
+
+ScenarioPlacementAuthoringResult regenerateScenarioGroupPlacement(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const std::vector<ScenarioCrowdPlacement>& placements,
+    const ScenarioCrowdPlacement& placement,
+    int occupantCount,
+    safecrowd::domain::InitialPlacementDistribution distribution) {
+    if (placement.kind != ScenarioCrowdPlacementKind::Group || placement.area.empty()) {
+        return {};
+    }
+
+    const auto zoneId = zoneIdAt(layout, placement.floorId, placement.area.front());
+    if (zoneId.isEmpty()) {
+        return {};
+    }
+
+    if (placementAreaBlocked(placement.area)) {
+        return {};
+    }
+
+    const auto generatedPositions = generateGroupPlacementPositions(
+        layout,
+        placement.floorId,
+        placements,
+        placement.id,
+        placement.id,
+        zoneId,
+        placement.area,
+        occupantCount,
+        distribution);
+    if (static_cast<int>(generatedPositions.size()) < occupantCount) {
+        return {
+            .placement = std::nullopt,
+            .errorMessage = "The selected region is too small or blocked for the requested occupant count.",
+        };
+    }
+
+    auto updated = placement;
+    updated.zoneId = zoneId;
+    updated.occupantCount = occupantCount;
+    updated.distribution = distribution;
+    updated.generatedPositions = generatedPositions;
+    return {.placement = std::move(updated)};
 }
 
 ScenarioPlacementAuthoringResult createScenarioIndividualPlacement(

@@ -36,6 +36,7 @@
 
 #include "application/LayoutNavigationPanelWidget.h"
 #include "application/NavigationTreeWidget.h"
+#include "application/ScenarioCanvasAuthoringRules.h"
 #include "application/ScenarioCanvasWidget.h"
 #include "application/ScenarioRunWidget.h"
 #include "application/ToolIconResources.h"
@@ -1432,23 +1433,6 @@ bool scenarioHasOccupants(const ScenarioAuthoringWidget::ScenarioState& scenario
     return totalOccupantCount(scenario) > 0;
 }
 
-const safecrowd::domain::Zone2D* firstStartZone(const safecrowd::domain::FacilityLayout2D& layout) {
-    const auto it = std::find_if(layout.zones.begin(), layout.zones.end(), [](const auto& zone) {
-        return zone.kind == safecrowd::domain::ZoneKind::Room || zone.kind == safecrowd::domain::ZoneKind::Unknown;
-    });
-    return it == layout.zones.end() ? nullptr : &(*it);
-}
-
-const safecrowd::domain::Zone2D* firstDestinationZone(const safecrowd::domain::FacilityLayout2D& layout) {
-    const auto exitIt = std::find_if(layout.zones.begin(), layout.zones.end(), [](const auto& zone) {
-        return zone.kind == safecrowd::domain::ZoneKind::Exit;
-    });
-    if (exitIt != layout.zones.end()) {
-        return &(*exitIt);
-    }
-    return layout.zones.empty() ? nullptr : &layout.zones.back();
-}
-
 QIcon scenarioNavigationIcon(const QString& resourcePath, const QColor& color) {
     return makeSvgToolIcon(resourcePath, color, QSize(22, 22));
 }
@@ -2299,8 +2283,6 @@ void ScenarioAuthoringWidget::createScenarioWithName(const QString& name, int so
             source.draft, newScenarioId, trimmedName.toStdString());
         scenario.events = source.events;
         scenario.crowdPlacements = source.crowdPlacements;
-        scenario.startText = source.startText;
-        scenario.destinationText = source.destinationText;
         scenario.baseScenarioId = scenarioRoleHasBaselineDiff(source.draft.role)
             ? source.baseScenarioId
             : QString::fromStdString(source.draft.scenarioId);
@@ -2314,15 +2296,6 @@ void ScenarioAuthoringWidget::createScenarioWithName(const QString& name, int so
         scenario.draft.execution.baseSeed = 1;
         scenario.draft.name = trimmedName.toStdString();
         scenario.draft.scenarioId = newScenarioId;
-
-        const auto* destinationZone = firstDestinationZone(layout_);
-        const auto* startZone = firstStartZone(layout_);
-        if (startZone != nullptr) {
-            scenario.startText = zoneLabel(*startZone);
-        }
-        if (destinationZone != nullptr) {
-            scenario.destinationText = zoneLabel(*destinationZone);
-        }
     }
 
     scenarios_.push_back(std::move(scenario));
@@ -2497,8 +2470,6 @@ void ScenarioAuthoringWidget::refreshInspector() {
                 addMetaRow(panelLayout, "Hazards", QString::number(static_cast<int>(scenario->draft.environment.hazards.size())), scenarioOverviewPanel_);
                 addMetaRow(panelLayout, "Guidance", QString::number(static_cast<int>(scenario->draft.control.routeGuidances.size())), scenarioOverviewPanel_);
                 addMetaRow(panelLayout, "Blocked", QString::number(static_cast<int>(scenario->draft.control.connectionBlocks.size())), scenarioOverviewPanel_);
-                addMetaRow(panelLayout, "Start", scenario->startText, scenarioOverviewPanel_);
-                addMetaRow(panelLayout, "Destination", scenario->destinationText, scenarioOverviewPanel_);
                 if (variation && !scenario->baseScenarioId.isEmpty()) {
                     addMetaRow(panelLayout, "Based on", scenario->baseScenarioId, scenarioOverviewPanel_);
                 }
@@ -2607,7 +2578,9 @@ void ScenarioAuthoringWidget::refreshInspector() {
                     nameEdit->setText(placementIt->name.isEmpty() ? placementIt->id : placementIt->name);
                     constrainInspectorField(nameEdit);
                     auto* countSpin = new QSpinBox(elementInspectorPanel_);
-                    countSpin->setRange(placementIt->kind == ScenarioCrowdPlacementKind::Individual ? 1 : 0, 100000);
+                    countSpin->setRange(
+                        placementIt->kind == ScenarioCrowdPlacementKind::Individual ? 1 : 0,
+                        placementIt->kind == ScenarioCrowdPlacementKind::Group ? kScenarioMaxGroupOccupantCount : 100000);
                     countSpin->setValue(std::max(0, placementIt->occupantCount));
                     constrainInspectorField(countSpin);
                     form->addRow("Name", nameEdit);
@@ -2707,10 +2680,11 @@ void ScenarioAuthoringWidget::refreshInspector() {
                         }
                         const auto beforeChange = currentCrowdPlacementHistoryEntry(placementId);
                         const auto previousPlacement = *placementIt;
-                        placementIt->name = nameEdit->text().trimmed();
-                        placementIt->occupantCount = countSpin->value();
+                        auto updatedPlacement = *placementIt;
+                        updatedPlacement.name = nameEdit->text().trimmed();
+                        updatedPlacement.occupantCount = countSpin->value();
                         if (positionXSpin != nullptr && positionYSpin != nullptr
-                            && placementIt->kind != ScenarioCrowdPlacementKind::Group) {
+                            && updatedPlacement.kind != ScenarioCrowdPlacementKind::Group) {
                             const safecrowd::domain::Point2D position{
                                 .x = positionXSpin->value(),
                                 .y = positionYSpin->value(),
@@ -2720,34 +2694,54 @@ void ScenarioAuthoringWidget::refreshInspector() {
                                 QMessageBox::warning(this, "Edit crowd", "The placement location must stay inside a walkable zone.");
                                 return;
                             }
-                            placementIt->area = {position};
-                            placementIt->zoneId = QString::fromStdString(zone->id);
-                            placementIt->floorId = QString::fromStdString(zone->floorId);
+                            updatedPlacement.area = {position};
+                            updatedPlacement.zoneId = QString::fromStdString(zone->id);
+                            updatedPlacement.floorId = QString::fromStdString(zone->floorId);
                         }
-                        placementIt->velocity = {
+                        updatedPlacement.velocity = {
                             .x = velocityXSpin->value(),
                             .y = velocityYSpin->value(),
                         };
-                        if (placementIt->kind != ScenarioCrowdPlacementKind::Source) {
-                            placementIt->distribution = static_cast<safecrowd::domain::InitialPlacementDistribution>(
+                        if (updatedPlacement.kind == ScenarioCrowdPlacementKind::Group) {
+                            const auto distribution = static_cast<safecrowd::domain::InitialPlacementDistribution>(
+                                distributionCombo->currentData().toInt());
+                            const auto result = regenerateScenarioGroupPlacement(
+                                layout_,
+                                scenario->crowdPlacements,
+                                updatedPlacement,
+                                updatedPlacement.occupantCount,
+                                distribution);
+                            if (!result.placement.has_value()) {
+                                QMessageBox::warning(
+                                    this,
+                                    "Edit crowd",
+                                    result.errorMessage.isEmpty()
+                                        ? QStringLiteral("The selected group region cannot fit the requested occupant count.")
+                                        : result.errorMessage);
+                                return;
+                            }
+                            updatedPlacement = *result.placement;
+                        } else if (updatedPlacement.kind != ScenarioCrowdPlacementKind::Source) {
+                            updatedPlacement.distribution = static_cast<safecrowd::domain::InitialPlacementDistribution>(
                                 distributionCombo->currentData().toInt());
                         } else {
                             if (agentsPerSpawnSpin != nullptr) {
-                                placementIt->sourceAgentsPerSpawn = agentsPerSpawnSpin->value();
+                                updatedPlacement.sourceAgentsPerSpawn = agentsPerSpawnSpin->value();
                             }
                             if (startSpin != nullptr) {
-                                placementIt->sourceStartSeconds = std::max(0.0, startSpin->value());
+                                updatedPlacement.sourceStartSeconds = std::max(0.0, startSpin->value());
                             }
                             if (endSpin != nullptr) {
-                                placementIt->sourceEndSeconds = std::max(placementIt->sourceStartSeconds, endSpin->value());
+                                updatedPlacement.sourceEndSeconds = std::max(updatedPlacement.sourceStartSeconds, endSpin->value());
                             }
                             if (intervalSpin != nullptr) {
-                                placementIt->sourceIntervalSeconds = std::max(0.1, intervalSpin->value());
+                                updatedPlacement.sourceIntervalSeconds = std::max(0.1, intervalSpin->value());
                             }
                         }
-                        if (crowdPlacementEqual(*placementIt, previousPlacement)) {
+                        if (crowdPlacementEqual(updatedPlacement, previousPlacement)) {
                             return;
                         }
+                        *placementIt = std::move(updatedPlacement);
                         selectedCrowdElementId_ = placementId;
                         inspectorSelectionKind_ = InspectorSelectionKind::Crowd;
                         inspectorSelectionId_ = placementId;
@@ -4118,40 +4112,6 @@ QWidget* ScenarioAuthoringWidget::createElementInspectorPanel() {
     inspectorLayout->addWidget(card, 1);
 
     return inspector;
-}
-
-QWidget* ScenarioAuthoringWidget::createRunPanel() {
-    auto* panel = new QWidget(shell_);
-    auto* layout = new QVBoxLayout(panel);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(12);
-    layout->addWidget(createLabel("Run", panel, ui::FontRole::Title));
-
-    stagedScenariosLabel_ = createLabel("", panel);
-    stagedScenariosLabel_->setStyleSheet(ui::mutedTextStyleSheet());
-    layout->addWidget(stagedScenariosLabel_);
-
-    executeRunButton_ = new QPushButton("Run Staged Scenarios", panel);
-    executeRunButton_->setFont(ui::font(ui::FontRole::Body));
-    executeRunButton_->setStyleSheet(ui::primaryButtonStyleSheet());
-    executeRunButton_->setEnabled(false);
-    layout->addWidget(executeRunButton_);
-
-    auto* editButton = new QPushButton("Edit Scenario", panel);
-    editButton->setFont(ui::font(ui::FontRole::Body));
-    editButton->setStyleSheet(ui::secondaryButtonStyleSheet());
-    layout->addWidget(editButton);
-    layout->addStretch(1);
-
-    connect(executeRunButton_, &QPushButton::clicked, this, [this]() {
-        runStagedScenarios();
-    });
-    connect(editButton, &QPushButton::clicked, this, [this]() {
-        scenarioPanelVisible_ = true;
-        refreshRightPanel();
-    });
-
-    return panel;
 }
 
 QWidget* ScenarioAuthoringWidget::createScenarioPanel() {

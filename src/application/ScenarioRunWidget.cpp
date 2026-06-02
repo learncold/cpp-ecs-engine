@@ -236,12 +236,6 @@ QPushButton* createToggleIconButton(const QIcon& icon, const QString& tooltip, Q
     return button;
 }
 
-QString zoneLabel(const safecrowd::domain::Zone2D& zone) {
-    const auto id = QString::fromStdString(zone.id);
-    const auto label = QString::fromStdString(zone.label);
-    return label.isEmpty() ? id : QString("%1  -  %2").arg(label, id);
-}
-
 int percentValue(double numerator, double denominator) {
     if (denominator <= 0.0) {
         return 0;
@@ -293,23 +287,6 @@ QDialog* createResultCalculationDialog(QWidget* parent) {
     return dialog;
 }
 
-const safecrowd::domain::Zone2D* firstStartZone(const safecrowd::domain::FacilityLayout2D& layout) {
-    const auto it = std::find_if(layout.zones.begin(), layout.zones.end(), [](const auto& zone) {
-        return zone.kind == safecrowd::domain::ZoneKind::Room || zone.kind == safecrowd::domain::ZoneKind::Unknown;
-    });
-    return it == layout.zones.end() ? nullptr : &(*it);
-}
-
-const safecrowd::domain::Zone2D* firstDestinationZone(const safecrowd::domain::FacilityLayout2D& layout) {
-    const auto exitIt = std::find_if(layout.zones.begin(), layout.zones.end(), [](const auto& zone) {
-        return zone.kind == safecrowd::domain::ZoneKind::Exit;
-    });
-    if (exitIt != layout.zones.end()) {
-        return &(*exitIt);
-    }
-    return layout.zones.empty() ? nullptr : &layout.zones.back();
-}
-
 QString simulationStatusText(bool complete, bool paused, int playbackSpeedMultiplier) {
     if (complete) {
         return "Complete";
@@ -330,19 +307,11 @@ QString simulationStatusText(bool complete, bool paused, int playbackSpeedMultip
 }
 
 ScenarioAuthoringWidget::ScenarioState scenarioStateFromDraft(
-    const safecrowd::domain::ScenarioDraft& scenario,
-    const safecrowd::domain::FacilityLayout2D& layout) {
+    const safecrowd::domain::ScenarioDraft& scenario) {
     ScenarioAuthoringWidget::ScenarioState state;
     state.draft = scenario;
     state.events = scenario.control.events;
     state.stagedForRun = true;
-
-    if (const auto* startZone = firstStartZone(layout); startZone != nullptr) {
-        state.startText = zoneLabel(*startZone);
-    }
-    if (const auto* destinationZone = firstDestinationZone(layout); destinationZone != nullptr) {
-        state.destinationText = zoneLabel(*destinationZone);
-    }
 
     for (const auto& placement : scenario.population.initialPlacements) {
         ScenarioCrowdPlacement uiPlacement;
@@ -754,7 +723,7 @@ void ScenarioRunWidget::returnToAuthoring() {
     auto initial = returnAuthoringState_.value_or(ScenarioAuthoringWidget::InitialState{});
     if (initial.scenarios.empty()) {
         for (const auto& scenario : scenarios_) {
-            initial.scenarios.push_back(scenarioStateFromDraft(scenario, layout_));
+            initial.scenarios.push_back(scenarioStateFromDraft(scenario));
         }
         initial.navigationView = ScenarioAuthoringWidget::NavigationView::Layout;
     }

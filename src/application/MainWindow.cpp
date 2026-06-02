@@ -173,29 +173,6 @@ safecrowd::domain::ImportResult importProjectLayout(const ProjectMetadata& metad
     return importer.importFile(importRequest);
 }
 
-QString zoneLabel(const safecrowd::domain::Zone2D& zone) {
-    const auto id = QString::fromStdString(zone.id);
-    const auto label = QString::fromStdString(zone.label);
-    return label.isEmpty() ? id : QString("%1  -  %2").arg(label, id);
-}
-
-const safecrowd::domain::Zone2D* firstStartZone(const safecrowd::domain::FacilityLayout2D& layout) {
-    const auto it = std::find_if(layout.zones.begin(), layout.zones.end(), [](const auto& zone) {
-        return zone.kind == safecrowd::domain::ZoneKind::Room || zone.kind == safecrowd::domain::ZoneKind::Unknown;
-    });
-    return it == layout.zones.end() ? nullptr : &(*it);
-}
-
-const safecrowd::domain::Zone2D* firstDestinationZone(const safecrowd::domain::FacilityLayout2D& layout) {
-    const auto exitIt = std::find_if(layout.zones.begin(), layout.zones.end(), [](const auto& zone) {
-        return zone.kind == safecrowd::domain::ZoneKind::Exit;
-    });
-    if (exitIt != layout.zones.end()) {
-        return &(*exitIt);
-    }
-    return layout.zones.empty() ? nullptr : &layout.zones.back();
-}
-
 ScenarioAuthoringWidget::NavigationView navigationViewFromSaved(SavedNavigationView view) {
     switch (view) {
     case SavedNavigationView::Crowd:
@@ -232,21 +209,12 @@ SavedNavigationView savedNavigationViewFromInitial(ScenarioAuthoringWidget::Navi
     }
 }
 
-ScenarioAuthoringWidget::ScenarioState scenarioStateFromSaved(
-    const SavedScenarioState& saved,
-    const safecrowd::domain::FacilityLayout2D& layout) {
+ScenarioAuthoringWidget::ScenarioState scenarioStateFromSaved(const SavedScenarioState& saved) {
     ScenarioAuthoringWidget::ScenarioState state;
     state.draft = saved.draft;
     state.events = saved.draft.control.events;
     state.baseScenarioId = QString::fromStdString(saved.baseScenarioId);
     state.stagedForRun = saved.stagedForRun;
-
-    if (const auto* startZone = firstStartZone(layout); startZone != nullptr) {
-        state.startText = zoneLabel(*startZone);
-    }
-    if (const auto* destinationZone = firstDestinationZone(layout); destinationZone != nullptr) {
-        state.destinationText = zoneLabel(*destinationZone);
-    }
 
     for (const auto& placement : saved.draft.population.initialPlacements) {
         ScenarioCrowdPlacement uiPlacement;
@@ -284,9 +252,7 @@ ScenarioAuthoringWidget::ScenarioState scenarioStateFromSaved(
     return state;
 }
 
-ScenarioAuthoringWidget::InitialState initialStateFromSaved(
-    const SavedScenarioAuthoringState& saved,
-    const safecrowd::domain::FacilityLayout2D& layout) {
+ScenarioAuthoringWidget::InitialState initialStateFromSaved(const SavedScenarioAuthoringState& saved) {
     ScenarioAuthoringWidget::InitialState initial;
     initial.currentScenarioIndex = saved.currentScenarioIndex;
     initial.navigationView = navigationViewFromSaved(saved.navigationView);
@@ -295,7 +261,7 @@ ScenarioAuthoringWidget::InitialState initialStateFromSaved(
     initial.rightPanelMode = rightPanelModeFromSaved(saved.rightPanelMode);
     initial.scenarios.reserve(saved.scenarios.size());
     for (const auto& scenario : saved.scenarios) {
-        initial.scenarios.push_back(scenarioStateFromSaved(scenario, layout));
+        initial.scenarios.push_back(scenarioStateFromSaved(scenario));
     }
     if (initial.currentScenarioIndex < 0 || initial.currentScenarioIndex >= static_cast<int>(initial.scenarios.size())) {
         initial.currentScenarioIndex = initial.scenarios.empty() ? -1 : 0;
@@ -574,14 +540,14 @@ void MainWindow::openProject(const ProjectMetadata& metadata) {
     switch (workspace.activeView) {
     case ProjectWorkspaceView::ScenarioAuthoring:
         if (workspace.authoring.has_value()) {
-            showScenarioAuthoring(importResult, initialStateFromSaved(*workspace.authoring, *importResult.layout));
+            showScenarioAuthoring(importResult, initialStateFromSaved(*workspace.authoring));
             return;
         }
         break;
     case ProjectWorkspaceView::ScenarioRun:
         if (!workspace.runningScenarios.empty()) {
             auto returnAuthoringState = workspace.authoring.has_value()
-                ? std::make_optional(initialStateFromSaved(*workspace.authoring, *importResult.layout))
+                ? std::make_optional(initialStateFromSaved(*workspace.authoring))
                 : std::optional<ScenarioAuthoringWidget::InitialState>{};
             const auto initialSelectedRunIndex = workspace.runningScenarioIndex >= 0
                 ? workspace.runningScenarioIndex
@@ -600,7 +566,7 @@ void MainWindow::openProject(const ProjectMetadata& metadata) {
                 *importResult.layout,
                 *workspace.runningScenario,
                 workspace.authoring.has_value()
-                    ? std::make_optional(initialStateFromSaved(*workspace.authoring, *importResult.layout))
+                    ? std::make_optional(initialStateFromSaved(*workspace.authoring))
                     : std::nullopt);
             return;
         }
@@ -612,7 +578,7 @@ void MainWindow::openProject(const ProjectMetadata& metadata) {
                 workspace.batchResult->results,
                 workspace.batchResult->currentResultIndex,
                 workspace.authoring.has_value()
-                    ? std::make_optional(initialStateFromSaved(*workspace.authoring, *importResult.layout))
+                    ? std::make_optional(initialStateFromSaved(*workspace.authoring))
                     : std::nullopt);
             return;
         }
@@ -622,7 +588,7 @@ void MainWindow::openProject(const ProjectMetadata& metadata) {
                 {*workspace.result},
                 0,
                 workspace.authoring.has_value()
-                    ? std::make_optional(initialStateFromSaved(*workspace.authoring, *importResult.layout))
+                    ? std::make_optional(initialStateFromSaved(*workspace.authoring))
                     : std::nullopt);
             return;
         }

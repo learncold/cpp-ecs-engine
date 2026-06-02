@@ -188,14 +188,17 @@ if (BUILD_TESTING)
         target_sources(safecrowd_tests
             PRIVATE
                 tests/LayoutCanvasSnappingTests.cpp
+                tests/ScenarioCanvasAuthoringRulesTests.cpp
                 tests/ProjectPersistenceTests.cpp
                 src/application/LayoutCanvasRendering.cpp
                 src/application/LayoutCanvasSnapping.cpp
+                src/application/LayoutPreviewGeometry.cpp
                 src/application/LayoutReviewCodec.cpp
                 src/application/ProjectMetadataCodec.cpp
                 src/application/ProjectPersistence.cpp
                 src/application/ProjectPersistenceJson.cpp
                 src/application/ResultArtifactsCodec.cpp
+                src/application/ScenarioCanvasAuthoringRules.cpp
                 src/application/WorkspaceStateCodec.cpp
         )
 
@@ -203,6 +206,7 @@ if (BUILD_TESTING)
             PRIVATE
                 Qt6::Core
                 Qt6::Gui
+                Qt6::Widgets
         )
     endif()
 

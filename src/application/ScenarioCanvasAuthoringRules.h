@@ -12,6 +12,7 @@
 
 namespace safecrowd::application {
 
+inline constexpr int kScenarioMaxGroupOccupantCount = 5000;
 inline constexpr int kScenarioMaxSourceOccupantCount = 5000;
 
 struct ScenarioPlacementAuthoringResult {
@@ -61,6 +62,13 @@ ScenarioPlacementAuthoringResult createScenarioGroupPlacement(
     const QString& currentFloorId,
     const std::vector<ScenarioCrowdPlacement>& placements,
     const std::vector<safecrowd::domain::Point2D>& area,
+    int occupantCount,
+    safecrowd::domain::InitialPlacementDistribution distribution);
+
+ScenarioPlacementAuthoringResult regenerateScenarioGroupPlacement(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const std::vector<ScenarioCrowdPlacement>& placements,
+    const ScenarioCrowdPlacement& placement,
     int occupantCount,
     safecrowd::domain::InitialPlacementDistribution distribution);
 
