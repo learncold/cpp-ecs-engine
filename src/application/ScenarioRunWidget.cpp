@@ -43,6 +43,7 @@ namespace {
 constexpr double kSimulationDeltaSeconds = 1.0 / 30.0;
 constexpr double kResultCalculationChunkSeconds = 1.0;
 constexpr int kPlaybackTimerIntervalMs = 33;
+constexpr int kMaxUiSeed = 2147483647;
 
 int normalizedRunIndex(int index, std::size_t runCount) {
     if (runCount == 0) {
@@ -706,7 +707,7 @@ QWidget* ScenarioRunWidget::createRunPanel() {
     settingsForm->addRow("Repeats", repeatSpin_);
 
     seedSpin_ = new QSpinBox(settingsGroup);
-    seedSpin_->setRange(1, 1000000);
+    seedSpin_->setRange(1, kMaxUiSeed);
     seedSpin_->setToolTip("Base random seed");
     settingsForm->addRow("Seed", seedSpin_);
 
@@ -1009,7 +1010,9 @@ void ScenarioRunWidget::syncRunSettingsControls() {
     if (seedSpin_ != nullptr) {
         seedSpin_->setValue(execution.baseSeed == 0
             ? 1
-            : static_cast<int>(std::min<unsigned int>(execution.baseSeed, 1000000U)));
+            : static_cast<int>(std::min<std::uint32_t>(
+                  execution.baseSeed,
+                  static_cast<std::uint32_t>(kMaxUiSeed))));
     }
 }
 
