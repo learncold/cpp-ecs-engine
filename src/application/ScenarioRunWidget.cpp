@@ -18,6 +18,7 @@
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QLabel>
+#include <QMessageBox>
 #include <QPainter>
 #include <QPaintEvent>
 #include <QPen>
@@ -1023,6 +1024,18 @@ void ScenarioRunWidget::applyRunSettings() {
 
     const auto sourceIndex = selectedSourceScenarioIndex();
     if (sourceIndex >= scenarios_.size()) {
+        return;
+    }
+
+    const bool wouldDiscardResults = hasCachedResults() || (batchRunner_.complete() && !batchRunner_.empty());
+    if (wouldDiscardResults
+        && QMessageBox::question(
+               this,
+               "Apply run settings",
+               "Re-running with the new settings discards the current simulation results.\n\nContinue?",
+               QMessageBox::Yes | QMessageBox::Cancel,
+               QMessageBox::Cancel)
+            != QMessageBox::Yes) {
         return;
     }
 
