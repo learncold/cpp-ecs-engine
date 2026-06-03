@@ -512,6 +512,26 @@ SC_TEST(AlternativeRecommendationService_addsBottleneckGuidanceAtExit) {
     SC_EXPECT_TRUE(containsDiffKey(it->recommendedScenario, "control.routeGuidances"));
 }
 
+SC_TEST(AlternativeRecommendationService_skipsBottleneckGuidanceForSingleExitLayout) {
+    ScenarioRiskSnapshot risk;
+    risk.bottlenecks.push_back({
+        .connectionId = "door-main",
+        .nearbyAgentCount = 8,
+        .stalledAgentCount = 5,
+    });
+
+    const AlternativeRecommendationService service;
+    const auto result = service.recommend({
+        .layout = makeSingleExitRecommendationLayout(),
+        .sourceScenario = makeScenario(),
+        .risk = risk,
+        .artifacts = makeSingleExitUsageArtifacts("exit-main", "Main Exit", 20, 1.0),
+    });
+
+    SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::BottleneckBypassGuidance));
+    SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::ExitUsageBalancing));
+}
+
 SC_TEST(AlternativeRecommendationService_installsCorridorBottleneckGuidanceAtExitOnly) {
     ScenarioRiskSnapshot risk;
     risk.bottlenecks.push_back({

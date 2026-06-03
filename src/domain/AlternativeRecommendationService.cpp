@@ -996,6 +996,21 @@ std::optional<ExitUsageMetric> leastUsedReachableExit(
     return best;
 }
 
+std::size_t reachableExitCandidateCount(const AlternativeRecommendationInput& request) {
+    std::unordered_set<std::string> reachableExitZoneIds;
+    for (const auto& usage : exitUsageCandidates(request)) {
+        if (!usage.exitZoneId.empty()
+            && exitReachableFromScenarioSources(request, usage.exitZoneId)) {
+            reachableExitZoneIds.insert(usage.exitZoneId);
+        }
+    }
+    return reachableExitZoneIds.size();
+}
+
+bool hasAlternativeReachableExit(const AlternativeRecommendationInput& request) {
+    return reachableExitCandidateCount(request) >= 2;
+}
+
 bool bottleneckLessSevere(const ScenarioBottleneckMetric& lhs, const ScenarioBottleneckMetric& rhs) {
     if (lhs.stalledAgentCount == rhs.stalledAgentCount) {
         return lhs.nearbyAgentCount < rhs.nearbyAgentCount;
@@ -1410,6 +1425,9 @@ std::optional<AlternativeRecommendationCandidate> makeBottleneckGuidanceCandidat
     if (!bottleneck.has_value() || bottleneck->connectionId.empty()) {
         return std::nullopt;
     }
+    if (!hasAlternativeReachableExit(request)) {
+        return std::nullopt;
+    }
     const auto adjacentExitZoneIds = adjacentExitZoneIdsForConnection(request, bottleneck->connectionId);
     const auto targetExit = leastUsedReachableExit(
         request,
@@ -1487,7 +1505,7 @@ std::optional<AlternativeRecommendationCandidate> makeBottleneckGuidanceCandidat
 std::optional<AlternativeRecommendationCandidate> makeExitBalancingCandidate(
     const AlternativeRecommendationInput& request,
     const RecommendationContext& context) {
-    if (exitUsageCandidates(request).size() < 2) {
+    if (!hasAlternativeReachableExit(request)) {
         return std::nullopt;
     }
     const auto low = context.leastUsedReachableExit;
@@ -1561,7 +1579,7 @@ std::optional<AlternativeRecommendationCandidate> makePressureHotspotCandidate(
     if (!hasPressureSignal(request)) {
         return std::nullopt;
     }
-    if (exitUsageCandidates(request).size() < 2) {
+    if (!hasAlternativeReachableExit(request)) {
         return std::nullopt;
     }
 
@@ -1670,7 +1688,7 @@ std::optional<AlternativeRecommendationCandidate> makeCrossFlowCandidate(
     }
 
     const auto severity = signal->severity;
-    if (!context.exitUsageImbalanced && exitUsageCandidates(request).size() >= 2) {
+    if (!context.exitUsageImbalanced && hasAlternativeReachableExit(request)) {
         const auto targetExit = context.leastUsedReachableExit;
         if (targetExit.has_value()
             && context.mostUsedExit.has_value()
