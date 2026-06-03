@@ -1027,11 +1027,25 @@ SC_TEST(AlternativeRecommendationService_sortsBlockedReliefBeforeGuidance) {
         .nearbyAgentCount = 8,
         .stalledAgentCount = 5,
     });
+    auto layout = makeRecommendationLayout();
+    layout.zones.push_back({
+        .id = "exit-west",
+        .floorId = "L1",
+        .kind = ZoneKind::Exit,
+        .label = "West Exit",
+    });
+    layout.connections.push_back({
+        .id = "door-west",
+        .floorId = "L1",
+        .kind = ConnectionKind::Exit,
+        .fromZoneId = "room-a",
+        .toZoneId = "exit-west",
+    });
     const auto artifacts = makeExitUsageArtifacts();
 
     const AlternativeRecommendationService service;
     const auto result = service.recommend({
-        .layout = makeRecommendationLayout(),
+        .layout = layout,
         .sourceScenario = scenario,
         .risk = risk,
         .artifacts = artifacts,
