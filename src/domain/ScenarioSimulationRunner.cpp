@@ -54,24 +54,6 @@ double beta22(std::uint64_t baseSeed, std::uint64_t salt) {
     return x / (x + y);
 }
 
-std::size_t sourceTickCount(const OccupantSource2D& source) {
-    if (source.spawnIntervalSeconds <= 1e-9 || source.endSeconds <= source.startSeconds) {
-        return 0;
-    }
-
-    const auto duration = source.endSeconds - source.startSeconds;
-    return static_cast<std::size_t>(
-        std::floor(std::max(0.0, duration - 1e-9) / source.spawnIntervalSeconds)) + 1;
-}
-
-std::size_t sourceScheduleCount(const OccupantSource2D& source) {
-    if (source.targetAgentCount == 0) {
-        return 0;
-    }
-    const auto scheduled = sourceTickCount(source) * std::max<std::size_t>(1, source.agentsPerSpawn);
-    return std::min(source.targetAgentCount, scheduled);
-}
-
 }  // namespace
 
 using namespace simulation_internal;
@@ -184,18 +166,17 @@ std::vector<ScheduledScenarioAgentSeed> ScenarioSimulationRunner::createOccupant
     std::vector<ScheduledScenarioAgentSeed> seeds;
     std::size_t totalCount = 0;
     for (const auto& source : scenario_.population.occupantSources) {
-        totalCount += sourceScheduleCount(source);
+        totalCount += occupantSourceScheduledAgentCount(source);
     }
     seeds.reserve(totalCount);
 
     std::uint64_t agentSerial = 0;
     for (const auto& placement : scenario_.population.initialPlacements) {
-        agentSerial += static_cast<std::uint64_t>(
-            placement.explicitPositions.empty() ? placement.targetAgentCount : placement.explicitPositions.size());
+        agentSerial += static_cast<std::uint64_t>(initialPlacementAgentCount(placement));
     }
     for (const auto& source : scenario_.population.occupantSources) {
-        const auto targetCount = sourceScheduleCount(source);
-        const auto tickCount = sourceTickCount(source);
+        const auto targetCount = occupantSourceScheduledAgentCount(source);
+        const auto tickCount = occupantSourceSpawnTickCount(source);
         const auto agentsPerSpawn = std::max<std::size_t>(1, source.agentsPerSpawn);
         std::size_t emittedCount = 0;
         for (std::size_t tickIndex = 0; tickIndex < tickCount && emittedCount < targetCount; ++tickIndex) {

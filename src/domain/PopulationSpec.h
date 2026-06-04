@@ -1,6 +1,8 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -41,5 +43,40 @@ struct PopulationSpec {
     std::vector<InitialPlacement2D> initialPlacements{};
     std::vector<OccupantSource2D> occupantSources{};
 };
+
+inline std::size_t initialPlacementAgentCount(const InitialPlacement2D& placement) {
+    return placement.explicitPositions.empty()
+        ? placement.targetAgentCount
+        : placement.explicitPositions.size();
+}
+
+inline std::size_t occupantSourceSpawnTickCount(const OccupantSource2D& source) {
+    if (source.spawnIntervalSeconds <= 1e-9 || source.endSeconds <= source.startSeconds) {
+        return 0;
+    }
+
+    const auto duration = source.endSeconds - source.startSeconds;
+    return static_cast<std::size_t>(
+        std::floor(std::max(0.0, duration - 1e-9) / source.spawnIntervalSeconds)) + 1;
+}
+
+inline std::size_t occupantSourceScheduledAgentCount(const OccupantSource2D& source) {
+    if (source.targetAgentCount == 0) {
+        return 0;
+    }
+    const auto scheduled = occupantSourceSpawnTickCount(source) * std::max<std::size_t>(1, source.agentsPerSpawn);
+    return std::min(source.targetAgentCount, scheduled);
+}
+
+inline std::size_t scheduledPopulationAgentCount(const PopulationSpec& population) {
+    std::size_t total = 0;
+    for (const auto& placement : population.initialPlacements) {
+        total += initialPlacementAgentCount(placement);
+    }
+    for (const auto& source : population.occupantSources) {
+        total += occupantSourceScheduledAgentCount(source);
+    }
+    return total;
+}
 
 }  // namespace safecrowd::domain

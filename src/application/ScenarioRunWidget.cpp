@@ -263,6 +263,15 @@ int percentValue(double numerator, double denominator) {
     return static_cast<int>(std::round(percent));
 }
 
+int evacuationProgressValue(
+    const safecrowd::domain::SimulationFrame& frame,
+    const safecrowd::domain::ScenarioDraft& scenario) {
+    const auto totalOccupants = safecrowd::domain::scheduledPopulationAgentCount(scenario.population);
+    return percentValue(
+        static_cast<double>(frame.evacuatedAgentCount),
+        static_cast<double>(totalOccupants));
+}
+
 double remainingSimulationSeconds(const safecrowd::domain::ScenarioBatchRunner& batchRunner) {
     double remainingSeconds = 0.0;
     for (const auto& run : batchRunner.runs()) {
@@ -619,7 +628,7 @@ QWidget* ScenarioRunWidget::createRunCanvas() {
         status->setStyleSheet(ui::mutedTextStyleSheet());
         cardLayout->addWidget(status);
 
-        auto* progress = createProgressBar("Scenario progress against its time limit.", card);
+        auto* progress = createProgressBar("Run progress based on evacuated occupants divided by total occupants.", card);
         cardLayout->addWidget(progress);
 
         const int row = index / columns;
@@ -652,10 +661,9 @@ QWidget* ScenarioRunWidget::createRunPanel() {
     statusLabel_->setStyleSheet(ui::mutedTextStyleSheet());
     elapsedLabel_ = createLabel("", panel);
     elapsedLabel_->setStyleSheet(ui::mutedTextStyleSheet());
-    timeProgressBar_ = createProgressBar("Time progress against the scenario time limit.", panel);
     agentCountLabel_ = createLabel("", panel);
     agentCountLabel_->setStyleSheet(ui::mutedTextStyleSheet());
-    evacuationProgressBar_ = createProgressBar("Evacuation progress based on evacuated agents divided by total agents.", panel);
+    runProgressBar_ = createProgressBar("Run progress based on evacuated occupants divided by total occupants.", panel);
     stalledLabel_ = createLabel("", panel);
     stalledLabel_->setStyleSheet(ui::mutedTextStyleSheet());
     stalledLabel_->setToolTip(safecrowd::domain::scenarioStalledDefinition());
@@ -669,9 +677,8 @@ QWidget* ScenarioRunWidget::createRunPanel() {
     layout->addWidget(scenarioLabel_);
     layout->addWidget(statusLabel_);
     layout->addWidget(elapsedLabel_);
-    layout->addWidget(timeProgressBar_);
     layout->addWidget(agentCountLabel_);
-    layout->addWidget(evacuationProgressBar_);
+    layout->addWidget(runProgressBar_);
     layout->addWidget(stalledLabel_);
     layout->addWidget(congestionLabel_);
     layout->addWidget(bottleneckLabel_);
@@ -845,6 +852,7 @@ void ScenarioRunWidget::refreshStatus() {
                 : ui::secondaryButtonStyleSheet());
         }
         if (index < previewStatusLabels_.size() && previewStatusLabels_[index] != nullptr) {
+            const auto totalOccupants = safecrowd::domain::scheduledPopulationAgentCount(run.scenario.population);
             const auto repeatText = run.repeatCount > 1
                 ? QString("Run %1/%2  -  Seed %3\n")
                     .arg(run.repeatIndex)
@@ -855,10 +863,10 @@ void ScenarioRunWidget::refreshStatus() {
                 .arg(repeatText)
                 .arg(simulationStatusText(run.complete, paused_, playbackSpeedMultiplier_))
                 .arg(static_cast<int>(run.frame.evacuatedAgentCount))
-                .arg(static_cast<int>(run.frame.totalAgentCount)));
+                .arg(static_cast<int>(totalOccupants)));
         }
         if (index < previewProgressBars_.size() && previewProgressBars_[index] != nullptr) {
-            previewProgressBars_[index]->setValue(percentValue(run.frame.elapsedSeconds, run.timeLimitSeconds));
+            previewProgressBars_[index]->setValue(evacuationProgressValue(run.frame, run.scenario));
         }
     }
     if (scenarioLabel_ != nullptr) {
@@ -882,19 +890,15 @@ void ScenarioRunWidget::refreshStatus() {
             .arg(frame.elapsedSeconds, 0, 'f', 1)
             .arg(selectedRun.timeLimitSeconds, 0, 'f', 0));
     }
-    if (timeProgressBar_ != nullptr) {
-        timeProgressBar_->setValue(percentValue(frame.elapsedSeconds, selectedRun.timeLimitSeconds));
-    }
     if (agentCountLabel_ != nullptr) {
+        const auto totalOccupants = safecrowd::domain::scheduledPopulationAgentCount(selectedRun.scenario.population);
         agentCountLabel_->setText(QString("Evacuated: %1 / %2\nActive Agents: %3")
             .arg(static_cast<int>(frame.evacuatedAgentCount))
-            .arg(static_cast<int>(frame.totalAgentCount))
+            .arg(static_cast<int>(totalOccupants))
             .arg(static_cast<int>(frame.agents.size())));
     }
-    if (evacuationProgressBar_ != nullptr) {
-        evacuationProgressBar_->setValue(percentValue(
-            static_cast<double>(frame.evacuatedAgentCount),
-            static_cast<double>(frame.totalAgentCount)));
+    if (runProgressBar_ != nullptr) {
+        runProgressBar_->setValue(evacuationProgressValue(frame, selectedRun.scenario));
     }
     const auto& risk = selectedRun.risk;
     if (stalledLabel_ != nullptr) {

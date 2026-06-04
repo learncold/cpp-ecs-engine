@@ -1109,6 +1109,36 @@ SC_TEST(ScenarioSimulationRunnerSpawnsOccupantSourcesOnSchedule) {
     SC_EXPECT_EQ(runner.frame().totalAgentCount, static_cast<std::size_t>(6));
 }
 
+SC_TEST(PopulationScheduledAgentCountMatchesRunnerSpawnRules) {
+    safecrowd::domain::PopulationSpec population;
+    population.initialPlacements.push_back({
+        .targetAgentCount = 10,
+        .explicitPositions = {{.x = 1.0, .y = 1.0}, {.x = 2.0, .y = 2.0}},
+    });
+    population.initialPlacements.push_back({
+        .targetAgentCount = 3,
+    });
+    population.occupantSources.push_back({
+        .targetAgentCount = 7,
+        .agentsPerSpawn = 2,
+        .startSeconds = 0.0,
+        .endSeconds = 0.3,
+        .spawnIntervalSeconds = 0.1,
+    });
+    population.occupantSources.push_back({
+        .targetAgentCount = 5,
+        .agentsPerSpawn = 2,
+        .startSeconds = 2.0,
+        .endSeconds = 2.0,
+        .spawnIntervalSeconds = 0.1,
+    });
+
+    SC_EXPECT_EQ(safecrowd::domain::initialPlacementAgentCount(population.initialPlacements.front()), std::size_t{2});
+    SC_EXPECT_EQ(safecrowd::domain::occupantSourceSpawnTickCount(population.occupantSources.front()), std::size_t{3});
+    SC_EXPECT_EQ(safecrowd::domain::occupantSourceScheduledAgentCount(population.occupantSources.front()), std::size_t{6});
+    SC_EXPECT_EQ(safecrowd::domain::scheduledPopulationAgentCount(population), std::size_t{11});
+}
+
 SC_TEST(ScenarioSimulationRunnerSplitsLargeDeltaIntoStableFixedSteps) {
     safecrowd::domain::ScenarioDraft scenario;
     scenario.execution.timeLimitSeconds = 10.0;

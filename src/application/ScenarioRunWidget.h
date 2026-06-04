@@ -118,9 +118,8 @@ private:
     QLabel* scenarioLabel_{nullptr};
     QLabel* statusLabel_{nullptr};
     QLabel* elapsedLabel_{nullptr};
-    QProgressBar* timeProgressBar_{nullptr};
     QLabel* agentCountLabel_{nullptr};
-    QProgressBar* evacuationProgressBar_{nullptr};
+    QProgressBar* runProgressBar_{nullptr};
     QLabel* stalledLabel_{nullptr};
     QLabel* congestionLabel_{nullptr};
     QLabel* bottleneckLabel_{nullptr};
