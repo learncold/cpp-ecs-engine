@@ -532,6 +532,39 @@ SC_TEST(AlternativeRecommendationService_skipsBottleneckGuidanceForSingleExitLay
     SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::ExitUsageBalancing));
 }
 
+SC_TEST(AlternativeRecommendationService_keepsInactiveTimedBlockReachableForBottleneckGuidance) {
+    auto scenario = makeScenario();
+    scenario.control.connectionBlocks.push_back({
+        .id = "block-main-early",
+        .connectionId = "door-main",
+        .intervals = {{.startSeconds = 0.0, .endSeconds = 5.0}},
+    });
+
+    ScenarioRiskSnapshot risk;
+    risk.bottlenecks.push_back({
+        .connectionId = "door-main",
+        .nearbyAgentCount = 8,
+        .stalledAgentCount = 5,
+        .detectedAtSeconds = 20.0,
+    });
+
+    const AlternativeRecommendationService service;
+    const auto result = service.recommend({
+        .layout = makeRecommendationLayout(),
+        .sourceScenario = scenario,
+        .risk = risk,
+        .artifacts = makeExitUsageArtifacts(),
+    });
+
+    SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::BlockedConnectionRelief));
+    const auto it = std::find_if(result.candidates.begin(), result.candidates.end(), [](const auto& candidate) {
+        return candidate.kind == AlternativeRecommendationKind::BottleneckBypassGuidance;
+    });
+    SC_EXPECT_TRUE(it != result.candidates.end());
+    SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.size(), std::size_t{1});
+    SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.front().guidedExitZoneId, std::string{"exit-east"});
+}
+
 SC_TEST(AlternativeRecommendationService_installsCorridorBottleneckGuidanceAtExitOnly) {
     ScenarioRiskSnapshot risk;
     risk.bottlenecks.push_back({

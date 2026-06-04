@@ -505,9 +505,30 @@ void finalizeDiffKeys(const AlternativeRecommendationInput& request, ScenarioDra
     }
 }
 
-bool sourceHasConnectionBlock(const ScenarioDraft& scenario, const std::string& connectionId) {
+bool connectionBlockConstrainsReachability(
+    const ConnectionBlockDraft& block,
+    const std::optional<double>& elapsedSeconds) {
+    if (block.connectionId.empty()) {
+        return false;
+    }
+    if (elapsedSeconds.has_value()) {
+        return connectionBlockActiveAt(block, *elapsedSeconds);
+    }
+    if (block.intervals.empty()) {
+        return true;
+    }
+    return std::any_of(block.intervals.begin(), block.intervals.end(), [](const auto& interval) {
+        return interval.startSeconds <= 0.0 && interval.endSeconds <= interval.startSeconds;
+    });
+}
+
+bool sourceHasReachabilityConnectionBlock(
+    const ScenarioDraft& scenario,
+    const std::string& connectionId,
+    const std::optional<double>& elapsedSeconds) {
     return std::any_of(scenario.control.connectionBlocks.begin(), scenario.control.connectionBlocks.end(), [&](const auto& block) {
-        return block.connectionId == connectionId;
+        return block.connectionId == connectionId
+            && connectionBlockConstrainsReachability(block, elapsedSeconds);
     });
 }
 
@@ -876,9 +897,10 @@ bool connectionTraversableFromZone(
     const ScenarioDraft& scenario,
     const Connection2D& connection,
     const std::string& zoneId,
-    std::string& nextZoneId) {
+    std::string& nextZoneId,
+    const std::optional<double>& elapsedSeconds) {
     if (connection.directionality == TravelDirection::Closed
-        || sourceHasConnectionBlock(scenario, connection.id)) {
+        || sourceHasReachabilityConnectionBlock(scenario, connection.id, elapsedSeconds)) {
         return false;
     }
     if (connection.fromZoneId == zoneId && connection.directionality != TravelDirection::ReverseOnly) {
@@ -896,7 +918,8 @@ bool routeExistsBetweenZones(
     const FacilityLayout2D& layout,
     const ScenarioDraft& scenario,
     const std::string& startZoneId,
-    const std::string& targetZoneId) {
+    const std::string& targetZoneId,
+    const std::optional<double>& elapsedSeconds = std::nullopt) {
     if (startZoneId.empty() || targetZoneId.empty()) {
         return false;
     }
@@ -910,7 +933,7 @@ bool routeExistsBetweenZones(
         const auto zoneId = pending[index];
         for (const auto& connection : layout.connections) {
             std::string nextZoneId;
-            if (!connectionTraversableFromZone(scenario, connection, zoneId, nextZoneId)
+            if (!connectionTraversableFromZone(scenario, connection, zoneId, nextZoneId, elapsedSeconds)
                 || visited.find(nextZoneId) != visited.end()) {
                 continue;
             }
@@ -926,7 +949,8 @@ bool routeExistsBetweenZones(
 
 bool exitReachableFromScenarioSources(
     const AlternativeRecommendationInput& request,
-    const std::string& exitZoneId) {
+    const std::string& exitZoneId,
+    const std::optional<double>& elapsedSeconds = std::nullopt) {
     if (exitZoneId.empty()) {
         return false;
     }
@@ -939,7 +963,7 @@ bool exitReachableFromScenarioSources(
         return false;
     }
     return std::any_of(zones.begin(), zones.end(), [&](const auto& zoneId) {
-        return routeExistsBetweenZones(request.layout, request.sourceScenario, zoneId, exitZoneId);
+        return routeExistsBetweenZones(request.layout, request.sourceScenario, zoneId, exitZoneId, elapsedSeconds);
     });
 }
 
@@ -979,12 +1003,13 @@ bool guidanceDetourAcceptable(
 
 std::optional<ExitUsageMetric> leastUsedReachableExit(
     const AlternativeRecommendationInput& request,
-    const std::vector<std::string>& excludedExitZoneIds = {}) {
+    const std::vector<std::string>& excludedExitZoneIds = {},
+    const std::optional<double>& elapsedSeconds = std::nullopt) {
     const auto candidates = exitUsageCandidates(request);
     std::optional<ExitUsageMetric> best;
     for (const auto& usage : candidates) {
         if (containsString(excludedExitZoneIds, usage.exitZoneId)
-            || !exitReachableFromScenarioSources(request, usage.exitZoneId)) {
+            || !exitReachableFromScenarioSources(request, usage.exitZoneId, elapsedSeconds)) {
             continue;
         }
         if (!best.has_value()
@@ -996,19 +1021,23 @@ std::optional<ExitUsageMetric> leastUsedReachableExit(
     return best;
 }
 
-std::size_t reachableExitCandidateCount(const AlternativeRecommendationInput& request) {
+std::size_t reachableExitCandidateCount(
+    const AlternativeRecommendationInput& request,
+    const std::optional<double>& elapsedSeconds = std::nullopt) {
     std::unordered_set<std::string> reachableExitZoneIds;
     for (const auto& usage : exitUsageCandidates(request)) {
         if (!usage.exitZoneId.empty()
-            && exitReachableFromScenarioSources(request, usage.exitZoneId)) {
+            && exitReachableFromScenarioSources(request, usage.exitZoneId, elapsedSeconds)) {
             reachableExitZoneIds.insert(usage.exitZoneId);
         }
     }
     return reachableExitZoneIds.size();
 }
 
-bool hasAlternativeReachableExit(const AlternativeRecommendationInput& request) {
-    return reachableExitCandidateCount(request) >= 2;
+bool hasAlternativeReachableExit(
+    const AlternativeRecommendationInput& request,
+    const std::optional<double>& elapsedSeconds = std::nullopt) {
+    return reachableExitCandidateCount(request, elapsedSeconds) >= 2;
 }
 
 bool bottleneckLessSevere(const ScenarioBottleneckMetric& lhs, const ScenarioBottleneckMetric& rhs) {
@@ -1425,13 +1454,14 @@ std::optional<AlternativeRecommendationCandidate> makeBottleneckGuidanceCandidat
     if (!bottleneck.has_value() || bottleneck->connectionId.empty()) {
         return std::nullopt;
     }
-    if (!hasAlternativeReachableExit(request)) {
+    if (!hasAlternativeReachableExit(request, bottleneck->detectedAtSeconds)) {
         return std::nullopt;
     }
     const auto adjacentExitZoneIds = adjacentExitZoneIdsForConnection(request, bottleneck->connectionId);
     const auto targetExit = leastUsedReachableExit(
         request,
-        adjacentExitZoneIds);
+        adjacentExitZoneIds,
+        bottleneck->detectedAtSeconds);
     if (!targetExit.has_value() || targetExit->exitZoneId.empty()) {
         return std::nullopt;
     }
