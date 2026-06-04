@@ -76,6 +76,38 @@ SC_TEST(ImportValidationFlagsBarrierCrossingConnectionPassage) {
     SC_EXPECT_TRUE(!hasBlockingImportIssue(issues));
 }
 
+SC_TEST(ImportValidationFlagsBarrierCrossingNearConnectionEndpoint) {
+    auto layout = makeConnectedRoomAndExit();
+    // Still inside the passage span, but close to the start endpoint.
+    layout.barriers.push_back({
+        .id = "near-start-wall",
+        .floorId = "F1",
+        .geometry = {.vertices = {{10.05, 3.0}, {10.05, 5.0}}, .closed = false},
+        .blocksMovement = true,
+    });
+
+    ImportValidationService validator;
+    const auto issues = validator.validate(layout);
+
+    SC_EXPECT_TRUE(hasIssueCode(issues, ImportIssueCode::ObstructedConnection));
+}
+
+SC_TEST(ImportValidationFlagsCollinearBarrierOverConnectionPassage) {
+    auto layout = makeConnectedRoomAndExit();
+    // Unbroken wall segment left on the same span as the exit passage.
+    layout.barriers.push_back({
+        .id = "collinear-wall",
+        .floorId = "F1",
+        .geometry = {.vertices = {{10.2, 4.0}, {10.8, 4.0}}, .closed = false},
+        .blocksMovement = true,
+    });
+
+    ImportValidationService validator;
+    const auto issues = validator.validate(layout);
+
+    SC_EXPECT_TRUE(hasIssueCode(issues, ImportIssueCode::ObstructedConnection));
+}
+
 SC_TEST(ImportValidationFlagsClosedObstacleContainingConnectionPassage) {
     auto layout = makeConnectedRoomAndExit();
     // Closed footprint fully contains the passage span, so no obstacle edge
@@ -100,6 +132,21 @@ SC_TEST(ImportValidationIgnoresNonBlockingBarrierOverConnection) {
         .floorId = "F1",
         .geometry = {.vertices = {{10.5, 3.0}, {10.5, 5.0}}, .closed = false},
         .blocksMovement = false,
+    });
+
+    ImportValidationService validator;
+    const auto issues = validator.validate(layout);
+
+    SC_EXPECT_TRUE(!hasIssueCode(issues, ImportIssueCode::ObstructedConnection));
+}
+
+SC_TEST(ImportValidationDoesNotFlagCollinearWallTouchingConnectionEndpoint) {
+    auto layout = makeConnectedRoomAndExit();
+    layout.barriers.push_back({
+        .id = "collinear-flank",
+        .floorId = "F1",
+        .geometry = {.vertices = {{9.0, 4.0}, {10.0, 4.0}}, .closed = false},
+        .blocksMovement = true,
     });
 
     ImportValidationService validator;

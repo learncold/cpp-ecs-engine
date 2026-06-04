@@ -266,24 +266,39 @@ bool barrierSharesConnectionFloor(const Barrier2D& barrier, const Connection2D& 
     return barrier.floorId.empty() || connection.floorId.empty() || barrier.floorId == connection.floorId;
 }
 
-// A blocking barrier obstructs a passage when one of its segments crosses the
-// connection span through the span interior. Crossings at the span endpoints
-// (where doorways legitimately meet flanking walls) and collinear/parallel
-// barriers that run along a zone boundary are intentionally ignored.
+// A blocking barrier obstructs a passage when one of its segments crosses or
+// overlaps the connection span through the span interior. Endpoint-only contact
+// is ignored because doorways legitimately meet flanking walls.
 bool barrierSegmentCrossesSpanInterior(const LineSegment2D& barrierSegment, const LineSegment2D& span) {
     const auto spanDirection = subtract(span.end, span.start);
     const auto barrierDirection = subtract(barrierSegment.end, barrierSegment.start);
+    const auto spanLengthSquared = dot(spanDirection, spanDirection);
+    if (spanLengthSquared <= kGeometryEpsilon) {
+        return false;
+    }
+
+    constexpr double kSpanEndpointTolerance = 1e-6;
     const auto denominator = cross(spanDirection, barrierDirection);
     if (std::abs(denominator) <= kGeometryEpsilon) {
-        return false;
+        if (std::abs(cross(subtract(barrierSegment.start, span.start), spanDirection)) > kGeometryEpsilon
+            || std::abs(cross(subtract(barrierSegment.end, span.start), spanDirection)) > kGeometryEpsilon) {
+            return false;
+        }
+
+        const auto startFraction = dot(subtract(barrierSegment.start, span.start), spanDirection) / spanLengthSquared;
+        const auto endFraction = dot(subtract(barrierSegment.end, span.start), spanDirection) / spanLengthSquared;
+        const auto overlapStart = std::max(std::min(startFraction, endFraction), 0.0);
+        const auto overlapEnd = std::min(std::max(startFraction, endFraction), 1.0);
+        return overlapEnd - overlapStart > kSpanEndpointTolerance
+            && overlapEnd > kSpanEndpointTolerance
+            && overlapStart < 1.0 - kSpanEndpointTolerance;
     }
 
     const auto delta = subtract(barrierSegment.start, span.start);
     const auto spanFraction = cross(delta, barrierDirection) / denominator;
     const auto barrierFraction = cross(delta, spanDirection) / denominator;
-    constexpr double kSpanInteriorMargin = 0.15;
-    return spanFraction > kSpanInteriorMargin
-        && spanFraction < 1.0 - kSpanInteriorMargin
+    return spanFraction > kSpanEndpointTolerance
+        && spanFraction < 1.0 - kSpanEndpointTolerance
         && barrierFraction >= -kGeometryEpsilon
         && barrierFraction <= 1.0 + kGeometryEpsilon;
 }
