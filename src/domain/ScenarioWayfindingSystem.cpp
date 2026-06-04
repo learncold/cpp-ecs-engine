@@ -27,6 +27,9 @@ constexpr double kStalledConnectionAvoidSeconds = 5.0;
 constexpr double kPreviousZoneBacktrackPenalty = 85.0;
 constexpr double kRetainedTargetBonus = 4.0;
 constexpr double kSameFloorExitStairDetourPenalty = 100.0;
+constexpr double kDirectExitPriorityBonus = 250.0;
+constexpr double kSameFloorExitRouteBonus = 120.0;
+constexpr double kSameFloorExitRouteDetourPenalty = 95.0;
 
 bool signActiveAt(const EvacuationSignDraft& sign, double elapsedSeconds) {
     if (sign.periods.empty()) {
@@ -263,42 +266,77 @@ bool zoneLooksLikeDeadEnd(
     });
 }
 
-bool sameFloorExitReachableWithoutVertical(
+std::vector<std::string> sameFloorExitRouteConnectionIds(
     const ScenarioLayoutCacheResource& layoutCache,
     const std::string& startZoneId) {
     const auto startFloorId = cachedFloorIdForZone(layoutCache, startZoneId);
     if (startZoneId.empty() || startFloorId.empty()) {
-        return false;
+        return {};
     }
 
-    std::vector<std::string> visited;
-    std::vector<std::string> pending{startZoneId};
-    while (!pending.empty()) {
-        const auto zoneId = pending.back();
-        pending.pop_back();
-        if (containsString(visited, zoneId)) {
+    std::vector<std::string> routeConnectionIds;
+    for (const auto& firstTraversal : cachedTraversalsForZone(layoutCache, startZoneId)) {
+        if (firstTraversal.nextZoneId.empty() || firstTraversal.connectionIndex >= layoutCache.layout.connections.size()) {
             continue;
         }
-        visited.push_back(zoneId);
-
-        const auto* zone = findCachedZone(layoutCache, zoneId);
-        if (zone != nullptr && zone->kind == ZoneKind::Exit && matchesFloor(zone->floorId, startFloorId)) {
-            return true;
+        const auto& firstConnection = layoutCache.layout.connections[firstTraversal.connectionIndex];
+        if (isVerticalConnection(firstConnection) || firstConnection.kind == ConnectionKind::Stair || firstConnection.kind == ConnectionKind::Ramp) {
+            continue;
+        }
+        const auto firstNextFloorId = cachedFloorIdForZone(layoutCache, firstTraversal.nextZoneId);
+        if (!matchesFloor(firstNextFloorId, startFloorId)) {
+            continue;
         }
 
-        for (const auto& traversal : cachedTraversalsForZone(layoutCache, zoneId)) {
-            if (traversal.nextZoneId.empty() || traversal.connectionIndex >= layoutCache.layout.connections.size()) {
+        std::vector<std::string> visited{startZoneId};
+        std::vector<std::string> pending{firstTraversal.nextZoneId};
+        bool reachesExit = false;
+        for (std::size_t cursor = 0; cursor < pending.size() && !reachesExit; ++cursor) {
+            const auto zoneId = pending[cursor];
+            if (containsString(visited, zoneId)) {
                 continue;
             }
-            const auto& connection = layoutCache.layout.connections[traversal.connectionIndex];
-            if (isVerticalConnection(connection)) {
+            visited.push_back(zoneId);
+
+            const auto* zone = findCachedZone(layoutCache, zoneId);
+            if (zone != nullptr && zone->kind == ZoneKind::Exit && matchesFloor(zone->floorId, startFloorId)) {
+                reachesExit = true;
                 continue;
             }
-            const auto nextFloorId = cachedFloorIdForZone(layoutCache, traversal.nextZoneId);
-            if (!matchesFloor(nextFloorId, startFloorId) || containsString(visited, traversal.nextZoneId)) {
-                continue;
+
+            for (const auto& traversal : cachedTraversalsForZone(layoutCache, zoneId)) {
+                if (traversal.nextZoneId.empty() || traversal.connectionIndex >= layoutCache.layout.connections.size()) {
+                    continue;
+                }
+                const auto& connection = layoutCache.layout.connections[traversal.connectionIndex];
+                if (isVerticalConnection(connection) || connection.kind == ConnectionKind::Stair || connection.kind == ConnectionKind::Ramp) {
+                    continue;
+                }
+                const auto nextFloorId = cachedFloorIdForZone(layoutCache, traversal.nextZoneId);
+                if (!matchesFloor(nextFloorId, startFloorId) || containsString(visited, traversal.nextZoneId)) {
+                    continue;
+                }
+                pending.push_back(traversal.nextZoneId);
             }
-            pending.push_back(traversal.nextZoneId);
+        }
+        if (reachesExit && !containsString(routeConnectionIds, firstConnection.id)) {
+            routeConnectionIds.push_back(firstConnection.id);
+        }
+    }
+    return routeConnectionIds;
+}
+
+bool hasDirectExitCandidate(
+    const ScenarioLayoutCacheResource& layoutCache,
+    const std::string& currentZoneId) {
+    for (const auto& traversal : cachedTraversalsForZone(layoutCache, currentZoneId)) {
+        if (traversal.connectionIndex >= layoutCache.layout.connections.size()) {
+            continue;
+        }
+        const auto& connection = layoutCache.layout.connections[traversal.connectionIndex];
+        const auto* nextZone = findCachedZone(layoutCache, traversal.nextZoneId);
+        if (connection.kind == ConnectionKind::Exit || (nextZone != nullptr && nextZone->kind == ZoneKind::Exit)) {
+            return true;
         }
     }
     return false;
@@ -326,7 +364,8 @@ WayfindingCandidate scoreCandidate(
     const Agent& agent,
     const std::string& currentZoneId,
     const ScenarioConnectionTraversal& traversal,
-    bool sameFloorExitReachable,
+    bool directExitAvailable,
+    const std::vector<std::string>& sameFloorExitConnectionIds,
     double elapsedSeconds) {
     const auto& connection = layoutCache.layout.connections[traversal.connectionIndex];
     const auto* currentZone = findCachedZone(layoutCache, currentZoneId);
@@ -355,8 +394,10 @@ WayfindingCandidate scoreCandidate(
         || (nextZone != nullptr && nextZone->kind == ZoneKind::Exit);
 
     if (candidateTargetsExit) {
-        candidate.score += 100.0;
+        candidate.score += kDirectExitPriorityBonus;
         candidate.intent = WayfindingIntent::MovingToVisibleExit;
+    } else if (directExitAvailable) {
+        candidate.score -= kDirectExitPriorityBonus;
     }
     if (candidateIsVertical && currentZoneIsStairLike) {
         if (!targetZoneVisited) {
@@ -382,7 +423,14 @@ WayfindingCandidate scoreCandidate(
         && (nextZone == nullptr || nextZone->kind != ZoneKind::Exit)) {
         candidate.score -= kPreviousZoneBacktrackPenalty;
     }
-    if (sameFloorExitReachable && !candidateTargetsExit) {
+    if (!candidateTargetsExit && !sameFloorExitConnectionIds.empty()) {
+        if (containsString(sameFloorExitConnectionIds, connection.id)) {
+            candidate.score += kSameFloorExitRouteBonus;
+        } else {
+            candidate.score -= kSameFloorExitRouteDetourPenalty;
+        }
+    }
+    if (!sameFloorExitConnectionIds.empty() && !candidateTargetsExit) {
         const bool entersStairZone = !currentZoneIsStairLike && nextZoneIsStairLike;
         if (candidateIsVertical || entersStairZone || connection.kind == ConnectionKind::Stair || connection.kind == ConnectionKind::Ramp) {
             candidate.score -= kSameFloorExitStairDetourPenalty;
@@ -461,7 +509,8 @@ std::optional<WayfindingCandidate> chooseCandidate(
     const std::string& currentZoneId,
     double elapsedSeconds) {
     const auto& traversals = cachedTraversalsForZone(layoutCache, currentZoneId);
-    const bool sameFloorExitReachable = sameFloorExitReachableWithoutVertical(layoutCache, currentZoneId);
+    const bool directExitAvailable = hasDirectExitCandidate(layoutCache, currentZoneId);
+    const auto sameFloorExitConnectionIds = sameFloorExitRouteConnectionIds(layoutCache, currentZoneId);
     std::optional<WayfindingCandidate> best;
     for (const auto& traversal : traversals) {
         if (traversal.nextZoneId.empty() || traversal.connectionIndex >= layoutCache.layout.connections.size()) {
@@ -477,7 +526,8 @@ std::optional<WayfindingCandidate> chooseCandidate(
             agent,
             currentZoneId,
             traversal,
-            sameFloorExitReachable,
+            directExitAvailable,
+            sameFloorExitConnectionIds,
             elapsedSeconds);
         if (!best.has_value()
             || candidate.score > best->score + 1e-9
