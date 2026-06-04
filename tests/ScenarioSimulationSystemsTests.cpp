@@ -1281,6 +1281,116 @@ SC_TEST(ScenarioAgentSpawnSystem_ConfiguresClockAndSpawnsAgentSeeds) {
     SC_EXPECT_TRUE(frame.agents.front().stalled);
 }
 
+SC_TEST(ScenarioFrameSyncSystem_PropagatesStalledStateToAgentBetweenStalledNeighbors) {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    seeds.push_back({
+        .position = {.value = {.x = 0.0, .y = 0.0}},
+        .agent = {.radius = 0.25f, .maxSpeed = 1.2f},
+        .velocity = {.value = {.x = 0.0, .y = 0.5}},
+        .route = {.stalledSeconds = 0.0, .currentFloorId = "L1", .displayFloorId = "L1"},
+        .status = {},
+    });
+    seeds.push_back({
+        .position = {.value = {.x = 0.0, .y = 0.55}},
+        .agent = {.radius = 0.25f, .maxSpeed = 1.2f},
+        .velocity = {.value = {}},
+        .route = {.stalledSeconds = 1.0, .currentFloorId = "L1", .displayFloorId = "L1"},
+        .status = {},
+    });
+    seeds.push_back({
+        .position = {.value = {.x = 0.0, .y = -0.55}},
+        .agent = {.radius = 0.25f, .maxSpeed = 1.2f},
+        .velocity = {.value = {}},
+        .route = {.stalledSeconds = 1.0, .currentFloorId = "L1", .displayFloorId = "L1"},
+        .status = {},
+    });
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 2,
+    });
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 15.0));
+    runtime.addSystem(
+        std::make_unique<safecrowd::domain::ScenarioFrameSyncSystem>(),
+        {.phase = safecrowd::engine::UpdatePhase::RenderSync,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(1.0 / 30.0);
+
+    const auto& frame = runtime.world().resources().get<safecrowd::domain::ScenarioSimulationFrameResource>().frame;
+    std::size_t stalledCount = 0;
+    bool middleStalled = false;
+    for (const auto& agent : frame.agents) {
+        if (agent.stalled) {
+            ++stalledCount;
+        }
+        if (std::fabs(agent.position.y) <= 1e-9) {
+            middleStalled = agent.stalled;
+        }
+    }
+
+    SC_EXPECT_EQ(frame.agents.size(), std::size_t{3});
+    SC_EXPECT_EQ(stalledCount, std::size_t{3});
+    SC_EXPECT_TRUE(middleStalled);
+}
+
+SC_TEST(ScenarioFrameSyncSystem_DoesNotPropagateStalledStateFromSideLane) {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    seeds.push_back({
+        .position = {.value = {.x = 0.0, .y = 0.0}},
+        .agent = {.radius = 0.25f, .maxSpeed = 1.2f},
+        .velocity = {.value = {.x = 0.0, .y = 0.5}},
+        .route = {.stalledSeconds = 0.0, .currentFloorId = "L1", .displayFloorId = "L1"},
+        .status = {},
+    });
+    seeds.push_back({
+        .position = {.value = {.x = 0.0, .y = 0.55}},
+        .agent = {.radius = 0.25f, .maxSpeed = 1.2f},
+        .velocity = {.value = {}},
+        .route = {.stalledSeconds = 1.0, .currentFloorId = "L1", .displayFloorId = "L1"},
+        .status = {},
+    });
+    seeds.push_back({
+        .position = {.value = {.x = 1.0, .y = -0.55}},
+        .agent = {.radius = 0.25f, .maxSpeed = 1.2f},
+        .velocity = {.value = {}},
+        .route = {.stalledSeconds = 1.0, .currentFloorId = "L1", .displayFloorId = "L1"},
+        .status = {},
+    });
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 2,
+    });
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 15.0));
+    runtime.addSystem(
+        std::make_unique<safecrowd::domain::ScenarioFrameSyncSystem>(),
+        {.phase = safecrowd::engine::UpdatePhase::RenderSync,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(1.0 / 30.0);
+
+    const auto& frame = runtime.world().resources().get<safecrowd::domain::ScenarioSimulationFrameResource>().frame;
+    std::size_t stalledCount = 0;
+    bool middleStalled = true;
+    for (const auto& agent : frame.agents) {
+        if (agent.stalled) {
+            ++stalledCount;
+        }
+        if (std::fabs(agent.position.y) <= 1e-9) {
+            middleStalled = agent.stalled;
+        }
+    }
+
+    SC_EXPECT_EQ(frame.agents.size(), std::size_t{3});
+    SC_EXPECT_EQ(stalledCount, std::size_t{2});
+    SC_EXPECT_TRUE(!middleStalled);
+}
+
 SC_TEST(ScenarioWayfindingSystem_DirectionArrowSelectsAlignedConnection) {
     std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
     seeds.push_back(localWayfindingSeed({.x = 1.0, .y = 3.0}));

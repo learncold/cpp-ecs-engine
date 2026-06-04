@@ -1,5 +1,7 @@
 #include "domain/ScenarioSimulationInternal.h"
 
+#include "domain/ScenarioRiskMetrics.h"
+#include "domain/ScenarioSimulationFrame.h"
 #include "domain/ScenarioSimulationSystems.h"
 
 #include <algorithm>
@@ -64,6 +66,10 @@ double lengthOf(const Point2D& point) {
 
 double dot(const Point2D& lhs, const Point2D& rhs) {
     return (lhs.x * rhs.x) + (lhs.y * rhs.y);
+}
+
+double crossMagnitude(const Point2D& lhs, const Point2D& rhs) {
+    return std::fabs((lhs.x * rhs.y) - (lhs.y * rhs.x));
 }
 
 Point2D perpendicularLeft(const Point2D& point) {
@@ -1151,6 +1157,75 @@ double speedOf(const Point2D& velocity) {
 
 std::vector<engine::Entity> simulationEntities(engine::WorldQuery& query) {
     return query.view<Position, Agent, Velocity, AvoidanceState, EvacuationRoute, EvacuationStatus>();
+}
+
+void propagateStalledStateThroughQueues(SimulationFrame& frame) {
+    std::vector<std::size_t> stalledIndexes;
+    stalledIndexes.reserve(frame.agents.size());
+    for (std::size_t index = 0; index < frame.agents.size(); ++index) {
+        if (frame.agents[index].stalled) {
+            stalledIndexes.push_back(index);
+        }
+    }
+    if (stalledIndexes.size() < 2) {
+        return;
+    }
+
+    std::vector<std::size_t> propagatedIndexes;
+    for (std::size_t index = 0; index < frame.agents.size(); ++index) {
+        auto& candidate = frame.agents[index];
+        if (candidate.stalled) {
+            continue;
+        }
+
+        const auto speed = lengthOf(candidate.velocity);
+        if (speed <= kScenarioStalledSpeedThreshold) {
+            continue;
+        }
+
+        const auto forward = candidate.velocity * (1.0 / speed);
+        bool hasStalledAhead = false;
+        bool hasStalledBehind = false;
+        for (const auto stalledIndex : stalledIndexes) {
+            const auto& stalled = frame.agents[stalledIndex];
+            if (stalled.floorId != candidate.floorId) {
+                continue;
+            }
+
+            const auto offset = stalled.position - candidate.position;
+            const auto distance = lengthOf(offset);
+            const auto reach = std::max(0.0, candidate.radius)
+                + std::max(0.0, stalled.radius)
+                + kStalledQueuePropagationExtraReach;
+            if (distance > reach) {
+                continue;
+            }
+
+            const auto lateralDistance = crossMagnitude(forward, offset);
+            const auto lateralTolerance = std::max(0.0, candidate.radius)
+                + std::max(0.0, stalled.radius)
+                + kStalledQueuePropagationLateralBuffer;
+            if (lateralDistance > lateralTolerance) {
+                continue;
+            }
+
+            const auto longitudinalDistance = dot(offset, forward);
+            if (longitudinalDistance >= kStalledQueuePropagationMinimumLongitudinal) {
+                hasStalledAhead = true;
+            } else if (longitudinalDistance <= -kStalledQueuePropagationMinimumLongitudinal) {
+                hasStalledBehind = true;
+            }
+
+            if (hasStalledAhead && hasStalledBehind) {
+                propagatedIndexes.push_back(index);
+                break;
+            }
+        }
+    }
+
+    for (const auto index : propagatedIndexes) {
+        frame.agents[index].stalled = true;
+    }
 }
 
 AgentSpatialIndex buildAgentSpatialIndex(

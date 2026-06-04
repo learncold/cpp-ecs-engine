@@ -16,6 +16,7 @@
 namespace safecrowd::domain {
 struct ScenarioConnectionTraversal;
 struct ScenarioLayoutCacheResource;
+struct SimulationFrame;
 }
 
 namespace safecrowd::domain::simulation_internal {
@@ -42,6 +43,9 @@ inline constexpr double kWaypointProgressEpsilon = 0.02;
 inline constexpr double kWaypointBypassLongitudinalTolerance = 0.5;
 inline constexpr double kWaypointBypassLateralTolerance = 0.65;
 inline constexpr double kWaypointStallSeconds = 0.75;
+inline constexpr double kStalledQueuePropagationExtraReach = 0.35;
+inline constexpr double kStalledQueuePropagationLateralBuffer = 0.15;
+inline constexpr double kStalledQueuePropagationMinimumLongitudinal = 0.05;
 inline constexpr double kPortalCrossingEpsilon = 0.02;
 inline constexpr double kRouteReplanCooldownSeconds = 0.35;
 
@@ -161,6 +165,7 @@ bool routePassageCrossed(const FacilityLayout2D& layout, const EvacuationRoute& 
 double speedOf(const Point2D& velocity);
 bool pointHasBarrierClearance(const FacilityLayout2D& layout, const Point2D& point, double clearance);
 std::vector<engine::Entity> simulationEntities(engine::WorldQuery& query);
+void propagateStalledStateThroughQueues(SimulationFrame& frame);
 AgentSpatialIndex buildAgentSpatialIndex(engine::WorldQuery& query, const std::vector<engine::Entity>& entities, double cellSize);
 std::vector<engine::Entity> nearbyAgents(engine::WorldQuery& query, const AgentSpatialIndex& index, const Point2D& point, double radius);
 std::vector<engine::Entity> nearbyAgents(

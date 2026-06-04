@@ -1286,6 +1286,7 @@ void ScenarioFrameSyncSystem::update(engine::EngineWorld& world, const engine::E
                 && scenarioAgentStalled(simulation_internal::lengthOf(velocity.value), route->stalledSeconds),
         });
     }
+    simulation_internal::propagateStalledStateThroughQueues(frame);
 
     if (resources.contains<ScenarioResultArtifactsResource>()) {
         auto& result = resources.get<ScenarioResultArtifactsResource>();
