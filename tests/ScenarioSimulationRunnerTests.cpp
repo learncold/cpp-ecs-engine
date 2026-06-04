@@ -757,6 +757,133 @@ safecrowd::domain::FacilityLayout2D competingStairExitLayout() {
     return layout;
 }
 
+safecrowd::domain::FacilityLayout2D sameFloorExitWithVerticalLoopLayout() {
+    safecrowd::domain::FacilityLayout2D layout;
+    layout.id = "same-floor-exit-with-vertical-loop";
+    layout.levelId = "L1";
+    layout.floors.push_back({.id = "L1", .label = "Floor 1"});
+    layout.floors.push_back({.id = "L2", .label = "Floor 2", .elevationMeters = 3.5});
+    layout.zones.push_back({
+        .id = "room-l1",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Room L1",
+        .area = {.outline = {{0.0, 0.0}, {4.0, 0.0}, {4.0, 2.0}, {0.0, 2.0}}},
+    });
+    layout.zones.push_back({
+        .id = "exit-l1",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Exit,
+        .label = "Exit L1",
+        .area = {.outline = {{100.0, 0.0}, {102.0, 0.0}, {102.0, 2.0}, {100.0, 2.0}}},
+    });
+    layout.zones.push_back({
+        .id = "stair-a-l1",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Stair,
+        .label = "Stair A L1",
+        .area = {.outline = {{0.0, 2.0}, {2.0, 2.0}, {2.0, 4.0}, {0.0, 4.0}}},
+        .isStair = true,
+    });
+    layout.zones.push_back({
+        .id = "stair-a-l2",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ZoneKind::Stair,
+        .label = "Stair A L2",
+        .area = {.outline = {{0.0, 2.0}, {2.0, 2.0}, {2.0, 4.0}, {0.0, 4.0}}},
+        .isStair = true,
+    });
+    layout.zones.push_back({
+        .id = "bridge-l2",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ZoneKind::Room,
+        .label = "Bridge L2",
+        .area = {.outline = {{2.0, 2.0}, {4.0, 2.0}, {4.0, 4.0}, {2.0, 4.0}}},
+    });
+    layout.zones.push_back({
+        .id = "stair-b-l2",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ZoneKind::Stair,
+        .label = "Stair B L2",
+        .area = {.outline = {{4.0, 2.0}, {6.0, 2.0}, {6.0, 4.0}, {4.0, 4.0}}},
+        .isStair = true,
+    });
+    layout.zones.push_back({
+        .id = "stair-b-l1",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ZoneKind::Stair,
+        .label = "Stair B L1",
+        .area = {.outline = {{4.0, 2.0}, {6.0, 2.0}, {6.0, 4.0}, {4.0, 4.0}}},
+        .isStair = true,
+    });
+    layout.connections.push_back({
+        .id = "room-direct-exit",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ConnectionKind::Exit,
+        .fromZoneId = "room-l1",
+        .toZoneId = "exit-l1",
+        .effectiveWidth = 1.2,
+        .centerSpan = {{100.0, 0.4}, {100.0, 1.6}},
+    });
+    layout.connections.push_back({
+        .id = "room-stair-a",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ConnectionKind::Opening,
+        .fromZoneId = "room-l1",
+        .toZoneId = "stair-a-l1",
+        .effectiveWidth = 1.2,
+        .centerSpan = {{1.0, 2.0}, {1.8, 2.0}},
+    });
+    layout.connections.push_back({
+        .id = "stair-a-vertical",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ConnectionKind::Stair,
+        .fromZoneId = "stair-a-l1",
+        .toZoneId = "stair-a-l2",
+        .effectiveWidth = 1.2,
+        .isStair = true,
+        .centerSpan = {{1.0, 2.8}, {1.8, 2.8}},
+    });
+    layout.connections.push_back({
+        .id = "stair-a-bridge",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ConnectionKind::Opening,
+        .fromZoneId = "stair-a-l2",
+        .toZoneId = "bridge-l2",
+        .effectiveWidth = 1.2,
+        .centerSpan = {{2.0, 2.4}, {2.0, 3.6}},
+    });
+    layout.connections.push_back({
+        .id = "bridge-stair-b",
+        .floorId = "L2",
+        .kind = safecrowd::domain::ConnectionKind::Opening,
+        .fromZoneId = "bridge-l2",
+        .toZoneId = "stair-b-l2",
+        .effectiveWidth = 1.2,
+        .centerSpan = {{4.0, 2.4}, {4.0, 3.6}},
+    });
+    layout.connections.push_back({
+        .id = "stair-b-vertical",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ConnectionKind::Stair,
+        .fromZoneId = "stair-b-l2",
+        .toZoneId = "stair-b-l1",
+        .effectiveWidth = 1.2,
+        .isStair = true,
+        .centerSpan = {{4.8, 2.8}, {5.6, 2.8}},
+    });
+    layout.connections.push_back({
+        .id = "stair-b-exit",
+        .floorId = "L1",
+        .kind = safecrowd::domain::ConnectionKind::Exit,
+        .fromZoneId = "stair-b-l1",
+        .toZoneId = "exit-l1",
+        .effectiveWidth = 1.2,
+        .centerSpan = {{6.0, 2.4}, {6.0, 3.6}},
+    });
+    return layout;
+}
+
 safecrowd::domain::FacilityLayout2D adjacentExitPortalChoiceLayout() {
     safecrowd::domain::FacilityLayout2D layout;
     layout.id = "adjacent-exit-portal-choice";
@@ -1396,6 +1523,29 @@ SC_TEST(ScenarioRouteToNearestExitUsesStartPositionAndLowerFloorExitDistanceForS
     SC_EXPECT_TRUE(startPositionRoute.size() >= 2);
     SC_EXPECT_EQ(startPositionRoute.size() >= 2 ? startPositionRoute[1] : std::string{}, std::string{"right-stair-upper"});
     SC_EXPECT_EQ(startPositionRoute.empty() ? std::string{} : startPositionRoute.back(), std::string{"exit-left"});
+}
+
+SC_TEST(ScenarioRouteToNearestExitPrefersReachableSameFloorExitOverVerticalLoop) {
+    const auto layout = sameFloorExitWithVerticalLoopLayout();
+    const auto cache = safecrowd::domain::simulation_internal::buildScenarioLayoutCache(layout);
+
+    const auto route = safecrowd::domain::simulation_internal::zoneRouteToNearestExit(
+        cache,
+        {.x = 0.5, .y = 1.0},
+        "room-l1");
+
+    SC_EXPECT_TRUE(route.has_value());
+    const auto zoneRoute = route.has_value() ? route->zoneIds : std::vector<std::string>{};
+    SC_EXPECT_EQ(zoneRoute.size(), std::size_t{2});
+    SC_EXPECT_EQ(zoneRoute.size() > 1 ? zoneRoute[1] : std::string{}, std::string{"exit-l1"});
+    SC_EXPECT_EQ(route.has_value() ? route->connectionIndices.size() : std::size_t{0}, std::size_t{1});
+    const auto connectionIndex = route.has_value() && !route->connectionIndices.empty()
+        ? route->connectionIndices.front()
+        : std::size_t{0};
+    SC_EXPECT_TRUE(connectionIndex < layout.connections.size());
+    SC_EXPECT_EQ(
+        connectionIndex < layout.connections.size() ? layout.connections[connectionIndex].id : std::string{},
+        std::string{"room-direct-exit"});
 }
 
 SC_TEST(ScenarioRouteToNearestExitPrefersNearestExitPortalOverExitZoneCenter) {

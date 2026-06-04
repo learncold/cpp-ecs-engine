@@ -1717,6 +1717,43 @@ SC_TEST(ScenarioWayfindingSystem_ReplansStalledStairAdjacentOpeningTarget) {
     SC_EXPECT_TRUE(state.avoidedConnectionId.empty());
 }
 
+SC_TEST(ScenarioWayfindingSystem_PrefersSameFloorExitPathFromLowerStair) {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    seeds.push_back(localWayfindingSeed({.x = 4.2, .y = 3.0}, "lower-stair", "L1"));
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 54,
+    });
+    const auto layout = stairWayfindingLayout();
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioWayfindingSystem(layout, {}),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .order = -5,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    stepScenarioRuntime(runtime, 0.0);
+
+    const auto entities = runtime.world().query().view<
+        safecrowd::domain::Position,
+        safecrowd::domain::Agent,
+        safecrowd::domain::Velocity,
+        safecrowd::domain::AvoidanceState,
+        safecrowd::domain::EvacuationRoute,
+        safecrowd::domain::WayfindingState,
+        safecrowd::domain::EvacuationStatus>();
+    SC_EXPECT_EQ(entities.size(), std::size_t{1});
+    const auto& route = runtime.world().query().get<safecrowd::domain::EvacuationRoute>(entities.front());
+    const auto& state = runtime.world().query().get<safecrowd::domain::WayfindingState>(entities.front());
+    SC_EXPECT_EQ(route.destinationZoneId, std::string{"ground-room"});
+    SC_EXPECT_TRUE(!route.waypointConnectionIds.empty());
+    SC_EXPECT_EQ(route.waypointConnectionIds.front(), std::string{"lower-stair-ground-room"});
+    SC_EXPECT_EQ(state.currentTargetConnectionId, std::string{"lower-stair-ground-room"});
+}
+
 SC_TEST(ScenarioSimulationMotionSystem_LocalWayfindingLandsInsideVerticalTargetZone) {
     std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
     seeds.push_back(localWayfindingVerticalStairSeed({.x = 1.0, .y = 1.0}));
