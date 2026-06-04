@@ -1,5 +1,6 @@
 <RCC>
     <qresource prefix="/">
+        <file alias="demo-layouts/demo-2f-layout-review.json">../../assets/demo-layouts/demo-2f-layout-review.json</file>
         <file alias="tool-icons/layout-authoring/select.svg">../../assets/tool-icon-candidates/layout-authoring/select__02_lucide_square-dashed-mouse-pointer.svg</file>
         <file alias="tool-icons/layout-authoring/reset-view.svg">../../assets/tool-icon-candidates/layout-authoring/reset-view__01_lucide_rotate-ccw.svg</file>
         <file alias="tool-icons/layout-authoring/add-floor.svg">../../assets/tool-icon-candidates/layout-authoring/add-floor__01_lucide_layers-plus.svg</file>

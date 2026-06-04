@@ -1,14 +1,50 @@
 #include "TestSupport.h"
+#include "application/LayoutReviewCodec.h"
 #include "application/ProjectPersistence.h"
 #include "application/ResultArtifactsCodec.h"
+#include "domain/ImportValidationService.h"
 
+#include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QTemporaryDir>
 
+#include <string>
+
 using namespace safecrowd::application;
 using namespace safecrowd::domain;
+
+SC_TEST(ProjectMetadata_recognizesBuiltInDemo2FProject) {
+    const auto metadata = makeBuiltInDemo2FProject();
+
+    SC_EXPECT_EQ(metadata.name.toStdString(), std::string{"Demo - 2F"});
+    SC_EXPECT_EQ(metadata.layoutPath.toStdString(), std::string{"safecrowd://demo/demo-2f"});
+    SC_EXPECT_TRUE(metadata.isBuiltInDemo());
+    SC_EXPECT_TRUE(metadata.isBuiltInDemo2F());
+    SC_EXPECT_TRUE(metadata.isValid());
+}
+
+SC_TEST(ProjectPersistence_loadsBuiltInDemo2FLayoutResource) {
+    QFile file(":/demo-layouts/demo-2f-layout-review.json");
+    SC_EXPECT_TRUE(file.open(QIODevice::ReadOnly));
+
+    const auto document = QJsonDocument::fromJson(file.readAll());
+    SC_EXPECT_TRUE(document.isObject());
+    SC_EXPECT_TRUE(document.object().value("layout").isObject());
+
+    const auto layout = layoutFromJson(document.object().value("layout").toObject());
+    SC_EXPECT_EQ(layout.name, std::string{"Demo - 2F"});
+    SC_EXPECT_EQ(layout.floors.size(), std::size_t{2});
+    SC_EXPECT_EQ(layout.zones.size(), std::size_t{19});
+    SC_EXPECT_EQ(layout.connections.size(), std::size_t{20});
+    SC_EXPECT_EQ(layout.barriers.size(), std::size_t{43});
+
+    ImportValidationService validator;
+    const auto issues = validator.validate(layout);
+    SC_EXPECT_TRUE(!hasBlockingImportIssue(issues));
+}
 
 SC_TEST(ProjectPersistence_preservesRecommendedScenarioDraftState) {
     QTemporaryDir projectDir;

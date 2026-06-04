@@ -8,9 +8,14 @@
 #include <string>
 #include <utility>
 
-#include <QMessageBox>
+#include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonParseError>
+#include <QMessageBox>
 
+#include "application/LayoutReviewCodec.h"
 #include "application/LayoutReviewWidget.h"
 #include "application/NewProjectWidget.h"
 #include "application/ProjectPersistence.h"
@@ -49,6 +54,46 @@ safecrowd::domain::ImportResult makeImportResultForDemoLayout(safecrowd::domain:
     return result;
 }
 
+safecrowd::domain::ImportResult makeFailedBuiltInLayoutImportResult(const QString& message) {
+    safecrowd::domain::ImportResult result;
+    result.statusMessage = message.toStdString();
+
+    safecrowd::domain::ImportIssue issue;
+    issue.severity = safecrowd::domain::ImportIssueSeverity::Error;
+    issue.code = safecrowd::domain::ImportIssueCode::FileReadFailed;
+    issue.message = message.toStdString();
+    issue.isBlocking = true;
+    result.issues.push_back(std::move(issue));
+    return result;
+}
+
+safecrowd::domain::ImportResult makeImportResultForDemoLayoutResource(
+    const QString& resourcePath,
+    const QString& fallbackLayoutName) {
+    QFile file(resourcePath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return makeFailedBuiltInLayoutImportResult(QString("Failed to load built-in layout resource: %1").arg(resourcePath));
+    }
+
+    QJsonParseError parseError;
+    const auto document = QJsonDocument::fromJson(file.readAll(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        return makeFailedBuiltInLayoutImportResult(QString("Failed to parse built-in layout resource: %1").arg(resourcePath));
+    }
+
+    const auto root = document.object();
+    const auto layoutValue = root.value("layout");
+    const auto layoutObject = layoutValue.isObject() ? layoutValue.toObject() : root;
+    auto layout = layoutFromJson(layoutObject);
+    if (layout.id.empty()) {
+        layout.id = fallbackLayoutName.toStdString();
+    }
+    if (layout.name.empty()) {
+        layout.name = fallbackLayoutName.toStdString();
+    }
+    return makeImportResultForDemoLayout(std::move(layout));
+}
+
 safecrowd::domain::ImportResult makeSprint1DemoImportResult() {
     safecrowd::domain::DemoFixtureService fixtureService;
     const auto fixture = fixtureService.createSprint1DemoFixture();
@@ -59,6 +104,12 @@ safecrowd::domain::ImportResult makeTwoFloorEvacuationDemoImportResult() {
     safecrowd::domain::DemoFixtureService fixtureService;
     const auto fixture = fixtureService.createTwoFloorEvacuationDemoFixture();
     return makeImportResultForDemoLayout(fixture.layout);
+}
+
+safecrowd::domain::ImportResult makeDemo2FImportResult() {
+    return makeImportResultForDemoLayoutResource(
+        QStringLiteral(":/demo-layouts/demo-2f-layout-review.json"),
+        QStringLiteral("Demo - 2F"));
 }
 
 ProjectWorkspaceState makeEvacuationScenarioDemoWorkspace() {
@@ -153,6 +204,9 @@ safecrowd::domain::ImportResult makeBlankImportResult(const QString& projectName
 }
 
 safecrowd::domain::ImportResult importProjectLayout(const ProjectMetadata& metadata) {
+    if (metadata.isBuiltInDemo2F()) {
+        return makeDemo2FImportResult();
+    }
     if (metadata.isBuiltInTwoFloorEvacuationDemo()) {
         return makeTwoFloorEvacuationDemoImportResult();
     }

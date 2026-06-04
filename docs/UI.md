@@ -83,7 +83,7 @@ Sprint 1 시연에서 가장 중요한 기준은 `도면 불러오기 -> 검토/
 현재 기능:
 
 - 최근 프로젝트 목록 표시
-- built-in `Demo`, `Evacuation Scenario Demo`, `Two-floor Evacuation Demo` 프로젝트 표시
+- built-in `Demo`, `Demo - 2F`, `Evacuation Scenario Demo`, `Two-floor Evacuation Demo` 프로젝트 표시
 - 프로젝트 목록이 없을 때 빈 상태 표시
 - `+ New Project`로 새 프로젝트 생성 화면 진입
 - 최근 프로젝트 row 클릭 시 해당 프로젝트 열기

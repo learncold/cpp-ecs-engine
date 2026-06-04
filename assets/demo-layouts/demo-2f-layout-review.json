@@ -1,0 +1,2355 @@
+{
+    "layout": {
+        "barriers": [
+            {
+                "blocksMovement": true,
+                "floorId": "L1",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            -5,
+                            57
+                        ],
+                        [
+                            -5,
+                            82
+                        ]
+                    ]
+                },
+                "id": "wall-user-99",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L1",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            -3,
+                            59.4
+                        ],
+                        [
+                            -3,
+                            65
+                        ]
+                    ]
+                },
+                "id": "wall-user-101",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L1",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            -1,
+                            57
+                        ],
+                        [
+                            -1,
+                            65
+                        ]
+                    ]
+                },
+                "id": "wall-user-40",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L1",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            5,
+                            73
+                        ],
+                        [
+                            5,
+                            82
+                        ]
+                    ]
+                },
+                "id": "wall-user-2",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L1",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            9,
+                            57
+                        ],
+                        [
+                            9,
+                            65
+                        ]
+                    ]
+                },
+                "id": "wall-user-39",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L1",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            15,
+                            73
+                        ],
+                        [
+                            15,
+                            82
+                        ]
+                    ]
+                },
+                "id": "wall-user-9",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L1",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            19,
+                            57
+                        ],
+                        [
+                            19,
+                            65
+                        ]
+                    ]
+                },
+                "id": "wall-user-42",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L1",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            25,
+                            73
+                        ],
+                        [
+                            25,
+                            82
+                        ]
+                    ]
+                },
+                "id": "wall-user-26",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L1",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            27,
+                            73
+                        ],
+                        [
+                            27,
+                            79.3
+                        ]
+                    ]
+                },
+                "id": "wall-user-80",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L1",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            29,
+                            57
+                        ],
+                        [
+                            29,
+                            67.09999999999994
+                        ]
+                    ]
+                },
+                "id": "wall-user-76",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L1",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            29,
+                            68
+                        ],
+                        [
+                            29,
+                            69.985
+                        ]
+                    ]
+                },
+                "id": "wall-user-77",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L1",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            29,
+                            70.9
+                        ],
+                        [
+                            29,
+                            82
+                        ]
+                    ]
+                },
+                "id": "wall-user-78",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L1",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            -5,
+                            57
+                        ],
+                        [
+                            -3,
+                            57
+                        ]
+                    ]
+                },
+                "id": "wall-user-100",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L1",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            -1,
+                            57
+                        ],
+                        [
+                            19,
+                            57
+                        ]
+                    ]
+                },
+                "id": "wall-user-38",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L1",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            19,
+                            57.000290768586666
+                        ],
+                        [
+                            29.03406544378872,
+                            57.000290768586666
+                        ]
+                    ]
+                },
+                "id": "wall-user-43",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L1",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            -3,
+                            65
+                        ],
+                        [
+                            8.1,
+                            65
+                        ]
+                    ]
+                },
+                "id": "wall-user-47",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L1",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            9,
+                            65
+                        ],
+                        [
+                            18.1,
+                            65
+                        ]
+                    ]
+                },
+                "id": "wall-user-71",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L1",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            19,
+                            65
+                        ],
+                        [
+                            28.1,
+                            65
+                        ]
+                    ]
+                },
+                "id": "wall-user-72",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L1",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            -4.1,
+                            73
+                        ],
+                        [
+                            5,
+                            73
+                        ]
+                    ]
+                },
+                "id": "wall-user-18",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L1",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            5.9,
+                            73
+                        ],
+                        [
+                            14.994466550853183,
+                            73
+                        ]
+                    ]
+                },
+                "id": "wall-user-69",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L1",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            15.9,
+                            73
+                        ],
+                        [
+                            27,
+                            73
+                        ]
+                    ]
+                },
+                "id": "wall-user-84",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L1",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            -5,
+                            82
+                        ],
+                        [
+                            25,
+                            82
+                        ]
+                    ]
+                },
+                "id": "wall-user-3",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L1",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            27,
+                            82
+                        ],
+                        [
+                            29,
+                            82
+                        ]
+                    ]
+                },
+                "id": "wall-user-79",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L2",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            -5,
+                            65
+                        ],
+                        [
+                            -5,
+                            82
+                        ]
+                    ]
+                },
+                "id": "wall-user-24",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L2",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            -3,
+                            59.4
+                        ],
+                        [
+                            -3,
+                            65
+                        ]
+                    ]
+                },
+                "id": "wall-user-102",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L2",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            -1,
+                            57
+                        ],
+                        [
+                            -1,
+                            65
+                        ]
+                    ]
+                },
+                "id": "wall-user-104",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L2",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            5,
+                            73
+                        ],
+                        [
+                            5,
+                            82
+                        ]
+                    ]
+                },
+                "id": "wall-user-58",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L2",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            9,
+                            57
+                        ],
+                        [
+                            9,
+                            65
+                        ]
+                    ]
+                },
+                "id": "wall-user-50",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L2",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            15,
+                            73
+                        ],
+                        [
+                            15,
+                            82
+                        ]
+                    ]
+                },
+                "id": "wall-user-56",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L2",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            19,
+                            57
+                        ],
+                        [
+                            19,
+                            65
+                        ]
+                    ]
+                },
+                "id": "wall-user-52",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L2",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            25,
+                            73
+                        ],
+                        [
+                            25,
+                            82
+                        ]
+                    ]
+                },
+                "id": "wall-user-83",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L2",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            27,
+                            73
+                        ],
+                        [
+                            27,
+                            79.3
+                        ]
+                    ]
+                },
+                "id": "wall-user-81",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L2",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            29,
+                            57
+                        ],
+                        [
+                            29,
+                            73
+                        ]
+                    ]
+                },
+                "id": "wall-user-54",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L2",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            -3,
+                            57
+                        ],
+                        [
+                            29,
+                            57
+                        ]
+                    ]
+                },
+                "id": "wall-user-103",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L2",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            -5,
+                            65
+                        ],
+                        [
+                            -3,
+                            65
+                        ]
+                    ]
+                },
+                "id": "wall-user-105",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L2",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            -1,
+                            65
+                        ],
+                        [
+                            8.09,
+                            65
+                        ]
+                    ]
+                },
+                "id": "wall-user-63",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L2",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            9,
+                            65
+                        ],
+                        [
+                            18.1,
+                            65
+                        ]
+                    ]
+                },
+                "id": "wall-user-64",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L2",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            19,
+                            65
+                        ],
+                        [
+                            28.1,
+                            65
+                        ]
+                    ]
+                },
+                "id": "wall-user-65",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L2",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            -4.1,
+                            73
+                        ],
+                        [
+                            5,
+                            73
+                        ]
+                    ]
+                },
+                "id": "wall-user-61",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L2",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            5.9,
+                            73
+                        ],
+                        [
+                            15,
+                            73
+                        ]
+                    ]
+                },
+                "id": "wall-user-67",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L2",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            15.9,
+                            73
+                        ],
+                        [
+                            25,
+                            73
+                        ]
+                    ]
+                },
+                "id": "wall-user-68",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L2",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            27.017,
+                            73
+                        ],
+                        [
+                            29,
+                            73
+                        ]
+                    ]
+                },
+                "id": "wall-user-37",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "blocksMovement": true,
+                "floorId": "L2",
+                "geometry": {
+                    "closed": false,
+                    "vertices": [
+                        [
+                            -5,
+                            82
+                        ],
+                        [
+                            27.01703272189436,
+                            82
+                        ]
+                    ]
+                },
+                "id": "wall-user-82",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            }
+        ],
+        "connections": [
+            {
+                "centerSpan": {
+                    "end": [
+                        -4.1,
+                        73
+                    ],
+                    "start": [
+                        -5,
+                        73
+                    ]
+                },
+                "directionality": 0,
+                "effectiveWidth": 0.9,
+                "floorId": "L1",
+                "fromZoneId": "zone-user-1",
+                "id": "connection-user-2",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 1,
+                "lowerEntryDirection": 0,
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                },
+                "toZoneId": "zone-user-2",
+                "upperEntryDirection": 0
+            },
+            {
+                "centerSpan": {
+                    "end": [
+                        5.9,
+                        73
+                    ],
+                    "start": [
+                        5,
+                        73
+                    ]
+                },
+                "directionality": 0,
+                "effectiveWidth": 0.9226860564816528,
+                "floorId": "L1",
+                "fromZoneId": "zone-user-3",
+                "id": "connection-user-5",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 1,
+                "lowerEntryDirection": 0,
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                },
+                "toZoneId": "zone-user-2",
+                "upperEntryDirection": 0
+            },
+            {
+                "centerSpan": {
+                    "end": [
+                        9,
+                        65
+                    ],
+                    "start": [
+                        8.1,
+                        65
+                    ]
+                },
+                "directionality": 0,
+                "effectiveWidth": 1.292659511775554,
+                "floorId": "L1",
+                "fromZoneId": "zone-user-2",
+                "id": "connection-user-10",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 1,
+                "lowerEntryDirection": 0,
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                },
+                "toZoneId": "zone-user-10",
+                "upperEntryDirection": 0
+            },
+            {
+                "centerSpan": {
+                    "end": [
+                        -4.1,
+                        73
+                    ],
+                    "start": [
+                        -5,
+                        73
+                    ]
+                },
+                "directionality": 0,
+                "effectiveWidth": 0.9000000000000004,
+                "floorId": "L2",
+                "fromZoneId": "zone-user-19",
+                "id": "connection-user-11",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 1,
+                "lowerEntryDirection": 0,
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                },
+                "toZoneId": "zone-user-6",
+                "upperEntryDirection": 0
+            },
+            {
+                "centerSpan": {
+                    "end": [
+                        5.9,
+                        73
+                    ],
+                    "start": [
+                        5,
+                        73
+                    ]
+                },
+                "directionality": 0,
+                "effectiveWidth": 0.9000000000000004,
+                "floorId": "L2",
+                "fromZoneId": "zone-user-18",
+                "id": "connection-user-12",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 1,
+                "lowerEntryDirection": 0,
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                },
+                "toZoneId": "zone-user-6",
+                "upperEntryDirection": 0
+            },
+            {
+                "centerSpan": {
+                    "end": [
+                        9,
+                        65
+                    ],
+                    "start": [
+                        8.09,
+                        65
+                    ]
+                },
+                "directionality": 0,
+                "effectiveWidth": 0.9057880379455394,
+                "floorId": "L2",
+                "fromZoneId": "zone-user-6",
+                "id": "connection-user-13",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 1,
+                "lowerEntryDirection": 0,
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                },
+                "toZoneId": "zone-user-14",
+                "upperEntryDirection": 0
+            },
+            {
+                "centerSpan": {
+                    "end": [
+                        19,
+                        65
+                    ],
+                    "start": [
+                        18.1,
+                        65
+                    ]
+                },
+                "directionality": 0,
+                "effectiveWidth": 0.8999999999999986,
+                "floorId": "L2",
+                "fromZoneId": "zone-user-6",
+                "id": "connection-user-14",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 1,
+                "lowerEntryDirection": 0,
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                },
+                "toZoneId": "zone-user-15",
+                "upperEntryDirection": 0
+            },
+            {
+                "centerSpan": {
+                    "end": [
+                        29,
+                        65
+                    ],
+                    "start": [
+                        28.1,
+                        65
+                    ]
+                },
+                "directionality": 0,
+                "effectiveWidth": 0.8999999999999986,
+                "floorId": "L2",
+                "fromZoneId": "zone-user-6",
+                "id": "connection-user-15",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 1,
+                "lowerEntryDirection": 0,
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                },
+                "toZoneId": "zone-user-16",
+                "upperEntryDirection": 0
+            },
+            {
+                "centerSpan": {
+                    "end": [
+                        15.9,
+                        73
+                    ],
+                    "start": [
+                        15,
+                        73
+                    ]
+                },
+                "directionality": 0,
+                "effectiveWidth": 0.8999999999999986,
+                "floorId": "L2",
+                "fromZoneId": "zone-user-17",
+                "id": "connection-user-16",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 1,
+                "lowerEntryDirection": 0,
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                },
+                "toZoneId": "zone-user-6",
+                "upperEntryDirection": 0
+            },
+            {
+                "centerSpan": {
+                    "end": [
+                        15.9,
+                        73
+                    ],
+                    "start": [
+                        15,
+                        73
+                    ]
+                },
+                "directionality": 0,
+                "effectiveWidth": 0.9589149444359357,
+                "floorId": "L1",
+                "fromZoneId": "zone-user-7",
+                "id": "connection-user-17",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 1,
+                "lowerEntryDirection": 0,
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                },
+                "toZoneId": "zone-user-2",
+                "upperEntryDirection": 0
+            },
+            {
+                "centerSpan": {
+                    "end": [
+                        19,
+                        65
+                    ],
+                    "start": [
+                        18.1,
+                        65
+                    ]
+                },
+                "directionality": 0,
+                "effectiveWidth": 1.4082633669525961,
+                "floorId": "L1",
+                "fromZoneId": "zone-user-2",
+                "id": "connection-user-18",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 1,
+                "lowerEntryDirection": 0,
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                },
+                "toZoneId": "zone-user-11",
+                "upperEntryDirection": 0
+            },
+            {
+                "centerSpan": {
+                    "end": [
+                        29,
+                        65
+                    ],
+                    "start": [
+                        28.1,
+                        65
+                    ]
+                },
+                "directionality": 0,
+                "effectiveWidth": 1.2422267406154361,
+                "floorId": "L1",
+                "fromZoneId": "zone-user-2",
+                "id": "connection-user-19",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 1,
+                "lowerEntryDirection": 0,
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                },
+                "toZoneId": "zone-user-12",
+                "upperEntryDirection": 0
+            },
+            {
+                "centerSpan": {
+                    "end": [
+                        29,
+                        68
+                    ],
+                    "start": [
+                        29,
+                        67.1
+                    ]
+                },
+                "directionality": 0,
+                "effectiveWidth": 1.4355251822944777,
+                "floorId": "L1",
+                "fromZoneId": "zone-user-2",
+                "id": "connection-user-20",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 3,
+                "lowerEntryDirection": 0,
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                },
+                "toZoneId": "zone-user-13",
+                "upperEntryDirection": 0
+            },
+            {
+                "centerSpan": {
+                    "end": [
+                        29,
+                        70.9
+                    ],
+                    "start": [
+                        29,
+                        70
+                    ]
+                },
+                "directionality": 0,
+                "effectiveWidth": 1.392885820534133,
+                "floorId": "L1",
+                "fromZoneId": "zone-user-2",
+                "id": "connection-user-21",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 3,
+                "lowerEntryDirection": 0,
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                },
+                "toZoneId": "zone-user-13",
+                "upperEntryDirection": 0
+            },
+            {
+                "centerSpan": {
+                    "end": [
+                        29,
+                        73
+                    ],
+                    "start": [
+                        27,
+                        73
+                    ]
+                },
+                "directionality": 0,
+                "effectiveWidth": 2,
+                "floorId": "L1",
+                "fromZoneId": "zone-user-2",
+                "id": "connection-user-22",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 2,
+                "lowerEntryDirection": 0,
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                },
+                "toZoneId": "zone-user-20",
+                "upperEntryDirection": 0
+            },
+            {
+                "centerSpan": {
+                    "end": [
+                        27,
+                        82
+                    ],
+                    "start": [
+                        27,
+                        79.3
+                    ]
+                },
+                "directionality": 0,
+                "effectiveWidth": 2,
+                "floorId": "L1",
+                "fromZoneId": "zone-user-20",
+                "id": "vertical-user-2",
+                "isRamp": false,
+                "isStair": true,
+                "kind": 4,
+                "lowerEntryDirection": 3,
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                },
+                "toZoneId": "zone-user-21",
+                "upperEntryDirection": 3
+            },
+            {
+                "centerSpan": {
+                    "end": [
+                        27,
+                        73
+                    ],
+                    "start": [
+                        25,
+                        73
+                    ]
+                },
+                "directionality": 0,
+                "effectiveWidth": 2,
+                "floorId": "L2",
+                "fromZoneId": "zone-user-21",
+                "id": "connection-user-23",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 2,
+                "lowerEntryDirection": 0,
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                },
+                "toZoneId": "zone-user-6",
+                "upperEntryDirection": 0
+            },
+            {
+                "centerSpan": {
+                    "end": [
+                        -5,
+                        65
+                    ],
+                    "start": [
+                        -3,
+                        65
+                    ]
+                },
+                "directionality": 0,
+                "effectiveWidth": 2,
+                "floorId": "L1",
+                "fromZoneId": "zone-user-2",
+                "id": "connection-user-24",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 2,
+                "lowerEntryDirection": 0,
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                },
+                "toZoneId": "zone-user-22",
+                "upperEntryDirection": 0
+            },
+            {
+                "centerSpan": {
+                    "end": [
+                        -3,
+                        57
+                    ],
+                    "start": [
+                        -3,
+                        59.4
+                    ]
+                },
+                "directionality": 0,
+                "effectiveWidth": 2,
+                "floorId": "L1",
+                "fromZoneId": "zone-user-22",
+                "id": "vertical-user-3",
+                "isRamp": false,
+                "isStair": true,
+                "kind": 4,
+                "lowerEntryDirection": 1,
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                },
+                "toZoneId": "zone-user-23",
+                "upperEntryDirection": 1
+            },
+            {
+                "centerSpan": {
+                    "end": [
+                        -3,
+                        65
+                    ],
+                    "start": [
+                        -1,
+                        65
+                    ]
+                },
+                "directionality": 0,
+                "effectiveWidth": 2,
+                "floorId": "L2",
+                "fromZoneId": "zone-user-23",
+                "id": "connection-user-25",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 2,
+                "lowerEntryDirection": 0,
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                },
+                "toZoneId": "zone-user-6",
+                "upperEntryDirection": 0
+            }
+        ],
+        "controls": [
+        ],
+        "floors": [
+            {
+                "elevationMeters": 0,
+                "id": "L1",
+                "label": "Floor 1",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "elevationMeters": 0,
+                "id": "L2",
+                "label": "Floor 2",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            }
+        ],
+        "id": "Demo - 2F",
+        "levelId": "L1",
+        "name": "Demo - 2F",
+        "zones": [
+            {
+                "area": {
+                    "holes": [
+                    ],
+                    "outline": [
+                        [
+                            -5,
+                            73
+                        ],
+                        [
+                            5,
+                            73
+                        ],
+                        [
+                            5,
+                            82
+                        ],
+                        [
+                            -5,
+                            82
+                        ]
+                    ]
+                },
+                "defaultCapacity": 0,
+                "floorId": "L1",
+                "id": "zone-user-1",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 1,
+                "label": "Room 1",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "area": {
+                    "holes": [
+                    ],
+                    "outline": [
+                        [
+                            -5,
+                            65
+                        ],
+                        [
+                            29,
+                            65
+                        ],
+                        [
+                            29,
+                            73
+                        ],
+                        [
+                            -5,
+                            73
+                        ]
+                    ]
+                },
+                "defaultCapacity": 0,
+                "floorId": "L1",
+                "id": "zone-user-2",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 1,
+                "label": "Room 2",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "area": {
+                    "holes": [
+                    ],
+                    "outline": [
+                        [
+                            5,
+                            73
+                        ],
+                        [
+                            15,
+                            73
+                        ],
+                        [
+                            15,
+                            82
+                        ],
+                        [
+                            5,
+                            82
+                        ]
+                    ]
+                },
+                "defaultCapacity": 0,
+                "floorId": "L1",
+                "id": "zone-user-3",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 1,
+                "label": "Room 3",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "area": {
+                    "holes": [
+                    ],
+                    "outline": [
+                        [
+                            -5,
+                            65
+                        ],
+                        [
+                            29,
+                            65
+                        ],
+                        [
+                            29,
+                            73
+                        ],
+                        [
+                            -5,
+                            73
+                        ]
+                    ]
+                },
+                "defaultCapacity": 0,
+                "floorId": "L2",
+                "id": "zone-user-6",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 1,
+                "label": "Room 6",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "area": {
+                    "holes": [
+                    ],
+                    "outline": [
+                        [
+                            15,
+                            73
+                        ],
+                        [
+                            25,
+                            73
+                        ],
+                        [
+                            25,
+                            82
+                        ],
+                        [
+                            15,
+                            82
+                        ]
+                    ]
+                },
+                "defaultCapacity": 0,
+                "floorId": "L1",
+                "id": "zone-user-7",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 1,
+                "label": "Room 7",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "area": {
+                    "holes": [
+                    ],
+                    "outline": [
+                        [
+                            -1,
+                            57
+                        ],
+                        [
+                            9,
+                            57
+                        ],
+                        [
+                            9,
+                            65
+                        ],
+                        [
+                            -1,
+                            65
+                        ]
+                    ]
+                },
+                "defaultCapacity": 0,
+                "floorId": "L1",
+                "id": "zone-user-10",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 1,
+                "label": "Room 10",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "area": {
+                    "holes": [
+                    ],
+                    "outline": [
+                        [
+                            9,
+                            57
+                        ],
+                        [
+                            19,
+                            57
+                        ],
+                        [
+                            19,
+                            65
+                        ],
+                        [
+                            9,
+                            65
+                        ]
+                    ]
+                },
+                "defaultCapacity": 0,
+                "floorId": "L1",
+                "id": "zone-user-11",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 1,
+                "label": "Room 11",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "area": {
+                    "holes": [
+                    ],
+                    "outline": [
+                        [
+                            19,
+                            57
+                        ],
+                        [
+                            29,
+                            57
+                        ],
+                        [
+                            29,
+                            65
+                        ],
+                        [
+                            19,
+                            65
+                        ]
+                    ]
+                },
+                "defaultCapacity": 0,
+                "floorId": "L1",
+                "id": "zone-user-12",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 1,
+                "label": "Room 12",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "area": {
+                    "holes": [
+                    ],
+                    "outline": [
+                        [
+                            29,
+                            65
+                        ],
+                        [
+                            33,
+                            65
+                        ],
+                        [
+                            33,
+                            73
+                        ],
+                        [
+                            29,
+                            73
+                        ]
+                    ]
+                },
+                "defaultCapacity": 20,
+                "floorId": "L1",
+                "id": "zone-user-13",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 3,
+                "label": "Exit 13",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "area": {
+                    "holes": [
+                    ],
+                    "outline": [
+                        [
+                            -1,
+                            57
+                        ],
+                        [
+                            9,
+                            57
+                        ],
+                        [
+                            9,
+                            65
+                        ],
+                        [
+                            -1,
+                            65
+                        ]
+                    ]
+                },
+                "defaultCapacity": 0,
+                "floorId": "L2",
+                "id": "zone-user-14",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 1,
+                "label": "Room 14",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "area": {
+                    "holes": [
+                    ],
+                    "outline": [
+                        [
+                            9,
+                            57
+                        ],
+                        [
+                            19,
+                            57
+                        ],
+                        [
+                            19,
+                            65
+                        ],
+                        [
+                            9,
+                            65
+                        ]
+                    ]
+                },
+                "defaultCapacity": 0,
+                "floorId": "L2",
+                "id": "zone-user-15",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 1,
+                "label": "Room 15",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "area": {
+                    "holes": [
+                    ],
+                    "outline": [
+                        [
+                            19,
+                            57
+                        ],
+                        [
+                            29,
+                            57
+                        ],
+                        [
+                            29,
+                            65
+                        ],
+                        [
+                            19,
+                            65
+                        ]
+                    ]
+                },
+                "defaultCapacity": 0,
+                "floorId": "L2",
+                "id": "zone-user-16",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 1,
+                "label": "Room 16",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "area": {
+                    "holes": [
+                    ],
+                    "outline": [
+                        [
+                            15,
+                            73
+                        ],
+                        [
+                            25,
+                            73
+                        ],
+                        [
+                            25,
+                            82
+                        ],
+                        [
+                            15,
+                            82
+                        ]
+                    ]
+                },
+                "defaultCapacity": 0,
+                "floorId": "L2",
+                "id": "zone-user-17",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 1,
+                "label": "Room 17",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "area": {
+                    "holes": [
+                    ],
+                    "outline": [
+                        [
+                            5,
+                            73
+                        ],
+                        [
+                            15,
+                            73
+                        ],
+                        [
+                            15,
+                            82
+                        ],
+                        [
+                            5,
+                            82
+                        ]
+                    ]
+                },
+                "defaultCapacity": 0,
+                "floorId": "L2",
+                "id": "zone-user-18",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 1,
+                "label": "Room 18",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "area": {
+                    "holes": [
+                    ],
+                    "outline": [
+                        [
+                            -5,
+                            73
+                        ],
+                        [
+                            5,
+                            73
+                        ],
+                        [
+                            5,
+                            82
+                        ],
+                        [
+                            -5,
+                            82
+                        ]
+                    ]
+                },
+                "defaultCapacity": 0,
+                "floorId": "L2",
+                "id": "zone-user-19",
+                "isRamp": false,
+                "isStair": false,
+                "kind": 1,
+                "label": "Room 19",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "area": {
+                    "holes": [
+                    ],
+                    "outline": [
+                        [
+                            27,
+                            73
+                        ],
+                        [
+                            29,
+                            73
+                        ],
+                        [
+                            29,
+                            82
+                        ],
+                        [
+                            27,
+                            82
+                        ]
+                    ]
+                },
+                "defaultCapacity": 8,
+                "floorId": "L1",
+                "id": "zone-user-20",
+                "isRamp": false,
+                "isStair": true,
+                "kind": 5,
+                "label": "U Stair 18",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "area": {
+                    "holes": [
+                    ],
+                    "outline": [
+                        [
+                            25,
+                            73
+                        ],
+                        [
+                            27,
+                            73
+                        ],
+                        [
+                            27,
+                            82
+                        ],
+                        [
+                            25,
+                            82
+                        ]
+                    ]
+                },
+                "defaultCapacity": 8,
+                "floorId": "L2",
+                "id": "zone-user-21",
+                "isRamp": false,
+                "isStair": true,
+                "kind": 5,
+                "label": "U Stair 19",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "area": {
+                    "holes": [
+                    ],
+                    "outline": [
+                        [
+                            -3,
+                            65
+                        ],
+                        [
+                            -5,
+                            65
+                        ],
+                        [
+                            -5,
+                            57
+                        ],
+                        [
+                            -3,
+                            57
+                        ]
+                    ]
+                },
+                "defaultCapacity": 8,
+                "floorId": "L1",
+                "id": "zone-user-22",
+                "isRamp": false,
+                "isStair": true,
+                "kind": 5,
+                "label": "U Stair 18",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            },
+            {
+                "area": {
+                    "holes": [
+                    ],
+                    "outline": [
+                        [
+                            -1,
+                            65
+                        ],
+                        [
+                            -3,
+                            65
+                        ],
+                        [
+                            -3,
+                            57
+                        ],
+                        [
+                            -1,
+                            57
+                        ]
+                    ]
+                },
+                "defaultCapacity": 8,
+                "floorId": "L2",
+                "id": "zone-user-23",
+                "isRamp": false,
+                "isStair": true,
+                "kind": 5,
+                "label": "U Stair 19",
+                "provenance": {
+                    "canonicalIds": [
+                    ],
+                    "sourceIds": [
+                    ]
+                }
+            }
+        ]
+    },
+    "reviewStatus": 2
+}

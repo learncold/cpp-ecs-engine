@@ -199,6 +199,7 @@ if (BUILD_TESTING)
                 src/application/ProjectPersistenceJson.cpp
                 src/application/ResultArtifactsCodec.cpp
                 src/application/ScenarioCanvasAuthoringRules.cpp
+                src/application/ToolIcons.qrc
                 src/application/WorkspaceStateCodec.cpp
         )
 

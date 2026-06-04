@@ -343,6 +343,7 @@ void updateLiveValidationIssues(safecrowd::domain::ImportResult* importResult) {
 QList<ProjectMetadata> ProjectPersistence::loadRecentProjects() {
     QList<ProjectMetadata> projects;
     projects.push_back(makeBuiltInDemoProject());
+    projects.push_back(makeBuiltInDemo2FProject());
     projects.push_back(makeBuiltInEvacuationScenarioDemoProject());
     projects.push_back(makeBuiltInTwoFloorEvacuationDemoProject());
 

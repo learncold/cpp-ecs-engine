@@ -16,6 +16,10 @@ inline QString builtInTwoFloorEvacuationDemoLayoutPath() {
     return QStringLiteral("safecrowd://demo/two-floor-evacuation");
 }
 
+inline QString builtInDemo2FLayoutPath() {
+    return QStringLiteral("safecrowd://demo/demo-2f");
+}
+
 struct ProjectMetadata {
     QString name{};
     QString folderPath{};
@@ -25,7 +29,8 @@ struct ProjectMetadata {
     bool isBuiltInDemo() const noexcept {
         return layoutPath == builtInDemoLayoutPath()
             || isBuiltInEvacuationScenarioDemo()
-            || isBuiltInTwoFloorEvacuationDemo();
+            || isBuiltInTwoFloorEvacuationDemo()
+            || isBuiltInDemo2F();
     }
 
     bool isBuiltInEvacuationScenarioDemo() const noexcept {
@@ -34,6 +39,10 @@ struct ProjectMetadata {
 
     bool isBuiltInTwoFloorEvacuationDemo() const noexcept {
         return layoutPath == builtInTwoFloorEvacuationDemoLayoutPath();
+    }
+
+    bool isBuiltInDemo2F() const noexcept {
+        return layoutPath == builtInDemo2FLayoutPath();
     }
 
     bool isBlankLayoutProject() const noexcept {
@@ -66,6 +75,13 @@ inline ProjectMetadata makeBuiltInTwoFloorEvacuationDemoProject() {
     return {
         .name = QStringLiteral("Two-floor Evacuation Demo"),
         .layoutPath = builtInTwoFloorEvacuationDemoLayoutPath(),
+    };
+}
+
+inline ProjectMetadata makeBuiltInDemo2FProject() {
+    return {
+        .name = QStringLiteral("Demo - 2F"),
+        .layoutPath = builtInDemo2FLayoutPath(),
     };
 }
 
