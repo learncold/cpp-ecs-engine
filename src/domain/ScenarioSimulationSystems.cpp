@@ -58,6 +58,14 @@ struct DensityCellAccumulator {
     std::vector<engine::Entity> entities{};
 };
 
+struct FrameCellAccumulator {
+    Point2D positionSum{};
+    SpatialCell cell{};
+    std::string floorId{};
+    std::size_t agentCount{0};
+    std::vector<const SimulationAgentFrame*> agents{};
+};
+
 double distanceBetween(const Point2D& lhs, const Point2D& rhs) {
     return std::hypot(lhs.x - rhs.x, lhs.y - rhs.y);
 }
@@ -415,6 +423,96 @@ PressureCellMetric pressureMetricFromCell(
     }
 
     return metric;
+}
+
+DensityCellMetric densityMetricFromFrameCell(
+    const FrameCellAccumulator& cell,
+    double cellSize) {
+    const auto count = static_cast<double>(cell.agentCount);
+    const auto min = spatialCellMin(cell.cell, cellSize);
+    const auto max = spatialCellMax(cell.cell, cellSize);
+    return {
+        .center = cell.agentCount == 0
+            ? Point2D{.x = (min.x + max.x) * 0.5, .y = (min.y + max.y) * 0.5}
+            : Point2D{.x = cell.positionSum.x / count, .y = cell.positionSum.y / count},
+        .cellMin = min,
+        .cellMax = max,
+        .floorId = cell.floorId,
+        .agentCount = cell.agentCount,
+        .densityPeoplePerSquareMeter = cellSize <= 0.0
+            ? 0.0
+            : count / (cellSize * cellSize),
+    };
+}
+
+PressureCellMetric pressureMetricFromFrameCell(
+    const FrameCellAccumulator& cell,
+    double cellSize) {
+    const auto density = densityMetricFromFrameCell(cell, cellSize);
+    PressureCellMetric metric{
+        .center = density.center,
+        .cellMin = density.cellMin,
+        .cellMax = density.cellMax,
+        .floorId = density.floorId,
+        .agentCount = density.agentCount,
+        .intrudingPairCount = 0,
+        .densityPeoplePerSquareMeter = density.densityPeoplePerSquareMeter,
+        .pressureScore = 0.0,
+    };
+
+    for (std::size_t lhsIndex = 0; lhsIndex < cell.agents.size(); ++lhsIndex) {
+        const auto* lhs = cell.agents[lhsIndex];
+        if (lhs == nullptr) {
+            continue;
+        }
+        for (std::size_t rhsIndex = lhsIndex + 1; rhsIndex < cell.agents.size(); ++rhsIndex) {
+            const auto* rhs = cell.agents[rhsIndex];
+            if (rhs == nullptr) {
+                continue;
+            }
+            const auto score = simulation_internal::occupantInteractionPressureScore(
+                distanceBetween(lhs->position, rhs->position),
+                lhs->radius,
+                rhs->radius);
+            if (score <= 0.0) {
+                continue;
+            }
+            metric.pressureScore += score;
+            ++metric.intrudingPairCount;
+        }
+    }
+
+    return metric;
+}
+
+std::vector<FrameCellAccumulator> frameCells(
+    const SimulationFrame& frame,
+    double cellSize) {
+    std::unordered_map<long long, FrameCellAccumulator> cells;
+    for (const auto& agent : frame.agents) {
+        const DensityCellAddress address{
+            .cell = spatialCellFor(agent.position, cellSize),
+            .floorId = agent.floorId,
+        };
+        auto& cell = cells[densitySpatialKey(address)];
+        if (cell.agentCount == 0) {
+            cell.cell = address.cell;
+            cell.floorId = address.floorId;
+        }
+        cell.positionSum = {
+            .x = cell.positionSum.x + agent.position.x,
+            .y = cell.positionSum.y + agent.position.y,
+        };
+        ++cell.agentCount;
+        cell.agents.push_back(&agent);
+    }
+
+    std::vector<FrameCellAccumulator> values;
+    values.reserve(cells.size());
+    for (auto& [_, cell] : cells) {
+        values.push_back(std::move(cell));
+    }
+    return values;
 }
 
 bool isPressureCellWorse(const PressureCellMetric& candidate, const PressureCellMetric& current) {
@@ -858,6 +956,63 @@ private:
 };
 
 }  // namespace
+
+DensityFieldSnapshot densityFieldSnapshotFromFrame(
+    const SimulationFrame& frame,
+    double cellSizeMeters) {
+    const auto cellSize = cellSizeMeters > 0.0 ? cellSizeMeters : kScenarioHotspotCellSize;
+    auto cells = frameCells(frame, cellSize);
+
+    std::vector<DensityCellMetric> metrics;
+    metrics.reserve(cells.size());
+    for (const auto& cell : cells) {
+        metrics.push_back(densityMetricFromFrameCell(cell, cellSize));
+    }
+    std::sort(metrics.begin(), metrics.end(), [](const auto& lhs, const auto& rhs) {
+        if (lhs.densityPeoplePerSquareMeter != rhs.densityPeoplePerSquareMeter) {
+            return lhs.densityPeoplePerSquareMeter > rhs.densityPeoplePerSquareMeter;
+        }
+        return lhs.agentCount > rhs.agentCount;
+    });
+
+    return {
+        .timeSeconds = frame.elapsedSeconds,
+        .cellSizeMeters = cellSize,
+        .cells = std::move(metrics),
+    };
+}
+
+PressureFieldSnapshot pressureFieldSnapshotFromFrame(
+    const SimulationFrame& frame,
+    double cellSizeMeters) {
+    const auto cellSize = cellSizeMeters > 0.0 ? cellSizeMeters : kScenarioHotspotCellSize;
+    auto cells = frameCells(frame, cellSize);
+
+    std::vector<PressureCellMetric> metrics;
+    metrics.reserve(cells.size());
+    for (const auto& cell : cells) {
+        auto metric = pressureMetricFromFrameCell(cell, cellSize);
+        if (metric.intrudingPairCount == 0 || metric.pressureScore <= 0.0) {
+            continue;
+        }
+        metrics.push_back(std::move(metric));
+    }
+    std::sort(metrics.begin(), metrics.end(), [](const auto& lhs, const auto& rhs) {
+        if (std::fabs(lhs.pressureScore - rhs.pressureScore) > 1e-9) {
+            return lhs.pressureScore > rhs.pressureScore;
+        }
+        if (lhs.intrudingPairCount != rhs.intrudingPairCount) {
+            return lhs.intrudingPairCount > rhs.intrudingPairCount;
+        }
+        return lhs.agentCount > rhs.agentCount;
+    });
+
+    return {
+        .timeSeconds = frame.elapsedSeconds,
+        .cellSizeMeters = cellSize,
+        .cells = std::move(metrics),
+    };
+}
 
 ScenarioAgentSpawnSystem::ScenarioAgentSpawnSystem(std::vector<ScenarioAgentSeed> seeds, double timeLimitSeconds)
     : seeds_(std::move(seeds)),

@@ -186,4 +186,11 @@ struct ScenarioResultArtifacts {
     std::vector<PlacementCompletionMetric> placementCompletion{};
 };
 
+DensityFieldSnapshot densityFieldSnapshotFromFrame(
+    const SimulationFrame& frame,
+    double cellSizeMeters = kScenarioHotspotCellSize);
+PressureFieldSnapshot pressureFieldSnapshotFromFrame(
+    const SimulationFrame& frame,
+    double cellSizeMeters = kScenarioHotspotCellSize);
+
 }  // namespace safecrowd::domain

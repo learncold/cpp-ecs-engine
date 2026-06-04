@@ -5272,6 +5272,51 @@ SC_TEST(ScenarioResultArtifactsSystem_PublishesCrossFlowSummary) {
     SC_EXPECT_EQ(artifacts.crossFlowTimeline.front().activeCrossFlowCellCount, std::size_t{1});
 }
 
+SC_TEST(ScenarioResultArtifacts_FrameDensitySnapshotGroupsAgentsByFloorAndCell) {
+    const safecrowd::domain::SimulationFrame frame{
+        .elapsedSeconds = 3.5,
+        .agents = {
+            {.id = 1, .position = {.x = 0.1, .y = 0.1}, .radius = 0.25, .floorId = "L1"},
+            {.id = 2, .position = {.x = 0.3, .y = 0.1}, .radius = 0.25, .floorId = "L1"},
+            {.id = 3, .position = {.x = 2.1, .y = 0.1}, .radius = 0.25, .floorId = "L1"},
+            {.id = 4, .position = {.x = 0.1, .y = 0.1}, .radius = 0.25, .floorId = "L2"},
+        },
+    };
+
+    const auto snapshot = safecrowd::domain::densityFieldSnapshotFromFrame(frame, 1.0);
+
+    SC_EXPECT_NEAR(snapshot.timeSeconds, 3.5, 1e-9);
+    SC_EXPECT_NEAR(snapshot.cellSizeMeters, 1.0, 1e-9);
+    SC_EXPECT_EQ(snapshot.cells.size(), std::size_t{3});
+    SC_EXPECT_EQ(snapshot.cells.front().floorId, std::string{"L1"});
+    SC_EXPECT_EQ(snapshot.cells.front().agentCount, std::size_t{2});
+    SC_EXPECT_NEAR(snapshot.cells.front().densityPeoplePerSquareMeter, 2.0, 1e-9);
+    SC_EXPECT_NEAR(snapshot.cells.front().center.x, 0.2, 1e-9);
+    SC_EXPECT_NEAR(snapshot.cells.front().center.y, 0.1, 1e-9);
+}
+
+SC_TEST(ScenarioResultArtifacts_FramePressureSnapshotFiltersNonIntrudingCells) {
+    const safecrowd::domain::SimulationFrame frame{
+        .elapsedSeconds = 4.0,
+        .agents = {
+            {.id = 1, .position = {.x = 0.1, .y = 0.1}, .radius = 0.25, .floorId = "L1"},
+            {.id = 2, .position = {.x = 0.3, .y = 0.1}, .radius = 0.25, .floorId = "L1"},
+            {.id = 3, .position = {.x = 2.1, .y = 0.1}, .radius = 0.25, .floorId = "L1"},
+            {.id = 4, .position = {.x = 0.1, .y = 0.1}, .radius = 0.25, .floorId = "L2"},
+        },
+    };
+
+    const auto snapshot = safecrowd::domain::pressureFieldSnapshotFromFrame(frame, 1.0);
+
+    SC_EXPECT_NEAR(snapshot.timeSeconds, 4.0, 1e-9);
+    SC_EXPECT_NEAR(snapshot.cellSizeMeters, 1.0, 1e-9);
+    SC_EXPECT_EQ(snapshot.cells.size(), std::size_t{1});
+    SC_EXPECT_EQ(snapshot.cells.front().floorId, std::string{"L1"});
+    SC_EXPECT_EQ(snapshot.cells.front().agentCount, std::size_t{2});
+    SC_EXPECT_EQ(snapshot.cells.front().intrudingPairCount, std::size_t{1});
+    SC_EXPECT_TRUE(snapshot.cells.front().pressureScore > 0.0);
+}
+
 SC_TEST(ScenarioRoutePassageCrossed_UsesDoorPlaneNearEndpoint) {
     safecrowd::domain::FacilityLayout2D layout;
     layout.zones.push_back({

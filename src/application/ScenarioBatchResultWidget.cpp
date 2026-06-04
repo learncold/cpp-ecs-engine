@@ -321,6 +321,47 @@ std::vector<int> defaultCompareIndices(
     return indices;
 }
 
+std::vector<safecrowd::domain::DensityCellMetric> fullRunDensityCells(
+    const SavedScenarioResultState& result) {
+    return result.artifacts.densitySummary.peakField.cells.empty()
+        ? result.artifacts.densitySummary.peakCells
+        : result.artifacts.densitySummary.peakField.cells;
+}
+
+std::vector<safecrowd::domain::PressureCellMetric> fullRunPressureCells(
+    const SavedScenarioResultState& result) {
+    return result.artifacts.pressureSummary.peakField.cells.empty()
+        ? result.artifacts.pressureSummary.peakCells
+        : result.artifacts.pressureSummary.peakField.cells;
+}
+
+double densityFieldCellSize(const SavedScenarioResultState& result) {
+    const auto cellSize = result.artifacts.densitySummary.cellSizeMeters > 0.0
+        ? result.artifacts.densitySummary.cellSizeMeters
+        : result.artifacts.densitySummary.peakField.cellSizeMeters;
+    return cellSize > 0.0 ? cellSize : safecrowd::domain::kScenarioHotspotCellSize;
+}
+
+double pressureFieldCellSize(const SavedScenarioResultState& result) {
+    const auto cellSize = result.artifacts.pressureSummary.cellSizeMeters > 0.0
+        ? result.artifacts.pressureSummary.cellSizeMeters
+        : result.artifacts.pressureSummary.peakField.cellSizeMeters;
+    return cellSize > 0.0 ? cellSize : safecrowd::domain::kScenarioHotspotCellSize;
+}
+
+double densityOverlayScaleMax(const SavedScenarioResultState& result) {
+    const auto threshold = result.artifacts.densitySummary.highDensityThresholdPeoplePerSquareMeter;
+    return threshold > 0.0 ? threshold : safecrowd::domain::kScenarioHotspotDensityThresholdPeoplePerSquareMeter;
+}
+
+double pressureOverlayScaleMax(const SavedScenarioResultState& result) {
+    return std::max({
+        result.artifacts.pressureSummary.hotspotScoreThreshold,
+        result.artifacts.pressureSummary.peakPressureScore,
+        static_cast<double>(safecrowd::domain::kScenarioPressureScoreThreshold),
+    });
+}
+
 enum class ComparisonGraphMode {
     Remaining,
     Exits,
@@ -1093,6 +1134,15 @@ std::optional<ScenarioAuthoringWidget::InitialState> ScenarioBatchResultWidget::
     return returnAuthoringState_;
 }
 
+bool ScenarioBatchResultWidget::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == canvas_
+        && event != nullptr
+        && (event->type() == QEvent::Resize || event->type() == QEvent::Show)) {
+        positionHeatmapScopeCheckBox();
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
 QWidget* ScenarioBatchResultWidget::createCanvasPanel() {
     auto* panel = new QWidget(shell_);
     auto* layout = new QVBoxLayout(panel);
@@ -1137,6 +1187,29 @@ QWidget* ScenarioBatchResultWidget::createCanvasPanel() {
 
     canvas_ = new SimulationCanvasWidget(layout_, panel);
     layout->addWidget(canvas_, 1);
+    canvas_->installEventFilter(this);
+
+    heatmapScopeCheckBox_ = new QCheckBox("Full heatmap", canvas_);
+    heatmapScopeCheckBox_->setChecked(fullHeatmapOverlayVisible_);
+    heatmapScopeCheckBox_->setCursor(Qt::PointingHandCursor);
+    heatmapScopeCheckBox_->setFocusPolicy(Qt::NoFocus);
+    heatmapScopeCheckBox_->setToolTip("Checked: full run heatmap. Unchecked: current replay time.");
+    heatmapScopeCheckBox_->setStyleSheet(
+        "QCheckBox {"
+        " background: rgba(255, 255, 255, 232);"
+        " border: 1px solid #c9d5e2;"
+        " border-radius: 8px;"
+        " color: #16202b;"
+        " padding: 6px 10px;"
+        "}"
+        "QCheckBox:hover { background: #ffffff; }"
+        "QCheckBox::indicator { width: 15px; height: 15px; }");
+    connect(heatmapScopeCheckBox_, &QCheckBox::toggled, this, [this](bool checked) {
+        fullHeatmapOverlayVisible_ = checked;
+        applyHeatmapOverlayScope(currentReplayFrame());
+        refreshHeatmapScopeCheckBox();
+    });
+    refreshHeatmapScopeCheckBox();
 
     auto* replayBar = new QFrame(panel);
     replayBar->setStyleSheet(
@@ -1532,6 +1605,7 @@ void ScenarioBatchResultWidget::showAuthoring(ScenarioAuthoringWidget::InitialSt
     shell_->deleteLater();
     shell_ = nullptr;
     canvas_ = nullptr;
+    heatmapScopeCheckBox_ = nullptr;
 }
 
 void ScenarioBatchResultWidget::createRecommendedScenario(
@@ -1643,6 +1717,9 @@ void ScenarioBatchResultWidget::applyReplayFrameData(const safecrowd::domain::Si
     if (canvas_ != nullptr) {
         canvas_->setFrame(frame);
     }
+    if (!fullHeatmapOverlayVisible_) {
+        applyHeatmapOverlayScope(&frame);
+    }
     if (replaySlider_ != nullptr && replaySlider_->value() != replayFrameIndex_) {
         const QSignalBlocker blocker(replaySlider_);
         replaySlider_->setValue(replayFrameIndex_);
@@ -1675,18 +1752,56 @@ void ScenarioBatchResultWidget::applySelectedResultStaticCanvasState() {
     canvas_->setCrossFlowOverlay(result.risk.crossFlowCells);
     canvas_->setOccupancyHeatmapOverlay(result.artifacts.occupancyHeatmap);
     canvas_->setDensityOverlay(
-        result.artifacts.densitySummary.peakField.cells.empty()
-            ? result.artifacts.densitySummary.peakCells
-            : result.artifacts.densitySummary.peakField.cells,
-        result.artifacts.densitySummary.highDensityThresholdPeoplePerSquareMeter);
+        fullRunDensityCells(result),
+        densityOverlayScaleMax(result));
     canvas_->setPressureOverlay(
-        result.artifacts.pressureSummary.peakField.cells.empty()
-            ? result.artifacts.pressureSummary.peakCells
-            : result.artifacts.pressureSummary.peakField.cells,
-        std::max(
-            result.artifacts.pressureSummary.hotspotScoreThreshold,
-            result.artifacts.pressureSummary.peakPressureScore));
+        fullRunPressureCells(result),
+        pressureOverlayScaleMax(result));
+    applyHeatmapOverlayScope(currentReplayFrame());
     applyOverlayModeToCanvas();
+}
+
+const safecrowd::domain::SimulationFrame* ScenarioBatchResultWidget::currentReplayFrame() const {
+    if (!replayFrames_.empty()) {
+        const auto index = std::clamp(replayFrameIndex_, 0, static_cast<int>(replayFrames_.size()) - 1);
+        return &replayFrames_[static_cast<std::size_t>(index)];
+    }
+    if (results_.empty() || currentResultIndex_ < 0 || currentResultIndex_ >= static_cast<int>(results_.size())) {
+        return nullptr;
+    }
+    return &results_[static_cast<std::size_t>(currentResultIndex_)].frame;
+}
+
+void ScenarioBatchResultWidget::applyHeatmapOverlayScope(const safecrowd::domain::SimulationFrame* frame) {
+    if (canvas_ == nullptr
+        || results_.empty()
+        || currentResultIndex_ < 0
+        || currentResultIndex_ >= static_cast<int>(results_.size())) {
+        return;
+    }
+    if (overlayMode_ != OverlayMode::Density && overlayMode_ != OverlayMode::Pressure) {
+        return;
+    }
+
+    const auto& result = results_[static_cast<std::size_t>(currentResultIndex_)];
+    const auto* sourceFrame = frame != nullptr ? frame : currentReplayFrame();
+    const bool useCurrentFrame = !fullHeatmapOverlayVisible_ && sourceFrame != nullptr;
+    if (overlayMode_ == OverlayMode::Density) {
+        auto cells = useCurrentFrame
+            ? safecrowd::domain::densityFieldSnapshotFromFrame(
+                  *sourceFrame,
+                  densityFieldCellSize(result)).cells
+            : fullRunDensityCells(result);
+        canvas_->setDensityOverlay(std::move(cells), densityOverlayScaleMax(result));
+        return;
+    }
+
+    auto cells = useCurrentFrame
+        ? safecrowd::domain::pressureFieldSnapshotFromFrame(
+              *sourceFrame,
+              pressureFieldCellSize(result)).cells
+        : fullRunPressureCells(result);
+    canvas_->setPressureOverlay(std::move(cells), pressureOverlayScaleMax(result));
 }
 
 void ScenarioBatchResultWidget::applyOverlayModeToCanvas() {
@@ -1792,6 +1907,8 @@ void ScenarioBatchResultWidget::setOverlayMode(OverlayMode mode) {
             overlayCombo_->setCurrentIndex(comboIndex);
         }
     }
+    refreshHeatmapScopeCheckBox();
+    applyHeatmapOverlayScope(currentReplayFrame());
     applyOverlayModeToCanvas();
 }
 
@@ -1801,9 +1918,9 @@ void ScenarioBatchResultWidget::loadReplayForSelectedResult() {
         replayFrames_.clear();
         return;
     }
-    applySelectedResultStaticCanvasState();
     replayFrames_ = replayFramesForResult(results_[static_cast<std::size_t>(currentResultIndex_)]);
     replayFrameIndex_ = replayFrames_.empty() ? 0 : static_cast<int>(replayFrames_.size()) - 1;
+    applySelectedResultStaticCanvasState();
     if (replaySlider_ != nullptr) {
         replaySlider_->setEnabled(replayFrames_.size() > 1);
         replaySlider_->setRange(0, replayFrames_.empty() ? 0 : static_cast<int>(replayFrames_.size()) - 1);
@@ -1815,6 +1932,37 @@ void ScenarioBatchResultWidget::loadReplayForSelectedResult() {
         playButton_->setText("Play");
     }
     applyReplayFrame(replayFrameIndex_);
+}
+
+void ScenarioBatchResultWidget::positionHeatmapScopeCheckBox() {
+    if (canvas_ == nullptr || heatmapScopeCheckBox_ == nullptr) {
+        return;
+    }
+
+    const auto hint = heatmapScopeCheckBox_->sizeHint();
+    heatmapScopeCheckBox_->resize(hint);
+    constexpr int margin = 14;
+    const auto x = std::max(margin, canvas_->width() - hint.width() - margin);
+    heatmapScopeCheckBox_->move(x, margin);
+    heatmapScopeCheckBox_->raise();
+}
+
+void ScenarioBatchResultWidget::refreshHeatmapScopeCheckBox() {
+    if (heatmapScopeCheckBox_ == nullptr) {
+        return;
+    }
+
+    const bool visible = overlayMode_ == OverlayMode::Density || overlayMode_ == OverlayMode::Pressure;
+    const QSignalBlocker blocker(heatmapScopeCheckBox_);
+    heatmapScopeCheckBox_->setChecked(fullHeatmapOverlayVisible_);
+    heatmapScopeCheckBox_->setVisible(visible);
+    heatmapScopeCheckBox_->setEnabled(visible);
+    heatmapScopeCheckBox_->setToolTip(fullHeatmapOverlayVisible_
+        ? "Showing the full run heatmap. Clear to show the current replay time."
+        : "Showing the current replay time. Check to show the full run heatmap.");
+    if (visible) {
+        positionHeatmapScopeCheckBox();
+    }
 }
 
 void ScenarioBatchResultWidget::refreshComparisonSelection() {

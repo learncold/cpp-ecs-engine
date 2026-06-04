@@ -17,6 +17,7 @@
 class QLabel;
 class QCheckBox;
 class QComboBox;
+class QEvent;
 class QPushButton;
 class QSlider;
 class QTableWidget;
@@ -45,6 +46,9 @@ public:
     SavedResultNavigationView currentSavedNavigationView() const noexcept;
     std::optional<ScenarioAuthoringWidget::InitialState> returnAuthoringState() const;
 
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+
 private:
     enum class OverlayMode {
         Occupancy = 0,
@@ -65,8 +69,10 @@ private:
     void advanceReplay();
     void applyReplayFrame(int frameIndex);
     void applyReplayFrameData(const safecrowd::domain::SimulationFrame& frame, int sliderIndex);
+    void applyHeatmapOverlayScope(const safecrowd::domain::SimulationFrame* frame = nullptr);
     void applyOverlayModeToCanvas();
     void applySelectedResultStaticCanvasState();
+    const safecrowd::domain::SimulationFrame* currentReplayFrame() const;
     void loadReplayForSelectedResult();
     int nearestReplayFrameIndex(double seconds) const;
     void navigateToAuthoring();
@@ -81,6 +87,8 @@ private:
     void refreshResultNavigationPanel();
     void refreshRightPanel();
     void refreshSelectedResult();
+    void positionHeatmapScopeCheckBox();
+    void refreshHeatmapScopeCheckBox();
     void rerunBatch();
     void seekToTimingMarkerSeconds(double seconds);
     void selectAllComparisonScenarios();
@@ -114,6 +122,7 @@ private:
     SimulationCanvasWidget* canvas_{nullptr};
     QComboBox* displayScenarioCombo_{nullptr};
     QComboBox* overlayCombo_{nullptr};
+    QCheckBox* heatmapScopeCheckBox_{nullptr};
     QPushButton* playButton_{nullptr};
     QSlider* replaySlider_{nullptr};
     QLabel* replayTimeLabel_{nullptr};
@@ -135,6 +144,7 @@ private:
     int detailSelectionResultIndex_{-1};
     bool detailPanelVisible_{true};
     bool overviewPanelVisible_{true};
+    bool fullHeatmapOverlayVisible_{true};
 };
 
 }  // namespace safecrowd::application
