@@ -37,6 +37,7 @@
 #include "application/ScenarioResultNavigation.h"
 #include "application/ScenarioRunWidget.h"
 #include "application/SimulationCanvasWidget.h"
+#include "application/ToolIconResources.h"
 #include "application/UiStyle.h"
 #include "application/WorkspaceShell.h"
 #include "domain/AlternativeRecommendationService.h"
@@ -1532,6 +1533,11 @@ QWidget* ScenarioBatchResultWidget::createPanelToggleBar() {
     detailPanelToggleButton_->setFixedSize(36, 32);
     detailPanelToggleButton_->setCursor(Qt::PointingHandCursor);
     detailPanelToggleButton_->setFocusPolicy(Qt::NoFocus);
+    detailPanelToggleButton_->setIcon(makeSvgToolIcon(
+        QStringLiteral(":/tool-icons/scenario-result/detail-panel.svg"),
+        QColor("#16202b"),
+        QSize(20, 20)));
+    detailPanelToggleButton_->setIconSize(QSize(20, 20));
     detailPanelToggleButton_->setToolTip("Detail");
     detailPanelToggleButton_->setAccessibleName("Toggle Detail panel");
     detailPanelToggleButton_->setStyleSheet(buttonStyle);
@@ -1543,6 +1549,11 @@ QWidget* ScenarioBatchResultWidget::createPanelToggleBar() {
     overviewPanelToggleButton_->setFixedSize(36, 32);
     overviewPanelToggleButton_->setCursor(Qt::PointingHandCursor);
     overviewPanelToggleButton_->setFocusPolicy(Qt::NoFocus);
+    overviewPanelToggleButton_->setIcon(makeSvgToolIcon(
+        QStringLiteral(":/tool-icons/scenario-result/overview-panel.svg"),
+        QColor("#16202b"),
+        QSize(20, 20)));
+    overviewPanelToggleButton_->setIconSize(QSize(20, 20));
     overviewPanelToggleButton_->setToolTip("Overview");
     overviewPanelToggleButton_->setAccessibleName("Toggle Overview panel");
     overviewPanelToggleButton_->setStyleSheet(buttonStyle);

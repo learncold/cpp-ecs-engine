@@ -1471,25 +1471,21 @@ std::vector<NavigationTreeNode> buildCrowdTree(const ScenarioAuthoringWidget::Sc
             occupants.push_back({
                 .label = QString("Occupant %1").arg(index),
                 .id = QString("%1/occupant-%2").arg(placement.id).arg(index),
-                .detail = QString("Floor: %1\nZone: %2\nVelocity: (%3, %4)")
+                .detail = QString("Floor: %1\nZone: %2")
                               .arg(placement.floorId)
-                              .arg(placement.zoneId)
-                              .arg(placement.velocity.x, 0, 'f', 2)
-                              .arg(placement.velocity.y, 0, 'f', 2),
+                              .arg(placement.zoneId),
                 .icon = individualCrowdTreeIcon(),
             });
         }
 
         const auto detail = source
-            ? QString("Source schedule: %1 people every %2s for %3 min\nVelocity: (%4, %5)")
+            ? QString("Source schedule: %1 people every %2s for %3 min")
                   .arg(placement.sourceAgentsPerSpawn)
                   .arg(placement.sourceIntervalSeconds, 0, 'f', 1)
                   .arg(std::max(0.0, placement.sourceEndSeconds - placement.sourceStartSeconds) / 60.0, 0, 'f', 1)
-                  .arg(placement.velocity.x, 0, 'f', 2)
-                  .arg(placement.velocity.y, 0, 'f', 2)
-            : QString("Velocity: (%1, %2)")
-                  .arg(placement.velocity.x, 0, 'f', 2)
-                  .arg(placement.velocity.y, 0, 'f', 2);
+            : QString("Floor: %1\nZone: %2")
+                  .arg(placement.floorId)
+                  .arg(placement.zoneId);
         placements.push_back({
             .label = QString("%1  -  %2  -  %3 %4")
                          .arg(
@@ -2604,22 +2600,6 @@ void ScenarioAuthoringWidget::refreshInspector() {
                         form->addRow("Y", positionYSpin);
                     }
 
-                    auto* velocityXSpin = new QDoubleSpinBox(elementInspectorPanel_);
-                    velocityXSpin->setRange(-20.0, 20.0);
-                    velocityXSpin->setDecimals(2);
-                    velocityXSpin->setSingleStep(0.1);
-                    velocityXSpin->setValue(placementIt->velocity.x);
-                    constrainInspectorField(velocityXSpin);
-                    form->addRow("Velocity X", velocityXSpin);
-
-                    auto* velocityYSpin = new QDoubleSpinBox(elementInspectorPanel_);
-                    velocityYSpin->setRange(-20.0, 20.0);
-                    velocityYSpin->setDecimals(2);
-                    velocityYSpin->setSingleStep(0.1);
-                    velocityYSpin->setValue(placementIt->velocity.y);
-                    constrainInspectorField(velocityYSpin);
-                    form->addRow("Velocity Y", velocityYSpin);
-
                     auto* distributionCombo = new QComboBox(elementInspectorPanel_);
                     distributionCombo->addItem("Uniform", static_cast<int>(safecrowd::domain::InitialPlacementDistribution::Uniform));
                     distributionCombo->addItem("Random", static_cast<int>(safecrowd::domain::InitialPlacementDistribution::Random));
@@ -2667,7 +2647,7 @@ void ScenarioAuthoringWidget::refreshInspector() {
                     configureInspectorActionButton(applyButton);
                     panelLayout->addWidget(applyButton);
                     const auto placementId = inspectorSelectionId_;
-                    connect(applyButton, &QPushButton::clicked, this, [this, placementId, nameEdit, countSpin, positionXSpin, positionYSpin, velocityXSpin, velocityYSpin, distributionCombo, agentsPerSpawnSpin, startSpin, endSpin, intervalSpin]() {
+                    connect(applyButton, &QPushButton::clicked, this, [this, placementId, nameEdit, countSpin, positionXSpin, positionYSpin, distributionCombo, agentsPerSpawnSpin, startSpin, endSpin, intervalSpin]() {
                         auto* scenario = currentScenario();
                         if (scenario == nullptr) {
                             return;
@@ -2698,10 +2678,6 @@ void ScenarioAuthoringWidget::refreshInspector() {
                             updatedPlacement.zoneId = QString::fromStdString(zone->id);
                             updatedPlacement.floorId = QString::fromStdString(zone->floorId);
                         }
-                        updatedPlacement.velocity = {
-                            .x = velocityXSpin->value(),
-                            .y = velocityYSpin->value(),
-                        };
                         if (updatedPlacement.kind == ScenarioCrowdPlacementKind::Group) {
                             const auto distribution = static_cast<safecrowd::domain::InitialPlacementDistribution>(
                                 distributionCombo->currentData().toInt());

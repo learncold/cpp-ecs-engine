@@ -53,6 +53,8 @@ License copies are saved under `licenses/`.
 | Zone | `scenario-result/zone__01_lucide_grid-2x2.svg` |
 | Groups | `scenario-authoring/add-occupant-group__01_lucide_users-round.svg` |
 | Recommendations | `scenario-result/recommendations__02_lucide_scroll-text.svg` |
+| Detail panel toggle | `scenario-result/detail-panel__01_lucide_info.svg` |
+| Overview panel toggle | `scenario-result/overview-panel__01_lucide_square-chart-gantt.svg` |
 
 ## Applied Shared Icons
 

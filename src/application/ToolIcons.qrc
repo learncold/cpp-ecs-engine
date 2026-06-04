@@ -32,6 +32,8 @@
         <file alias="tool-icons/scenario-result/zone.svg">../../assets/tool-icon-candidates/scenario-result/zone__01_lucide_grid-2x2.svg</file>
         <file alias="tool-icons/scenario-result/groups.svg">../../assets/tool-icon-candidates/scenario-authoring/add-occupant-group__01_lucide_users-round.svg</file>
         <file alias="tool-icons/scenario-result/recommendations.svg">../../assets/tool-icon-candidates/scenario-result/recommendations__02_lucide_scroll-text.svg</file>
+        <file alias="tool-icons/scenario-result/detail-panel.svg">../../assets/tool-icon-candidates/scenario-result/detail-panel__01_lucide_info.svg</file>
+        <file alias="tool-icons/scenario-result/overview-panel.svg">../../assets/tool-icon-candidates/scenario-result/overview-panel__01_lucide_square-chart-gantt.svg</file>
         <file alias="tool-icons/etc/issues.svg">../../assets/tool-icon-candidates/etc/issues__01_lucide_triangle-alert.svg</file>
         <file alias="tool-icons/etc/pencil-ruler.svg">../../assets/tool-icon-candidates/etc/pencil-ruler.svg</file>
         <file alias="tool-icons/etc/inspector-panel.svg">../../assets/tool-icon-candidates/etc/inspector-panel__01_lucide_sliders-horizontal.svg</file>
