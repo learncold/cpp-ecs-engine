@@ -676,10 +676,6 @@ QWidget* ScenarioRunWidget::createRunPanel() {
     layout->addWidget(congestionLabel_);
     layout->addWidget(bottleneckLabel_);
 
-    auto* settingsTitle = createLabel("Run settings", panel, ui::FontRole::Caption);
-    settingsTitle->setStyleSheet(ui::mutedTextStyleSheet());
-    layout->addWidget(settingsTitle);
-
     auto* settingsGroup = new QWidget(panel);
     auto* settingsForm = new QFormLayout(settingsGroup);
     settingsForm->setContentsMargins(0, 4, 0, 0);
@@ -711,7 +707,7 @@ QWidget* ScenarioRunWidget::createRunPanel() {
     seedSpin_->setToolTip("Base random seed");
     settingsForm->addRow("Seed", seedSpin_);
 
-    applySettingsButton_ = new QPushButton("Apply selected & restart", settingsGroup);
+    applySettingsButton_ = new QPushButton("Apply and Restart", settingsGroup);
     applySettingsButton_->setFont(ui::font(ui::FontRole::Caption));
     applySettingsButton_->setStyleSheet(ui::secondaryButtonStyleSheet());
     settingsForm->addRow(applySettingsButton_);
