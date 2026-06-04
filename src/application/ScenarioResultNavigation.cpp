@@ -197,28 +197,60 @@ QPushButton* createHotspotRowButton(
     return button;
 }
 
-QPushButton* createCrossFlowCellRowButton(
-    const safecrowd::domain::ScenarioCrossFlowCellMetric& cell,
+QPushButton* createOperationalConflictCellRowButton(
+    const safecrowd::domain::ScenarioOperationalConflictCellMetric& cell,
     std::size_t index,
     QWidget* parent) {
     QStringList lines{
-        QString("%1. Cross-flow score %2")
+        QString("%1. Conflict score %2")
             .arg(static_cast<int>(index + 1))
-            .arg(cell.crossFlowScore, 0, 'f', 2),
-        QString("Cross flow %1  |  %2 primary / %3 crossing movers")
-            .arg(formatPercent(cell.crossFlowRatio))
-            .arg(static_cast<int>(cell.primaryFlowCount))
-            .arg(static_cast<int>(cell.crossFlowCount)),
+            .arg(cell.conflictScore, 0, 'f', 2),
+        QString("Counterflow %1  |  %2 forward / %3 reverse")
+            .arg(formatPercent(cell.counterflowRatio))
+            .arg(static_cast<int>(cell.forwardCount))
+            .arg(static_cast<int>(cell.reverseCount)),
+        QString("Opposition %1").arg(formatPercent(cell.oppositionScore)),
         QString("Duration %1 sec  |  Speed %2 m/s")
             .arg(cell.durationSeconds, 0, 'f', 1)
             .arg(cell.averageSpeed, 0, 'f', 2),
     };
+    if (!cell.nearestConnectionLabel.empty()) {
+        lines.push_back(QString("Nearest: %1").arg(QString::fromStdString(cell.nearestConnectionLabel)));
+    }
     if (!cell.floorId.empty()) {
         lines.push_back(QString("Floor: %1").arg(QString::fromStdString(cell.floorId)));
     }
     auto* button = createReportRowButton(lines, parent);
-    button->setToolTip(QString("%1\nClick to focus this cross-flow hotspot on the canvas.")
-        .arg(safecrowd::domain::scenarioCrossFlowDefinition()));
+    button->setToolTip(QString("%1\nClick to focus this operational-conflict cell on the canvas.")
+        .arg(safecrowd::domain::scenarioOperationalConflictDefinition()));
+    return button;
+}
+
+QPushButton* createOperationalConflictConnectionRowButton(
+    const safecrowd::domain::ScenarioOperationalConflictConnectionMetric& connection,
+    std::size_t index,
+    QWidget* parent) {
+    QStringList lines{
+        QString("%1. %2")
+            .arg(static_cast<int>(index + 1))
+            .arg(QString::fromStdString(connection.label.empty() ? connection.connectionId : connection.label)),
+        QString("Conflict score %1  |  Opposition %2")
+            .arg(connection.conflictScore, 0, 'f', 2)
+            .arg(formatPercent(connection.oppositionScore)),
+        QString("%1 forward / %2 reverse  |  Queue %3")
+            .arg(static_cast<int>(connection.forwardCount))
+            .arg(static_cast<int>(connection.reverseCount))
+            .arg(static_cast<int>(connection.queueAgentCount)),
+        QString("Duration %1 sec  |  Speed %2 m/s")
+            .arg(connection.durationSeconds, 0, 'f', 1)
+            .arg(connection.averageSpeed, 0, 'f', 2),
+    };
+    if (!connection.floorId.empty()) {
+        lines.push_back(QString("Floor: %1").arg(QString::fromStdString(connection.floorId)));
+    }
+    auto* button = createReportRowButton(lines, parent);
+    button->setToolTip(QString("%1\nClick to focus this connection on the canvas.")
+        .arg(safecrowd::domain::scenarioOperationalConflictDefinition()));
     return button;
 }
 
@@ -531,42 +563,68 @@ QWidget* createGroupsReportPanel(
     return parts.panel;
 }
 
-QWidget* createCrossFlowReportPanel(
+QWidget* createOperationalConflictReportPanel(
     const safecrowd::domain::ScenarioRiskSnapshot& risk,
     const safecrowd::domain::ScenarioResultArtifacts& artifacts,
-    std::function<void(std::size_t)> crossFlowCellFocusHandler,
+    std::function<void(std::size_t)> operationalConflictCellFocusHandler,
+    std::function<void(std::size_t)> operationalConflictConnectionFocusHandler,
     ResultItemSelectionHandler itemSelectionHandler,
     QWidget* parent) {
-    auto parts = createResultReportPanel("Cross Flow", "Non-aligned movement streams", parent);
+    auto parts = createResultReportPanel("Operational Conflict", "Counterflow at shared passages", parent);
     auto* summaryHeader = createReportSectionHeader("Summary", parts.content);
-    summaryHeader->setToolTip(safecrowd::domain::scenarioCrossFlowDefinition());
+    summaryHeader->setToolTip(safecrowd::domain::scenarioOperationalConflictDefinition());
     parts.contentLayout->addWidget(summaryHeader);
     parts.contentLayout->addWidget(createReportInfoRow({
-        QString("Peak cross-flow score: %1")
-            .arg(artifacts.crossFlowSummary.peakCrossFlowScore, 0, 'f', 2),
+        QString("Peak conflict score: %1")
+            .arg(artifacts.operationalConflictSummary.peakConflictScore, 0, 'f', 2),
         QString("Total exposure: %1 agent-sec")
-            .arg(artifacts.crossFlowSummary.totalCrossFlowExposureAgentSeconds, 0, 'f', 1),
+            .arg(artifacts.operationalConflictSummary.totalConflictExposureAgentSeconds, 0, 'f', 1),
         QString("Longest duration: %1 sec")
-            .arg(artifacts.crossFlowSummary.longestCrossFlowDurationSeconds, 0, 'f', 1),
-        QString("Cross-flow hotspots: %1")
-            .arg(static_cast<int>(artifacts.crossFlowSummary.crossFlowHotspotCount)),
+            .arg(artifacts.operationalConflictSummary.longestConflictDurationSeconds, 0, 'f', 1),
+        QString("Conflict connections: %1")
+            .arg(static_cast<int>(artifacts.operationalConflictSummary.conflictConnectionCount)),
     }, parts.content));
 
-    auto* cellHeader = createReportSectionHeader("Cross-Flow Cells", parts.content);
-    parts.contentLayout->addWidget(cellHeader);
-    if (risk.crossFlowCells.empty()) {
+    auto* connectionHeader = createReportSectionHeader("Connections", parts.content);
+    parts.contentLayout->addWidget(connectionHeader);
+    if (risk.operationalConflictConnections.empty()) {
         auto* empty = createLabel("None detected", parts.content);
         empty->setStyleSheet(ui::mutedTextStyleSheet());
         parts.contentLayout->addWidget(empty);
     } else {
-        for (std::size_t index = 0; index < risk.crossFlowCells.size(); ++index) {
-            auto* row = createCrossFlowCellRowButton(risk.crossFlowCells[index], index, parts.content);
-            QObject::connect(row, &QPushButton::clicked, parts.content, [crossFlowCellFocusHandler, itemSelectionHandler, index]() {
+        for (std::size_t index = 0; index < risk.operationalConflictConnections.size(); ++index) {
+            auto* row = createOperationalConflictConnectionRowButton(
+                risk.operationalConflictConnections[index],
+                index,
+                parts.content);
+            QObject::connect(row, &QPushButton::clicked, parts.content, [operationalConflictConnectionFocusHandler, itemSelectionHandler, index]() {
                 if (itemSelectionHandler) {
-                    itemSelectionHandler(ScenarioResultNavigationView::CrossFlow, index);
+                    itemSelectionHandler(ScenarioResultNavigationView::OperationalConflict, index);
                 }
-                if (crossFlowCellFocusHandler) {
-                    crossFlowCellFocusHandler(index);
+                if (operationalConflictConnectionFocusHandler) {
+                    operationalConflictConnectionFocusHandler(index);
+                }
+            });
+            parts.contentLayout->addWidget(row);
+        }
+    }
+
+    auto* cellHeader = createReportSectionHeader("Conflict Cells", parts.content);
+    parts.contentLayout->addWidget(cellHeader);
+    if (risk.operationalConflictCells.empty()) {
+        auto* empty = createLabel("None detected", parts.content);
+        empty->setStyleSheet(ui::mutedTextStyleSheet());
+        parts.contentLayout->addWidget(empty);
+    } else {
+        for (std::size_t index = 0; index < risk.operationalConflictCells.size(); ++index) {
+            auto* row = createOperationalConflictCellRowButton(risk.operationalConflictCells[index], index, parts.content);
+            const auto selectionIndex = risk.operationalConflictConnections.size() + index;
+            QObject::connect(row, &QPushButton::clicked, parts.content, [operationalConflictCellFocusHandler, itemSelectionHandler, index, selectionIndex]() {
+                if (itemSelectionHandler) {
+                    itemSelectionHandler(ScenarioResultNavigationView::OperationalConflict, selectionIndex);
+                }
+                if (operationalConflictCellFocusHandler) {
+                    operationalConflictCellFocusHandler(index);
                 }
             });
             parts.contentLayout->addWidget(row);
@@ -593,7 +651,7 @@ std::vector<WorkspaceNavigationTab> scenarioResultNavigationTabs() {
         },
         {
             .id = "cross-flow",
-            .label = "Cross Flow",
+            .label = "Operational Conflict",
             .icon = makeResultNavigationIcon("cross-flow", QColor("#1f5fae")),
         },
         {
@@ -626,7 +684,7 @@ std::vector<WorkspaceNavigationTab> scenarioResultNavigationTabs() {
 
 QString scenarioResultNavigationTabId(ScenarioResultNavigationView view) {
     switch (view) {
-    case ScenarioResultNavigationView::CrossFlow:
+    case ScenarioResultNavigationView::OperationalConflict:
         return "cross-flow";
     case ScenarioResultNavigationView::Hotspot:
         return "hotspot";
@@ -646,7 +704,7 @@ QString scenarioResultNavigationTabId(ScenarioResultNavigationView view) {
 
 ScenarioResultNavigationView scenarioResultNavigationViewFromTabId(const QString& tabId) {
     if (tabId == "cross-flow") {
-        return ScenarioResultNavigationView::CrossFlow;
+        return ScenarioResultNavigationView::OperationalConflict;
     }
     if (tabId == "hotspot") {
         return ScenarioResultNavigationView::Hotspot;
@@ -671,16 +729,18 @@ QWidget* createScenarioResultNavigationPanel(
     const safecrowd::domain::ScenarioRiskSnapshot& risk,
     const safecrowd::domain::ScenarioResultArtifacts& artifacts,
     std::function<void(std::size_t)> bottleneckFocusHandler,
-    std::function<void(std::size_t)> crossFlowCellFocusHandler,
+    std::function<void(std::size_t)> operationalConflictCellFocusHandler,
+    std::function<void(std::size_t)> operationalConflictConnectionFocusHandler,
     std::function<void(std::size_t)> hotspotFocusHandler,
     std::function<void(ScenarioResultNavigationView, std::size_t)> itemSelectionHandler,
     QWidget* parent) {
     switch (view) {
-    case ScenarioResultNavigationView::CrossFlow:
-        return createCrossFlowReportPanel(
+    case ScenarioResultNavigationView::OperationalConflict:
+        return createOperationalConflictReportPanel(
             risk,
             artifacts,
-            std::move(crossFlowCellFocusHandler),
+            std::move(operationalConflictCellFocusHandler),
+            std::move(operationalConflictConnectionFocusHandler),
             std::move(itemSelectionHandler),
             parent);
     case ScenarioResultNavigationView::Hotspot:

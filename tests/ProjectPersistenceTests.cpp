@@ -664,43 +664,68 @@ SC_TEST(ProjectPersistence_preservesImportArtifactsBesideLayoutReview) {
     SC_EXPECT_EQ(loaded.artifacts.selectedRules.rules.front().tokens.front(), std::string{"A-WALL"});
 }
 
-SC_TEST(ProjectPersistence_preservesCrossFlowResultState) {
+SC_TEST(ProjectPersistence_preservesOperationalConflictResultState) {
     QTemporaryDir projectDir;
     SC_EXPECT_TRUE(projectDir.isValid());
 
     ScenarioDraft scenario;
     scenario.scenarioId = "scenario-cross-flow";
-    scenario.name = "Cross Flow Scenario";
+    scenario.name = "Operational Conflict Scenario";
 
     ScenarioRiskSnapshot risk;
-    risk.peakCrossFlowScore = 0.74;
-    risk.totalCrossFlowExposureAgentSeconds = 19.5;
-    risk.crossFlowCells.push_back({
+    risk.peakConflictScore = 0.74;
+    risk.totalConflictExposureAgentSeconds = 19.5;
+    risk.operationalConflictCells.push_back({
         .center = {.x = 1.0, .y = 1.0},
         .cellMin = {.x = 0.0, .y = 0.0},
         .cellMax = {.x = 2.0, .y = 2.0},
         .floorId = "L1",
         .movingAgentCount = 6,
         .peakAgentCount = 6,
-        .primaryFlowCount = 3,
-        .crossFlowCount = 3,
-        .crossFlowRatio = 0.5,
+        .forwardCount = 3,
+        .reverseCount = 3,
+        .counterflowRatio = 0.5,
         .averageSpeed = 0.58,
         .speedDropRatio = 0.55,
-        .crossFlowScore = 0.74,
+        .conflictScore = 0.74,
         .durationSeconds = 10.0,
         .exposureAgentSeconds = 19.5,
+        .nearestConnectionId = "door-main",
+        .nearestConnectionLabel = "Main Door",
+        .oppositionScore = 1.0,
+    });
+    risk.operationalConflictConnections.push_back({
+        .connectionId = "door-main",
+        .label = "Main Door",
+        .floorId = "L1",
+        .passage = {.start = {.x = 2.0, .y = 0.0}, .end = {.x = 2.0, .y = 1.0}},
+        .nearbyAgentCount = 6,
+        .movingAgentCount = 6,
+        .queueAgentCount = 2,
+        .forwardCount = 3,
+        .reverseCount = 3,
+        .counterflowRatio = 0.5,
+        .averageSpeed = 0.58,
+        .speedDropRatio = 0.55,
+        .conflictScore = 0.74,
+        .durationSeconds = 10.0,
+        .exposureAgentSeconds = 19.5,
+        .oppositionScore = 1.0,
     });
 
     ScenarioResultArtifacts artifacts;
-    artifacts.crossFlowSummary.peakCrossFlowScore = 0.74;
-    artifacts.crossFlowSummary.totalCrossFlowExposureAgentSeconds = 19.5;
-    artifacts.crossFlowSummary.longestCrossFlowDurationSeconds = 10.0;
-    artifacts.crossFlowSummary.crossFlowHotspotCount = 1;
-    artifacts.crossFlowTimeline.push_back({
+    artifacts.operationalConflictSummary.peakConflictScore = 0.74;
+    artifacts.operationalConflictSummary.totalConflictExposureAgentSeconds = 19.5;
+    artifacts.operationalConflictSummary.longestConflictDurationSeconds = 10.0;
+    artifacts.operationalConflictSummary.conflictConnectionCount = 1;
+    artifacts.operationalConflictSummary.connectionConcentrationIndex = 0.5;
+    artifacts.operationalConflictSummary.topConflictConnectionId = "door-main";
+    artifacts.operationalConflictSummary.topConflictConnectionLabel = "Main Door";
+    artifacts.operationalConflictTimeline.push_back({
         .timeSeconds = 12.0,
-        .peakCrossFlowScore = 0.74,
-        .activeCrossFlowCellCount = 1,
+        .peakConflictScore = 0.74,
+        .activeConflictCellCount = 1,
+        .activeConflictConnectionCount = 1,
     });
 
     ProjectWorkspaceState workspace;
@@ -709,11 +734,11 @@ SC_TEST(ProjectPersistence_preservesCrossFlowResultState) {
         .scenario = scenario,
         .risk = risk,
         .artifacts = artifacts,
-        .navigationView = SavedResultNavigationView::CrossFlow,
+        .navigationView = SavedResultNavigationView::OperationalConflict,
     };
 
     const ProjectMetadata metadata{
-        .name = "Cross Flow Persistence",
+        .name = "Operational Conflict Persistence",
         .folderPath = projectDir.path(),
     };
 
@@ -723,10 +748,14 @@ SC_TEST(ProjectPersistence_preservesCrossFlowResultState) {
     ProjectWorkspaceState loaded;
     SC_EXPECT_TRUE(ProjectPersistence::loadProjectWorkspace(metadata, &loaded));
     SC_EXPECT_TRUE(loaded.result.has_value());
-    SC_EXPECT_TRUE(loaded.result->navigationView == SavedResultNavigationView::CrossFlow);
-    SC_EXPECT_EQ(loaded.result->risk.crossFlowCells.size(), std::size_t{1});
-    SC_EXPECT_NEAR(loaded.result->artifacts.crossFlowSummary.peakCrossFlowScore, 0.74, 1e-9);
-    SC_EXPECT_EQ(loaded.result->artifacts.crossFlowSummary.crossFlowHotspotCount, std::size_t{1});
-    SC_EXPECT_EQ(loaded.result->artifacts.crossFlowTimeline.size(), std::size_t{1});
-    SC_EXPECT_EQ(loaded.result->artifacts.crossFlowTimeline.front().activeCrossFlowCellCount, std::size_t{1});
+    SC_EXPECT_TRUE(loaded.result->navigationView == SavedResultNavigationView::OperationalConflict);
+    SC_EXPECT_EQ(loaded.result->risk.operationalConflictCells.size(), std::size_t{1});
+    SC_EXPECT_EQ(loaded.result->risk.operationalConflictConnections.size(), std::size_t{1});
+    SC_EXPECT_NEAR(loaded.result->risk.operationalConflictCells.front().oppositionScore, 1.0, 1e-9);
+    SC_EXPECT_NEAR(loaded.result->risk.operationalConflictConnections.front().oppositionScore, 1.0, 1e-9);
+    SC_EXPECT_NEAR(loaded.result->artifacts.operationalConflictSummary.peakConflictScore, 0.74, 1e-9);
+    SC_EXPECT_EQ(loaded.result->artifacts.operationalConflictSummary.conflictConnectionCount, std::size_t{1});
+    SC_EXPECT_EQ(loaded.result->artifacts.operationalConflictTimeline.size(), std::size_t{1});
+    SC_EXPECT_EQ(loaded.result->artifacts.operationalConflictTimeline.front().activeConflictCellCount, std::size_t{1});
+    SC_EXPECT_EQ(loaded.result->artifacts.operationalConflictTimeline.front().activeConflictConnectionCount, std::size_t{1});
 }

@@ -986,8 +986,8 @@ std::optional<int> existingScenarioIndexBySourceTemplate(
 
 ScenarioResultNavigationView resultNavigationViewFromSaved(SavedResultNavigationView view) {
     switch (view) {
-    case SavedResultNavigationView::CrossFlow:
-        return ScenarioResultNavigationView::CrossFlow;
+    case SavedResultNavigationView::OperationalConflict:
+        return ScenarioResultNavigationView::OperationalConflict;
     case SavedResultNavigationView::Hotspot:
         return ScenarioResultNavigationView::Hotspot;
     case SavedResultNavigationView::HazardExposure:
@@ -1006,8 +1006,8 @@ ScenarioResultNavigationView resultNavigationViewFromSaved(SavedResultNavigation
 
 SavedResultNavigationView savedResultNavigationView(ScenarioResultNavigationView view) {
     switch (view) {
-    case ScenarioResultNavigationView::CrossFlow:
-        return SavedResultNavigationView::CrossFlow;
+    case ScenarioResultNavigationView::OperationalConflict:
+        return SavedResultNavigationView::OperationalConflict;
     case ScenarioResultNavigationView::Hotspot:
         return SavedResultNavigationView::Hotspot;
     case ScenarioResultNavigationView::HazardExposure:
@@ -1129,7 +1129,7 @@ QWidget* ScenarioBatchResultWidget::createCanvasPanel() {
     overlayCombo_->addItem("Pressure", static_cast<int>(OverlayMode::Pressure));
     overlayCombo_->addItem("Hotspots", static_cast<int>(OverlayMode::Hotspots));
     overlayCombo_->addItem("Bottlenecks", static_cast<int>(OverlayMode::Bottlenecks));
-    overlayCombo_->addItem("Cross Flow", static_cast<int>(OverlayMode::CrossFlow));
+    overlayCombo_->addItem("Operational Conflict", static_cast<int>(OverlayMode::OperationalConflict));
     overlayCombo_->addItem("None", static_cast<int>(OverlayMode::None));
     overlayCombo_->setCurrentIndex(0);
     selectorLayout->addWidget(overlayCombo_);
@@ -1672,7 +1672,9 @@ void ScenarioBatchResultWidget::applySelectedResultStaticCanvasState() {
     canvas_->setRouteGuidances(result.scenario.control.routeGuidances);
     canvas_->setHotspotOverlay(result.risk.hotspots);
     canvas_->setBottleneckOverlay(result.risk.bottlenecks);
-    canvas_->setCrossFlowOverlay(result.risk.crossFlowCells);
+    canvas_->setOperationalConflictOverlay(
+        result.risk.operationalConflictCells,
+        result.risk.operationalConflictConnections);
     canvas_->setOccupancyHeatmapOverlay(result.artifacts.occupancyHeatmap);
     canvas_->setDensityOverlay(
         result.artifacts.densitySummary.peakField.cells.empty()
@@ -1713,8 +1715,8 @@ void ScenarioBatchResultWidget::applyOverlayModeToCanvas() {
     case OverlayMode::Bottlenecks:
         canvas_->setResultOverlayMode(ResultOverlayMode::Bottlenecks);
         break;
-    case OverlayMode::CrossFlow:
-        canvas_->setResultOverlayMode(ResultOverlayMode::CrossFlow);
+    case OverlayMode::OperationalConflict:
+        canvas_->setResultOverlayMode(ResultOverlayMode::OperationalConflict);
         break;
     case OverlayMode::None:
         canvas_->setResultOverlayMode(ResultOverlayMode::None);
@@ -2175,14 +2177,14 @@ void ScenarioBatchResultWidget::refreshResultNavigationPanel() {
             canvas_->focusBottleneck(index);
         }
     };
-    auto crossFlowCellFocusHandler = [this](std::size_t index) {
+    auto operationalConflictCellFocusHandler = [this](std::size_t index) {
         if (results_.empty() || currentResultIndex_ < 0 || currentResultIndex_ >= static_cast<int>(results_.size())) {
             return;
         }
         const auto& selected = results_[static_cast<std::size_t>(currentResultIndex_)];
-        if (index < selected.risk.crossFlowCells.size()) {
-            setOverlayMode(OverlayMode::CrossFlow);
-            const auto& cell = selected.risk.crossFlowCells[index];
+        if (index < selected.risk.operationalConflictCells.size()) {
+            setOverlayMode(OverlayMode::OperationalConflict);
+            const auto& cell = selected.risk.operationalConflictCells[index];
             if (cell.detectionFrame.has_value()) {
                 showReplayFrame(*cell.detectionFrame);
             } else if (cell.detectedAtSeconds.has_value()) {
@@ -2190,7 +2192,25 @@ void ScenarioBatchResultWidget::refreshResultNavigationPanel() {
             }
         }
         if (canvas_ != nullptr) {
-            canvas_->focusCrossFlowCell(index);
+            canvas_->focusOperationalConflictCell(index);
+        }
+    };
+    auto operationalConflictConnectionFocusHandler = [this](std::size_t index) {
+        if (results_.empty() || currentResultIndex_ < 0 || currentResultIndex_ >= static_cast<int>(results_.size())) {
+            return;
+        }
+        const auto& selected = results_[static_cast<std::size_t>(currentResultIndex_)];
+        if (index < selected.risk.operationalConflictConnections.size()) {
+            setOverlayMode(OverlayMode::OperationalConflict);
+            const auto& connection = selected.risk.operationalConflictConnections[index];
+            if (connection.detectionFrame.has_value()) {
+                showReplayFrame(*connection.detectionFrame);
+            } else if (connection.detectedAtSeconds.has_value()) {
+                showClosestReplayFrameAtSeconds(*connection.detectedAtSeconds);
+            }
+        }
+        if (canvas_ != nullptr) {
+            canvas_->focusOperationalConflictConnection(index);
         }
     };
     auto hotspotFocusHandler = [this](std::size_t index) {
@@ -2217,7 +2237,8 @@ void ScenarioBatchResultWidget::refreshResultNavigationPanel() {
         result.risk,
         result.artifacts,
         std::move(bottleneckFocusHandler),
-        std::move(crossFlowCellFocusHandler),
+        std::move(operationalConflictCellFocusHandler),
+        std::move(operationalConflictConnectionFocusHandler),
         std::move(hotspotFocusHandler),
         [this](ScenarioResultNavigationView view, std::size_t index) {
             setDetailSelection(view, index);
@@ -2348,12 +2369,12 @@ void ScenarioBatchResultWidget::refreshOverviewPanel() {
         .arg(formatSeconds(result.artifacts.timingSummary.t50Seconds))
         .arg(formatSeconds(result.artifacts.timingSummary.t90Seconds))
         .arg(formatSeconds(result.artifacts.timingSummary.t95Seconds))
-        + QString("\nCross flow: %1 score / %2 cells")
-            .arg(result.artifacts.crossFlowSummary.peakCrossFlowScore, 0, 'f', 2)
-            .arg(static_cast<int>(result.artifacts.crossFlowSummary.crossFlowHotspotCount))
-        + QString("\nCross-flow exposure: %1 agent-sec  |  Longest duration: %2 sec")
-            .arg(result.artifacts.crossFlowSummary.totalCrossFlowExposureAgentSeconds, 0, 'f', 1)
-            .arg(result.artifacts.crossFlowSummary.longestCrossFlowDurationSeconds, 0, 'f', 1));
+        + QString("\nOperational conflict: %1 score / %2 connections")
+            .arg(result.artifacts.operationalConflictSummary.peakConflictScore, 0, 'f', 2)
+            .arg(static_cast<int>(result.artifacts.operationalConflictSummary.conflictConnectionCount))
+        + QString("\nConflict exposure: %1 agent-sec  |  Longest duration: %2 sec")
+            .arg(result.artifacts.operationalConflictSummary.totalConflictExposureAgentSeconds, 0, 'f', 1)
+            .arg(result.artifacts.operationalConflictSummary.longestConflictDurationSeconds, 0, 'f', 1));
 }
 
 void ScenarioBatchResultWidget::refreshDetailPanel() {
@@ -2400,19 +2421,49 @@ QString ScenarioBatchResultWidget::detailTextForSelection(
                 .arg(QString::fromStdString(bottleneck.label)),
             lines);
     }
-    case ScenarioResultNavigationView::CrossFlow: {
-        if (index >= result.risk.crossFlowCells.size()) {
-            return "The selected cross-flow cell is no longer available.";
+    case ScenarioResultNavigationView::OperationalConflict: {
+        if (index < result.risk.operationalConflictConnections.size()) {
+            const auto& connection = result.risk.operationalConflictConnections[index];
+            QStringList lines{
+                QString("Score: %1").arg(connection.conflictScore, 0, 'f', 2),
+                QString("Opposition: %1").arg(formatRatioPercent(connection.oppositionScore)),
+                QString("Counterflow ratio: %1").arg(formatRatioPercent(connection.counterflowRatio)),
+                QString("Forward / reverse: %1 / %2")
+                    .arg(static_cast<int>(connection.forwardCount))
+                    .arg(static_cast<int>(connection.reverseCount)),
+                QString("Nearby agents: %1").arg(static_cast<int>(connection.nearbyAgentCount)),
+                QString("Queue agents: %1").arg(static_cast<int>(connection.queueAgentCount)),
+                QString("Duration: %1 sec").arg(connection.durationSeconds, 0, 'f', 1),
+                QString("Exposure: %1 agent-sec").arg(connection.exposureAgentSeconds, 0, 'f', 1),
+                QString("Average speed: %1 m/s").arg(connection.averageSpeed, 0, 'f', 2),
+                QString("Speed drop: %1").arg(formatRatioPercent(connection.speedDropRatio)),
+                QString("Detected: %1").arg(formatSeconds(connection.detectedAtSeconds)),
+                QString("Passage: %1 to %2").arg(formatPoint(connection.passage.start), formatPoint(connection.passage.end)),
+            };
+            if (!connection.floorId.empty()) {
+                lines.push_back(QString("Floor: %1").arg(QString::fromStdString(connection.floorId)));
+            }
+            return detailText(
+                QString("Operational Conflict Connection %1: %2")
+                    .arg(static_cast<int>(index + 1))
+                    .arg(QString::fromStdString(connection.label)),
+                lines);
         }
-        const auto& cell = result.risk.crossFlowCells[index];
+
+        const auto cellIndex = index - result.risk.operationalConflictConnections.size();
+        if (cellIndex >= result.risk.operationalConflictCells.size()) {
+            return "The selected operational-conflict item is no longer available.";
+        }
+        const auto& cell = result.risk.operationalConflictCells[cellIndex];
         QStringList lines{
-            QString("Score: %1").arg(cell.crossFlowScore, 0, 'f', 2),
-            QString("Ratio: %1").arg(formatRatioPercent(cell.crossFlowRatio)),
+            QString("Score: %1").arg(cell.conflictScore, 0, 'f', 2),
+            QString("Opposition: %1").arg(formatRatioPercent(cell.oppositionScore)),
+            QString("Counterflow ratio: %1").arg(formatRatioPercent(cell.counterflowRatio)),
             QString("Moving agents: %1").arg(static_cast<int>(cell.movingAgentCount)),
             QString("Peak agents: %1").arg(static_cast<int>(cell.peakAgentCount)),
-            QString("Primary / crossing: %1 / %2")
-                .arg(static_cast<int>(cell.primaryFlowCount))
-                .arg(static_cast<int>(cell.crossFlowCount)),
+            QString("Forward / reverse: %1 / %2")
+                .arg(static_cast<int>(cell.forwardCount))
+                .arg(static_cast<int>(cell.reverseCount)),
             QString("Duration: %1 sec").arg(cell.durationSeconds, 0, 'f', 1),
             QString("Exposure: %1 agent-sec").arg(cell.exposureAgentSeconds, 0, 'f', 1),
             QString("Average speed: %1 m/s").arg(cell.averageSpeed, 0, 'f', 2),
@@ -2421,10 +2472,13 @@ QString ScenarioBatchResultWidget::detailTextForSelection(
             QString("Center: %1").arg(formatPoint(cell.center)),
             QString("Cell: %1").arg(formatBounds(cell.cellMin, cell.cellMax)),
         };
+        if (!cell.nearestConnectionLabel.empty()) {
+            lines.push_back(QString("Nearest connection: %1").arg(QString::fromStdString(cell.nearestConnectionLabel)));
+        }
         if (!cell.floorId.empty()) {
             lines.push_back(QString("Floor: %1").arg(QString::fromStdString(cell.floorId)));
         }
-        return detailText(QString("Cross-Flow Cell %1").arg(static_cast<int>(index + 1)), lines);
+        return detailText(QString("Operational Conflict Cell %1").arg(static_cast<int>(cellIndex + 1)), lines);
     }
     case ScenarioResultNavigationView::Hotspot: {
         if (index >= result.risk.hotspots.size()) {

@@ -21,11 +21,11 @@ const char* scenarioBottleneckDefinition() noexcept {
            "are within 1.25 m and at least one is stalled or average speed is low.";
 }
 
-const char* scenarioCrossFlowDefinition() noexcept {
-    return "Cross flow highlights non-aligned movement streams sharing the same space while slowed down. "
-           "Cross-flow cells use a 2.0 m grid derived from Pathfinder's 4 m^2 measurement-region "
-           "influence area and compare observed speed against "
-           "Pathfinder's 1.30 m/s mean and 0.97 m/s minimum walking speeds.";
+const char* scenarioOperationalConflictDefinition() noexcept {
+    return "Operational conflict highlights opposing route intent and queueing around shared passages. "
+           "Cells use a 2.0 m grid derived from Pathfinder's 4 m^2 measurement-region influence area, "
+           "while connection metrics require forward and reverse movement intent before scoring speed drop. "
+           "This separates bidirectional conflict from one-way bottleneck concentration.";
 }
 
 bool scenarioAgentStalled(double speedMetersPerSecond, double routeStalledSeconds) noexcept {

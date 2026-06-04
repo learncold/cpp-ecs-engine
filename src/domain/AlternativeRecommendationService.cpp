@@ -781,23 +781,23 @@ std::optional<GuidanceInstallAnchor> pressureGuidanceAnchor(const AlternativeRec
     return sourceGuidanceAnchor(request, std::nullopt, {}, "ScenarioDraft.population fallback");
 }
 
-std::optional<GuidanceInstallAnchor> crossFlowGuidanceAnchor(const AlternativeRecommendationInput& request) {
-    if (!request.risk.crossFlowCells.empty()) {
+std::optional<GuidanceInstallAnchor> operationalConflictGuidanceAnchor(const AlternativeRecommendationInput& request) {
+    if (!request.risk.operationalConflictCells.empty()) {
         const auto it = std::max_element(
-            request.risk.crossFlowCells.begin(),
-            request.risk.crossFlowCells.end(),
+            request.risk.operationalConflictCells.begin(),
+            request.risk.operationalConflictCells.end(),
             [](const auto& lhs, const auto& rhs) {
-                if (lhs.crossFlowScore == rhs.crossFlowScore) {
+                if (lhs.conflictScore == rhs.conflictScore) {
                     return lhs.exposureAgentSeconds < rhs.exposureAgentSeconds;
                 }
-                return lhs.crossFlowScore < rhs.crossFlowScore;
+                return lhs.conflictScore < rhs.conflictScore;
             });
         return pointGuidanceAnchor(
             request,
             it->center,
             it->floorId,
-            "cross-flow hotspot",
-            "ScenarioRiskSnapshot.crossFlowCells");
+            "operational-conflict hotspot",
+            "ScenarioRiskSnapshot.operationalConflictCells");
     }
     return sourceGuidanceAnchor(request, std::nullopt, {}, "ScenarioDraft.population fallback");
 }
@@ -1147,52 +1147,77 @@ const SimulationFrame* finalFrameForRequest(const AlternativeRecommendationInput
     return nullptr;
 }
 
-std::optional<AlternativeRecommendationRiskSignal> makeCrossFlowRiskSignal(
+std::optional<AlternativeRecommendationRiskSignal> makeOperationalConflictRiskSignal(
     const AlternativeRecommendationInput& request) {
-    if (request.risk.crossFlowCells.empty()
-        && request.artifacts.crossFlowSummary.peakCrossFlowScore <= 0.0) {
+    if (request.risk.operationalConflictCells.empty()
+        && request.risk.operationalConflictConnections.empty()
+        && request.artifacts.operationalConflictSummary.peakConflictScore <= 0.0) {
         return std::nullopt;
     }
 
     AlternativeRecommendationRiskSignal signal;
-    signal.kind = AlternativeRecommendationRiskKind::CrossFlow;
-    signal.summary = "Cross flow detected from non-aligned movement streams.";
+    signal.kind = AlternativeRecommendationRiskKind::OperationalConflict;
+    signal.summary = "Operational conflict detected from opposing movement intent at shared passages.";
 
-    double severity = request.artifacts.crossFlowSummary.peakCrossFlowScore * 100.0;
-    severity += request.artifacts.crossFlowSummary.longestCrossFlowDurationSeconds * 4.0;
-    severity += request.artifacts.crossFlowSummary.totalCrossFlowExposureAgentSeconds * 0.2;
-    severity += static_cast<double>(request.artifacts.crossFlowSummary.crossFlowHotspotCount * 8U);
+    double severity = request.artifacts.operationalConflictSummary.peakConflictScore * 100.0;
+    severity += request.artifacts.operationalConflictSummary.longestConflictDurationSeconds * 4.0;
+    severity += request.artifacts.operationalConflictSummary.totalConflictExposureAgentSeconds * 0.2;
+    severity += static_cast<double>(request.artifacts.operationalConflictSummary.conflictConnectionCount * 10U);
 
-    if (!request.risk.crossFlowCells.empty()) {
-        const auto& cell = request.risk.crossFlowCells.front();
-        severity += static_cast<double>(cell.primaryFlowCount + cell.crossFlowCount);
+    if (!request.risk.operationalConflictConnections.empty()) {
+        const auto& connection = request.risk.operationalConflictConnections.front();
+        severity += static_cast<double>(connection.forwardCount + connection.reverseCount);
         signal.evidence.push_back(evidence(
-            "Cross flow",
-            std::to_string(cell.primaryFlowCount) + " primary / "
-                + std::to_string(cell.crossFlowCount) + " crossing movers",
-            "ScenarioRiskSnapshot.crossFlowCells"));
+            "Conflict connection",
+            connection.label.empty() ? connection.connectionId : connection.label,
+            "ScenarioRiskSnapshot.operationalConflictConnections"));
         signal.evidence.push_back(evidence(
-            "Cross-flow duration",
+            "Opposing intent",
+            std::to_string(connection.forwardCount) + " forward / "
+                + std::to_string(connection.reverseCount) + " reverse",
+            "ScenarioRiskSnapshot.operationalConflictConnections"));
+        signal.evidence.push_back(evidence(
+            "Opposition score",
+            fixed(connection.oppositionScore, 2),
+            "ScenarioRiskSnapshot.operationalConflictConnections"));
+        signal.evidence.push_back(evidence(
+            "Queued agents",
+            std::to_string(connection.queueAgentCount),
+            "ScenarioRiskSnapshot.operationalConflictConnections"));
+    } else if (!request.risk.operationalConflictCells.empty()) {
+        const auto& cell = request.risk.operationalConflictCells.front();
+        severity += static_cast<double>(cell.forwardCount + cell.reverseCount);
+        signal.evidence.push_back(evidence(
+            "Conflict cell",
+            std::to_string(cell.forwardCount) + " forward / "
+                + std::to_string(cell.reverseCount) + " reverse movers",
+            "ScenarioRiskSnapshot.operationalConflictCells"));
+        signal.evidence.push_back(evidence(
+            "Conflict duration",
             fixed(cell.durationSeconds, 1) + " sec",
-            "ScenarioRiskSnapshot.crossFlowCells"));
+            "ScenarioRiskSnapshot.operationalConflictCells"));
+        signal.evidence.push_back(evidence(
+            "Opposition score",
+            fixed(cell.oppositionScore, 2),
+            "ScenarioRiskSnapshot.operationalConflictCells"));
         signal.evidence.push_back(evidence(
             "Average speed",
             fixed(cell.averageSpeed, 2) + " m/s",
-            "ScenarioRiskSnapshot.crossFlowCells"));
+            "ScenarioRiskSnapshot.operationalConflictCells"));
     }
 
     signal.evidence.push_back(evidence(
-        "Peak cross-flow score",
-        fixed(request.artifacts.crossFlowSummary.peakCrossFlowScore, 2),
-        "ScenarioResultArtifacts.crossFlowSummary"));
+        "Peak conflict score",
+        fixed(request.artifacts.operationalConflictSummary.peakConflictScore, 2),
+        "ScenarioResultArtifacts.operationalConflictSummary"));
     signal.evidence.push_back(evidence(
-        "Cross-flow exposure",
-        fixed(request.artifacts.crossFlowSummary.totalCrossFlowExposureAgentSeconds, 1) + " agent-sec",
-        "ScenarioResultArtifacts.crossFlowSummary"));
+        "Conflict exposure",
+        fixed(request.artifacts.operationalConflictSummary.totalConflictExposureAgentSeconds, 1) + " agent-sec",
+        "ScenarioResultArtifacts.operationalConflictSummary"));
     signal.evidence.push_back(evidence(
-        "Cross-flow hotspots",
-        std::to_string(request.artifacts.crossFlowSummary.crossFlowHotspotCount),
-        "ScenarioResultArtifacts.crossFlowSummary"));
+        "Conflict connections",
+        std::to_string(request.artifacts.operationalConflictSummary.conflictConnectionCount),
+        "ScenarioResultArtifacts.operationalConflictSummary"));
 
     signal.severity = static_cast<int>(std::round(severity));
     return signal;
@@ -1265,8 +1290,8 @@ std::vector<AlternativeRecommendationRiskSignal> detectRiskSignals(
         bottleneck.has_value()) {
         signals.push_back(makeBottleneckRiskSignal(request, *bottleneck, AlternativeRecommendationRiskKind::CorridorBottleneck));
     }
-    if (const auto crossFlow = makeCrossFlowRiskSignal(request); crossFlow.has_value()) {
-        signals.push_back(*crossFlow);
+    if (const auto operationalConflict = makeOperationalConflictRiskSignal(request); operationalConflict.has_value()) {
+        signals.push_back(*operationalConflict);
     }
     if (const auto timeLimit = makeTimeLimitRiskSignal(request); timeLimit.has_value()) {
         signals.push_back(*timeLimit);
@@ -1661,10 +1686,10 @@ std::optional<AlternativeRecommendationCandidate> makePressureHotspotCandidate(
     return candidate;
 }
 
-std::optional<AlternativeRecommendationCandidate> makeCrossFlowCandidate(
+std::optional<AlternativeRecommendationCandidate> makeOperationalConflictCandidate(
     const AlternativeRecommendationInput& request,
     const RecommendationContext& context) {
-    const auto* signal = findRiskSignal(context, AlternativeRecommendationRiskKind::CrossFlow);
+    const auto* signal = findRiskSignal(context, AlternativeRecommendationRiskKind::OperationalConflict);
     if (signal == nullptr) {
         return std::nullopt;
     }
@@ -1678,16 +1703,16 @@ std::optional<AlternativeRecommendationCandidate> makeCrossFlowCandidate(
             && !hasRouteGuidanceForExit(request.sourceScenario, targetExit->exitZoneId)
             && !exitHasBottleneck(request, targetExit->exitZoneId)
             && guidanceDetourAcceptable(request, context.mostUsedExit->exitZoneId, targetExit->exitZoneId)) {
-            const auto installAnchor = crossFlowGuidanceAnchor(request);
+            const auto installAnchor = operationalConflictGuidanceAnchor(request);
             if (!installAnchor.has_value()) {
                 return std::nullopt;
             }
             auto draft = makeRecommendedDraft(
                 request,
-                AlternativeRecommendationKind::CrossFlowSeparation,
-                "Recommended: guide cross-flow away from shared movement");
+                AlternativeRecommendationKind::OperationalConflictSeparation,
+                "Recommended: guide operational conflict away from shared movement");
             auto guidance = makeGuidance(
-                "recommendation-guidance-cross-flow-" + sanitizeId(targetExit->exitZoneId),
+                "recommendation-guidance-operational-conflict-" + sanitizeId(targetExit->exitZoneId),
                 targetExit->exitZoneId,
                 guidanceComplianceForSeverity(severity));
             configureGuidanceForRecommendation(guidance, request, *installAnchor, severity);
@@ -1695,11 +1720,11 @@ std::optional<AlternativeRecommendationCandidate> makeCrossFlowCandidate(
             finalizeDiffKeys(request, draft);
             if (recommendedDraftChangesSource(request, draft)) {
                 AlternativeRecommendationCandidate candidate;
-                candidate.kind = AlternativeRecommendationKind::CrossFlowSeparation;
-                candidate.riskKind = AlternativeRecommendationRiskKind::CrossFlow;
-                candidate.id = "guide-cross-flow-" + sanitizeId(targetExit->exitZoneId);
+                candidate.kind = AlternativeRecommendationKind::OperationalConflictSeparation;
+                candidate.riskKind = AlternativeRecommendationRiskKind::OperationalConflict;
+                candidate.id = "guide-operational-conflict-" + sanitizeId(targetExit->exitZoneId);
                 candidate.priority = priorityForCandidate(130, severity, true);
-                candidate.title = "Guide cross-flow to another exit";
+                candidate.title = "Guide operational conflict to another exit";
                 candidate.summary = "Guide part of the crossing stream toward "
                     + zoneName(request.layout, targetExit->exitZoneId)
                     + " so the shared movement area carries less conflicting flow.";
@@ -1728,8 +1753,8 @@ std::optional<AlternativeRecommendationCandidate> makeCrossFlowCandidate(
                })) {
             auto draft = makeRecommendedDraft(
                 request,
-                AlternativeRecommendationKind::CrossFlowSeparation,
-                "Recommended: time-separate cross-flow groups");
+                AlternativeRecommendationKind::OperationalConflictSeparation,
+                "Recommended: time-separate operational-conflict groups");
             draft.population.initialPlacements.clear();
             draft.population.occupantSources.insert(
                 draft.population.occupantSources.end(),
@@ -1738,13 +1763,13 @@ std::optional<AlternativeRecommendationCandidate> makeCrossFlowCandidate(
             finalizeDiffKeys(request, draft);
             if (recommendedDraftChangesSource(request, draft)) {
                 AlternativeRecommendationCandidate candidate;
-                candidate.kind = AlternativeRecommendationKind::CrossFlowSeparation;
-                candidate.riskKind = AlternativeRecommendationRiskKind::CrossFlow;
-                candidate.id = "stage-cross-flow-groups";
+                candidate.kind = AlternativeRecommendationKind::OperationalConflictSeparation;
+                candidate.riskKind = AlternativeRecommendationRiskKind::OperationalConflict;
+                candidate.id = "stage-operational-conflict-groups";
                 candidate.priority = priorityForCandidate(135, severity, true);
-                candidate.title = "Time-separate cross-flow groups";
-                candidate.summary = "Release source groups sequentially to reduce simultaneous crossing streams.";
-                candidate.expectedImprovement = "Turns the cross-flow rule into a rerunnable staged-release draft.";
+                candidate.title = "Time-separate operational-conflict groups";
+                candidate.summary = "Release source groups sequentially to reduce simultaneous opposing streams.";
+                candidate.expectedImprovement = "Turns the operational-conflict rule into a rerunnable staged-release draft.";
                 candidate.artifactSource = "AlternativeRecommendationRiskSignal + ScenarioDraft.population.initialPlacements";
                 candidate.evidence = signal->evidence;
                 candidate.evidence.push_back(evidence(
@@ -1853,8 +1878,8 @@ const char* alternativeRecommendationKindId(AlternativeRecommendationKind kind) 
         return "pressure-hotspot-relief";
     case AlternativeRecommendationKind::CorridorOneWayFlow:
         return "corridor-one-way-flow";
-    case AlternativeRecommendationKind::CrossFlowSeparation:
-        return "cross-flow-separation";
+    case AlternativeRecommendationKind::OperationalConflictSeparation:
+        return "operational-conflict-separation";
     case AlternativeRecommendationKind::StagedEvacuation:
         return "staged-evacuation";
     }
@@ -1867,8 +1892,8 @@ const char* alternativeRecommendationRiskKindId(AlternativeRecommendationRiskKin
         return "exit-bottleneck";
     case AlternativeRecommendationRiskKind::CorridorBottleneck:
         return "corridor-bottleneck";
-    case AlternativeRecommendationRiskKind::CrossFlow:
-        return "cross-flow";
+    case AlternativeRecommendationRiskKind::OperationalConflict:
+        return "operational-conflict";
     case AlternativeRecommendationRiskKind::TimeLimitMissed:
         return "time-limit-missed";
     case AlternativeRecommendationRiskKind::PressureHotspot:
@@ -1899,7 +1924,7 @@ AlternativeRecommendationResult recommendFromInput(const AlternativeRecommendati
     if (const auto candidate = makeExitBalancingCandidate(request, context); candidate.has_value()) {
         result.candidates.push_back(*candidate);
     }
-    if (const auto candidate = makeCrossFlowCandidate(request, context); candidate.has_value()) {
+    if (const auto candidate = makeOperationalConflictCandidate(request, context); candidate.has_value()) {
         result.candidates.push_back(*candidate);
     }
     if (const auto candidate = makePressureHotspotCandidate(request, context); candidate.has_value()) {

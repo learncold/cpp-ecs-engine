@@ -138,36 +138,60 @@ ScenarioResultArtifacts makeExitUsageArtifacts(double mainRatio = 0.85, double e
     return artifacts;
 }
 
-ScenarioRiskSnapshot makeCrossFlowRisk() {
+ScenarioRiskSnapshot makeOperationalConflictRisk() {
     ScenarioRiskSnapshot risk;
-    risk.peakCrossFlowScore = 0.78;
-    risk.totalCrossFlowExposureAgentSeconds = 22.5;
-    risk.crossFlowAgentCount = 7;
-    risk.crossFlowCells.push_back({
+    risk.peakConflictScore = 0.78;
+    risk.totalConflictExposureAgentSeconds = 22.5;
+    risk.conflictAgentCount = 7;
+    risk.operationalConflictCells.push_back({
         .center = {.x = 1.0, .y = 0.5},
         .cellMin = {.x = 0.0, .y = 0.0},
         .cellMax = {.x = 2.0, .y = 2.0},
         .floorId = "L1",
         .movingAgentCount = 7,
         .peakAgentCount = 7,
-        .primaryFlowCount = 4,
-        .crossFlowCount = 3,
-        .crossFlowRatio = 3.0 / 7.0,
+        .forwardCount = 4,
+        .reverseCount = 3,
+        .counterflowRatio = 3.0 / 7.0,
         .averageSpeed = 0.55,
         .speedDropRatio = 0.58,
-        .crossFlowScore = 0.78,
+        .conflictScore = 0.78,
         .durationSeconds = 14.0,
         .exposureAgentSeconds = 22.5,
+        .nearestConnectionId = "door-main",
+        .nearestConnectionLabel = "Main Door",
+        .oppositionScore = 0.86,
+    });
+    risk.operationalConflictConnections.push_back({
+        .connectionId = "door-main",
+        .label = "Main Door",
+        .floorId = "L1",
+        .passage = {.start = {.x = 2.0, .y = 0.0}, .end = {.x = 2.0, .y = 1.0}},
+        .nearbyAgentCount = 7,
+        .movingAgentCount = 7,
+        .queueAgentCount = 2,
+        .forwardCount = 4,
+        .reverseCount = 3,
+        .counterflowRatio = 3.0 / 7.0,
+        .averageSpeed = 0.55,
+        .speedDropRatio = 0.58,
+        .conflictScore = 0.78,
+        .durationSeconds = 14.0,
+        .exposureAgentSeconds = 22.5,
+        .oppositionScore = 0.86,
     });
     return risk;
 }
 
-ScenarioResultArtifacts makeCrossFlowArtifacts() {
+ScenarioResultArtifacts makeOperationalConflictArtifacts() {
     ScenarioResultArtifacts artifacts = makeCompletedArtifacts();
-    artifacts.crossFlowSummary.peakCrossFlowScore = 0.78;
-    artifacts.crossFlowSummary.totalCrossFlowExposureAgentSeconds = 22.5;
-    artifacts.crossFlowSummary.longestCrossFlowDurationSeconds = 14.0;
-    artifacts.crossFlowSummary.crossFlowHotspotCount = 1;
+    artifacts.operationalConflictSummary.peakConflictScore = 0.78;
+    artifacts.operationalConflictSummary.totalConflictExposureAgentSeconds = 22.5;
+    artifacts.operationalConflictSummary.longestConflictDurationSeconds = 14.0;
+    artifacts.operationalConflictSummary.conflictConnectionCount = 1;
+    artifacts.operationalConflictSummary.connectionConcentrationIndex = 0.62;
+    artifacts.operationalConflictSummary.topConflictConnectionId = "door-main";
+    artifacts.operationalConflictSummary.topConflictConnectionLabel = "Main Door";
     return artifacts;
 }
 
@@ -783,52 +807,52 @@ SC_TEST(AlternativeRecommendationService_doesNotAddOneWayOperationForCorridorBot
     SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::CorridorOneWayFlow));
 }
 
-SC_TEST(AlternativeRecommendationService_suppressesOneWayOperationForCrossFlow) {
+SC_TEST(AlternativeRecommendationService_suppressesOneWayOperationForOperationalConflict) {
     const AlternativeRecommendationService service;
     const auto result = service.recommend({
         .layout = makeRecommendationLayout(),
         .sourceScenario = makeScenario(),
-        .risk = makeCrossFlowRisk(),
-        .artifacts = makeCrossFlowArtifacts(),
+        .risk = makeOperationalConflictRisk(),
+        .artifacts = makeOperationalConflictArtifacts(),
     });
 
-    SC_EXPECT_TRUE(hasRiskSignalKind(result, AlternativeRecommendationRiskKind::CrossFlow));
+    SC_EXPECT_TRUE(hasRiskSignalKind(result, AlternativeRecommendationRiskKind::OperationalConflict));
     SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::CorridorOneWayFlow));
-    SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::CrossFlowSeparation));
+    SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::OperationalConflictSeparation));
 }
 
-SC_TEST(AlternativeRecommendationService_reportsCrossFlowRiskWithoutManualOnlyDraft) {
+SC_TEST(AlternativeRecommendationService_reportsOperationalConflictRiskWithoutManualOnlyDraft) {
     const AlternativeRecommendationService service;
     const auto result = service.recommend({
         .layout = makeRecommendationLayout(),
         .sourceScenario = makeScenario(),
-        .risk = makeCrossFlowRisk(),
-        .artifacts = makeCrossFlowArtifacts(),
+        .risk = makeOperationalConflictRisk(),
+        .artifacts = makeOperationalConflictArtifacts(),
     });
 
     const auto signalIt = std::find_if(result.riskSignals.begin(), result.riskSignals.end(), [](const auto& signal) {
-        return signal.kind == AlternativeRecommendationRiskKind::CrossFlow;
+        return signal.kind == AlternativeRecommendationRiskKind::OperationalConflict;
     });
     SC_EXPECT_TRUE(signalIt != result.riskSignals.end());
-    SC_EXPECT_TRUE(containsEvidenceSource(*signalIt, "ScenarioRiskSnapshot.crossFlowCells"));
-    SC_EXPECT_TRUE(containsEvidenceSource(*signalIt, "ScenarioResultArtifacts.crossFlowSummary"));
-    SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::CrossFlowSeparation));
+    SC_EXPECT_TRUE(containsEvidenceSource(*signalIt, "ScenarioRiskSnapshot.operationalConflictConnections"));
+    SC_EXPECT_TRUE(containsEvidenceSource(*signalIt, "ScenarioResultArtifacts.operationalConflictSummary"));
+    SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::OperationalConflictSeparation));
 }
 
-SC_TEST(AlternativeRecommendationService_convertsCrossFlowToRouteGuidanceWhenExitDataAllows) {
-    auto artifacts = makeCrossFlowArtifacts();
+SC_TEST(AlternativeRecommendationService_convertsOperationalConflictToRouteGuidanceWhenExitDataAllows) {
+    auto artifacts = makeOperationalConflictArtifacts();
     artifacts.exitUsage = makeExitUsageArtifacts(0.55, 0.45).exitUsage;
 
     const AlternativeRecommendationService service;
     const auto result = service.recommend({
         .layout = makeRecommendationLayout(),
         .sourceScenario = makeScenario(),
-        .risk = makeCrossFlowRisk(),
+        .risk = makeOperationalConflictRisk(),
         .artifacts = artifacts,
     });
 
     const auto it = std::find_if(result.candidates.begin(), result.candidates.end(), [](const auto& candidate) {
-        return candidate.kind == AlternativeRecommendationKind::CrossFlowSeparation;
+        return candidate.kind == AlternativeRecommendationKind::OperationalConflictSeparation;
     });
     SC_EXPECT_TRUE(it != result.candidates.end());
     SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.size(), std::size_t{1});
@@ -842,7 +866,7 @@ SC_TEST(AlternativeRecommendationService_convertsCrossFlowToRouteGuidanceWhenExi
     SC_EXPECT_TRUE(containsDiffKey(it->recommendedScenario, "control.routeGuidances"));
 }
 
-SC_TEST(AlternativeRecommendationService_convertsCrossFlowToStagedReleaseWhenNoExitUsageExists) {
+SC_TEST(AlternativeRecommendationService_convertsOperationalConflictToStagedReleaseWhenNoExitUsageExists) {
     auto scenario = makeScenario();
     auto second = scenario.population.initialPlacements.front();
     second.id = "group-b";
@@ -853,12 +877,12 @@ SC_TEST(AlternativeRecommendationService_convertsCrossFlowToStagedReleaseWhenNoE
     const auto result = service.recommend({
         .layout = makeRecommendationLayout(),
         .sourceScenario = scenario,
-        .risk = makeCrossFlowRisk(),
-        .artifacts = makeCrossFlowArtifacts(),
+        .risk = makeOperationalConflictRisk(),
+        .artifacts = makeOperationalConflictArtifacts(),
     });
 
     const auto it = std::find_if(result.candidates.begin(), result.candidates.end(), [](const auto& candidate) {
-        return candidate.kind == AlternativeRecommendationKind::CrossFlowSeparation;
+        return candidate.kind == AlternativeRecommendationKind::OperationalConflictSeparation;
     });
     SC_EXPECT_TRUE(it != result.candidates.end());
     SC_EXPECT_TRUE(it->recommendedScenario.control.events.empty());
@@ -869,21 +893,21 @@ SC_TEST(AlternativeRecommendationService_convertsCrossFlowToStagedReleaseWhenNoE
     SC_EXPECT_TRUE(containsDiffKey(it->recommendedScenario, "population.placements"));
 }
 
-SC_TEST(AlternativeRecommendationService_skipsManualCrossFlowFallbackWhenExitBalancingExists) {
-    auto artifacts = makeCrossFlowArtifacts();
+SC_TEST(AlternativeRecommendationService_skipsManualOperationalConflictFallbackWhenExitBalancingExists) {
+    auto artifacts = makeOperationalConflictArtifacts();
     artifacts.exitUsage = makeExitUsageArtifacts(0.90, 0.10).exitUsage;
 
     const AlternativeRecommendationService service;
     const auto result = service.recommend({
         .layout = makeRecommendationLayout(),
         .sourceScenario = makeScenario(),
-        .risk = makeCrossFlowRisk(),
+        .risk = makeOperationalConflictRisk(),
         .artifacts = artifacts,
     });
 
     SC_EXPECT_EQ(result.candidates.size(), std::size_t{1});
     SC_EXPECT_TRUE(result.candidates.front().kind == AlternativeRecommendationKind::ExitUsageBalancing);
-    SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::CrossFlowSeparation));
+    SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::OperationalConflictSeparation));
 }
 
 SC_TEST(AlternativeRecommendationService_addsStagedEvacuationForMissedTimeLimit) {
