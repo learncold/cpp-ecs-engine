@@ -24,6 +24,8 @@ constexpr double kSignCommitmentSeconds = 3.0;
 constexpr double kSignSightClearanceMeters = 0.08;
 constexpr double kCandidateCongestionRadiusMeters = 1.0;
 constexpr double kStalledConnectionAvoidSeconds = 5.0;
+constexpr double kPreviousZoneBacktrackPenalty = 85.0;
+constexpr double kRetainedTargetBonus = 4.0;
 
 bool signActiveAt(const EvacuationSignDraft& sign, double elapsedSeconds) {
     if (sign.periods.empty()) {
@@ -40,10 +42,26 @@ bool containsString(const std::vector<std::string>& values, const std::string& v
     return std::find(values.begin(), values.end(), value) != values.end();
 }
 
-void appendUnique(std::vector<std::string>& values, const std::string& value) {
-    if (!value.empty() && !containsString(values, value)) {
-        values.push_back(value);
+void recordZoneVisit(WayfindingState& state, const std::string& zoneId) {
+    if (zoneId.empty()) {
+        return;
     }
+
+    const auto existing = std::find(state.visitedZoneIds.begin(), state.visitedZoneIds.end(), zoneId);
+    if (existing != state.visitedZoneIds.end()) {
+        if (existing + 1 == state.visitedZoneIds.end()) {
+            return;
+        }
+        state.visitedZoneIds.erase(existing);
+    }
+    state.visitedZoneIds.push_back(zoneId);
+}
+
+std::string previousVisitedZoneId(const WayfindingState& state) {
+    if (state.visitedZoneIds.size() < 2) {
+        return {};
+    }
+    return state.visitedZoneIds[state.visitedZoneIds.size() - 2];
 }
 
 bool isExitZone(const ScenarioLayoutCacheResource& layoutCache, const std::string& zoneId) {
@@ -279,6 +297,8 @@ WayfindingCandidate scoreCandidate(
     const bool candidateIsVertical = isVerticalConnection(connection);
     const bool candidateIsStairLike = connectionIsVerticalOrStair(layoutCache.layout, connection);
     const bool targetZoneVisited = containsString(state.visitedZoneIds, traversal.nextZoneId);
+    const auto previousZoneId = previousVisitedZoneId(state);
+    const bool returnsToPreviousZone = !previousZoneId.empty() && traversal.nextZoneId == previousZoneId;
 
     WayfindingCandidate candidate{
         .connectionIndex = traversal.connectionIndex,
@@ -311,10 +331,15 @@ WayfindingCandidate scoreCandidate(
         && elapsedSeconds + 1e-9 < state.avoidConnectionUntilSeconds) {
         candidate.score -= 120.0;
     }
+    if (returnsToPreviousZone
+        && connection.kind != ConnectionKind::Exit
+        && (nextZone == nullptr || nextZone->kind != ZoneKind::Exit)) {
+        candidate.score -= kPreviousZoneBacktrackPenalty;
+    }
 
     candidate.score += targetZoneVisited ? -6.0 : 5.0;
-    if (state.currentTargetZoneId == traversal.nextZoneId) {
-        candidate.score -= 2.0;
+    if (state.currentTargetConnectionId == connection.id || state.currentTargetZoneId == traversal.nextZoneId) {
+        candidate.score += kRetainedTargetBonus;
     }
     candidate.score -= distanceBetween(position.value, midpointPoint) * 0.10;
     candidate.score -= congestionPenalty(query, spatialIndex, midpointPoint, connectionFloorId);
@@ -539,7 +564,7 @@ public:
             if (currentZoneId.empty() || isExitZone(layoutCache, currentZoneId)) {
                 continue;
             }
-            appendUnique(state.visitedZoneIds, currentZoneId);
+            recordZoneVisit(state, currentZoneId);
             if (clock.elapsedSeconds + 1e-9 >= state.avoidConnectionUntilSeconds) {
                 state.avoidedConnectionId.clear();
                 state.avoidConnectionUntilSeconds = 0.0;

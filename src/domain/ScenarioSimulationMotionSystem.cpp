@@ -702,6 +702,16 @@ private:
         return verticalTransitionNormal(passage, *toZone, route.currentSegmentStart);
     }
 
+    Point2D anchoredTargetOnCurrentPassage(
+        const EvacuationRoute& route,
+        const LineSegment2D& passage,
+        const Point2D& position) const {
+        const auto anchor = route.nextWaypointIndex < route.waypoints.size()
+            ? route.waypoints[route.nextWaypointIndex]
+            : position;
+        return closestPointOnSegment(anchor, passage.start, passage.end);
+    }
+
     Point2D movementTargetForCurrentWaypoint(
         const ScenarioLayoutCacheResource& layoutCache,
         const EvacuationRoute& route,
@@ -713,7 +723,7 @@ private:
             if (lengthSquaredOf(passage) > 1e-9) {
                 const auto normal = passageNormalTowardCurrentWaypoint(layoutCache, route);
                 if (normal.has_value()) {
-                    const auto portalTarget = closestPointOnSegment(position, passage.start, passage.end);
+                    const auto portalTarget = anchoredTargetOnCurrentPassage(route, passage, position);
                     const auto offset = std::max(kPortalCrossingEpsilon * 2.0, clearance * 0.20);
                     return portalTarget + (*normal * offset);
                 }
@@ -727,7 +737,7 @@ private:
             if (lengthSquaredOf(passage) > 1e-9) {
                 const auto normal = passageNormalTowardCurrentWaypoint(layoutCache, route);
                 if (normal.has_value()) {
-                    const auto doorwayTarget = closestPointOnSegment(position, passage.start, passage.end);
+                    const auto doorwayTarget = anchoredTargetOnCurrentPassage(route, passage, position);
                     const auto offset = std::max(kPortalCrossingEpsilon * 2.0, clearance * 0.20);
                     return doorwayTarget + (*normal * offset);
                 }
