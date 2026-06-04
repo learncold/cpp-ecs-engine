@@ -512,6 +512,59 @@ SC_TEST(AlternativeRecommendationService_addsBottleneckGuidanceAtExit) {
     SC_EXPECT_TRUE(containsDiffKey(it->recommendedScenario, "control.routeGuidances"));
 }
 
+SC_TEST(AlternativeRecommendationService_skipsBottleneckGuidanceForSingleExitLayout) {
+    ScenarioRiskSnapshot risk;
+    risk.bottlenecks.push_back({
+        .connectionId = "door-main",
+        .nearbyAgentCount = 8,
+        .stalledAgentCount = 5,
+    });
+
+    const AlternativeRecommendationService service;
+    const auto result = service.recommend({
+        .layout = makeSingleExitRecommendationLayout(),
+        .sourceScenario = makeScenario(),
+        .risk = risk,
+        .artifacts = makeSingleExitUsageArtifacts("exit-main", "Main Exit", 20, 1.0),
+    });
+
+    SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::BottleneckBypassGuidance));
+    SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::ExitUsageBalancing));
+}
+
+SC_TEST(AlternativeRecommendationService_keepsInactiveTimedBlockReachableForBottleneckGuidance) {
+    auto scenario = makeScenario();
+    scenario.control.connectionBlocks.push_back({
+        .id = "block-main-early",
+        .connectionId = "door-main",
+        .intervals = {{.startSeconds = 0.0, .endSeconds = 5.0}},
+    });
+
+    ScenarioRiskSnapshot risk;
+    risk.bottlenecks.push_back({
+        .connectionId = "door-main",
+        .nearbyAgentCount = 8,
+        .stalledAgentCount = 5,
+        .detectedAtSeconds = 20.0,
+    });
+
+    const AlternativeRecommendationService service;
+    const auto result = service.recommend({
+        .layout = makeRecommendationLayout(),
+        .sourceScenario = scenario,
+        .risk = risk,
+        .artifacts = makeExitUsageArtifacts(),
+    });
+
+    SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::BlockedConnectionRelief));
+    const auto it = std::find_if(result.candidates.begin(), result.candidates.end(), [](const auto& candidate) {
+        return candidate.kind == AlternativeRecommendationKind::BottleneckBypassGuidance;
+    });
+    SC_EXPECT_TRUE(it != result.candidates.end());
+    SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.size(), std::size_t{1});
+    SC_EXPECT_EQ(it->recommendedScenario.control.routeGuidances.front().guidedExitZoneId, std::string{"exit-east"});
+}
+
 SC_TEST(AlternativeRecommendationService_installsCorridorBottleneckGuidanceAtExitOnly) {
     ScenarioRiskSnapshot risk;
     risk.bottlenecks.push_back({
@@ -1007,11 +1060,25 @@ SC_TEST(AlternativeRecommendationService_sortsBlockedReliefBeforeGuidance) {
         .nearbyAgentCount = 8,
         .stalledAgentCount = 5,
     });
+    auto layout = makeRecommendationLayout();
+    layout.zones.push_back({
+        .id = "exit-west",
+        .floorId = "L1",
+        .kind = ZoneKind::Exit,
+        .label = "West Exit",
+    });
+    layout.connections.push_back({
+        .id = "door-west",
+        .floorId = "L1",
+        .kind = ConnectionKind::Exit,
+        .fromZoneId = "room-a",
+        .toZoneId = "exit-west",
+    });
     const auto artifacts = makeExitUsageArtifacts();
 
     const AlternativeRecommendationService service;
     const auto result = service.recommend({
-        .layout = makeRecommendationLayout(),
+        .layout = layout,
         .sourceScenario = scenario,
         .risk = risk,
         .artifacts = artifacts,
