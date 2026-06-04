@@ -1174,14 +1174,14 @@ QWidget* ScenarioBatchResultWidget::createCanvasPanel() {
     selectorLayout->addWidget(overlayLabel);
 
     overlayCombo_ = new QComboBox(selectorBar);
+    overlayCombo_->addItem("Peak Density", static_cast<int>(OverlayMode::Density));
     overlayCombo_->addItem("Occupancy", static_cast<int>(OverlayMode::Occupancy));
-    overlayCombo_->addItem("Density", static_cast<int>(OverlayMode::Density));
     overlayCombo_->addItem("Pressure", static_cast<int>(OverlayMode::Pressure));
     overlayCombo_->addItem("Hotspots", static_cast<int>(OverlayMode::Hotspots));
     overlayCombo_->addItem("Bottlenecks", static_cast<int>(OverlayMode::Bottlenecks));
     overlayCombo_->addItem("Cross Flow", static_cast<int>(OverlayMode::CrossFlow));
     overlayCombo_->addItem("None", static_cast<int>(OverlayMode::None));
-    overlayCombo_->setCurrentIndex(0);
+    overlayCombo_->setCurrentIndex(overlayCombo_->findData(static_cast<int>(overlayMode_)));
     selectorLayout->addWidget(overlayCombo_);
     layout->addWidget(selectorBar);
 
