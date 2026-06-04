@@ -35,13 +35,16 @@ inline constexpr double kScenarioCriticalPressureEventDurationThresholdSeconds =
 inline constexpr std::size_t kScenarioCriticalPressureEventAgentThreshold = 2;
 inline constexpr double kScenarioBottleneckRadius = 1.25;
 inline constexpr std::size_t kScenarioBottleneckAgentThreshold = 3;
-inline constexpr double kScenarioCrossFlowCellSize = 2.0;
-inline constexpr double kScenarioCrossFlowReferenceSpeedMetersPerSecond = 1.30;
-inline constexpr double kScenarioCrossFlowMinimumExpectedSpeedMetersPerSecond = 0.97;
-inline constexpr std::size_t kScenarioCrossFlowDirectionBinCount = 16;
-inline constexpr std::size_t kScenarioCrossFlowMinMovingAgents = 4;
-inline constexpr double kScenarioCrossFlowSideRatioThreshold = 0.30;
-inline constexpr double kScenarioCrossFlowCosineThreshold = 0.5;
+inline constexpr double kScenarioOperationalConflictCellSize = 2.0;
+inline constexpr double kScenarioOperationalConflictInfluenceRadius = 1.41;
+inline constexpr double kScenarioOperationalConflictReferenceSpeedMetersPerSecond = 1.30;
+inline constexpr double kScenarioOperationalConflictMinimumExpectedSpeedMetersPerSecond = 0.97;
+inline constexpr std::size_t kScenarioOperationalConflictDirectionBinCount = 16;
+inline constexpr std::size_t kScenarioOperationalConflictMinMovingAgents = 4;
+inline constexpr double kScenarioOperationalConflictSideRatioThreshold = 0.30;
+inline constexpr double kScenarioOperationalConflictCosineThreshold = -0.5;
+inline constexpr double kScenarioOperationalConflictQueueSpeedThreshold = kScenarioStalledSpeedThreshold;
+inline constexpr double kScenarioOperationalConflictWindowSeconds = 5.0;
 
 struct ScenarioCongestionHotspot {
     Point2D center{};
@@ -101,45 +104,70 @@ struct ScenarioBottleneckMetric {
     std::optional<SimulationFrame> detectionFrame{};
 };
 
-struct ScenarioCrossFlowCellMetric {
+struct ScenarioOperationalConflictCellMetric {
     Point2D center{};
     Point2D cellMin{};
     Point2D cellMax{};
     std::string floorId{};
     std::size_t movingAgentCount{0};
     std::size_t peakAgentCount{0};
-    std::size_t primaryFlowCount{0};
-    std::size_t crossFlowCount{0};
-    double crossFlowRatio{0.0};
+    std::size_t forwardCount{0};
+    std::size_t reverseCount{0};
+    double counterflowRatio{0.0};
     double averageSpeed{0.0};
     double speedDropRatio{0.0};
-    double crossFlowScore{0.0};
+    double conflictScore{0.0};
+    double durationSeconds{0.0};
+    double exposureAgentSeconds{0.0};
+    std::string nearestConnectionId{};
+    std::string nearestConnectionLabel{};
+    std::optional<double> detectedAtSeconds{};
+    std::optional<SimulationFrame> detectionFrame{};
+    double oppositionScore{0.0};
+};
+
+struct ScenarioOperationalConflictConnectionMetric {
+    std::string connectionId{};
+    std::string label{};
+    std::string floorId{};
+    LineSegment2D passage{};
+    std::size_t nearbyAgentCount{0};
+    std::size_t movingAgentCount{0};
+    std::size_t queueAgentCount{0};
+    std::size_t forwardCount{0};
+    std::size_t reverseCount{0};
+    double counterflowRatio{0.0};
+    double averageSpeed{0.0};
+    double speedDropRatio{0.0};
+    double conflictScore{0.0};
     double durationSeconds{0.0};
     double exposureAgentSeconds{0.0};
     std::optional<double> detectedAtSeconds{};
     std::optional<SimulationFrame> detectionFrame{};
+    double oppositionScore{0.0};
 };
 
 struct ScenarioRiskSnapshot {
     std::size_t stalledAgentCount{0};
     std::size_t pressureExposedAgentCount{0};
     std::size_t criticalPressureAgentCount{0};
-    std::size_t crossFlowAgentCount{0};
-    double peakCrossFlowScore{0.0};
-    double totalCrossFlowExposureAgentSeconds{0.0};
+    std::size_t conflictAgentCount{0};
+    double peakConflictScore{0.0};
+    double totalConflictExposureAgentSeconds{0.0};
     std::vector<ScenarioCongestionHotspot> hotspots{};
     std::vector<ScenarioPressureHotspot> pressureHotspots{};
     std::vector<ScenarioPressureAgentMetric> pressureAgents{};
     std::vector<ScenarioCriticalPressureEvent> criticalPressureEvents{};
     std::vector<ScenarioBottleneckMetric> bottlenecks{};
-    std::vector<ScenarioCrossFlowCellMetric> crossFlowCells{};
+    std::vector<ScenarioOperationalConflictCellMetric> operationalConflictCells{};
+    std::vector<ScenarioOperationalConflictConnectionMetric> operationalConflictConnections{};
 };
 
 const char* scenarioStalledDefinition() noexcept;
 const char* scenarioHotspotDefinition() noexcept;
 const char* scenarioPressureHotspotDefinition() noexcept;
 const char* scenarioBottleneckDefinition() noexcept;
-const char* scenarioCrossFlowDefinition() noexcept;
+const char* scenarioOperationalConflictDefinition() noexcept;
 bool scenarioAgentStalled(double speedMetersPerSecond, double routeStalledSeconds) noexcept;
 
 }  // namespace safecrowd::domain

@@ -294,7 +294,7 @@ public:
     }
 };
 
-class ConfigureCrossFlowArtifactsSystem final : public safecrowd::engine::EngineSystem {
+class ConfigureOperationalConflictArtifactsSystem final : public safecrowd::engine::EngineSystem {
 public:
     void configure(safecrowd::engine::EngineWorld& world) override {
         world.resources().set(safecrowd::domain::ScenarioSimulationClockResource{
@@ -304,31 +304,51 @@ public:
         });
 
         safecrowd::domain::ScenarioRiskMetricsResource metrics;
-        metrics.snapshot.peakCrossFlowScore = 0.95;
-        metrics.snapshot.totalCrossFlowExposureAgentSeconds = 18.0;
-        metrics.snapshot.crossFlowCells.push_back({
+        metrics.snapshot.peakConflictScore = 0.95;
+        metrics.snapshot.totalConflictExposureAgentSeconds = 18.0;
+        metrics.snapshot.operationalConflictCells.push_back({
             .center = {.x = 1.0, .y = 1.0},
             .cellMin = {.x = 0.0, .y = 0.0},
             .cellMax = {.x = 2.0, .y = 2.0},
             .floorId = "L1",
             .movingAgentCount = 6,
             .peakAgentCount = 6,
-            .primaryFlowCount = 3,
-            .crossFlowCount = 3,
-            .crossFlowRatio = 0.5,
+            .forwardCount = 3,
+            .reverseCount = 3,
+            .counterflowRatio = 0.5,
             .averageSpeed = 0.6,
             .speedDropRatio = 0.54,
-            .crossFlowScore = 0.95,
+            .conflictScore = 0.95,
             .durationSeconds = 11.0,
             .exposureAgentSeconds = 18.0,
             .detectedAtSeconds = 12.0,
+            .oppositionScore = 1.0,
+        });
+        metrics.snapshot.operationalConflictConnections.push_back({
+            .connectionId = "door-main",
+            .label = "Main Door",
+            .floorId = "L1",
+            .passage = {.start = {.x = 2.0, .y = 0.0}, .end = {.x = 2.0, .y = 1.0}},
+            .nearbyAgentCount = 6,
+            .movingAgentCount = 6,
+            .queueAgentCount = 2,
+            .forwardCount = 3,
+            .reverseCount = 3,
+            .counterflowRatio = 0.5,
+            .averageSpeed = 0.6,
+            .speedDropRatio = 0.54,
+            .conflictScore = 0.95,
+            .durationSeconds = 11.0,
+            .exposureAgentSeconds = 18.0,
+            .detectedAtSeconds = 12.0,
+            .oppositionScore = 1.0,
         });
         metrics.peakSnapshot = metrics.snapshot;
         world.resources().set(std::move(metrics));
 
-        safecrowd::domain::ScenarioCrossFlowResource crossFlow;
-        crossFlow.totalCrossFlowExposureAgentSeconds = 18.0;
-        world.resources().set(std::move(crossFlow));
+        safecrowd::domain::ScenarioOperationalConflictResource operationalConflict;
+        operationalConflict.totalConflictExposureAgentSeconds = 18.0;
+        world.resources().set(std::move(operationalConflict));
     }
 
     void update(safecrowd::engine::EngineWorld&, const safecrowd::engine::EngineStepContext&) override {
@@ -4638,6 +4658,239 @@ SC_TEST(ScenarioRiskMetricsSystem_PublishesStalledHotspotAndBottleneckMetrics) {
     SC_EXPECT_EQ(snapshot.bottlenecks.front().label, std::string{"Room -> Exit"});
 }
 
+SC_TEST(ScenarioRiskMetricsSystem_ClassifiesOneWayDoorQueueAsBottleneckOnly) {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    for (int index = 0; index < 6; ++index) {
+        const auto y = -0.25 + (static_cast<double>(index) * 0.1);
+        seeds.push_back({
+            .position = {.value = {.x = 0.78 + (static_cast<double>(index) * 0.02), .y = y}},
+            .agent = {.radius = 0.25f, .maxSpeed = 1.0f},
+            .velocity = {.value = {}},
+            .route = {
+                .waypoints = {{.x = 1.0, .y = y}},
+                .waypointPassages = {{{.x = 1.0, .y = -0.4}, {.x = 1.0, .y = 0.4}}},
+                .waypointFromZoneIds = {"room"},
+                .waypointZoneIds = {"exit"},
+                .waypointConnectionIds = {"room-exit"},
+                .nextWaypointIndex = 0,
+                .currentSegmentStart = {.x = 0.78, .y = y},
+                .previousDistanceToWaypoint = 0.22,
+                .stalledSeconds = 1.0,
+                .destinationZoneId = "exit",
+            },
+            .status = {},
+        });
+    }
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 53,
+    });
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioRiskMetricsSystem(straightExitLayout()),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(0.0);
+
+    const auto& snapshot =
+        runtime.world().resources().get<safecrowd::domain::ScenarioRiskMetricsResource>().snapshot;
+    SC_EXPECT_EQ(snapshot.bottlenecks.size(), std::size_t{1});
+    SC_EXPECT_TRUE(snapshot.operationalConflictCells.empty());
+    SC_EXPECT_TRUE(snapshot.operationalConflictConnections.empty());
+}
+
+SC_TEST(ScenarioRiskMetricsSystem_ClassifiesStoppedBidirectionalIntentAsOperationalConflict) {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    for (int index = 0; index < 3; ++index) {
+        const auto y = -0.15 + (static_cast<double>(index) * 0.15);
+        seeds.push_back({
+            .position = {.value = {.x = 0.85, .y = y}},
+            .agent = {.radius = 0.25f, .maxSpeed = 1.0f},
+            .velocity = {.value = {}},
+            .route = {
+                .waypoints = {{.x = 1.0, .y = y}},
+                .waypointPassages = {{{.x = 1.0, .y = -0.4}, {.x = 1.0, .y = 0.4}}},
+                .waypointFromZoneIds = {"room"},
+                .waypointZoneIds = {"exit"},
+                .waypointConnectionIds = {"room-exit"},
+                .nextWaypointIndex = 0,
+                .currentSegmentStart = {.x = 0.85, .y = y},
+                .previousDistanceToWaypoint = 0.15,
+                .stalledSeconds = 1.0,
+                .destinationZoneId = "exit",
+            },
+            .status = {},
+        });
+        seeds.push_back({
+            .position = {.value = {.x = 1.15, .y = y}},
+            .agent = {.radius = 0.25f, .maxSpeed = 1.0f},
+            .velocity = {.value = {}},
+            .route = {
+                .waypoints = {{.x = 1.0, .y = y}},
+                .waypointPassages = {{{.x = 1.0, .y = -0.4}, {.x = 1.0, .y = 0.4}}},
+                .waypointFromZoneIds = {"exit"},
+                .waypointZoneIds = {"room"},
+                .waypointConnectionIds = {"room-exit"},
+                .nextWaypointIndex = 0,
+                .currentSegmentStart = {.x = 1.15, .y = y},
+                .previousDistanceToWaypoint = 0.15,
+                .stalledSeconds = 1.0,
+                .destinationZoneId = "room",
+            },
+            .status = {},
+        });
+    }
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 54,
+    });
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioRiskMetricsSystem(straightExitLayout()),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(0.0);
+
+    const auto& snapshot =
+        runtime.world().resources().get<safecrowd::domain::ScenarioRiskMetricsResource>().snapshot;
+    SC_EXPECT_EQ(snapshot.operationalConflictConnections.size(), std::size_t{1});
+    SC_EXPECT_TRUE(!snapshot.operationalConflictCells.empty());
+    SC_EXPECT_EQ(snapshot.operationalConflictConnections.front().forwardCount, std::size_t{3});
+    SC_EXPECT_EQ(snapshot.operationalConflictConnections.front().reverseCount, std::size_t{3});
+    SC_EXPECT_NEAR(snapshot.operationalConflictConnections.front().counterflowRatio, 0.5, 1e-9);
+    SC_EXPECT_TRUE(snapshot.operationalConflictConnections.front().oppositionScore > 0.9);
+    SC_EXPECT_TRUE(snapshot.operationalConflictConnections.front().conflictScore > 0.9);
+
+    auto& conflictState =
+        runtime.world().resources().get<safecrowd::domain::ScenarioOperationalConflictResource>().connectionsById.at("room-exit");
+    SC_EXPECT_TRUE(conflictState.conflictActive);
+    SC_EXPECT_EQ(conflictState.currentQueueAgents, std::size_t{6});
+    SC_EXPECT_EQ(conflictState.counterflowEventCount, std::size_t{1});
+
+    auto& query = runtime.world().query();
+    for (const auto entity : query.view<
+             safecrowd::domain::Position,
+             safecrowd::domain::EvacuationRoute,
+             safecrowd::domain::EvacuationStatus>()) {
+        auto& position = query.get<safecrowd::domain::Position>(entity);
+        auto& route = query.get<safecrowd::domain::EvacuationRoute>(entity);
+        position.value = {.x = 8.0 + static_cast<double>(entity.index), .y = 8.0};
+        route.currentFloorId.clear();
+        route.displayFloorId.clear();
+    }
+    auto& clock = runtime.world().resources().get<safecrowd::domain::ScenarioSimulationClockResource>();
+    clock.elapsedSeconds = 2.0;
+    runtime.stepFrame(0.0);
+
+    const auto& inactiveMetrics =
+        runtime.world().resources().get<safecrowd::domain::ScenarioRiskMetricsResource>().snapshot;
+    const auto& inactiveState =
+        runtime.world().resources().get<safecrowd::domain::ScenarioOperationalConflictResource>().connectionsById.at("room-exit");
+    SC_EXPECT_TRUE(inactiveMetrics.operationalConflictConnections.empty());
+    SC_EXPECT_TRUE(!inactiveState.conflictActive);
+    SC_EXPECT_EQ(inactiveState.currentQueueAgents, std::size_t{0});
+    SC_EXPECT_EQ(inactiveState.counterflowEventCount, std::size_t{1});
+
+    int restoredIndex = 0;
+    for (const auto entity : query.view<
+             safecrowd::domain::Position,
+             safecrowd::domain::EvacuationRoute,
+             safecrowd::domain::EvacuationStatus>()) {
+        auto& position = query.get<safecrowd::domain::Position>(entity);
+        auto& route = query.get<safecrowd::domain::EvacuationRoute>(entity);
+        const auto pairIndex = restoredIndex / 2;
+        const auto y = -0.15 + (static_cast<double>(pairIndex) * 0.15);
+        const bool forward = (restoredIndex % 2) == 0;
+        position.value = forward
+            ? safecrowd::domain::Point2D{.x = 0.85, .y = y}
+            : safecrowd::domain::Point2D{.x = 1.15, .y = y};
+        route.currentFloorId.clear();
+        route.displayFloorId.clear();
+        ++restoredIndex;
+    }
+    clock.elapsedSeconds = 3.0;
+    runtime.stepFrame(0.0);
+
+    const auto& reactivatedState =
+        runtime.world().resources().get<safecrowd::domain::ScenarioOperationalConflictResource>().connectionsById.at("room-exit");
+    SC_EXPECT_TRUE(reactivatedState.conflictActive);
+    SC_EXPECT_EQ(reactivatedState.currentQueueAgents, std::size_t{6});
+    SC_EXPECT_EQ(reactivatedState.counterflowEventCount, std::size_t{2});
+}
+
+SC_TEST(ScenarioRiskMetricsSystem_DetectsMinorReverseFlowAtDoorAsOperationalConflict) {
+    std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
+    for (int index = 0; index < 3; ++index) {
+        const auto y = -0.18 + (static_cast<double>(index) * 0.18);
+        seeds.push_back({
+            .position = {.value = {.x = 0.86, .y = y}},
+            .agent = {.radius = 0.25f, .maxSpeed = 1.0f},
+            .velocity = {.value = {}},
+            .route = {
+                .waypoints = {{.x = 1.0, .y = y}},
+                .waypointPassages = {{{.x = 1.0, .y = -0.4}, {.x = 1.0, .y = 0.4}}},
+                .waypointFromZoneIds = {"room"},
+                .waypointZoneIds = {"exit"},
+                .waypointConnectionIds = {"room-exit"},
+                .nextWaypointIndex = 0,
+                .currentSegmentStart = {.x = 0.86, .y = y},
+                .previousDistanceToWaypoint = 0.14,
+                .stalledSeconds = 1.0,
+                .destinationZoneId = "exit",
+            },
+            .status = {},
+        });
+    }
+    seeds.push_back({
+        .position = {.value = {.x = 1.14, .y = 0.0}},
+        .agent = {.radius = 0.25f, .maxSpeed = 1.0f},
+        .velocity = {.value = {}},
+        .route = {
+            .waypoints = {{.x = 1.0, .y = 0.0}},
+            .waypointPassages = {{{.x = 1.0, .y = -0.4}, {.x = 1.0, .y = 0.4}}},
+            .waypointFromZoneIds = {"exit"},
+            .waypointZoneIds = {"room"},
+            .waypointConnectionIds = {"room-exit"},
+            .nextWaypointIndex = 0,
+            .currentSegmentStart = {.x = 1.14, .y = 0.0},
+            .previousDistanceToWaypoint = 0.14,
+            .stalledSeconds = 1.0,
+            .destinationZoneId = "room",
+        },
+        .status = {},
+    });
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 55,
+    });
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(std::move(seeds), 10.0));
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioRiskMetricsSystem(straightExitLayout()),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(0.0);
+
+    const auto& snapshot =
+        runtime.world().resources().get<safecrowd::domain::ScenarioRiskMetricsResource>().snapshot;
+    SC_EXPECT_EQ(snapshot.operationalConflictConnections.size(), std::size_t{1});
+    SC_EXPECT_EQ(snapshot.operationalConflictConnections.front().forwardCount, std::size_t{3});
+    SC_EXPECT_EQ(snapshot.operationalConflictConnections.front().reverseCount, std::size_t{1});
+    SC_EXPECT_NEAR(snapshot.operationalConflictConnections.front().counterflowRatio, 0.25, 1e-9);
+    SC_EXPECT_TRUE(snapshot.operationalConflictConnections.front().oppositionScore >= 0.5);
+}
+
 SC_TEST(ScenarioRiskMetricsSystem_DoesNotPublishPressureHotspotsForLooseClusterInSameCell) {
     std::vector<safecrowd::domain::ScenarioAgentSeed> seeds;
     for (const auto& point : std::vector<safecrowd::domain::Point2D>{
@@ -5244,13 +5497,13 @@ SC_TEST(ScenarioResultArtifactsSystem_AccumulatesPressurePeakFieldByFloorAndCell
     SC_EXPECT_TRUE(hasL2Cell);
 }
 
-SC_TEST(ScenarioResultArtifactsSystem_PublishesCrossFlowSummary) {
+SC_TEST(ScenarioResultArtifactsSystem_PublishesOperationalConflictSummary) {
     safecrowd::engine::EngineRuntime runtime({
         .fixedDeltaTime = 1.0 / 30.0,
         .maxCatchUpSteps = 1,
         .baseSeed = 52,
     });
-    runtime.addSystem(std::make_unique<ConfigureCrossFlowArtifactsSystem>());
+    runtime.addSystem(std::make_unique<ConfigureOperationalConflictArtifactsSystem>());
     runtime.addSystem(
         std::make_unique<safecrowd::domain::ScenarioResultArtifactsSystem>(1.0),
         {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
@@ -5261,15 +5514,16 @@ SC_TEST(ScenarioResultArtifactsSystem_PublishesCrossFlowSummary) {
 
     const auto& artifacts =
         runtime.world().resources().get<safecrowd::domain::ScenarioResultArtifactsResource>().artifacts;
-    SC_EXPECT_NEAR(artifacts.crossFlowSummary.peakCrossFlowScore, 0.95, 1e-9);
-    SC_EXPECT_NEAR(artifacts.crossFlowSummary.totalCrossFlowExposureAgentSeconds, 18.0, 1e-9);
-    SC_EXPECT_TRUE(artifacts.crossFlowSummary.peakAtSeconds.has_value());
-    SC_EXPECT_NEAR(*artifacts.crossFlowSummary.peakAtSeconds, 12.0, 1e-9);
-    SC_EXPECT_NEAR(artifacts.crossFlowSummary.longestCrossFlowDurationSeconds, 11.0, 1e-9);
-    SC_EXPECT_EQ(artifacts.crossFlowSummary.crossFlowHotspotCount, std::size_t{1});
-    SC_EXPECT_EQ(artifacts.crossFlowTimeline.size(), std::size_t{1});
-    SC_EXPECT_NEAR(artifacts.crossFlowTimeline.front().peakCrossFlowScore, 0.95, 1e-9);
-    SC_EXPECT_EQ(artifacts.crossFlowTimeline.front().activeCrossFlowCellCount, std::size_t{1});
+    SC_EXPECT_NEAR(artifacts.operationalConflictSummary.peakConflictScore, 0.95, 1e-9);
+    SC_EXPECT_NEAR(artifacts.operationalConflictSummary.totalConflictExposureAgentSeconds, 18.0, 1e-9);
+    SC_EXPECT_TRUE(artifacts.operationalConflictSummary.peakAtSeconds.has_value());
+    SC_EXPECT_NEAR(*artifacts.operationalConflictSummary.peakAtSeconds, 12.0, 1e-9);
+    SC_EXPECT_NEAR(artifacts.operationalConflictSummary.longestConflictDurationSeconds, 11.0, 1e-9);
+    SC_EXPECT_EQ(artifacts.operationalConflictSummary.conflictConnectionCount, std::size_t{1});
+    SC_EXPECT_EQ(artifacts.operationalConflictTimeline.size(), std::size_t{1});
+    SC_EXPECT_NEAR(artifacts.operationalConflictTimeline.front().peakConflictScore, 0.95, 1e-9);
+    SC_EXPECT_EQ(artifacts.operationalConflictTimeline.front().activeConflictCellCount, std::size_t{1});
+    SC_EXPECT_EQ(artifacts.operationalConflictTimeline.front().activeConflictConnectionCount, std::size_t{1});
 }
 
 SC_TEST(ScenarioRoutePassageCrossed_UsesDoorPlaneNearEndpoint) {

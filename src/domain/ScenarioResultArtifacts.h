@@ -130,18 +130,22 @@ struct HazardExposureSummary {
     std::vector<HazardExposureMetric> hazards{};
 };
 
-struct CrossFlowTimelineSample {
+struct OperationalConflictTimelineSample {
     double timeSeconds{0.0};
-    double peakCrossFlowScore{0.0};
-    std::size_t activeCrossFlowCellCount{0};
+    double peakConflictScore{0.0};
+    std::size_t activeConflictCellCount{0};
+    std::size_t activeConflictConnectionCount{0};
 };
 
-struct CrossFlowSummary {
-    double peakCrossFlowScore{0.0};
+struct OperationalConflictSummary {
+    double peakConflictScore{0.0};
     std::optional<double> peakAtSeconds{};
-    double totalCrossFlowExposureAgentSeconds{0.0};
-    double longestCrossFlowDurationSeconds{0.0};
-    std::size_t crossFlowHotspotCount{0};
+    double totalConflictExposureAgentSeconds{0.0};
+    double longestConflictDurationSeconds{0.0};
+    std::size_t conflictConnectionCount{0};
+    double connectionConcentrationIndex{0.0};
+    std::string topConflictConnectionId{};
+    std::string topConflictConnectionLabel{};
 };
 
 struct ExitUsageMetric {
@@ -179,8 +183,8 @@ struct ScenarioResultArtifacts {
     OccupancyHeatmap occupancyHeatmap{};
     PressureSummary pressureSummary{};
     HazardExposureSummary hazardExposureSummary{};
-    CrossFlowSummary crossFlowSummary{};
-    std::vector<CrossFlowTimelineSample> crossFlowTimeline{};
+    OperationalConflictSummary operationalConflictSummary{};
+    std::vector<OperationalConflictTimelineSample> operationalConflictTimeline{};
     std::vector<ExitUsageMetric> exitUsage{};
     std::vector<ZoneCompletionMetric> zoneCompletion{};
     std::vector<PlacementCompletionMetric> placementCompletion{};
