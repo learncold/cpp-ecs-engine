@@ -26,6 +26,7 @@ enum class ImportIssueCode {
     UnmappedElement,
     InvalidFloorReference,
     ConnectionSpanMisaligned,
+    ObstructedConnection,
 };
 
 struct ImportIssue {

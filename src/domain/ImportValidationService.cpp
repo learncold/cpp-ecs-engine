@@ -256,6 +256,98 @@ bool hasRouteToExit(
     return false;
 }
 
+bool isPassageConnection(const Connection2D& connection) {
+    return connection.kind == ConnectionKind::Doorway
+        || connection.kind == ConnectionKind::Opening
+        || connection.kind == ConnectionKind::Exit;
+}
+
+bool barrierSharesConnectionFloor(const Barrier2D& barrier, const Connection2D& connection) {
+    return barrier.floorId.empty() || connection.floorId.empty() || barrier.floorId == connection.floorId;
+}
+
+// A blocking barrier obstructs a passage when one of its segments crosses or
+// overlaps the connection span through the span interior. Endpoint-only contact
+// is ignored because doorways legitimately meet flanking walls.
+bool barrierSegmentCrossesSpanInterior(const LineSegment2D& barrierSegment, const LineSegment2D& span) {
+    const auto spanDirection = subtract(span.end, span.start);
+    const auto barrierDirection = subtract(barrierSegment.end, barrierSegment.start);
+    const auto spanLengthSquared = dot(spanDirection, spanDirection);
+    if (spanLengthSquared <= kGeometryEpsilon) {
+        return false;
+    }
+
+    constexpr double kSpanEndpointTolerance = 1e-6;
+    const auto denominator = cross(spanDirection, barrierDirection);
+    if (std::abs(denominator) <= kGeometryEpsilon) {
+        if (std::abs(cross(subtract(barrierSegment.start, span.start), spanDirection)) > kGeometryEpsilon
+            || std::abs(cross(subtract(barrierSegment.end, span.start), spanDirection)) > kGeometryEpsilon) {
+            return false;
+        }
+
+        const auto startFraction = dot(subtract(barrierSegment.start, span.start), spanDirection) / spanLengthSquared;
+        const auto endFraction = dot(subtract(barrierSegment.end, span.start), spanDirection) / spanLengthSquared;
+        const auto overlapStart = std::max(std::min(startFraction, endFraction), 0.0);
+        const auto overlapEnd = std::min(std::max(startFraction, endFraction), 1.0);
+        return overlapEnd - overlapStart > kSpanEndpointTolerance
+            && overlapEnd > kSpanEndpointTolerance
+            && overlapStart < 1.0 - kSpanEndpointTolerance;
+    }
+
+    const auto delta = subtract(barrierSegment.start, span.start);
+    const auto spanFraction = cross(delta, barrierDirection) / denominator;
+    const auto barrierFraction = cross(delta, spanDirection) / denominator;
+    return spanFraction > kSpanEndpointTolerance
+        && spanFraction < 1.0 - kSpanEndpointTolerance
+        && barrierFraction >= -kGeometryEpsilon
+        && barrierFraction <= 1.0 + kGeometryEpsilon;
+}
+
+Point2D pointAlongSpan(const LineSegment2D& span, double fraction) {
+    return {
+        .x = span.start.x + ((span.end.x - span.start.x) * fraction),
+        .y = span.start.y + ((span.end.y - span.start.y) * fraction),
+    };
+}
+
+bool closedBarrierContainsSpanInterior(const Barrier2D& barrier, const LineSegment2D& span) {
+    if (!barrier.geometry.closed || barrier.geometry.vertices.size() < 3) {
+        return false;
+    }
+
+    const Polygon2D barrierFootprint{.outline = barrier.geometry.vertices};
+    constexpr double kInteriorSampleFractions[] = {0.25, 0.5, 0.75};
+    for (const auto fraction : kInteriorSampleFractions) {
+        if (pointInPolygon(barrierFootprint, pointAlongSpan(span, fraction))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool barrierObstructsConnection(const Barrier2D& barrier, const Connection2D& connection) {
+    if (!barrier.blocksMovement || barrier.geometry.vertices.size() < 2) {
+        return false;
+    }
+
+    if (closedBarrierContainsSpanInterior(barrier, connection.centerSpan)) {
+        return true;
+    }
+
+    const auto& vertices = barrier.geometry.vertices;
+    const std::size_t segmentCount = barrier.geometry.closed ? vertices.size() : vertices.size() - 1;
+    for (std::size_t index = 0; index < segmentCount; ++index) {
+        const LineSegment2D segment{
+            .start = vertices[index],
+            .end = vertices[(index + 1) % vertices.size()],
+        };
+        if (barrierSegmentCrossesSpanInterior(segment, connection.centerSpan)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 }  // namespace
 
 std::vector<ImportIssue> ImportValidationService::validate(const FacilityLayout2D& layout) const {
@@ -381,6 +473,26 @@ std::vector<ImportIssue> ImportValidationService::validate(const FacilityLayout2
                 .targetId = connection.toZoneId,
                 .isBlocking = true,
             });
+        }
+    }
+
+    for (const auto& connection : layout.connections) {
+        if (!isPassageConnection(connection)) {
+            continue;
+        }
+        for (const auto& barrier : layout.barriers) {
+            if (!barrierSharesConnectionFloor(barrier, connection)
+                || !barrierObstructsConnection(barrier, connection)) {
+                continue;
+            }
+            issues.push_back({
+                .severity = ImportIssueSeverity::Warning,
+                .code = ImportIssueCode::ObstructedConnection,
+                .message = "A wall or obstacle crosses a connection passage and may block movement through it.",
+                .sourceId = barrier.id,
+                .targetId = connection.id,
+            });
+            break;
         }
     }
 
