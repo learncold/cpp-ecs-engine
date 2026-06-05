@@ -505,16 +505,10 @@ private:
             QColor("#b45309"),
             QColor("#475569"),
         };
-        if (index == displayIndex_) {
-            return QColor("#1d4ed8");
-        }
         return colors[static_cast<std::size_t>(std::abs(index)) % colors.size()];
     }
 
     Qt::PenStyle lineStyleForSeries(int index) const {
-        if (index == displayIndex_) {
-            return Qt::SolidLine;
-        }
         constexpr int kPaletteSize = 12;
         switch ((std::abs(index) / kPaletteSize) % 4) {
         case 1:
@@ -531,7 +525,7 @@ private:
     QPen penForSeries(int index, double width) const {
         return QPen(
             colorForSeries(index),
-            index == displayIndex_ ? std::max(width, 2.8) : width,
+            width,
             lineStyleForSeries(index),
             Qt::RoundCap,
             Qt::RoundJoin);
