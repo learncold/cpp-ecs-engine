@@ -1052,6 +1052,38 @@ std::optional<std::string> blockedConnectionToRelieve(const AlternativeRecommend
         return std::nullopt;
     }
 
+    std::optional<ScenarioBottleneckMetric> bestExitBottleneck;
+    std::optional<std::string> firstBlockedExitConnectionId;
+    for (const auto& block : request.sourceScenario.control.connectionBlocks) {
+        if (block.connectionId.empty()) {
+            continue;
+        }
+        const auto* connection = findConnection(request.layout, block.connectionId);
+        if (connection == nullptr || !connectionTouchesExit(request.layout, *connection)) {
+            continue;
+        }
+        if (!firstBlockedExitConnectionId.has_value()
+            && connectionBlockConstrainsReachability(block, std::nullopt)) {
+            firstBlockedExitConnectionId = block.connectionId;
+        }
+        for (const auto& bottleneck : request.risk.bottlenecks) {
+            if (bottleneck.connectionId == block.connectionId
+                && sourceHasActiveConnectionBlockAt(
+                    request.sourceScenario,
+                    bottleneck.connectionId,
+                    bottleneck.detectedAtSeconds)
+                && (!bestExitBottleneck.has_value() || bottleneckLessSevere(*bestExitBottleneck, bottleneck))) {
+                bestExitBottleneck = bottleneck;
+            }
+        }
+    }
+    if (bestExitBottleneck.has_value()) {
+        return bestExitBottleneck->connectionId;
+    }
+    if (firstBlockedExitConnectionId.has_value()) {
+        return firstBlockedExitConnectionId;
+    }
+
     std::optional<ScenarioBottleneckMetric> best;
     for (const auto& bottleneck : request.risk.bottlenecks) {
         if (!bottleneck.connectionId.empty()
@@ -1065,6 +1097,33 @@ std::optional<std::string> blockedConnectionToRelieve(const AlternativeRecommend
         }
     }
     return best.has_value() ? std::optional<std::string>{best->connectionId} : std::nullopt;
+}
+
+std::string blockedConnectionSummary(
+    const FacilityLayout2D& layout,
+    const std::vector<ConnectionBlockDraft>& blocks) {
+    std::vector<std::string> names;
+    std::vector<std::string> connectionIds;
+    names.reserve(blocks.size());
+    connectionIds.reserve(blocks.size());
+    for (const auto& block : blocks) {
+        if (block.connectionId.empty() || containsString(connectionIds, block.connectionId)) {
+            continue;
+        }
+        connectionIds.push_back(block.connectionId);
+        names.push_back(connectionName(layout, block.connectionId));
+    }
+    if (names.empty()) {
+        return "none";
+    }
+    std::string value;
+    for (const auto& name : names) {
+        if (!value.empty()) {
+            value += ", ";
+        }
+        value += name;
+    }
+    return value;
 }
 
 std::optional<ScenarioBottleneckMetric> worstBottleneck(const ScenarioRiskSnapshot& risk) {
@@ -1407,12 +1466,8 @@ std::optional<AlternativeRecommendationCandidate> makeBlockedConnectionCandidate
     auto draft = makeRecommendedDraft(
         request,
         AlternativeRecommendationKind::BlockedConnectionRelief,
-        "Recommended: reopen " + connectionName(request.layout, *connectionId));
-    draft.control.connectionBlocks.erase(
-        std::remove_if(draft.control.connectionBlocks.begin(), draft.control.connectionBlocks.end(), [&](const auto& block) {
-            return block.connectionId == *connectionId;
-        }),
-        draft.control.connectionBlocks.end());
+        "Recommended: open blocked connections");
+    draft.control.connectionBlocks.clear();
     finalizeDiffKeys(request, draft);
     if (!recommendedDraftChangesSource(request, draft)) {
         return std::nullopt;
@@ -1420,19 +1475,22 @@ std::optional<AlternativeRecommendationCandidate> makeBlockedConnectionCandidate
 
     AlternativeRecommendationCandidate candidate;
     candidate.kind = AlternativeRecommendationKind::BlockedConnectionRelief;
-    candidate.id = "open-" + sanitizeId(*connectionId);
-    candidate.title = "Reopen blocked connection";
-    candidate.summary = "Remove the block on " + connectionName(request.layout, *connectionId) + ".";
+    candidate.id = "open-blocked-connections";
+    candidate.title = "Open blocked connection";
+    candidate.summary = "Remove all blocked door and exit controls from this scenario.";
     candidate.expectedImprovement = "Restores a constrained exit path and can reduce queueing near blocked connectors.";
     candidate.artifactSource = "ScenarioDraft.control.connectionBlocks + completed result artifacts";
-    candidate.evidence.push_back(evidence("Blocked connection", connectionName(request.layout, *connectionId), "ScenarioDraft.control.connectionBlocks"));
+    candidate.evidence.push_back(evidence(
+        "Blocked connections",
+        blockedConnectionSummary(request.layout, request.sourceScenario.control.connectionBlocks),
+        "ScenarioDraft.control.connectionBlocks"));
     if (const auto* connection = findConnection(request.layout, *connectionId); connection != nullptr) {
         candidate.riskKind = connectionTouchesExit(request.layout, *connection)
             ? AlternativeRecommendationRiskKind::ExitBottleneck
             : AlternativeRecommendationRiskKind::CorridorBottleneck;
     }
     candidate.priority = priorityForCandidate(
-        100,
+        60,
         candidate.riskKind.has_value() ? riskSeverity(context, *candidate.riskKind) : 0,
         true);
     if (const auto bottleneck = worstBottleneck(request.risk);

@@ -63,6 +63,24 @@ FacilityLayout2D makeCorridorRecommendationLayout() {
     return layout;
 }
 
+FacilityLayout2D makeInteriorDoorRecommendationLayout() {
+    auto layout = makeRecommendationLayout();
+    layout.zones.push_back({
+        .id = "hall-a",
+        .floorId = "L1",
+        .kind = ZoneKind::Room,
+        .label = "Hall A",
+    });
+    layout.connections.push_back({
+        .id = "door-hall",
+        .floorId = "L1",
+        .kind = ConnectionKind::Doorway,
+        .fromZoneId = "room-a",
+        .toZoneId = "hall-a",
+    });
+    return layout;
+}
+
 FacilityLayout2D makeSingleExitRecommendationLayout() {
     FacilityLayout2D layout;
     layout.zones.push_back({
@@ -309,7 +327,7 @@ SC_TEST(AlternativeRecommendationService_removesBlockedConnectionInRecommendedDr
     SC_EXPECT_TRUE(containsDiffKey(candidate.recommendedScenario, "control.connectionBlocks"));
 }
 
-SC_TEST(AlternativeRecommendationService_skipsBlockedConnectionWithoutBottleneckEvidence) {
+SC_TEST(AlternativeRecommendationService_opensExitConnectionBlockWithoutBottleneckEvidence) {
     auto scenario = makeScenario();
     scenario.control.connectionBlocks.push_back({
         .id = "block-main",
@@ -319,6 +337,29 @@ SC_TEST(AlternativeRecommendationService_skipsBlockedConnectionWithoutBottleneck
     const AlternativeRecommendationService service;
     const auto result = service.recommend({
         .layout = makeRecommendationLayout(),
+        .sourceScenario = scenario,
+        .artifacts = makeCompletedArtifacts(),
+    });
+
+    SC_EXPECT_TRUE(!result.candidates.empty());
+    const auto& candidate = result.candidates.front();
+    SC_EXPECT_TRUE(candidate.kind == AlternativeRecommendationKind::BlockedConnectionRelief);
+    SC_EXPECT_EQ(candidate.title, std::string{"Open blocked connection"});
+    SC_EXPECT_TRUE(candidate.riskKind.has_value() && *candidate.riskKind == AlternativeRecommendationRiskKind::ExitBottleneck);
+    SC_EXPECT_TRUE(candidate.recommendedScenario.control.connectionBlocks.empty());
+    SC_EXPECT_TRUE(containsDiffKey(candidate.recommendedScenario, "control.connectionBlocks"));
+}
+
+SC_TEST(AlternativeRecommendationService_skipsInteriorConnectionBlockWithoutBottleneckEvidence) {
+    auto scenario = makeScenario();
+    scenario.control.connectionBlocks.push_back({
+        .id = "block-hall",
+        .connectionId = "door-hall",
+    });
+
+    const AlternativeRecommendationService service;
+    const auto result = service.recommend({
+        .layout = makeInteriorDoorRecommendationLayout(),
         .sourceScenario = scenario,
         .artifacts = makeCompletedArtifacts(),
     });
@@ -353,7 +394,7 @@ SC_TEST(AlternativeRecommendationService_skipsInactiveBlockedConnectionRelief) {
     SC_EXPECT_TRUE(!hasCandidateKind(result, AlternativeRecommendationKind::BlockedConnectionRelief));
 }
 
-SC_TEST(AlternativeRecommendationService_reopensWorstBlockedBottleneck) {
+SC_TEST(AlternativeRecommendationService_opensAllBlockedConnectionsInSingleRecommendation) {
     auto scenario = makeScenario();
     scenario.control.connectionBlocks.push_back({
         .id = "block-main",
@@ -385,10 +426,16 @@ SC_TEST(AlternativeRecommendationService_reopensWorstBlockedBottleneck) {
     });
 
     SC_EXPECT_TRUE(!result.candidates.empty());
-    const auto& candidate = result.candidates.front();
+    const auto blockedReliefCount = std::count_if(result.candidates.begin(), result.candidates.end(), [](const auto& candidate) {
+        return candidate.kind == AlternativeRecommendationKind::BlockedConnectionRelief;
+    });
+    SC_EXPECT_EQ(blockedReliefCount, 1);
+    const auto& candidate = *std::find_if(result.candidates.begin(), result.candidates.end(), [](const auto& item) {
+        return item.kind == AlternativeRecommendationKind::BlockedConnectionRelief;
+    });
     SC_EXPECT_TRUE(candidate.kind == AlternativeRecommendationKind::BlockedConnectionRelief);
-    SC_EXPECT_EQ(candidate.recommendedScenario.control.connectionBlocks.size(), std::size_t{1});
-    SC_EXPECT_EQ(candidate.recommendedScenario.control.connectionBlocks.front().connectionId, std::string{"door-east"});
+    SC_EXPECT_EQ(candidate.title, std::string{"Open blocked connection"});
+    SC_EXPECT_TRUE(candidate.recommendedScenario.control.connectionBlocks.empty());
 }
 
 SC_TEST(AlternativeRecommendationService_addsRouteGuidanceForExitImbalance) {
