@@ -46,6 +46,59 @@ SC_TEST(ProjectPersistence_loadsBuiltInDemo2FLayoutResource) {
     SC_EXPECT_TRUE(!hasBlockingImportIssue(issues));
 }
 
+SC_TEST(LayoutReviewCodec_preservesDoorLeafDirectionAndDefaultsLegacyConnections) {
+    FacilityLayout2D layout;
+    layout.id = "layout";
+    layout.name = "Door Leaf Layout";
+    layout.floors.push_back({
+        .id = "L1",
+        .label = "Level 1",
+    });
+    layout.zones.push_back({
+        .id = "room-a",
+        .floorId = "L1",
+        .kind = ZoneKind::Room,
+        .label = "Room A",
+        .area = {.outline = {{.x = 0.0, .y = 0.0}, {.x = 4.0, .y = 0.0}, {.x = 4.0, .y = 4.0}, {.x = 0.0, .y = 4.0}}},
+    });
+    layout.zones.push_back({
+        .id = "room-b",
+        .floorId = "L1",
+        .kind = ZoneKind::Room,
+        .label = "Room B",
+        .area = {.outline = {{.x = 4.0, .y = 0.0}, {.x = 8.0, .y = 0.0}, {.x = 8.0, .y = 4.0}, {.x = 4.0, .y = 4.0}}},
+    });
+    layout.connections.push_back({
+        .id = "door-a",
+        .floorId = "L1",
+        .kind = ConnectionKind::Doorway,
+        .fromZoneId = "room-a",
+        .toZoneId = "room-b",
+        .effectiveWidth = 1.2,
+        .directionality = TravelDirection::Bidirectional,
+        .centerSpan = {.start = {.x = 4.0, .y = 1.4}, .end = {.x = 4.0, .y = 2.6}},
+        .doorLeafDirection = DoorLeafDirection::East,
+    });
+
+    const auto json = layoutToJson(layout);
+    SC_EXPECT_TRUE(json.value("connections").toArray().at(0).toObject().contains("doorLeafDirection"));
+
+    const auto loaded = layoutFromJson(json);
+    SC_EXPECT_EQ(loaded.connections.size(), std::size_t{1});
+    SC_EXPECT_TRUE(loaded.connections.front().doorLeafDirection == DoorLeafDirection::East);
+
+    auto legacyJson = json;
+    auto legacyConnections = legacyJson.value("connections").toArray();
+    auto legacyConnection = legacyConnections.at(0).toObject();
+    legacyConnection.remove("doorLeafDirection");
+    legacyConnections.replace(0, legacyConnection);
+    legacyJson["connections"] = legacyConnections;
+
+    const auto legacyLoaded = layoutFromJson(legacyJson);
+    SC_EXPECT_EQ(legacyLoaded.connections.size(), std::size_t{1});
+    SC_EXPECT_TRUE(legacyLoaded.connections.front().doorLeafDirection == DoorLeafDirection::None);
+}
+
 SC_TEST(ProjectPersistence_preservesRecommendedScenarioDraftState) {
     QTemporaryDir projectDir;
     SC_EXPECT_TRUE(projectDir.isValid());

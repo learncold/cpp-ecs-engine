@@ -52,6 +52,37 @@ LayoutPreviewSelectionState selectBarrierState(const QString& barrierId) {
     return selection;
 }
 
+safecrowd::domain::DoorLeafDirection defaultDoorLeafDirectionForSpan(
+    const safecrowd::domain::Point2D& start,
+    const safecrowd::domain::Point2D& end) {
+    if (nearlyEqual(start.x, end.x)) {
+        return safecrowd::domain::DoorLeafDirection::East;
+    }
+    if (nearlyEqual(start.y, end.y)) {
+        return safecrowd::domain::DoorLeafDirection::North;
+    }
+    return safecrowd::domain::DoorLeafDirection::None;
+}
+
+void applyDoorLeafDefault(
+    safecrowd::domain::FacilityLayout2D& layout,
+    const QString& connectionId,
+    const safecrowd::domain::LineSegment2D& span) {
+    if (connectionId.isEmpty()) {
+        return;
+    }
+
+    for (auto& connection : layout.connections) {
+        if (QString::fromStdString(connection.id) != connectionId) {
+            continue;
+        }
+        if (connection.doorLeafDirection == safecrowd::domain::DoorLeafDirection::None) {
+            connection.doorLeafDirection = defaultDoorLeafDirectionForSpan(span.start, span.end);
+        }
+        return;
+    }
+}
+
 void selectPrimaryFromLists(LayoutPreviewSelectionState& selection) {
     selection.selectedZoneId = selection.selectedZoneIds.isEmpty() ? QString{} : selection.selectedZoneIds.front();
     selection.selectedConnectionId = selection.selectedConnectionIds.isEmpty() ? QString{} : selection.selectedConnectionIds.front();
@@ -869,6 +900,9 @@ LayoutPreviewEditResult createLayoutPreviewDoorSpan(
             return {};
         }
 
+        if (options.doorCreatesLeaf) {
+            applyDoorLeafDefault(layout, *mergedConnectionId, gapSpan);
+        }
         return selectionResult(selectConnectionState(*mergedConnectionId));
     }
 
@@ -882,6 +916,9 @@ LayoutPreviewEditResult createLayoutPreviewDoorSpan(
         .effectiveWidth = openingWidth,
         .directionality = safecrowd::domain::TravelDirection::Bidirectional,
         .centerSpan = {.start = gapStart, .end = gapEnd},
+        .doorLeafDirection = options.doorCreatesLeaf
+            ? defaultDoorLeafDirectionForSpan(gapStart, gapEnd)
+            : safecrowd::domain::DoorLeafDirection::None,
     });
 
     return selectionResult(selectConnectionState(connectionId));

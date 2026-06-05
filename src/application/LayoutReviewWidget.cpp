@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QFrame>
 #include <QGridLayout>
@@ -93,6 +94,38 @@ bool isFloorElementId(const QString& elementId) {
 
 QString floorIdFromElementId(const QString& elementId) {
     return isFloorElementId(elementId) ? elementId.mid(QString("floor:").size()) : QString{};
+}
+
+const safecrowd::domain::Connection2D* findConnection(
+    const safecrowd::domain::FacilityLayout2D& layout,
+    const QString& connectionId) {
+    const auto it = std::find_if(layout.connections.begin(), layout.connections.end(), [&](const auto& connection) {
+        return QString::fromStdString(connection.id) == connectionId;
+    });
+    return it == layout.connections.end() ? nullptr : &(*it);
+}
+
+bool supportsDoorLeafDirection(const safecrowd::domain::Connection2D& connection) {
+    return connection.kind == safecrowd::domain::ConnectionKind::Doorway
+        || connection.kind == safecrowd::domain::ConnectionKind::Exit;
+}
+
+QString doorLeafDirectionLabel(safecrowd::domain::DoorLeafDirection direction) {
+    using safecrowd::domain::DoorLeafDirection;
+
+    switch (direction) {
+    case DoorLeafDirection::North:
+        return "North";
+    case DoorLeafDirection::East:
+        return "East";
+    case DoorLeafDirection::South:
+        return "South";
+    case DoorLeafDirection::West:
+        return "West";
+    case DoorLeafDirection::None:
+    default:
+        return "None";
+    }
 }
 
 bool confirmFloorDeletion(QWidget* parent, const safecrowd::domain::ImportResult& importResult, const QString& elementId) {
@@ -699,8 +732,64 @@ std::optional<std::vector<safecrowd::domain::Point2D>> LayoutReviewWidget::selec
     return std::nullopt;
 }
 
+void LayoutReviewWidget::showConnectionDoorLeafEditor(const PreviewSelection& selection) {
+    if (inspectorEditorLayout_ == nullptr
+        || inspectorEditorHost_ == nullptr
+        || !importResult_.layout.has_value()
+        || selection.kind != PreviewSelectionKind::Connection
+        || selection.id.isEmpty()) {
+        return;
+    }
+
+    const auto* connection = findConnection(*importResult_.layout, selection.id);
+    if (connection == nullptr || !supportsDoorLeafDirection(*connection)) {
+        return;
+    }
+
+    auto* editor = new QWidget(inspectorEditorHost_);
+    auto* editorLayout = new QVBoxLayout(editor);
+    editorLayout->setContentsMargins(0, 0, 0, 0);
+    editorLayout->setSpacing(8);
+
+    auto* title = new QLabel("Door Leaf", editor);
+    title->setFont(ui::font(ui::FontRole::Body));
+    editorLayout->addWidget(title);
+
+    auto* directionCombo = new QComboBox(editor);
+    const auto addDirection = [&](safecrowd::domain::DoorLeafDirection direction) {
+        directionCombo->addItem(doorLeafDirectionLabel(direction), static_cast<int>(direction));
+    };
+    addDirection(safecrowd::domain::DoorLeafDirection::None);
+    addDirection(safecrowd::domain::DoorLeafDirection::North);
+    addDirection(safecrowd::domain::DoorLeafDirection::East);
+    addDirection(safecrowd::domain::DoorLeafDirection::South);
+    addDirection(safecrowd::domain::DoorLeafDirection::West);
+    const auto currentIndex = directionCombo->findData(static_cast<int>(connection->doorLeafDirection));
+    directionCombo->setCurrentIndex(currentIndex >= 0 ? currentIndex : 0);
+    editorLayout->addWidget(directionCombo);
+
+    connect(
+        directionCombo,
+        QOverload<int>::of(&QComboBox::currentIndexChanged),
+        editor,
+        [this, selection, directionCombo](int index) {
+            if (preview_ == nullptr || directionCombo == nullptr || index < 0) {
+                return;
+            }
+
+            const auto data = directionCombo->itemData(index);
+            const auto directionValue = data.isValid()
+                ? data.toInt()
+                : static_cast<int>(safecrowd::domain::DoorLeafDirection::None);
+            const auto direction = static_cast<safecrowd::domain::DoorLeafDirection>(directionValue);
+            preview_->updateConnectionDoorLeafDirection(selection.id, direction);
+        });
+
+    inspectorEditorLayout_->addWidget(editor);
+    inspectorEditorHost_->show();
+}
+
 void LayoutReviewWidget::showVertexEditor(const PreviewSelection& selection) {
-    clearInspectorEditor();
     if (inspectorEditorLayout_ == nullptr || inspectorEditorHost_ == nullptr) {
         return;
     }
@@ -797,6 +886,7 @@ void LayoutReviewWidget::showSelectionInspector(const PreviewSelection& selectio
     if (inspectorDetailLabel_ != nullptr) {
         inspectorDetailLabel_->setText(selection.detail);
     }
+    showConnectionDoorLeafEditor(selection);
     showVertexEditor(selection);
 }
 

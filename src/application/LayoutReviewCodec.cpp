@@ -311,6 +311,7 @@ QJsonObject connectionToJson(const safecrowd::domain::Connection2D& connection) 
     object["upperEntryDirection"] = static_cast<int>(connection.upperEntryDirection);
     object["centerSpan"] = lineToJson(connection.centerSpan);
     object["provenance"] = provenanceToJson(connection.provenance);
+    object["doorLeafDirection"] = static_cast<int>(connection.doorLeafDirection);
     return object;
 }
 
@@ -333,6 +334,9 @@ safecrowd::domain::Connection2D connectionFromJson(const QJsonObject& object) {
                 static_cast<int>(safecrowd::domain::StairEntryDirection::Unspecified))),
         .centerSpan = lineFromJson(object.value("centerSpan").toObject()),
         .provenance = provenanceFromJson(object.value("provenance").toObject()),
+        .doorLeafDirection = static_cast<safecrowd::domain::DoorLeafDirection>(
+            object.value("doorLeafDirection").toInt(
+                static_cast<int>(safecrowd::domain::DoorLeafDirection::None))),
     };
 }
 

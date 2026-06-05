@@ -12,6 +12,7 @@
 #include <QLineF>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPen>
 #include <QWheelEvent>
 
@@ -20,6 +21,8 @@ namespace {
 
 const QColor kDoorStrokeColor("#ff8c00");
 const QColor kOpeningStrokeColor("#2f6fb2");
+constexpr double kPi = 3.14159265358979323846;
+constexpr double kGeometryEpsilon = 1e-6;
 
 using safecrowd::domain::matchesFloor;
 
@@ -35,6 +38,154 @@ QColor connectionStrokeColor(const safecrowd::domain::Connection2D& connection) 
         return kDoorStrokeColor;
     }
     return kOpeningStrokeColor;
+}
+
+bool canRenderDoorLeaf(const safecrowd::domain::Connection2D& connection) {
+    return connection.doorLeafDirection != safecrowd::domain::DoorLeafDirection::None
+        && !isVerticalConnection(connection)
+        && (connection.kind == safecrowd::domain::ConnectionKind::Doorway
+            || connection.kind == safecrowd::domain::ConnectionKind::Exit);
+}
+
+safecrowd::domain::Point2D doorLeafDirectionVector(safecrowd::domain::DoorLeafDirection direction) {
+    switch (direction) {
+    case safecrowd::domain::DoorLeafDirection::North:
+        return {.x = 0.0, .y = 1.0};
+    case safecrowd::domain::DoorLeafDirection::East:
+        return {.x = 1.0, .y = 0.0};
+    case safecrowd::domain::DoorLeafDirection::South:
+        return {.x = 0.0, .y = -1.0};
+    case safecrowd::domain::DoorLeafDirection::West:
+        return {.x = -1.0, .y = 0.0};
+    case safecrowd::domain::DoorLeafDirection::None:
+        break;
+    }
+    return {};
+}
+
+double pointDistance(const safecrowd::domain::Point2D& lhs, const safecrowd::domain::Point2D& rhs) {
+    return std::hypot(lhs.x - rhs.x, lhs.y - rhs.y);
+}
+
+double normalizedAngleDelta(double delta) {
+    while (delta > kPi) {
+        delta -= 2.0 * kPi;
+    }
+    while (delta < -kPi) {
+        delta += 2.0 * kPi;
+    }
+    return delta;
+}
+
+double angleFrom(
+    const safecrowd::domain::Point2D& origin,
+    const safecrowd::domain::Point2D& point) {
+    return std::atan2(point.y - origin.y, point.x - origin.x);
+}
+
+struct DoorLeafGeometry {
+    safecrowd::domain::Point2D hinge{};
+    safecrowd::domain::Point2D closed{};
+    safecrowd::domain::Point2D open{};
+    double radius{0.0};
+};
+
+std::optional<DoorLeafGeometry> doorLeafGeometry(const safecrowd::domain::Connection2D& connection) {
+    if (!canRenderDoorLeaf(connection)) {
+        return std::nullopt;
+    }
+
+    const auto radius = pointDistance(connection.centerSpan.start, connection.centerSpan.end);
+    if (radius <= kGeometryEpsilon) {
+        return std::nullopt;
+    }
+
+    const auto direction = doorLeafDirectionVector(connection.doorLeafDirection);
+    if (std::abs(direction.x) <= kGeometryEpsilon && std::abs(direction.y) <= kGeometryEpsilon) {
+        return std::nullopt;
+    }
+
+    const auto makeCandidate = [&](const safecrowd::domain::Point2D& hinge, const safecrowd::domain::Point2D& closed) {
+        return DoorLeafGeometry{
+            .hinge = hinge,
+            .closed = closed,
+            .open = {.x = hinge.x + direction.x * radius, .y = hinge.y + direction.y * radius},
+            .radius = radius,
+        };
+    };
+
+    const auto startHinge = makeCandidate(connection.centerSpan.start, connection.centerSpan.end);
+    const auto endHinge = makeCandidate(connection.centerSpan.end, connection.centerSpan.start);
+    const auto sweepMagnitude = [](const DoorLeafGeometry& geometry) {
+        return std::abs(normalizedAngleDelta(
+            angleFrom(geometry.hinge, geometry.open) - angleFrom(geometry.hinge, geometry.closed)));
+    };
+
+    const auto startSweep = sweepMagnitude(startHinge);
+    const auto endSweep = sweepMagnitude(endHinge);
+    constexpr double kMinimumVisibleSweep = 0.02;
+    if (startSweep <= kMinimumVisibleSweep && endSweep > kMinimumVisibleSweep) {
+        return endHinge;
+    }
+    return startHinge;
+}
+
+void includeDoorLeafBounds(LayoutCanvasBounds& bounds, const safecrowd::domain::Connection2D& connection) {
+    const auto geometry = doorLeafGeometry(connection);
+    if (!geometry.has_value()) {
+        return;
+    }
+
+    includeLayoutCanvasPoint(bounds, {.x = geometry->hinge.x - geometry->radius, .y = geometry->hinge.y - geometry->radius});
+    includeLayoutCanvasPoint(bounds, {.x = geometry->hinge.x + geometry->radius, .y = geometry->hinge.y + geometry->radius});
+}
+
+void drawDoorLeaf(
+    QPainter& painter,
+    const safecrowd::domain::Connection2D& connection,
+    const LayoutCanvasTransform& transform) {
+    const auto geometry = doorLeafGeometry(connection);
+    if (!geometry.has_value()) {
+        return;
+    }
+
+    const auto hinge = transform.map(geometry->hinge);
+    const auto closed = transform.map(geometry->closed);
+    const auto open = transform.map(geometry->open);
+    const auto radius = QLineF(hinge, closed).length();
+    if (radius <= 1.0) {
+        return;
+    }
+
+    const auto startAngle = std::atan2(closed.y() - hinge.y(), closed.x() - hinge.x());
+    const auto endAngle = std::atan2(open.y() - hinge.y(), open.x() - hinge.x());
+    const auto sweep = normalizedAngleDelta(endAngle - startAngle);
+    if (std::abs(sweep) <= 0.02) {
+        return;
+    }
+
+    QPainterPath arcPath;
+    arcPath.moveTo(closed);
+    const auto steps = std::clamp(static_cast<int>(std::ceil(std::abs(sweep) / (kPi / 24.0))), 8, 48);
+    for (int step = 1; step <= steps; ++step) {
+        const auto ratio = static_cast<double>(step) / static_cast<double>(steps);
+        const auto angle = startAngle + sweep * ratio;
+        arcPath.lineTo(hinge + QPointF(std::cos(angle) * radius, std::sin(angle) * radius));
+    }
+
+    QColor arcColor = kDoorStrokeColor;
+    arcColor.setAlpha(190);
+    QColor guideColor = kDoorStrokeColor;
+    guideColor.setAlpha(96);
+
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setBrush(Qt::NoBrush);
+    painter.setPen(QPen(guideColor, 1.1, Qt::DotLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.drawLine(hinge, open);
+    painter.setPen(QPen(arcColor, 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.drawPath(arcPath);
+    painter.restore();
 }
 
 const safecrowd::domain::Zone2D* findZone(
@@ -551,6 +702,7 @@ std::optional<LayoutCanvasBounds> collectLayoutCanvasBounds(const safecrowd::dom
     }
     for (const auto& connection : layout.connections) {
         includeLayoutCanvasLine(bounds, connection.centerSpan);
+        includeDoorLeafBounds(bounds, connection);
     }
 
     if (!bounds.valid()) {
@@ -597,6 +749,7 @@ std::optional<LayoutCanvasBounds> collectLayoutCanvasBounds(const safecrowd::dom
     for (const auto& connection : layout.connections) {
         if (matchesFloor(connection.floorId, floorId)) {
             includeLayoutCanvasLine(bounds, connection.centerSpan);
+            includeDoorLeafBounds(bounds, connection);
         }
     }
 
@@ -628,6 +781,7 @@ std::optional<LayoutCanvasBounds> collectLayoutCanvasBounds(const safecrowd::dom
         }
         for (const auto& connection : importResult.layout->connections) {
             includeLayoutCanvasLine(bounds, connection.centerSpan);
+            includeDoorLeafBounds(bounds, connection);
         }
     }
 
@@ -786,6 +940,10 @@ void drawFacilityLayoutCanvas(QPainter& painter, const safecrowd::domain::Facili
     }
 
     for (const auto& connection : layout.connections) {
+        drawDoorLeaf(painter, connection, transform);
+    }
+
+    for (const auto& connection : layout.connections) {
         if (const auto view = stairFloorView(layout, connection, std::string{}); view.has_value()) {
             drawStairEntryOverlay(painter, *view, transform);
         }
@@ -826,6 +984,12 @@ void drawFacilityLayoutCanvas(
             && matchesFloor(connection.floorId, floorId)) {
             painter.setPen(QPen(connectionStrokeColor(connection), 3.0));
             drawLayoutCanvasLine(painter, connection.centerSpan, transform);
+        }
+    }
+
+    for (const auto& connection : layout.connections) {
+        if (matchesFloor(connection.floorId, floorId)) {
+            drawDoorLeaf(painter, connection, transform);
         }
     }
 

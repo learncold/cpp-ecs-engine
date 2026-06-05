@@ -40,6 +40,14 @@ enum class StairEntryDirection {
     West,
 };
 
+enum class DoorLeafDirection {
+    None,
+    North,
+    East,
+    South,
+    West,
+};
+
 enum class ControlKind {
     Unknown,
     Gate,
@@ -85,6 +93,7 @@ struct Connection2D {
     StairEntryDirection upperEntryDirection{StairEntryDirection::Unspecified};
     LineSegment2D centerSpan{};
     ElementProvenance provenance{};
+    DoorLeafDirection doorLeafDirection{DoorLeafDirection::None};
 };
 
 struct Barrier2D {

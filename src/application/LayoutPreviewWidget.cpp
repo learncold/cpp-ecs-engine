@@ -307,6 +307,24 @@ QString connectionKindLabel(safecrowd::domain::ConnectionKind kind) {
     }
 }
 
+QString doorLeafDirectionLabel(safecrowd::domain::DoorLeafDirection direction) {
+    using safecrowd::domain::DoorLeafDirection;
+
+    switch (direction) {
+    case DoorLeafDirection::North:
+        return "North";
+    case DoorLeafDirection::East:
+        return "East";
+    case DoorLeafDirection::South:
+        return "South";
+    case DoorLeafDirection::West:
+        return "West";
+    case DoorLeafDirection::None:
+    default:
+        return "None";
+    }
+}
+
 safecrowd::domain::Point2D polygonAnchor(const safecrowd::domain::Polygon2D& polygon) {
     const auto bounds = polygonBounds(polygon);
     if (!bounds.valid()) {
@@ -527,12 +545,13 @@ QString connectionDetail(const safecrowd::domain::Connection2D& connection) {
     const auto widthText = connection.effectiveWidth > 0.0
         ? QString::number(connection.effectiveWidth, 'f', 2)
         : QString("n/a");
-    return QString("Kind: %1\nFrom: %2\nTo: %3\nWidth: %4")
+    return QString("Kind: %1\nFrom: %2\nTo: %3\nWidth: %4\nDoor leaf: %5")
         .arg(
             connectionKindLabel(connection.kind),
             QString::fromStdString(connection.fromZoneId),
             QString::fromStdString(connection.toZoneId),
-            widthText);
+            widthText,
+            doorLeafDirectionLabel(connection.doorLeafDirection));
 }
 
 double distanceBetweenScreenPoints(const QPointF& lhs, const QPointF& rhs) {
@@ -1187,6 +1206,31 @@ bool LayoutPreviewWidget::updateElementVertices(
     notifyLayoutEdited();
     update();
     return true;
+}
+
+bool LayoutPreviewWidget::updateConnectionDoorLeafDirection(
+    const QString& connectionId,
+    safecrowd::domain::DoorLeafDirection direction) {
+    if (!importResult_.layout.has_value() || connectionId.isEmpty()) {
+        return false;
+    }
+
+    for (auto& connection : importResult_.layout->connections) {
+        if (QString::fromStdString(connection.id) != connectionId) {
+            continue;
+        }
+        if (connection.doorLeafDirection == direction) {
+            return false;
+        }
+
+        connection.doorLeafDirection = direction;
+        emitCurrentSelection();
+        notifyLayoutEdited();
+        update();
+        return true;
+    }
+
+    return false;
 }
 
 bool LayoutPreviewWidget::eventFilter(QObject* watched, QEvent* event) {

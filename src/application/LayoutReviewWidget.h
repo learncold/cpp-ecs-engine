@@ -51,6 +51,7 @@ private:
     void showIssueInspector(const safecrowd::domain::ImportIssue& issue);
     void showSelectionInspector(const PreviewSelection& selection);
     void clearInspectorEditor();
+    void showConnectionDoorLeafEditor(const PreviewSelection& selection);
     void showVertexEditor(const PreviewSelection& selection);
     std::optional<std::vector<safecrowd::domain::Point2D>> selectionVertices(const PreviewSelection& selection) const;
     void updateValidatedIssues();

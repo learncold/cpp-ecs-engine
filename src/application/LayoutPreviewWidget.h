@@ -66,6 +66,9 @@ public:
         PreviewSelectionKind kind,
         const QString& elementId,
         const std::vector<safecrowd::domain::Point2D>& vertices);
+    bool updateConnectionDoorLeafDirection(
+        const QString& connectionId,
+        safecrowd::domain::DoorLeafDirection direction);
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
