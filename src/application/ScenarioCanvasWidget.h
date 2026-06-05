@@ -172,6 +172,7 @@ private:
     bool tryMoveEnvironmentHazard(std::size_t index, const QPointF& position, QString* errorMessage);
     bool tryMoveRouteGuidance(std::size_t index, const QPointF& position, QString* errorMessage);
     void openRouteGuidanceEditor(const QString& guidanceId, const QPoint& screenPosition);
+    void openEnvironmentHazardContextMenu(const QString& hazardId, const QPoint& screenPosition);
     void selectSingleAt(const QPointF& position, const LayoutCanvasTransform& transform);
     void selectPlacementsInRect(const QRectF& screenRect, const LayoutCanvasTransform& transform);
     void selectLayoutElementAt(const QPointF& position);

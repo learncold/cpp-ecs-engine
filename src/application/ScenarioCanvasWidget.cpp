@@ -1558,6 +1558,20 @@ void ScenarioCanvasWidget::mousePressEvent(QMouseEvent* event) {
                 event->accept();
                 return;
             }
+
+            const auto hoveredHazard = hoveredEnvironmentHazardIndex(
+                layout_,
+                environmentHazards_,
+                transform,
+                currentFloorId_,
+                event->position());
+            if (hoveredHazard.has_value()) {
+                openEnvironmentHazardContextMenu(
+                    QString::fromStdString(environmentHazards_[*hoveredHazard].id),
+                    event->globalPosition().toPoint());
+                event->accept();
+                return;
+            }
         }
 
         const auto point = unmapPoint(event->position());
@@ -3229,6 +3243,15 @@ void ScenarioCanvasWidget::openRouteGuidanceEditor(const QString& guidanceId, co
     *it = dialog.guidance();
     emitRouteGuidancesChanged();
     update();
+}
+
+void ScenarioCanvasWidget::openEnvironmentHazardContextMenu(const QString& hazardId, const QPoint& screenPosition) {
+    QMenu menu(this);
+    auto* deleteAction = menu.addAction("Delete");
+    const auto* selectedAction = menu.exec(screenPosition);
+    if (selectedAction == deleteAction) {
+        deleteEnvironmentHazardById(hazardId);
+    }
 }
 
 bool ScenarioCanvasWidget::editOccupantSourceById(const QString& sourceId, const QPoint& screenPosition) {
