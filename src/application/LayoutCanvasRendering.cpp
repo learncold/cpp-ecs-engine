@@ -198,7 +198,7 @@ void drawDoorLeaf(
     painter.save();
     painter.setRenderHint(QPainter::Antialiasing, true);
     painter.setBrush(Qt::NoBrush);
-    painter.setPen(QPen(guideColor, 1.1, Qt::DotLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.setPen(QPen(guideColor, 1.1, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
     painter.drawLine(hinge, open);
     painter.setPen(QPen(arcColor, 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
     painter.drawPath(arcPath);
