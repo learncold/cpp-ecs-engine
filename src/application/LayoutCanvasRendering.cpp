@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 #include <QColor>
 #include <QEvent>
@@ -47,22 +48,6 @@ bool canRenderDoorLeaf(const safecrowd::domain::Connection2D& connection) {
             || connection.kind == safecrowd::domain::ConnectionKind::Exit);
 }
 
-safecrowd::domain::Point2D doorLeafDirectionVector(safecrowd::domain::DoorLeafDirection direction) {
-    switch (direction) {
-    case safecrowd::domain::DoorLeafDirection::North:
-        return {.x = 0.0, .y = 1.0};
-    case safecrowd::domain::DoorLeafDirection::East:
-        return {.x = 1.0, .y = 0.0};
-    case safecrowd::domain::DoorLeafDirection::South:
-        return {.x = 0.0, .y = -1.0};
-    case safecrowd::domain::DoorLeafDirection::West:
-        return {.x = -1.0, .y = 0.0};
-    case safecrowd::domain::DoorLeafDirection::None:
-        break;
-    }
-    return {};
-}
-
 double pointDistance(const safecrowd::domain::Point2D& lhs, const safecrowd::domain::Point2D& rhs) {
     return std::hypot(lhs.x - rhs.x, lhs.y - rhs.y);
 }
@@ -77,12 +62,6 @@ double normalizedAngleDelta(double delta) {
     return delta;
 }
 
-double angleFrom(
-    const safecrowd::domain::Point2D& origin,
-    const safecrowd::domain::Point2D& point) {
-    return std::atan2(point.y - origin.y, point.x - origin.x);
-}
-
 struct DoorLeafGeometry {
     safecrowd::domain::Point2D hinge{};
     safecrowd::domain::Point2D closed{};
@@ -90,44 +69,82 @@ struct DoorLeafGeometry {
     double radius{0.0};
 };
 
+struct DoorLeafBaseGeometry {
+    safecrowd::domain::Point2D left{};
+    safecrowd::domain::Point2D right{};
+    safecrowd::domain::Point2D upperNormal{};
+    double radius{0.0};
+};
+
+std::optional<DoorLeafBaseGeometry> doorLeafBaseGeometry(const safecrowd::domain::LineSegment2D& span) {
+    auto left = span.start;
+    auto right = span.end;
+    const auto dx = right.x - left.x;
+    const auto dy = right.y - left.y;
+    const auto nearlySame = [](double lhs, double rhs) {
+        return std::abs(lhs - rhs) <= kGeometryEpsilon;
+    };
+    if (std::abs(dx) >= std::abs(dy)) {
+        if (right.x < left.x || (nearlySame(right.x, left.x) && right.y < left.y)) {
+            std::swap(left, right);
+        }
+    } else if (right.y < left.y || (nearlySame(right.y, left.y) && right.x < left.x)) {
+        std::swap(left, right);
+    }
+
+    const auto radius = pointDistance(left, right);
+    if (radius <= kGeometryEpsilon) {
+        return std::nullopt;
+    }
+
+    const auto tangentX = (right.x - left.x) / radius;
+    const auto tangentY = (right.y - left.y) / radius;
+    return DoorLeafBaseGeometry{
+        .left = left,
+        .right = right,
+        .upperNormal = {.x = -tangentY, .y = tangentX},
+        .radius = radius,
+    };
+}
+
 std::optional<DoorLeafGeometry> doorLeafGeometry(const safecrowd::domain::Connection2D& connection) {
     if (!canRenderDoorLeaf(connection)) {
         return std::nullopt;
     }
 
-    const auto radius = pointDistance(connection.centerSpan.start, connection.centerSpan.end);
-    if (radius <= kGeometryEpsilon) {
+    const auto base = doorLeafBaseGeometry(connection.centerSpan);
+    if (!base.has_value()) {
         return std::nullopt;
     }
 
-    const auto direction = doorLeafDirectionVector(connection.doorLeafDirection);
-    if (std::abs(direction.x) <= kGeometryEpsilon && std::abs(direction.y) <= kGeometryEpsilon) {
-        return std::nullopt;
-    }
-
-    const auto makeCandidate = [&](const safecrowd::domain::Point2D& hinge, const safecrowd::domain::Point2D& closed) {
+    const auto makeGeometry = [&](
+        const safecrowd::domain::Point2D& hinge,
+        const safecrowd::domain::Point2D& closed,
+        double normalSign) {
         return DoorLeafGeometry{
             .hinge = hinge,
             .closed = closed,
-            .open = {.x = hinge.x + direction.x * radius, .y = hinge.y + direction.y * radius},
-            .radius = radius,
+            .open = {
+                .x = hinge.x + base->upperNormal.x * normalSign * base->radius,
+                .y = hinge.y + base->upperNormal.y * normalSign * base->radius,
+            },
+            .radius = base->radius,
         };
     };
 
-    const auto startHinge = makeCandidate(connection.centerSpan.start, connection.centerSpan.end);
-    const auto endHinge = makeCandidate(connection.centerSpan.end, connection.centerSpan.start);
-    const auto sweepMagnitude = [](const DoorLeafGeometry& geometry) {
-        return std::abs(normalizedAngleDelta(
-            angleFrom(geometry.hinge, geometry.open) - angleFrom(geometry.hinge, geometry.closed)));
-    };
-
-    const auto startSweep = sweepMagnitude(startHinge);
-    const auto endSweep = sweepMagnitude(endHinge);
-    constexpr double kMinimumVisibleSweep = 0.02;
-    if (startSweep <= kMinimumVisibleSweep && endSweep > kMinimumVisibleSweep) {
-        return endHinge;
+    switch (connection.doorLeafDirection) {
+    case safecrowd::domain::DoorLeafDirection::LeftUpper:
+        return makeGeometry(base->left, base->right, 1.0);
+    case safecrowd::domain::DoorLeafDirection::LeftLower:
+        return makeGeometry(base->left, base->right, -1.0);
+    case safecrowd::domain::DoorLeafDirection::RightUpper:
+        return makeGeometry(base->right, base->left, 1.0);
+    case safecrowd::domain::DoorLeafDirection::RightLower:
+        return makeGeometry(base->right, base->left, -1.0);
+    case safecrowd::domain::DoorLeafDirection::None:
+        break;
     }
-    return startHinge;
+    return std::nullopt;
 }
 
 void includeDoorLeafBounds(LayoutCanvasBounds& bounds, const safecrowd::domain::Connection2D& connection) {

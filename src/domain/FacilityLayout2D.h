@@ -41,11 +41,11 @@ enum class StairEntryDirection {
 };
 
 enum class DoorLeafDirection {
-    None,
-    North,
-    East,
-    South,
-    West,
+    None = 0,
+    LeftUpper = 1,
+    RightUpper = 2,
+    LeftLower = 3,
+    RightLower = 4,
 };
 
 enum class ControlKind {

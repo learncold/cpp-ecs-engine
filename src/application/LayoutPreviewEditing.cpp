@@ -55,13 +55,10 @@ LayoutPreviewSelectionState selectBarrierState(const QString& barrierId) {
 safecrowd::domain::DoorLeafDirection defaultDoorLeafDirectionForSpan(
     const safecrowd::domain::Point2D& start,
     const safecrowd::domain::Point2D& end) {
-    if (nearlyEqual(start.x, end.x)) {
-        return safecrowd::domain::DoorLeafDirection::East;
+    if (nearlyEqual(start.x, end.x) && nearlyEqual(start.y, end.y)) {
+        return safecrowd::domain::DoorLeafDirection::None;
     }
-    if (nearlyEqual(start.y, end.y)) {
-        return safecrowd::domain::DoorLeafDirection::North;
-    }
-    return safecrowd::domain::DoorLeafDirection::None;
+    return safecrowd::domain::DoorLeafDirection::LeftUpper;
 }
 
 void applyDoorLeafDefault(

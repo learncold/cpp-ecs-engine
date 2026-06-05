@@ -311,14 +311,14 @@ QString doorLeafDirectionLabel(safecrowd::domain::DoorLeafDirection direction) {
     using safecrowd::domain::DoorLeafDirection;
 
     switch (direction) {
-    case DoorLeafDirection::North:
-        return "North";
-    case DoorLeafDirection::East:
-        return "East";
-    case DoorLeafDirection::South:
-        return "South";
-    case DoorLeafDirection::West:
-        return "West";
+    case DoorLeafDirection::LeftUpper:
+        return "Left hinge / Upper arc";
+    case DoorLeafDirection::LeftLower:
+        return "Left hinge / Lower arc";
+    case DoorLeafDirection::RightUpper:
+        return "Right hinge / Upper arc";
+    case DoorLeafDirection::RightLower:
+        return "Right hinge / Lower arc";
     case DoorLeafDirection::None:
     default:
         return "None";

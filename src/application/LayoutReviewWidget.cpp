@@ -114,14 +114,14 @@ QString doorLeafDirectionLabel(safecrowd::domain::DoorLeafDirection direction) {
     using safecrowd::domain::DoorLeafDirection;
 
     switch (direction) {
-    case DoorLeafDirection::North:
-        return "North";
-    case DoorLeafDirection::East:
-        return "East";
-    case DoorLeafDirection::South:
-        return "South";
-    case DoorLeafDirection::West:
-        return "West";
+    case DoorLeafDirection::LeftUpper:
+        return "Left hinge / Upper arc";
+    case DoorLeafDirection::LeftLower:
+        return "Left hinge / Lower arc";
+    case DoorLeafDirection::RightUpper:
+        return "Right hinge / Upper arc";
+    case DoorLeafDirection::RightLower:
+        return "Right hinge / Lower arc";
     case DoorLeafDirection::None:
     default:
         return "None";
@@ -760,10 +760,10 @@ void LayoutReviewWidget::showConnectionDoorLeafEditor(const PreviewSelection& se
         directionCombo->addItem(doorLeafDirectionLabel(direction), static_cast<int>(direction));
     };
     addDirection(safecrowd::domain::DoorLeafDirection::None);
-    addDirection(safecrowd::domain::DoorLeafDirection::North);
-    addDirection(safecrowd::domain::DoorLeafDirection::East);
-    addDirection(safecrowd::domain::DoorLeafDirection::South);
-    addDirection(safecrowd::domain::DoorLeafDirection::West);
+    addDirection(safecrowd::domain::DoorLeafDirection::LeftUpper);
+    addDirection(safecrowd::domain::DoorLeafDirection::LeftLower);
+    addDirection(safecrowd::domain::DoorLeafDirection::RightUpper);
+    addDirection(safecrowd::domain::DoorLeafDirection::RightLower);
     const auto currentIndex = directionCombo->findData(static_cast<int>(connection->doorLeafDirection));
     directionCombo->setCurrentIndex(currentIndex >= 0 ? currentIndex : 0);
     editorLayout->addWidget(directionCombo);

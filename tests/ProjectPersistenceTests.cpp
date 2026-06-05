@@ -77,7 +77,7 @@ SC_TEST(LayoutReviewCodec_preservesDoorLeafDirectionAndDefaultsLegacyConnections
         .effectiveWidth = 1.2,
         .directionality = TravelDirection::Bidirectional,
         .centerSpan = {.start = {.x = 4.0, .y = 1.4}, .end = {.x = 4.0, .y = 2.6}},
-        .doorLeafDirection = DoorLeafDirection::East,
+        .doorLeafDirection = DoorLeafDirection::RightUpper,
     });
 
     const auto json = layoutToJson(layout);
@@ -85,7 +85,7 @@ SC_TEST(LayoutReviewCodec_preservesDoorLeafDirectionAndDefaultsLegacyConnections
 
     const auto loaded = layoutFromJson(json);
     SC_EXPECT_EQ(loaded.connections.size(), std::size_t{1});
-    SC_EXPECT_TRUE(loaded.connections.front().doorLeafDirection == DoorLeafDirection::East);
+    SC_EXPECT_TRUE(loaded.connections.front().doorLeafDirection == DoorLeafDirection::RightUpper);
 
     auto legacyJson = json;
     auto legacyConnections = legacyJson.value("connections").toArray();

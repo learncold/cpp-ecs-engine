@@ -315,6 +315,20 @@ QJsonObject connectionToJson(const safecrowd::domain::Connection2D& connection) 
     return object;
 }
 
+safecrowd::domain::DoorLeafDirection doorLeafDirectionFromJson(const QJsonObject& object) {
+    const auto direction = static_cast<safecrowd::domain::DoorLeafDirection>(
+        object.value("doorLeafDirection").toInt(static_cast<int>(safecrowd::domain::DoorLeafDirection::None)));
+    switch (direction) {
+    case safecrowd::domain::DoorLeafDirection::None:
+    case safecrowd::domain::DoorLeafDirection::LeftUpper:
+    case safecrowd::domain::DoorLeafDirection::RightUpper:
+    case safecrowd::domain::DoorLeafDirection::LeftLower:
+    case safecrowd::domain::DoorLeafDirection::RightLower:
+        return direction;
+    }
+    return safecrowd::domain::DoorLeafDirection::None;
+}
+
 safecrowd::domain::Connection2D connectionFromJson(const QJsonObject& object) {
     return {
         .id = object.value("id").toString().toStdString(),
@@ -334,9 +348,7 @@ safecrowd::domain::Connection2D connectionFromJson(const QJsonObject& object) {
                 static_cast<int>(safecrowd::domain::StairEntryDirection::Unspecified))),
         .centerSpan = lineFromJson(object.value("centerSpan").toObject()),
         .provenance = provenanceFromJson(object.value("provenance").toObject()),
-        .doorLeafDirection = static_cast<safecrowd::domain::DoorLeafDirection>(
-            object.value("doorLeafDirection").toInt(
-                static_cast<int>(safecrowd::domain::DoorLeafDirection::None))),
+        .doorLeafDirection = doorLeafDirectionFromJson(object),
     };
 }
 
