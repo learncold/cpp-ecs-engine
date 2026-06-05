@@ -1027,7 +1027,7 @@ ScenarioResultNavigationView resultNavigationViewFromSaved(SavedResultNavigation
     case SavedResultNavigationView::Hotspot:
         return ScenarioResultNavigationView::Hotspot;
     case SavedResultNavigationView::HazardExposure:
-        return ScenarioResultNavigationView::HazardExposure;
+        return ScenarioResultNavigationView::Bottleneck;
     case SavedResultNavigationView::Zone:
         return ScenarioResultNavigationView::Zone;
     case SavedResultNavigationView::Groups:
@@ -1047,7 +1047,7 @@ SavedResultNavigationView savedResultNavigationView(ScenarioResultNavigationView
     case ScenarioResultNavigationView::Hotspot:
         return SavedResultNavigationView::Hotspot;
     case ScenarioResultNavigationView::HazardExposure:
-        return SavedResultNavigationView::HazardExposure;
+        return SavedResultNavigationView::Bottleneck;
     case ScenarioResultNavigationView::Zone:
         return SavedResultNavigationView::Zone;
     case ScenarioResultNavigationView::Groups:
@@ -1242,7 +1242,7 @@ QWidget* ScenarioBatchResultWidget::createCanvasPanel() {
     auto* tabs = new QTabWidget(graphPanel);
     remainingChart_ = new ComparisonGraphWidget(ComparisonGraphMode::Remaining, tabs);
     exitsChart_ = new ComparisonGraphWidget(ComparisonGraphMode::Exits, tabs);
-    exposureTable_ = createComparisonTable({"Scenario", "Total", "Fire", "Smoke", "Peak", "Peak at"}, tabs);
+    exposureTable_ = nullptr;
     pressureTable_ = createComparisonTable({"Scenario", "Peak score", "Exposed / Critical", "Hotspots", "Events", "Peak at"}, tabs);
     static_cast<ComparisonGraphWidget*>(remainingChart_)->setResults(results_, selectedCompareIndices_, currentResultIndex_);
     static_cast<ComparisonGraphWidget*>(exitsChart_)->setResults(results_, selectedCompareIndices_, currentResultIndex_);
@@ -1264,7 +1264,6 @@ QWidget* ScenarioBatchResultWidget::createCanvasPanel() {
     });
     tabs->addTab(remainingChart_, "Remaining");
     tabs->addTab(exitsChart_, "Exits");
-    tabs->addTab(exposureTable_, "Exposure");
     tabs->addTab(pressureTable_, "Pressure");
     graphLayout->addWidget(tabs, 1);
     layout->addWidget(graphPanel, 1);

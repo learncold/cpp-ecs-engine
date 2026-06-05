@@ -602,11 +602,6 @@ std::vector<WorkspaceNavigationTab> scenarioResultNavigationTabs() {
             .icon = makeResultNavigationIcon("hotspot", QColor("#1f5fae")),
         },
         {
-            .id = "exposure",
-            .label = "Exposure",
-            .icon = makeResultNavigationIcon("exposure", QColor("#1f5fae")),
-        },
-        {
             .id = "zone",
             .label = "Zone",
             .icon = makeResultNavigationIcon("zone", QColor("#1f5fae")),
@@ -631,7 +626,7 @@ QString scenarioResultNavigationTabId(ScenarioResultNavigationView view) {
     case ScenarioResultNavigationView::Hotspot:
         return "hotspot";
     case ScenarioResultNavigationView::HazardExposure:
-        return "exposure";
+        return "bottleneck";
     case ScenarioResultNavigationView::Zone:
         return "zone";
     case ScenarioResultNavigationView::Groups:
@@ -652,7 +647,7 @@ ScenarioResultNavigationView scenarioResultNavigationViewFromTabId(const QString
         return ScenarioResultNavigationView::Hotspot;
     }
     if (tabId == "exposure") {
-        return ScenarioResultNavigationView::HazardExposure;
+        return ScenarioResultNavigationView::Bottleneck;
     }
     if (tabId == "zone") {
         return ScenarioResultNavigationView::Zone;
