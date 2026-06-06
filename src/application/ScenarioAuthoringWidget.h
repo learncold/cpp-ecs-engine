@@ -107,6 +107,7 @@ private:
     void addEventDraft(const QString& name, const QString& trigger, const QString& target);
     void createScenarioFromCurrent();
     void createScenarioWithName(const QString& name, int sourceIndex);
+    void deleteCurrentScenario();
     void ensureInitialScenarioPrompt();
     void refreshCanvas();
     void refreshInspector();
@@ -147,6 +148,7 @@ private:
     bool restoreCrowdPlacementHistoryEntry(const CrowdPlacementHistoryEntry& entry);
     ScenarioState* currentScenario();
     const ScenarioState* currentScenario() const;
+    std::string nextScenarioId() const;
     std::vector<safecrowd::domain::ScenarioDraft> stagedRunnableScenarios() const;
 
     enum class InspectorSelectionKind {

@@ -68,6 +68,33 @@ struct ScenarioRiskMetricsResource {
     ScenarioRiskSnapshot peakSnapshot{};
 };
 
+struct ScenarioHotspotTrackingState {
+    ScenarioCongestionHotspot peakMetric{};
+    bool hasPeakMetric{false};
+};
+
+struct ScenarioHotspotTrackingResource {
+    std::unordered_map<std::string, ScenarioHotspotTrackingState> peaksByCellKey{};
+};
+
+struct ScenarioPressureHotspotTrackingState {
+    ScenarioPressureHotspot peakMetric{};
+    bool hasPeakMetric{false};
+};
+
+struct ScenarioPressureHotspotTrackingResource {
+    std::unordered_map<std::string, ScenarioPressureHotspotTrackingState> peaksByCellKey{};
+};
+
+struct ScenarioBottleneckTrackingState {
+    ScenarioBottleneckMetric peakMetric{};
+    bool hasPeakMetric{false};
+};
+
+struct ScenarioBottleneckTrackingResource {
+    std::unordered_map<std::string, ScenarioBottleneckTrackingState> peaksByConnectionId{};
+};
+
 struct ScenarioPressureFeedbackAgentState {
     std::uint64_t agentId{0};
     Point2D position{};
@@ -147,6 +174,15 @@ struct ScenarioCrossFlowCellState {
 struct ScenarioCrossFlowResource {
     double totalCrossFlowExposureAgentSeconds{0.0};
     std::unordered_map<long long, ScenarioCrossFlowCellState> activeCellsByAddress{};
+};
+
+struct ScenarioCrossFlowTrackingState {
+    ScenarioCrossFlowCellMetric peakMetric{};
+    bool hasPeakMetric{false};
+};
+
+struct ScenarioCrossFlowTrackingResource {
+    std::unordered_map<std::string, ScenarioCrossFlowTrackingState> peaksByCellKey{};
 };
 
 struct ScenarioResultArtifactsResource {

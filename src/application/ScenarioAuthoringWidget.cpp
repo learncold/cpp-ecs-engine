@@ -59,7 +59,7 @@ QLabel* createLabel(const QString& text, QWidget* parent, ui::FontRole role = ui
     return label;
 }
 
-bool operationalEventHistoryShortcutBlockedByTextInput() {
+bool authoringShortcutBlockedByTextInput() {
     auto* focused = QApplication::focusWidget();
     return qobject_cast<QLineEdit*>(focused) != nullptr
         || qobject_cast<QPlainTextEdit*>(focused) != nullptr;
@@ -1832,14 +1832,20 @@ void ScenarioAuthoringWidget::initializeUi(bool promptForScenario) {
 
     auto* undoShortcut = new QShortcut(QKeySequence::Undo, this);
     connect(undoShortcut, &QShortcut::activated, this, [this]() {
-        if (!operationalEventHistoryShortcutBlockedByTextInput()) {
+        if (!authoringShortcutBlockedByTextInput()) {
             undoLastScenarioAuthoringEdit();
         }
     });
     auto* redoShortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+Z")), this);
     connect(redoShortcut, &QShortcut::activated, this, [this]() {
-        if (!operationalEventHistoryShortcutBlockedByTextInput()) {
+        if (!authoringShortcutBlockedByTextInput()) {
             redoLastScenarioAuthoringEdit();
+        }
+    });
+    auto* deleteScenarioShortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl+Delete")), this);
+    connect(deleteScenarioShortcut, &QShortcut::activated, this, [this]() {
+        if (!authoringShortcutBlockedByTextInput()) {
+            deleteCurrentScenario();
         }
     });
 
@@ -2271,7 +2277,7 @@ void ScenarioAuthoringWidget::createScenarioWithName(const QString& name, int so
         return;
     }
 
-    const auto newScenarioId = QString("scenario-%1").arg(scenarios_.size() + 1).toStdString();
+    const auto newScenarioId = nextScenarioId();
     ScenarioState scenario;
     if (sourceIndex >= 0 && sourceIndex < static_cast<int>(scenarios_.size())) {
         const auto& source = scenarios_[sourceIndex];
@@ -2300,6 +2306,42 @@ void ScenarioAuthoringWidget::createScenarioWithName(const QString& name, int so
     selectedCrowdElementId_.clear();
     setInspectorSelectionNone();
     recomputeVariationDiffKeysIfAlternative(scenarios_.back());
+    refreshScenarioSwitcher();
+    refreshCanvas();
+    refreshNavigationPanel();
+    refreshInspector();
+}
+
+void ScenarioAuthoringWidget::deleteCurrentScenario() {
+    if (currentScenarioIndex_ < 0 || currentScenarioIndex_ >= static_cast<int>(scenarios_.size())) {
+        return;
+    }
+
+    const auto deletedIndex = currentScenarioIndex_;
+    const auto deletedScenarioId = QString::fromStdString(scenarios_[static_cast<std::size_t>(deletedIndex)].draft.scenarioId);
+
+    scenarios_.erase(scenarios_.begin() + deletedIndex);
+    scenarioHistories_.erase(
+        std::remove_if(scenarioHistories_.begin(), scenarioHistories_.end(), [&](const auto& history) {
+            return history.scenarioId == deletedScenarioId;
+        }),
+        scenarioHistories_.end());
+
+    for (auto& scenario : scenarios_) {
+        if (scenario.baseScenarioId == deletedScenarioId) {
+            scenario.baseScenarioId.clear();
+            scenario.draft.variationDiffKeys.clear();
+            continue;
+        }
+        recomputeVariationDiffKeysIfAlternative(scenario);
+    }
+
+    currentScenarioIndex_ = scenarios_.empty()
+        ? -1
+        : std::min(deletedIndex, static_cast<int>(scenarios_.size()) - 1);
+    selectedLayoutElementId_.clear();
+    selectedCrowdElementId_.clear();
+    setInspectorSelectionNone();
     refreshScenarioSwitcher();
     refreshCanvas();
     refreshNavigationPanel();
@@ -4226,6 +4268,18 @@ const ScenarioAuthoringWidget::ScenarioState* ScenarioAuthoringWidget::currentSc
         return nullptr;
     }
     return &scenarios_[currentScenarioIndex_];
+}
+
+std::string ScenarioAuthoringWidget::nextScenarioId() const {
+    for (std::size_t suffix = scenarios_.size() + 1;; ++suffix) {
+        const auto candidate = QString("scenario-%1").arg(suffix).toStdString();
+        const auto exists = std::any_of(scenarios_.begin(), scenarios_.end(), [&](const auto& scenario) {
+            return scenario.draft.scenarioId == candidate;
+        });
+        if (!exists) {
+            return candidate;
+        }
+    }
 }
 
 std::vector<safecrowd::domain::ScenarioDraft> ScenarioAuthoringWidget::stagedRunnableScenarios() const {

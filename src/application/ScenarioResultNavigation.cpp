@@ -213,6 +213,9 @@ QPushButton* createCrossFlowCellRowButton(
             .arg(cell.durationSeconds, 0, 'f', 1)
             .arg(cell.averageSpeed, 0, 'f', 2),
     };
+    if (cell.detectedAtSeconds.has_value()) {
+        lines.push_back(QString("Detected: %1 sec").arg(*cell.detectedAtSeconds, 0, 'f', 1));
+    }
     if (!cell.floorId.empty()) {
         lines.push_back(QString("Floor: %1").arg(QString::fromStdString(cell.floorId)));
     }

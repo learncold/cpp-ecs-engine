@@ -490,6 +490,11 @@ private:
         double distance{0.0};
     };
 
+    struct VisibleSeries {
+        int resultIndex{0};
+        int seriesIndex{0};
+    };
+
     QColor colorForSeries(int index) const {
         static const std::vector<QColor> colors{
             QColor("#2563eb"),
@@ -529,6 +534,21 @@ private:
             lineStyleForSeries(index),
             Qt::RoundCap,
             Qt::RoundJoin);
+    }
+
+    std::vector<VisibleSeries> visibleSeries() const {
+        std::vector<VisibleSeries> series;
+        series.reserve(selectedIndices_.size());
+        for (const auto index : selectedIndices_) {
+            if (!validIndex(index)) {
+                continue;
+            }
+            series.push_back({
+                .resultIndex = index,
+                .seriesIndex = static_cast<int>(series.size()),
+            });
+        }
+        return series;
     }
 
     double remainingMaxTimeSeconds() const {
@@ -714,10 +734,8 @@ private:
         painter.drawText(QRectF(4, plot.bottom() - 10, 32, 18), Qt::AlignRight | Qt::AlignVCenter, "0%");
         painter.drawText(QRectF(plot.left(), plot.bottom() + 4, plot.width(), 18), Qt::AlignRight, formatSeconds(maxTime));
 
-        for (const auto index : selectedIndices_) {
-            if (!validIndex(index)) {
-                continue;
-            }
+        for (const auto& seriesEntry : visibleSeries()) {
+            const auto index = seriesEntry.resultIndex;
             const auto& result = (*results_)[static_cast<std::size_t>(index)];
             const auto series = progressSeries(result);
             if (series.empty()) {
@@ -737,7 +755,7 @@ private:
                     path.lineTo(x, y);
                 }
             }
-            painter.setPen(penForSeries(index, 2.0));
+            painter.setPen(penForSeries(seriesEntry.seriesIndex, 2.0));
             painter.drawPath(path);
         }
 
@@ -779,10 +797,8 @@ private:
             painter.drawText(QRectF(x - 38, plot.bottom() + 4, 76, 18), Qt::AlignCenter, exits[static_cast<std::size_t>(exitIndex)]);
         }
 
-        for (const auto index : selectedIndices_) {
-            if (!validIndex(index)) {
-                continue;
-            }
+        for (const auto& seriesEntry : visibleSeries()) {
+            const auto index = seriesEntry.resultIndex;
             const auto& result = (*results_)[static_cast<std::size_t>(index)];
             QPainterPath path;
             bool started = false;
@@ -803,7 +819,7 @@ private:
                     path.lineTo(x, y);
                 }
             }
-            painter.setPen(penForSeries(index, 2.0));
+            painter.setPen(penForSeries(seriesEntry.seriesIndex, 2.0));
             painter.drawPath(path);
             for (int exitIndex = 0; exitIndex < static_cast<int>(exits.size()); ++exitIndex) {
                 double usageRatio = 0.0;
@@ -815,7 +831,7 @@ private:
                     ? plot.center().x()
                     : plot.left() + (static_cast<double>(exitIndex) / static_cast<double>(exits.size() - 1)) * plot.width();
                 const auto y = plot.bottom() - usageRatio * plot.height();
-                painter.setBrush(colorForSeries(index));
+                painter.setBrush(colorForSeries(seriesEntry.seriesIndex));
                 painter.setPen(Qt::NoPen);
                 painter.drawEllipse(QPointF(x, y), 3.5, 3.5);
             }
@@ -826,15 +842,8 @@ private:
         painter.setFont(ui::font(ui::FontRole::Caption));
         QFontMetrics metrics(painter.font());
 
-        std::vector<int> visibleIndices;
-        visibleIndices.reserve(selectedIndices_.size());
-        for (const auto index : selectedIndices_) {
-            if (!validIndex(index)) {
-                continue;
-            }
-            visibleIndices.push_back(index);
-        }
-        if (visibleIndices.empty()) {
+        const auto visibleEntries = visibleSeries();
+        if (visibleEntries.empty()) {
             return;
         }
 
@@ -842,13 +851,13 @@ private:
         constexpr int kMaxRows = 2;
         const int columns = std::max(1, static_cast<int>(std::floor(legendRect.width() / kEntryWidth)));
         const int maxEntries = std::max(1, columns * kMaxRows);
-        const bool hasOverflow = static_cast<int>(visibleIndices.size()) > maxEntries;
-        const int visibleCount = static_cast<int>(visibleIndices.size());
+        const bool hasOverflow = static_cast<int>(visibleEntries.size()) > maxEntries;
+        const int visibleCount = static_cast<int>(visibleEntries.size());
         const int scenarioEntries = hasOverflow ? std::max(0, maxEntries - 1) : std::min(visibleCount, maxEntries);
         const auto rowHeight = legendRect.height() / static_cast<double>(kMaxRows);
         const auto slotWidth = legendRect.width() / static_cast<double>(columns);
 
-        auto drawSlot = [&](int slot, int index) {
+        auto drawSlot = [&](int slot, const VisibleSeries& seriesEntry) {
             const int row = slot / columns;
             const int column = slot % columns;
             const auto x = legendRect.left() + static_cast<double>(column) * slotWidth;
@@ -859,18 +868,18 @@ private:
                 std::max(0.0, slotWidth - 30.0),
                 rowHeight);
             const auto name = metrics.elidedText(
-                QString::fromStdString((*results_)[static_cast<std::size_t>(index)].scenario.name),
+                QString::fromStdString((*results_)[static_cast<std::size_t>(seriesEntry.resultIndex)].scenario.name),
                 Qt::ElideRight,
                 static_cast<int>(textRect.width()));
 
-            painter.setPen(penForSeries(index, 2.0));
+            painter.setPen(penForSeries(seriesEntry.seriesIndex, 2.0));
             painter.drawLine(QPointF(x, y), QPointF(x + 18.0, y));
             painter.setPen(QColor("#344256"));
             painter.drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter, name);
         };
 
         for (int slot = 0; slot < scenarioEntries; ++slot) {
-            drawSlot(slot, visibleIndices[static_cast<std::size_t>(slot)]);
+            drawSlot(slot, visibleEntries[static_cast<std::size_t>(slot)]);
         }
 
         if (hasOverflow) {
@@ -887,7 +896,7 @@ private:
             painter.drawText(
                 textRect,
                 Qt::AlignLeft | Qt::AlignVCenter,
-                QString("+%1 more").arg(static_cast<int>(visibleIndices.size()) - scenarioEntries));
+                QString("+%1 more").arg(static_cast<int>(visibleEntries.size()) - scenarioEntries));
         }
     }
 

@@ -397,6 +397,139 @@ public:
     }
 };
 
+class ConfigureStagedHotspotAgentsSystem final : public safecrowd::engine::EngineSystem {
+public:
+    void configure(safecrowd::engine::EngineWorld& world) override {
+        world.resources().set(safecrowd::domain::ScenarioSimulationClockResource{
+            .elapsedSeconds = 1.0,
+            .timeLimitSeconds = 10.0,
+            .complete = false,
+        });
+        for (int index = 0; index < 8; ++index) {
+            spawnHotspotAgent(
+                world,
+                "hotspot-initial",
+                {.x = 0.1 + (0.04 * static_cast<double>(index)), .y = 0.1},
+                false);
+        }
+        for (int index = 0; index < 9; ++index) {
+            spawnHotspotAgent(
+                world,
+                "hotspot-delayed",
+                {.x = 3.1 + (0.04 * static_cast<double>(index)), .y = 0.1},
+                true);
+        }
+    }
+
+    void update(safecrowd::engine::EngineWorld& world, const safecrowd::engine::EngineStepContext&) override {
+        if (!world.resources().contains<safecrowd::domain::ScenarioSimulationClockResource>()) {
+            return;
+        }
+        const auto& clock = world.resources().get<safecrowd::domain::ScenarioSimulationClockResource>();
+        if (clock.elapsedSeconds < 2.0) {
+            return;
+        }
+
+        auto& query = world.query();
+        for (const auto entity : query.view<safecrowd::domain::Agent, safecrowd::domain::EvacuationStatus>()) {
+            const auto& agent = query.get<safecrowd::domain::Agent>(entity);
+            if (agent.sourcePlacementId != "hotspot-delayed") {
+                continue;
+            }
+            query.get<safecrowd::domain::EvacuationStatus>(entity).evacuated = false;
+        }
+    }
+
+private:
+    static void spawnHotspotAgent(
+        safecrowd::engine::EngineWorld& world,
+        std::string placementId,
+        safecrowd::domain::Point2D position,
+        bool initiallyEvacuated) {
+        world.commands().spawnEntity(
+            safecrowd::domain::Position{.value = position},
+            safecrowd::domain::Agent{
+                .radius = 0.25f,
+                .maxSpeed = 1.5f,
+                .sourcePlacementId = std::move(placementId),
+                .sourceZoneId = "room",
+            },
+            safecrowd::domain::Velocity{.value = {}},
+            safecrowd::domain::EvacuationRoute{.currentFloorId = "L1", .displayFloorId = "L1"},
+            safecrowd::domain::EvacuationStatus{.evacuated = initiallyEvacuated});
+    }
+};
+
+class ConfigureStagedCrossFlowAgentsSystem final : public safecrowd::engine::EngineSystem {
+public:
+    void configure(safecrowd::engine::EngineWorld& world) override {
+        world.resources().set(safecrowd::domain::ScenarioSimulationClockResource{
+            .elapsedSeconds = 1.0,
+            .timeLimitSeconds = 10.0,
+            .complete = false,
+        });
+        for (int index = 0; index < 4; ++index) {
+            spawnCrossFlowAgent(
+                world,
+                "cross-flow-initial",
+                {.x = 0.1 + (0.04 * static_cast<double>(index)), .y = 0.1},
+                index < 2 ? safecrowd::domain::Point2D{.x = 0.5, .y = 0.0}
+                          : safecrowd::domain::Point2D{.x = -0.5, .y = 0.0},
+                false);
+        }
+        for (int index = 0; index < 4; ++index) {
+            spawnCrossFlowAgent(
+                world,
+                "cross-flow-delayed",
+                {.x = 3.1 + (0.04 * static_cast<double>(index)), .y = 0.1},
+                index < 2 ? safecrowd::domain::Point2D{.x = 0.5, .y = 0.0}
+                          : safecrowd::domain::Point2D{.x = -0.5, .y = 0.0},
+                true);
+        }
+    }
+
+    void update(safecrowd::engine::EngineWorld& world, const safecrowd::engine::EngineStepContext&) override {
+        if (!world.resources().contains<safecrowd::domain::ScenarioSimulationClockResource>()) {
+            return;
+        }
+        const auto& clock = world.resources().get<safecrowd::domain::ScenarioSimulationClockResource>();
+        if (clock.elapsedSeconds < 2.0) {
+            return;
+        }
+
+        auto& query = world.query();
+        for (const auto entity : query.view<safecrowd::domain::Agent, safecrowd::domain::EvacuationStatus>()) {
+            const auto& agent = query.get<safecrowd::domain::Agent>(entity);
+            auto& status = query.get<safecrowd::domain::EvacuationStatus>(entity);
+            if (agent.sourcePlacementId == "cross-flow-initial") {
+                status.evacuated = true;
+            } else if (agent.sourcePlacementId == "cross-flow-delayed") {
+                status.evacuated = false;
+            }
+        }
+    }
+
+private:
+    static void spawnCrossFlowAgent(
+        safecrowd::engine::EngineWorld& world,
+        std::string placementId,
+        safecrowd::domain::Point2D position,
+        safecrowd::domain::Point2D velocity,
+        bool initiallyEvacuated) {
+        world.commands().spawnEntity(
+            safecrowd::domain::Position{.value = position},
+            safecrowd::domain::Agent{
+                .radius = 0.25f,
+                .maxSpeed = 1.5f,
+                .sourcePlacementId = std::move(placementId),
+                .sourceZoneId = "room",
+            },
+            safecrowd::domain::Velocity{.value = velocity},
+            safecrowd::domain::EvacuationRoute{.currentFloorId = "L1", .displayFloorId = "L1"},
+            safecrowd::domain::EvacuationStatus{.evacuated = initiallyEvacuated});
+    }
+};
+
 class ConfigureSplitFloorHotspotAgentsSystem final : public safecrowd::engine::EngineSystem {
 public:
     void configure(safecrowd::engine::EngineWorld& world) override {
@@ -443,6 +576,72 @@ public:
     }
 
     void update(safecrowd::engine::EngineWorld&, const safecrowd::engine::EngineStepContext&) override {
+    }
+};
+
+class ConfigureStagedBottleneckAgentsSystem final : public safecrowd::engine::EngineSystem {
+public:
+    void configure(safecrowd::engine::EngineWorld& world) override {
+        world.resources().set(safecrowd::domain::ScenarioSimulationClockResource{
+            .elapsedSeconds = 1.0,
+            .timeLimitSeconds = 10.0,
+            .complete = false,
+        });
+        for (int index = 0; index < 7; ++index) {
+            spawnBottleneckAgent(
+                world,
+                "lower-door-initial",
+                {.x = 1.75 + (0.03 * static_cast<double>(index)), .y = 0.5},
+                false);
+        }
+        for (int index = 0; index < 8; ++index) {
+            spawnBottleneckAgent(
+                world,
+                "upper-door-delayed",
+                {.x = 1.75 + (0.03 * static_cast<double>(index)), .y = 3.5},
+                true);
+        }
+    }
+
+    void update(safecrowd::engine::EngineWorld& world, const safecrowd::engine::EngineStepContext&) override {
+        if (!world.resources().contains<safecrowd::domain::ScenarioSimulationClockResource>()) {
+            return;
+        }
+        const auto& clock = world.resources().get<safecrowd::domain::ScenarioSimulationClockResource>();
+        if (clock.elapsedSeconds < 2.0) {
+            return;
+        }
+
+        auto& query = world.query();
+        for (const auto entity : query.view<safecrowd::domain::Agent, safecrowd::domain::EvacuationStatus>()) {
+            const auto& agent = query.get<safecrowd::domain::Agent>(entity);
+            if (agent.sourcePlacementId != "upper-door-delayed") {
+                continue;
+            }
+            query.get<safecrowd::domain::EvacuationStatus>(entity).evacuated = false;
+        }
+    }
+
+private:
+    static void spawnBottleneckAgent(
+        safecrowd::engine::EngineWorld& world,
+        std::string placementId,
+        safecrowd::domain::Point2D position,
+        bool initiallyEvacuated) {
+        world.commands().spawnEntity(
+            safecrowd::domain::Position{.value = position},
+            safecrowd::domain::Agent{
+                .radius = 0.25f,
+                .maxSpeed = 1.5f,
+                .sourcePlacementId = std::move(placementId),
+                .sourceZoneId = "room",
+            },
+            safecrowd::domain::Velocity{.value = {}},
+            safecrowd::domain::EvacuationRoute{
+                .stalledSeconds = 1.0,
+                .destinationZoneId = "shared-exit",
+            },
+            safecrowd::domain::EvacuationStatus{.evacuated = initiallyEvacuated});
     }
 };
 
@@ -5357,6 +5556,142 @@ SC_TEST(ScenarioRiskMetricsSystem_PreservesPeakMetricsAfterAllAgentsEvacuate) {
     SC_EXPECT_TRUE(!metrics.peakSnapshot.pressureHotspots.empty());
     SC_EXPECT_TRUE(!metrics.peakSnapshot.bottlenecks.empty());
     SC_EXPECT_EQ(metrics.peakSnapshot.stalledAgentCount, std::size_t{8});
+}
+
+SC_TEST(ScenarioRiskMetricsSystem_TracksPeakHotspotTimePerCell) {
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 56,
+    });
+    runtime.addSystem(
+        std::make_unique<ConfigureStagedHotspotAgentsSystem>(),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .order = 0,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioRiskMetricsSystem(straightExitLayout()),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .order = 10,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(0.0);
+    auto& clock = runtime.world().resources().get<safecrowd::domain::ScenarioSimulationClockResource>();
+    clock.elapsedSeconds = 2.0;
+    runtime.stepFrame(0.0);
+
+    const auto& hotspots =
+        runtime.world().resources().get<safecrowd::domain::ScenarioRiskMetricsResource>().peakSnapshot.hotspots;
+    const auto initialIt = std::find_if(hotspots.begin(), hotspots.end(), [](const auto& hotspot) {
+        return std::abs(hotspot.cellMin.x - 0.0) <= 1e-9 && std::abs(hotspot.cellMin.y - 0.0) <= 1e-9;
+    });
+    const auto delayedIt = std::find_if(hotspots.begin(), hotspots.end(), [](const auto& hotspot) {
+        return std::abs(hotspot.cellMin.x - 3.0) <= 1e-9 && std::abs(hotspot.cellMin.y - 0.0) <= 1e-9;
+    });
+
+    SC_EXPECT_TRUE(initialIt != hotspots.end());
+    SC_EXPECT_TRUE(delayedIt != hotspots.end());
+    SC_EXPECT_TRUE(initialIt->detectedAtSeconds.has_value());
+    SC_EXPECT_TRUE(delayedIt->detectedAtSeconds.has_value());
+    SC_EXPECT_NEAR(*initialIt->detectedAtSeconds, 1.0, 1e-9);
+    SC_EXPECT_NEAR(*delayedIt->detectedAtSeconds, 2.0, 1e-9);
+    SC_EXPECT_TRUE(initialIt->detectionFrame.has_value());
+    SC_EXPECT_TRUE(delayedIt->detectionFrame.has_value());
+    SC_EXPECT_NEAR(initialIt->detectionFrame->elapsedSeconds, 1.0, 1e-9);
+    SC_EXPECT_NEAR(delayedIt->detectionFrame->elapsedSeconds, 2.0, 1e-9);
+}
+
+SC_TEST(ScenarioRiskMetricsSystem_TracksPeakBottleneckTimePerConnection) {
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 55,
+    });
+    runtime.addSystem(
+        std::make_unique<ConfigureStagedBottleneckAgentsSystem>(),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .order = 0,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioRiskMetricsSystem(sameExitTwoDoorGuidanceLayout()),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .order = 10,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(0.0);
+    auto& clock = runtime.world().resources().get<safecrowd::domain::ScenarioSimulationClockResource>();
+    clock.elapsedSeconds = 2.0;
+    runtime.stepFrame(0.0);
+
+    const auto& peakBottlenecks =
+        runtime.world().resources().get<safecrowd::domain::ScenarioRiskMetricsResource>().peakSnapshot.bottlenecks;
+    const auto lowerIt = std::find_if(
+        peakBottlenecks.begin(),
+        peakBottlenecks.end(),
+        [](const auto& bottleneck) {
+            return bottleneck.connectionId == "room-exit-lower";
+        });
+    const auto upperIt = std::find_if(
+        peakBottlenecks.begin(),
+        peakBottlenecks.end(),
+        [](const auto& bottleneck) {
+            return bottleneck.connectionId == "room-exit-upper";
+        });
+
+    SC_EXPECT_TRUE(lowerIt != peakBottlenecks.end());
+    SC_EXPECT_TRUE(upperIt != peakBottlenecks.end());
+    SC_EXPECT_EQ(lowerIt->nearbyAgentCount, std::size_t{7});
+    SC_EXPECT_EQ(upperIt->nearbyAgentCount, std::size_t{8});
+    SC_EXPECT_TRUE(lowerIt->detectedAtSeconds.has_value());
+    SC_EXPECT_TRUE(upperIt->detectedAtSeconds.has_value());
+    SC_EXPECT_NEAR(*lowerIt->detectedAtSeconds, 1.0, 1e-9);
+    SC_EXPECT_NEAR(*upperIt->detectedAtSeconds, 2.0, 1e-9);
+}
+
+SC_TEST(ScenarioRiskMetricsSystem_TracksPeakCrossFlowTimePerCell) {
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 57,
+    });
+    runtime.addSystem(
+        std::make_unique<ConfigureStagedCrossFlowAgentsSystem>(),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .order = 0,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+    runtime.addSystem(
+        safecrowd::domain::makeScenarioRiskMetricsSystem(straightExitLayout()),
+        {.phase = safecrowd::engine::UpdatePhase::PostSimulation,
+         .order = 10,
+         .triggerPolicy = safecrowd::engine::TriggerPolicy::EveryFrame});
+
+    runtime.play();
+    runtime.stepFrame(0.0);
+    auto& clock = runtime.world().resources().get<safecrowd::domain::ScenarioSimulationClockResource>();
+    clock.elapsedSeconds = 2.0;
+    runtime.stepFrame(0.0);
+
+    const auto& cells =
+        runtime.world().resources().get<safecrowd::domain::ScenarioRiskMetricsResource>().peakSnapshot.crossFlowCells;
+    const auto initialIt = std::find_if(cells.begin(), cells.end(), [](const auto& cell) {
+        return std::abs(cell.cellMin.x - 0.0) <= 1e-9 && std::abs(cell.cellMin.y - 0.0) <= 1e-9;
+    });
+    const auto delayedIt = std::find_if(cells.begin(), cells.end(), [](const auto& cell) {
+        return std::abs(cell.cellMin.x - 2.0) <= 1e-9 && std::abs(cell.cellMin.y - 0.0) <= 1e-9;
+    });
+
+    SC_EXPECT_TRUE(initialIt != cells.end());
+    SC_EXPECT_TRUE(delayedIt != cells.end());
+    SC_EXPECT_TRUE(initialIt->detectedAtSeconds.has_value());
+    SC_EXPECT_TRUE(delayedIt->detectedAtSeconds.has_value());
+    SC_EXPECT_NEAR(*initialIt->detectedAtSeconds, 1.0, 1e-9);
+    SC_EXPECT_NEAR(*delayedIt->detectedAtSeconds, 2.0, 1e-9);
+    SC_EXPECT_TRUE(initialIt->detectionFrame.has_value());
+    SC_EXPECT_TRUE(delayedIt->detectionFrame.has_value());
+    SC_EXPECT_NEAR(initialIt->detectionFrame->elapsedSeconds, 1.0, 1e-9);
+    SC_EXPECT_NEAR(delayedIt->detectionFrame->elapsedSeconds, 2.0, 1e-9);
 }
 
 SC_TEST(ScenarioRiskMetricsSystem_PreservesPeakCriticalPressureMetricsAfterAgentsEvacuate) {

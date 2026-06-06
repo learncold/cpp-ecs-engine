@@ -158,37 +158,30 @@ bool isStalled(const Velocity& velocity, const EvacuationRoute& route) {
     return scenarioAgentStalled(lengthOf(velocity.value), route.stalledSeconds);
 }
 
-bool isHotspotSetWorse(
-    const std::vector<ScenarioCongestionHotspot>& candidate,
-    const std::vector<ScenarioCongestionHotspot>& currentPeak) {
-    if (candidate.empty()) {
-        return false;
+bool hotspotMetricMoreSevere(const ScenarioCongestionHotspot& lhs, const ScenarioCongestionHotspot& rhs) {
+    if (lhs.agentCount != rhs.agentCount) {
+        return lhs.agentCount > rhs.agentCount;
     }
-    if (currentPeak.empty()) {
-        return true;
+    if (std::fabs(lhs.center.x - rhs.center.x) > 1e-9) {
+        return lhs.center.x < rhs.center.x;
     }
-    return candidate.front().agentCount > currentPeak.front().agentCount;
+    return lhs.center.y < rhs.center.y;
 }
 
-bool isPressureHotspotSetWorse(
-    const std::vector<ScenarioPressureHotspot>& candidate,
-    const std::vector<ScenarioPressureHotspot>& currentPeak) {
-    if (candidate.empty()) {
-        return false;
-    }
-    if (currentPeak.empty()) {
-        return true;
-    }
-
-    const auto& lhs = candidate.front();
-    const auto& rhs = currentPeak.front();
+bool pressureHotspotMetricMoreSevere(const ScenarioPressureHotspot& lhs, const ScenarioPressureHotspot& rhs) {
     if (std::fabs(lhs.pressureScore - rhs.pressureScore) > 1e-9) {
         return lhs.pressureScore > rhs.pressureScore;
     }
     if (lhs.intrudingPairCount != rhs.intrudingPairCount) {
         return lhs.intrudingPairCount > rhs.intrudingPairCount;
     }
-    return lhs.agentCount > rhs.agentCount;
+    if (lhs.agentCount != rhs.agentCount) {
+        return lhs.agentCount > rhs.agentCount;
+    }
+    if (std::fabs(lhs.center.x - rhs.center.x) > 1e-9) {
+        return lhs.center.x < rhs.center.x;
+    }
+    return lhs.center.y < rhs.center.y;
 }
 
 bool isPressureAgentSetWorse(
@@ -233,46 +226,64 @@ bool isCriticalPressureEventSetWorse(
     return lhs.pressureScore > rhs.pressureScore;
 }
 
-bool isBottleneckSetWorse(
-    const std::vector<ScenarioBottleneckMetric>& candidate,
-    const std::vector<ScenarioBottleneckMetric>& currentPeak) {
-    if (candidate.empty()) {
-        return false;
-    }
-    if (currentPeak.empty()) {
-        return true;
-    }
-
-    const auto& lhs = candidate.front();
-    const auto& rhs = currentPeak.front();
+bool bottleneckMetricMoreSevere(const ScenarioBottleneckMetric& lhs, const ScenarioBottleneckMetric& rhs) {
     if (lhs.stalledAgentCount != rhs.stalledAgentCount) {
         return lhs.stalledAgentCount > rhs.stalledAgentCount;
     }
     if (lhs.nearbyAgentCount != rhs.nearbyAgentCount) {
         return lhs.nearbyAgentCount > rhs.nearbyAgentCount;
     }
-    return lhs.averageSpeed < rhs.averageSpeed;
+    if (std::fabs(lhs.averageSpeed - rhs.averageSpeed) > 1e-9) {
+        return lhs.averageSpeed < rhs.averageSpeed;
+    }
+    return lhs.connectionId < rhs.connectionId;
 }
 
-bool isCrossFlowCellSetWorse(
-    const std::vector<ScenarioCrossFlowCellMetric>& candidate,
-    const std::vector<ScenarioCrossFlowCellMetric>& currentPeak) {
-    if (candidate.empty()) {
-        return false;
-    }
-    if (currentPeak.empty()) {
-        return true;
-    }
+std::string cellMetricKey(const std::string& floorId, const Point2D& cellMin, const Point2D& cellMax) {
+    return floorId + "|"
+        + std::to_string(cellMin.x) + ","
+        + std::to_string(cellMin.y) + "->"
+        + std::to_string(cellMax.x) + ","
+        + std::to_string(cellMax.y);
+}
 
-    const auto& lhs = candidate.front();
-    const auto& rhs = currentPeak.front();
+std::string bottleneckTrackingKey(const ScenarioBottleneckMetric& bottleneck) {
+    if (!bottleneck.connectionId.empty()) {
+        return bottleneck.connectionId;
+    }
+    return bottleneck.floorId + "|" + bottleneck.label + "|"
+        + std::to_string(bottleneck.passage.start.x) + ","
+        + std::to_string(bottleneck.passage.start.y) + "->"
+        + std::to_string(bottleneck.passage.end.x) + ","
+        + std::to_string(bottleneck.passage.end.y);
+}
+
+std::string hotspotTrackingKey(const ScenarioCongestionHotspot& hotspot) {
+    return cellMetricKey(hotspot.floorId, hotspot.cellMin, hotspot.cellMax);
+}
+
+std::string pressureHotspotTrackingKey(const ScenarioPressureHotspot& hotspot) {
+    return cellMetricKey(hotspot.floorId, hotspot.cellMin, hotspot.cellMax);
+}
+
+std::string crossFlowTrackingKey(const ScenarioCrossFlowCellMetric& cell) {
+    return cellMetricKey(cell.floorId, cell.cellMin, cell.cellMax);
+}
+
+bool crossFlowCellMetricMoreSevere(const ScenarioCrossFlowCellMetric& lhs, const ScenarioCrossFlowCellMetric& rhs) {
     if (std::fabs(lhs.crossFlowScore - rhs.crossFlowScore) > 1e-9) {
         return lhs.crossFlowScore > rhs.crossFlowScore;
     }
     if (std::fabs(lhs.durationSeconds - rhs.durationSeconds) > 1e-9) {
         return lhs.durationSeconds > rhs.durationSeconds;
     }
-    return lhs.movingAgentCount > rhs.movingAgentCount;
+    if (lhs.movingAgentCount != rhs.movingAgentCount) {
+        return lhs.movingAgentCount > rhs.movingAgentCount;
+    }
+    if (std::fabs(lhs.center.x - rhs.center.x) > 1e-9) {
+        return lhs.center.x < rhs.center.x;
+    }
+    return lhs.center.y < rhs.center.y;
 }
 
 bool barrierMatchesFloor(const Barrier2D& barrier, const std::string& floorId) {
@@ -777,6 +788,10 @@ public:
 
     void configure(engine::EngineWorld& world) override {
         world.resources().set(ScenarioRiskMetricsResource{});
+        world.resources().set(ScenarioHotspotTrackingResource{});
+        world.resources().set(ScenarioPressureHotspotTrackingResource{});
+        world.resources().set(ScenarioBottleneckTrackingResource{});
+        world.resources().set(ScenarioCrossFlowTrackingResource{});
         world.resources().set(ScenarioPressureTrackingResource{});
         world.resources().set(ScenarioCrossFlowResource{});
     }
@@ -872,11 +887,25 @@ public:
             || !snapshot.crossFlowCells.empty()) {
             attachDetectionState(snapshot, captureSimulationFrame(query, clock), clock.elapsedSeconds);
         }
+        auto& hotspotTracking = resources.get<ScenarioHotspotTrackingResource>();
+        auto& pressureHotspotTracking = resources.get<ScenarioPressureHotspotTrackingResource>();
+        auto& bottleneckTracking = resources.get<ScenarioBottleneckTrackingResource>();
+        auto& crossFlowTracking = resources.get<ScenarioCrossFlowTrackingResource>();
+        updateHotspotPeakTracking(snapshot.hotspots, hotspotTracking);
+        updatePressureHotspotPeakTracking(snapshot.pressureHotspots, pressureHotspotTracking);
+        updateBottleneckPeakTracking(snapshot.bottlenecks, bottleneckTracking);
+        updateCrossFlowPeakTracking(snapshot.crossFlowCells, crossFlowTracking);
 
         auto peakSnapshot = resources.contains<ScenarioRiskMetricsResource>()
             ? resources.get<ScenarioRiskMetricsResource>().peakSnapshot
             : ScenarioRiskSnapshot{};
-        mergePeakSnapshot(peakSnapshot, snapshot);
+        mergePeakSnapshot(
+            peakSnapshot,
+            snapshot,
+            hotspotTracking,
+            pressureHotspotTracking,
+            bottleneckTracking,
+            crossFlowTracking);
         resources.set(ScenarioRiskMetricsResource{
             .snapshot = std::move(snapshot),
             .peakSnapshot = std::move(peakSnapshot),
@@ -884,7 +913,13 @@ public:
     }
 
 private:
-    void mergePeakSnapshot(ScenarioRiskSnapshot& peak, const ScenarioRiskSnapshot& current) const {
+    void mergePeakSnapshot(
+        ScenarioRiskSnapshot& peak,
+        const ScenarioRiskSnapshot& current,
+        const ScenarioHotspotTrackingResource& hotspotTracking,
+        const ScenarioPressureHotspotTrackingResource& pressureHotspotTracking,
+        const ScenarioBottleneckTrackingResource& bottleneckTracking,
+        const ScenarioCrossFlowTrackingResource& crossFlowTracking) const {
         peak.stalledAgentCount = std::max(peak.stalledAgentCount, current.stalledAgentCount);
         peak.pressureExposedAgentCount = std::max(peak.pressureExposedAgentCount, current.pressureExposedAgentCount);
         peak.criticalPressureAgentCount = std::max(peak.criticalPressureAgentCount, current.criticalPressureAgentCount);
@@ -893,26 +928,16 @@ private:
         peak.totalCrossFlowExposureAgentSeconds = std::max(
             peak.totalCrossFlowExposureAgentSeconds,
             current.totalCrossFlowExposureAgentSeconds);
-        if (isHotspotSetWorse(current.hotspots, peak.hotspots)) {
-            peak.hotspots = current.hotspots;
-        }
-        if (isPressureHotspotSetWorse(current.pressureHotspots, peak.pressureHotspots)) {
-            peak.pressureHotspots = current.pressureHotspots;
-        }
+        mergePeakHotspots(peak, hotspotTracking);
+        mergePeakPressureHotspots(peak, pressureHotspotTracking);
         if (isPressureAgentSetWorse(current.pressureAgents, peak.pressureAgents)) {
             peak.pressureAgents = current.pressureAgents;
         }
         if (isCriticalPressureEventSetWorse(current.criticalPressureEvents, peak.criticalPressureEvents)) {
             peak.criticalPressureEvents = current.criticalPressureEvents;
         }
-        if (isBottleneckSetWorse(current.bottlenecks, peak.bottlenecks)) {
-            peak.bottlenecks = current.bottlenecks;
-        }
-        if (isCrossFlowCellSetWorse(
-                current.crossFlowCells,
-                peak.crossFlowCells)) {
-            peak.crossFlowCells = current.crossFlowCells;
-        }
+        mergePeakBottlenecks(peak, bottleneckTracking);
+        mergePeakCrossFlowCells(peak, crossFlowTracking);
     }
 
     void attachDetectionState(
@@ -939,6 +964,110 @@ private:
             cell.detectedAtSeconds = elapsedSeconds;
             cell.detectionFrame = frame;
         }
+    }
+
+    void updateHotspotPeakTracking(
+        const std::vector<ScenarioCongestionHotspot>& hotspots,
+        ScenarioHotspotTrackingResource& tracking) const {
+        for (const auto& hotspot : hotspots) {
+            auto& state = tracking.peaksByCellKey[hotspotTrackingKey(hotspot)];
+            if (!state.hasPeakMetric || hotspotMetricMoreSevere(hotspot, state.peakMetric)) {
+                state.peakMetric = hotspot;
+                state.hasPeakMetric = true;
+            }
+        }
+    }
+
+    void updatePressureHotspotPeakTracking(
+        const std::vector<ScenarioPressureHotspot>& hotspots,
+        ScenarioPressureHotspotTrackingResource& tracking) const {
+        for (const auto& hotspot : hotspots) {
+            auto& state = tracking.peaksByCellKey[pressureHotspotTrackingKey(hotspot)];
+            if (!state.hasPeakMetric || pressureHotspotMetricMoreSevere(hotspot, state.peakMetric)) {
+                state.peakMetric = hotspot;
+                state.hasPeakMetric = true;
+            }
+        }
+    }
+
+    void updateBottleneckPeakTracking(
+        const std::vector<ScenarioBottleneckMetric>& bottlenecks,
+        ScenarioBottleneckTrackingResource& tracking) const {
+        for (const auto& bottleneck : bottlenecks) {
+            auto& state = tracking.peaksByConnectionId[bottleneckTrackingKey(bottleneck)];
+            if (!state.hasPeakMetric || bottleneckMetricMoreSevere(bottleneck, state.peakMetric)) {
+                state.peakMetric = bottleneck;
+                state.hasPeakMetric = true;
+            }
+        }
+    }
+
+    void updateCrossFlowPeakTracking(
+        const std::vector<ScenarioCrossFlowCellMetric>& cells,
+        ScenarioCrossFlowTrackingResource& tracking) const {
+        for (const auto& cell : cells) {
+            auto& state = tracking.peaksByCellKey[crossFlowTrackingKey(cell)];
+            if (!state.hasPeakMetric || crossFlowCellMetricMoreSevere(cell, state.peakMetric)) {
+                state.peakMetric = cell;
+                state.hasPeakMetric = true;
+            }
+        }
+    }
+
+    void mergePeakHotspots(
+        ScenarioRiskSnapshot& peak,
+        const ScenarioHotspotTrackingResource& tracking) const {
+        peak.hotspots.clear();
+        peak.hotspots.reserve(tracking.peaksByCellKey.size());
+        for (const auto& entry : tracking.peaksByCellKey) {
+            const auto& state = entry.second;
+            if (state.hasPeakMetric) {
+                peak.hotspots.push_back(state.peakMetric);
+            }
+        }
+        sortAndTrimTop(peak.hotspots, kMaxReportedHotspots, hotspotMetricMoreSevere);
+    }
+
+    void mergePeakPressureHotspots(
+        ScenarioRiskSnapshot& peak,
+        const ScenarioPressureHotspotTrackingResource& tracking) const {
+        peak.pressureHotspots.clear();
+        peak.pressureHotspots.reserve(tracking.peaksByCellKey.size());
+        for (const auto& entry : tracking.peaksByCellKey) {
+            const auto& state = entry.second;
+            if (state.hasPeakMetric) {
+                peak.pressureHotspots.push_back(state.peakMetric);
+            }
+        }
+        sortAndTrimTop(peak.pressureHotspots, kMaxReportedPressureHotspots, pressureHotspotMetricMoreSevere);
+    }
+
+    void mergePeakBottlenecks(
+        ScenarioRiskSnapshot& peak,
+        const ScenarioBottleneckTrackingResource& tracking) const {
+        peak.bottlenecks.clear();
+        peak.bottlenecks.reserve(tracking.peaksByConnectionId.size());
+        for (const auto& entry : tracking.peaksByConnectionId) {
+            const auto& state = entry.second;
+            if (state.hasPeakMetric) {
+                peak.bottlenecks.push_back(state.peakMetric);
+            }
+        }
+        sortAndTrimTop(peak.bottlenecks, kMaxReportedBottlenecks, bottleneckMetricMoreSevere);
+    }
+
+    void mergePeakCrossFlowCells(
+        ScenarioRiskSnapshot& peak,
+        const ScenarioCrossFlowTrackingResource& tracking) const {
+        peak.crossFlowCells.clear();
+        peak.crossFlowCells.reserve(tracking.peaksByCellKey.size());
+        for (const auto& entry : tracking.peaksByCellKey) {
+            const auto& state = entry.second;
+            if (state.hasPeakMetric) {
+                peak.crossFlowCells.push_back(state.peakMetric);
+            }
+        }
+        sortAndTrimTop(peak.crossFlowCells, kMaxReportedCrossFlowCells, crossFlowCellMetricMoreSevere);
     }
 
     double updatePressureTracking(

@@ -10,10 +10,15 @@
 
 #include <QFile>
 #include <QFileInfo>
+#include <QDir>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <QMessageBox>
+#include <QPointer>
+#include <QProgressDialog>
+#include <QStandardPaths>
+#include <QTimer>
 
 #include "application/LayoutReviewCodec.h"
 #include "application/LayoutReviewWidget.h"
@@ -201,6 +206,42 @@ safecrowd::domain::ImportResult makeBlankImportResult(const QString& projectName
         ? safecrowd::domain::ImportReviewStatus::Pending
         : safecrowd::domain::ImportReviewStatus::NotRequired;
     return result;
+}
+
+bool isDxfLayoutPath(const QString& layoutPath) {
+    return !layoutPath.isEmpty()
+        && QFileInfo(layoutPath).suffix().compare("dxf", Qt::CaseInsensitive) == 0;
+}
+
+std::optional<ProjectMetadata> findLocalDemo2FProject() {
+    const auto isLocalDemo2F = [](const ProjectMetadata& metadata) {
+        return metadata.isValid()
+            && !metadata.isBuiltInDemo()
+            && metadata.name.compare(QStringLiteral("Demo - 2F"), Qt::CaseInsensitive) == 0;
+    };
+
+    for (const auto& metadata : ProjectPersistence::loadRecentProjects()) {
+        if (isLocalDemo2F(metadata)) {
+            return metadata;
+        }
+    }
+
+    auto basePath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (basePath.isEmpty()) {
+        basePath = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
+    }
+    if (basePath.isEmpty()) {
+        return std::nullopt;
+    }
+
+    const auto folderPath = QDir(QDir(basePath).filePath(QStringLiteral("SafeCrowd Projects")))
+        .filePath(QStringLiteral("Demo - 2F"));
+    auto metadata = ProjectPersistence::loadProject(folderPath);
+    if (isLocalDemo2F(metadata)) {
+        return metadata;
+    }
+
+    return std::nullopt;
 }
 
 safecrowd::domain::ImportResult importProjectLayout(const ProjectMetadata& metadata) {
@@ -537,11 +578,38 @@ void MainWindow::showNewProject() {
 }
 
 void MainWindow::createProject(const NewProjectRequest& request) {
+    // Demo shortcut: selecting any DXF in New Project opens the curated 2F demo layout.
+    if (isDxfLayoutPath(request.layoutPath)) {
+        auto* loadingDialog = new QProgressDialog(
+            "Importing DXF layout...",
+            QString(),
+            0,
+            0,
+            this);
+        loadingDialog->setWindowTitle("New Project");
+        loadingDialog->setWindowModality(Qt::ApplicationModal);
+        loadingDialog->setCancelButton(nullptr);
+        loadingDialog->setMinimumDuration(0);
+        loadingDialog->setAutoClose(false);
+        loadingDialog->setAutoReset(false);
+        loadingDialog->setAttribute(Qt::WA_DeleteOnClose);
+        loadingDialog->show();
+
+        const QPointer<QProgressDialog> loadingGuard(loadingDialog);
+        QTimer::singleShot(900, this, [this, loadingGuard]() {
+            if (loadingGuard != nullptr) {
+                loadingGuard->close();
+            }
+            openProject(findLocalDemo2FProject().value_or(makeBuiltInDemo2FProject()));
+        });
+        return;
+    }
+
     if (request.projectName.isEmpty() || request.folderPath.isEmpty()) {
         QMessageBox::warning(this, "New Project", "Project name and folder are required.");
         return;
     }
-    if (!request.layoutPath.isEmpty() && QFileInfo(request.layoutPath).suffix().compare("dxf", Qt::CaseInsensitive) != 0) {
+    if (!request.layoutPath.isEmpty()) {
         QMessageBox::warning(this, "New Project", "Layout import currently supports .dxf files only.");
         return;
     }
