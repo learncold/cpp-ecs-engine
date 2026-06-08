@@ -203,6 +203,7 @@ public:
                         && scenarioAgentStalled(simulation_internal::lengthOf(velocity.value), route->stalledSeconds),
                 });
             }
+            simulation_internal::propagateStalledStateThroughQueues(keyframe);
 
             if (shouldCaptureT90) {
                 timingKeyframes.t90Frame = keyframe;
