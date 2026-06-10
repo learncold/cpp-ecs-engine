@@ -760,6 +760,19 @@ private:
     std::uint64_t revision_{0};
 };
 
+void resetHazardEncounter(ScenarioEnvironmentReactionAgentState& state) {
+    state.hazardDetected = false;
+    state.hazardAware = false;
+    state.hazardInRange = false;
+    state.hazardDistanceMeters = 0.0;
+    state.hazardRadiusMeters = 0.0;
+    state.hazardSpeedFactor = 1.0;
+    state.hazardRoutePenaltyMeters = 0.0;
+    state.hazardSensedSinceSeconds = 0.0;
+    state.hazardDetectedAtSeconds = 0.0;
+    state.hazardReactionReadySeconds = 0.0;
+}
+
 class ScenarioEnvironmentHazardSystem final : public engine::EngineSystem {
 public:
     ScenarioEnvironmentHazardSystem(FacilityLayout2D layout, std::vector<EnvironmentHazardDraft> hazards)
@@ -872,21 +885,32 @@ public:
 
             auto& state = reactions.agentsById[entity.index];
             if (detectedHazard == nullptr) {
-                state.hazardInRange = false;
+                resetHazardEncounter(state);
                 continue;
             }
 
-            if (!state.hazardDetected || state.hazardKey != detectedHazard->key) {
-                state.hazardDetected = true;
-                state.hazardAware = false;
+            if (!state.hazardInRange || state.hazardKey != detectedHazard->key) {
+                // New hazard encounter: restart the sense -> detect -> react pipeline.
                 state.hazardKey = detectedHazard->key;
+                state.hazardSensedSinceSeconds = elapsedSeconds;
+                state.hazardDetected = false;
+                state.hazardAware = false;
+            }
+
+            // Detection lags entering sensing range by the agent's detection delay;
+            // the reaction delay then runs from the moment of detection.
+            if (!state.hazardDetected
+                && elapsedSeconds + 1e-9
+                    >= state.hazardSensedSinceSeconds + std::max(0.0, agent.detectionDelaySeconds)) {
+                state.hazardDetected = true;
                 state.hazardDetectedAtSeconds = elapsedSeconds;
                 state.hazardReactionReadySeconds =
                     elapsedSeconds + std::max(0.0, agent.reactionDelaySeconds);
             }
 
             state.hazardInRange = true;
-            state.hazardAware = elapsedSeconds + 1e-9 >= state.hazardReactionReadySeconds;
+            state.hazardAware = state.hazardDetected
+                && elapsedSeconds + 1e-9 >= state.hazardReactionReadySeconds;
             state.hazardKind = detectedHazard->draft.kind;
             state.hazardSeverity = detectedHazard->draft.severity;
             state.hazardPosition = detectedHazard->draft.position;

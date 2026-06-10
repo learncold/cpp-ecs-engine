@@ -24,6 +24,7 @@ struct Agent {
     double hazardSensitivity{1.0};
     double smokeSensitivity{1.0};
     double reactionDelaySeconds{0.0};
+    double detectionDelaySeconds{0.0};
     double closurePatienceSeconds{0.0};
 };
 

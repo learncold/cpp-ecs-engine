@@ -129,6 +129,7 @@ struct ScenarioEnvironmentReactionAgentState {
     double hazardRadiusMeters{0.0};
     double hazardSpeedFactor{1.0};
     double hazardRoutePenaltyMeters{0.0};
+    double hazardSensedSinceSeconds{0.0};
     double hazardDetectedAtSeconds{0.0};
     double hazardReactionReadySeconds{0.0};
     bool closureDetected{false};

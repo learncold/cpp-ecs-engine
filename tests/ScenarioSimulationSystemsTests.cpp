@@ -2849,6 +2849,111 @@ SC_TEST(ScenarioEnvironmentHazardSystem_DelaysFireAvoidanceUntilReactionReady) {
     SC_EXPECT_TRUE(awareFrame.agents.front().position.y < -0.01);
 }
 
+SC_TEST(ScenarioEnvironmentHazardSystem_DelaysDetectionUntilDetectionDelayElapses) {
+    auto seed = straightRouteSeed({.x = 0.0, .y = 0.0}, 1.0, 0.0);
+    seed.agent.detectionDelaySeconds = 1.0;  // must sense the hazard for 1s before detecting it
+    seed.agent.reactionDelaySeconds = 0.0;   // react immediately once detected
+
+    // A large radius keeps the agent inside the hazard while it moves along its route,
+    // so the test isolates the detection delay rather than range changes.
+    safecrowd::domain::EnvironmentHazardDraft fire;
+    fire.id = "fire-detect-delay";
+    fire.kind = safecrowd::domain::EnvironmentHazardKind::Fire;
+    fire.name = "Test hazard";
+    fire.affectedZoneId = "room";
+    fire.position = {.x = 0.0, .y = 0.4};
+    fire.startSeconds = 0.0;
+    fire.endSeconds = 0.0;
+    fire.severity = safecrowd::domain::ScenarioElementSeverity::High;
+    fire.radiusMeters = 100.0;
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 71,
+    });
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(
+        std::vector<safecrowd::domain::ScenarioAgentSeed>{seed}, 10.0));
+    addHazardMotionSystems(runtime, straightExitLayout(), {fire});
+
+    runtime.play();
+
+    // After 0.25s the hazard is sensed but the 1s detection delay has not elapsed.
+    runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.25});
+    runtime.stepFrame(0.0);
+
+    const auto& earlyState =
+        runtime.world().resources().get<safecrowd::domain::ScenarioEnvironmentReactionResource>().agentsById.at(0);
+    SC_EXPECT_TRUE(earlyState.hazardInRange);
+    SC_EXPECT_TRUE(!earlyState.hazardDetected);
+    SC_EXPECT_TRUE(!earlyState.hazardAware);
+
+    // Advance well past the detection delay; detection fires and, with no reaction delay,
+    // awareness follows immediately.
+    for (int step = 0; step < 7; ++step) {
+        runtime.world().resources().set(safecrowd::domain::ScenarioSimulationStepResource{.deltaSeconds = 0.25});
+        runtime.stepFrame(0.0);
+    }
+
+    const auto& lateState =
+        runtime.world().resources().get<safecrowd::domain::ScenarioEnvironmentReactionResource>().agentsById.at(0);
+    SC_EXPECT_TRUE(lateState.hazardDetected);
+    SC_EXPECT_TRUE(lateState.hazardAware);
+}
+
+SC_TEST(ScenarioEnvironmentHazardSystem_RestartsDetectionDelayAfterLeavingHazardRange) {
+    auto seed = straightRouteSeed({.x = 0.0, .y = 0.0}, 0.0, 0.0);
+    seed.agent.detectionDelaySeconds = 1.0;
+    seed.agent.reactionDelaySeconds = 0.0;
+
+    auto fire = hazardDraft(
+        "fire-reentry-delay",
+        safecrowd::domain::EnvironmentHazardKind::Fire,
+        safecrowd::domain::ScenarioElementSeverity::High,
+        {.x = 0.0, .y = 0.0});
+    fire.radiusMeters = 0.5;
+
+    safecrowd::engine::EngineRuntime runtime({
+        .fixedDeltaTime = 1.0 / 30.0,
+        .maxCatchUpSteps = 1,
+        .baseSeed = 72,
+    });
+    runtime.addSystem(std::make_unique<safecrowd::domain::ScenarioAgentSpawnSystem>(
+        std::vector<safecrowd::domain::ScenarioAgentSeed>{seed}, 10.0));
+    addHazardMotionSystems(runtime, straightExitLayout(), {fire});
+
+    runtime.play();
+    for (int step = 0; step < 5; ++step) {
+        stepScenarioRuntime(runtime, 0.25);
+    }
+
+    const auto& detectedState =
+        runtime.world().resources().get<safecrowd::domain::ScenarioEnvironmentReactionResource>().agentsById.at(0);
+    SC_EXPECT_TRUE(detectedState.hazardDetected);
+    SC_EXPECT_TRUE(detectedState.hazardAware);
+
+    auto& query = runtime.world().query();
+    const auto entity = query.view<safecrowd::domain::Position>().front();
+    query.get<safecrowd::domain::Position>(entity).value = {.x = 5.0, .y = 0.0};
+    stepScenarioRuntime(runtime, 0.25);
+
+    const auto& outsideState =
+        runtime.world().resources().get<safecrowd::domain::ScenarioEnvironmentReactionResource>().agentsById.at(0);
+    SC_EXPECT_TRUE(!outsideState.hazardInRange);
+    SC_EXPECT_TRUE(!outsideState.hazardDetected);
+    SC_EXPECT_TRUE(!outsideState.hazardAware);
+    SC_EXPECT_EQ(outsideState.hazardKey, std::string{"fire-reentry-delay"});
+
+    query.get<safecrowd::domain::Position>(entity).value = {.x = 0.0, .y = 0.0};
+    stepScenarioRuntime(runtime, 0.25);
+
+    const auto& reenteredState =
+        runtime.world().resources().get<safecrowd::domain::ScenarioEnvironmentReactionResource>().agentsById.at(0);
+    SC_EXPECT_TRUE(reenteredState.hazardInRange);
+    SC_EXPECT_TRUE(!reenteredState.hazardDetected);
+    SC_EXPECT_TRUE(!reenteredState.hazardAware);
+}
+
 SC_TEST(ScenarioEnvironmentHazardSystem_SmokeSlowsButDoesNotStopAgent) {
     std::vector<safecrowd::domain::ScenarioAgentSeed> baselineSeeds;
     baselineSeeds.push_back(straightRouteSeed({.x = 0.0, .y = 0.0}, 1.0));
